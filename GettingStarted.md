@@ -97,18 +97,18 @@ Use `--profile` to select your model:
 
 ```bash
 cd docker
+docker compose --profile parakeet up --build  # Parakeet (HTTP, port 8002) -- default
 docker compose --profile voxtral up --build   # Voxtral (WebSocket, port 8000)
 docker compose --profile cohere up --build    # Cohere (HTTP, port 8001)
-docker compose --profile parakeet up --build  # Parakeet (HTTP, port 8002)
 ```
 
 The first start will download the model and cache it in a Docker volume. Subsequent starts are fast.
 
-Wait until the server reports it is ready. The default Voxtral endpoint will be available at `ws://localhost:8000/v1/realtime`.
+Wait until the server reports it is ready. The default Parakeet endpoint will be available at `http://localhost:8002/v1/audio/transcriptions`.
 
 > To run the container in the background, add `-d`:
 > ```bash
-> docker compose --profile voxtral up --build -d
+> docker compose --profile parakeet up --build -d
 > ```
 
 ---

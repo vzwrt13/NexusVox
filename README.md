@@ -52,8 +52,8 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 ## Quick Start (GPU — recommended)
 
 ```bash
-# 1. Start the inference server for your chosen model
-cd docker && docker compose --profile voxtral up --build
+# 1. Start the Parakeet inference server (~2 GB VRAM)
+cd docker && docker compose --profile parakeet up --build
 
 # 2. Install
 pip install -e .
@@ -62,12 +62,16 @@ pip install -e .
 python -m nexusvox
 ```
 
+Parakeet is the default because it is both the fastest and the most accurate model measured (see [Performance](#performance)) and needs only ~2 GB of VRAM. Voxtral offers WebSocket streaming but wants **≥16 GB** — switch to it in the dashboard Settings tab if your card has the headroom, and the server URL follows automatically.
+
 ## Quick Start (CPU — fallback)
 
 ```bash
 pip install -e .
 python -m nexusvox
 ```
+
+The shipped default model is GPU-backed, so on a machine without a usable GPU the first run stops with a message telling you to pick a CPU-capable model. Open the dashboard at `http://localhost:47392` → Settings → **Model** and choose one of the Whisper entries — `whisper-small` for speed, `whisper-medium` for accuracy — then restart. Alternatively set `[inference].model = "whisper-small"` in `config.toml` before the first run.
 
 Whisper downloads on first use (~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`.
 

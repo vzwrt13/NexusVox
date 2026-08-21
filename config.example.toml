@@ -20,7 +20,7 @@ chunk_size = 4096
 [inference]
 # Inference server URL (automatically set when switching GPU-backed models).
 # Ignored when running Whisper in-process on CPU.
-server_url = "ws://localhost:8000/v1/realtime"
+server_url = "http://localhost:8002/v1/audio/transcriptions"
 # Transcription delay in ms (multiples of 80, range 80-2400)
 transcription_delay_ms = 480
 # Transcription model. In-process on CPU (no Docker): "whisper-small", "whisper-base",
@@ -28,7 +28,7 @@ transcription_delay_ms = 480
 # "distil-whisper-medium-en" (EN).
 # Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe", "parakeet-tdt-0.6b".
 # See the model table in README.md for resources and model licenses.
-model = "voxtral-mini-4b"
+model = "parakeet-tdt-0.6b"
 # Compute device: "auto" (detect CUDA, fall back to CPU), "cuda", or "cpu".
 # Use "cpu" to force in-process Whisper, including for benchmarking on a GPU machine.
 device = "auto"

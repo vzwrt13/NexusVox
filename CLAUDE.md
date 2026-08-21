@@ -30,8 +30,8 @@ the only place German may remain; no other file may follow its example.
 
 ```bash
 # Start inference server (requires NVIDIA GPU + Docker)
-# Use --profile to select model: voxtral (default), cohere, parakeet, or whisper
-cd docker && docker compose --profile voxtral up --build
+# Use --profile to select model: parakeet (default), voxtral, cohere, or whisper
+cd docker && docker compose --profile parakeet up --build
 
 # Install app (Python 3.11+)
 pip install -e ".[dev]"

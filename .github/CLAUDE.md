@@ -9,10 +9,28 @@
 
 ## Releasing
 
-1. Update `version` in `pyproject.toml`
-2. Commit and push
-3. `git tag v0.2.0 && git push origin v0.2.0`
-4. Release workflow builds and creates the GitHub Release automatically
+1. Update `version` in `pyproject.toml` **and** `__version__` in `src/nexusvox/__init__.py` -- they must agree
+2. Merge that through a pull request like any other change
+3. Tag the merge commit on `main` with an **annotated** tag:
+
+   ```bash
+   git tag -a v0.2.0        # opens an editor, or use -F -
+   git push origin v0.2.0
+   ```
+
+4. The release workflow lints, runs the full test matrix, builds the wheel and
+   sdist, verifies the built wheel with `scripts/packaging_smoke_test.py`, and
+   publishes a GitHub Release with both artifacts attached
+
+**The tag annotation becomes the release page.** Its first line is the release
+title, the rest is the body, and GitHub's generated list of merged pull requests
+is appended below it. Write the annotation for someone who has never seen the
+project: what this version is and what changed, not a restatement of the commit
+log -- the appended list already covers that.
+
+A lightweight tag (`git tag v0.2.0` without `-a`) still produces a release, but
+it has no annotation, so the release is titled with the bare tag name and has no
+body beyond the generated list.
 
 ## Repository
 

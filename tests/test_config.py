@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import tomllib
+from pathlib import Path
 
 import nexusvox.config as config_module
 from nexusvox.config import (
+    EXAMPLE_CONFIG_PATH,
     AudioConfig,
     Config,
     DatabaseConfig,
@@ -17,6 +19,23 @@ from nexusvox.config import (
     resolve_device,
     save_config,
 )
+
+
+def test_example_config_ships_inside_the_package():
+    """The template must resolve next to the module, not relative to a checkout.
+
+    A path walking up to the repository root works in a source tree and breaks in
+    an installed wheel, where it silently leaves the user with no config.toml at
+    all. Assert the layout the packaging depends on.
+    """
+    import nexusvox
+
+    package_dir = Path(nexusvox.__file__).resolve().parent
+    assert EXAMPLE_CONFIG_PATH.exists(), "config.example.toml is missing from the package"
+    assert EXAMPLE_CONFIG_PATH.parent == package_dir, (
+        f"config.example.toml must live inside the nexusvox package ({package_dir}), "
+        f"but EXAMPLE_CONFIG_PATH points at {EXAMPLE_CONFIG_PATH.parent}"
+    )
 
 
 def test_config_dataclass_defaults():

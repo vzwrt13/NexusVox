@@ -69,6 +69,30 @@ jobs:
       - name: Build wheel and sdist
         run: python -m build
 
+      - name: Install the wheel into a clean environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$HOME/smoke"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            smoke_py="$HOME/smoke/Scripts/python.exe"
+          else
+            smoke_py="$HOME/smoke/bin/python"
+          fi
+          echo "SMOKE_PY=$smoke_py" >> "$GITHUB_ENV"
+          "$smoke_py" -m pip install --quiet dist/*.whl
+
+      - name: Verify the installed wheel is usable
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Run from outside the checkout. With the source tree as the working
+          # directory an importable src/ can mask exactly the packaging mistakes
+          # this step exists to catch.
+          script="$(pwd)/scripts/packaging_smoke_test.py"
+          cd "$HOME"
+          "$SMOKE_PY" "$script"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

@@ -73,7 +73,7 @@ nexusvox = "nexusvox.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-nexusvox = ["dashboard/static/*"]
+nexusvox = ["dashboard/static/*", "config.example.toml"]
 
 [tool.ruff]
 target-version = "py311"

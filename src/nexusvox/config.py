@@ -9,7 +9,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
-EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config.example.toml"
+# Resolved next to this module, not relative to the repository root. The template
+# ships inside the package (see [tool.setuptools.package-data]), so an installed
+# wheel finds it in site-packages exactly as a source checkout finds it in src/.
+# A path walking up to the repository root works only in a checkout and silently
+# leaves wheel users without a config.toml at all.
+EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parent / "config.example.toml"
 
 MODEL_REGISTRY: dict[str, dict[str, object]] = {
     "voxtral-mini-4b": {

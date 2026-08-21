@@ -26,7 +26,7 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-Python 3.11 or newer. On first run, `config.toml` is created from `config.example.toml`.
+Python 3.11 or newer. On first run, `config.toml` is created in the working directory from the template at `src/nexusvox/config.example.toml`.
 
 Optional: [ffmpeg](https://ffmpeg.org/) on your `PATH`, needed only for uploading non-WAV audio files in the dashboard. Not required for the test suite.
 

@@ -136,7 +136,7 @@ pip install -e ".[dev]"
 On first run a `config.toml` is created automatically from the example template. You can also copy it manually:
 
 ```bash
-cp config.example.toml config.toml
+cp src/nexusvox/config.example.toml config.toml
 ```
 
 ### Configuration Reference
@@ -268,7 +268,6 @@ With `voice_commands_enabled = true`, certain spoken phrases are converted befor
 ```
 NexusVox/
 ├── pyproject.toml              # Project metadata & dependencies
-├── config.example.toml         # Configuration template
 ├── config.toml                 # Your local configuration (git-ignored)
 ├── docker/
 │   ├── Dockerfile              # vLLM image (Voxtral/Cohere)
@@ -280,6 +279,7 @@ NexusVox/
 │   ├── .env.example            # HF_TOKEN template
 │   └── .env                    # Your HF token (git-ignored)
 └── src/nexusvox/
+    ├── config.example.toml     # Configuration template, shipped inside the package
     ├── __main__.py             # Entry point
     ├── app.py                  # Main application orchestrator
     ├── audio.py                # Microphone capture (16kHz PCM16)

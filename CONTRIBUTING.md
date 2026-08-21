@@ -113,6 +113,13 @@ change to how injection or the hotkey works — open an issue first and wait for
 you write code. Given the maintenance level described above, that is not bureaucracy; it is
 how you avoid spending an evening on a change that will not land.
 
+## Security
+
+Found something with security impact? Do not open a public issue — the private
+channels are in [SECURITY.md](SECURITY.md). It also describes what NexusVox does on
+your machine and where the trust boundary sits, which is worth reading before you
+decide whether a finding is a bug or intended behaviour.
+
 ## Licensing
 
 NexusVox is licensed under the GNU Affero General Public License v3.0 or later. By contributing, you agree that your contributions are licensed under the same terms. There is currently no CLA to sign — if that ever changes, it will be stated here before it applies to anyone.

@@ -1,0 +1,77 @@
+name: Bug report
+description: Something in NexusVox does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before you spend time on this: NexusVox is published as a reference
+        implementation and is not actively developed. Bug reports are read and
+        welcome, but a reply can take a while.
+
+        **Do not report a security vulnerability here.** Use the private channels
+        in [SECURITY.md](https://github.com/vzwrt13/NexusVox/blob/main/SECURITY.md) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start NexusVox with ...
+        2. Hold Ctrl+Shift+Alt and say ...
+        3. Release
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: Compute path
+      options:
+        - GPU (Docker backend)
+        - CPU (in-process Whisper)
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: The entry selected in the dashboard Settings tab.
+      placeholder: parakeet-tdt-0.6b
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: NexusVox and Python version
+      placeholder: "0.2.0, Python 3.12.10"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output
+      description: >
+        Anything NexusVox printed around the failure. Please check it for
+        transcribed text you would rather not publish before pasting.
+      render: text

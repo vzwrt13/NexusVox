@@ -51,6 +51,12 @@ dependencies = [
     "faster-whisper>=1.0.2",
 ]
 
+[project.urls]
+Homepage = "https://github.com/vzwrt13/NexusVox"
+Repository = "https://github.com/vzwrt13/NexusVox"
+Issues = "https://github.com/vzwrt13/NexusVox/issues"
+Changelog = "https://github.com/vzwrt13/NexusVox/releases"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",

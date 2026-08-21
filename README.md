@@ -1,5 +1,10 @@
 # NexusVox
 
+[![CI](https://github.com/vzwrt13/NexusVox/actions/workflows/ci.yml/badge.svg)](https://github.com/vzwrt13/NexusVox/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
+[![Platform](https://img.shields.io/badge/platform-Windows%2011-blue.svg)](#platform)
+
 **Local speech-to-text with push-to-talk and auto-insert.**
 
 Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no subscription, no copy-paste. Runs on CPU out of the box; optional NVIDIA GPU unlocks streaming models.

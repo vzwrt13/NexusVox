@@ -1,10 +1,11 @@
 #!/bin/sh
 #
-# Reject commits made directly on a protected branch.
+# Two checks, in order of severity:
 #
-# Every change belongs on a feature/* or fix/* branch and reaches main through a
-# pull request. This hook is the local half of that rule; branch protection on the
-# forge is the authoritative half once the repository is public.
+#   1. Credentials in the staged changes. Runs unconditionally -- a merge commit
+#      can introduce a secret just as easily as an ordinary one.
+#   2. Commits made directly on a protected branch. Every change belongs on a
+#      feature/* or fix/* branch and reaches main through a pull request.
 #
 # Deliberately POSIX sh with no bashisms, so it behaves the same under macOS,
 # Linux and Git Bash on Windows.
@@ -12,6 +13,69 @@
 set -u
 
 PROTECTED='main master'
+
+# Words that mark a match as an obvious template rather than a real credential.
+PLACEHOLDER='your[_-]?|example|placeholder|changeme|dummy|redacted|xxxx|<[a-zA-Z_]+>|token_here|_here$'
+
+# ---------------------------------------------------------------------------
+# 1. Credential check
+# ---------------------------------------------------------------------------
+
+secret_hits=''
+
+note_hit() {
+	secret_hits="${secret_hits}  ${1}
+$(printf '%s\n' "$2" | cut -c1-120 | sed 's/^/      /')
+"
+}
+
+check_pattern() {
+	[ -n "$added_lines" ] || return 0
+	hits=$(printf '%s\n' "$added_lines" | grep -E -- "$2" | grep -Eiv -- "$PLACEHOLDER")
+	[ -n "$hits" ] && note_hit "$1" "$hits"
+	return 0
+}
+
+if [ "${GIT_ALLOW_SECRET:-0}" = "1" ]; then
+	printf 'hook: GIT_ALLOW_SECRET=1 set, credential check skipped.\n' >&2
+else
+	# Only added lines of added/copied/modified files. Deletions cannot leak.
+	added_lines=$(git diff --cached --no-color --diff-filter=ACM -U0 | grep '^+' | grep -v '^+++')
+
+	check_pattern 'Private key block'       '\-\-\-\-\-BEGIN [A-Z ]*PRIVATE KEY\-\-\-\-\-'
+	check_pattern 'AWS access key id'       'AKIA[0-9A-Z]{16}'
+	check_pattern 'GitHub token'            'gh[pousr]_[A-Za-z0-9]{30,}'
+	check_pattern 'GitHub fine-grained PAT' 'github_pat_[A-Za-z0-9_]{60,}'
+	check_pattern 'Hugging Face token'      'hf_[A-Za-z0-9]{30,}'
+	check_pattern 'OpenAI key'              'sk-(proj-)?[A-Za-z0-9]{20,}'
+	check_pattern 'Anthropic key'           'sk-ant-[A-Za-z0-9_-]{20,}'
+	check_pattern 'Slack token'             'xox[abprs]-[A-Za-z0-9-]{10,}'
+	check_pattern 'Google API key'          'AIza[0-9A-Za-z_-]{35}'
+	check_pattern 'Stripe live key'         '[sr]k_live_[A-Za-z0-9]{20,}'
+	check_pattern 'JSON Web Token'          'eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.'
+	check_pattern 'Credentials in a URL'    '(postgres|postgresql|mysql|mongodb|redis|amqp)://[^ :/@]+:[^ @]{3,}@'
+
+	if [ -n "$secret_hits" ]; then
+		printf '\n'
+		printf 'Refusing to commit: the staged changes look like they contain a credential.\n'
+		printf '\n'
+		printf '%s' "$secret_hits"
+		printf '\n'
+		printf 'If this is real, do not just unstage it -- rotate it. A credential that\n'
+		printf 'reached your working tree should be considered compromised.\n'
+		printf '\n'
+		printf 'If it is a placeholder the pattern list does not recognise:\n'
+		printf '    sh/bash        GIT_ALLOW_SECRET=1 git commit ...\n'
+		printf '    PowerShell     $env:GIT_ALLOW_SECRET=1; git commit ...\n'
+		printf '    cmd.exe        set GIT_ALLOW_SECRET=1 && git commit ...\n'
+		printf '\n'
+		exit 1
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Protected branch check
+# ---------------------------------------------------------------------------
 
 if [ "${GIT_ALLOW_PROTECTED:-0}" = "1" ]; then
 	printf 'hook: GIT_ALLOW_PROTECTED=1 set, protected-branch check skipped.\n' >&2

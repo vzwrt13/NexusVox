@@ -33,6 +33,36 @@ jobs:
       - name: Check formatting
         run: ruff format --check .
 
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks scans the commit history via `git log -p`, which a shallow
+          # clone does not contain. Without this the job only sees one commit.
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          # Pinned by checksum, not just by tag: a retagged or tampered release
+          # must not be able to run with repository access.
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o gitleaks.tar.gz "$url"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan history for secrets
+        # --redact keeps any match out of the build log. A CI log is not the place
+        # to print a credential -- especially once this repository is public.
+        run: gitleaks git --no-banner --redact --verbose .
+
   test:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
     needs: lint

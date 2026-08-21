@@ -1,0 +1,58 @@
+#!/bin/sh
+#
+# Reject commits made directly on a protected branch.
+#
+# Every change belongs on a feature/* or fix/* branch and reaches main through a
+# pull request. This hook is the local half of that rule; branch protection on the
+# forge is the authoritative half once the repository is public.
+#
+# Deliberately POSIX sh with no bashisms, so it behaves the same under macOS,
+# Linux and Git Bash on Windows.
+
+set -u
+
+PROTECTED='main master'
+
+if [ "${GIT_ALLOW_PROTECTED:-0}" = "1" ]; then
+	printf 'hook: GIT_ALLOW_PROTECTED=1 set, protected-branch check skipped.\n' >&2
+	exit 0
+fi
+
+# Detached HEAD (rebase, bisect, a checked-out tag): symbolic-ref exits non-zero.
+# There is no branch to protect, so stay out of the way.
+branch=$(git symbolic-ref --quiet --short HEAD) || exit 0
+
+# Do not interrupt an operation git started itself. Finishing a merge, rebase,
+# cherry-pick or revert writes a commit on the current branch by design, and
+# blocking it here would leave the repository stuck mid-operation.
+git_dir=$(git rev-parse --git-dir) || exit 0
+for marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply
+do
+	if [ -e "$git_dir/$marker" ]; then
+		exit 0
+	fi
+done
+
+for protected in $PROTECTED
+do
+	if [ "$branch" = "$protected" ]; then
+		printf '\n'
+		printf 'Refusing to commit directly on "%s".\n' "$branch"
+		printf '\n'
+		printf 'Move the staged work onto a branch and commit there:\n'
+		printf '\n'
+		printf '    git switch -c feature/short-description\n'
+		printf '    git commit\n'
+		printf '\n'
+		printf 'Nothing is lost -- the staged changes follow you onto the new branch.\n'
+		printf '\n'
+		printf 'To bypass deliberately (bootstrap, emergency):\n'
+		printf '    sh/bash        GIT_ALLOW_PROTECTED=1 git commit ...\n'
+		printf '    PowerShell     $env:GIT_ALLOW_PROTECTED=1; git commit ...\n'
+		printf '    cmd.exe        set GIT_ALLOW_PROTECTED=1 && git commit ...\n'
+		printf '\n'
+		exit 1
+	fi
+done
+
+exit 0

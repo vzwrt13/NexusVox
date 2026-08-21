@@ -1,0 +1,57 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Database (SQLite keeps -wal/-shm sidecars next to the .db)
+*.db
+*.db-wal
+*.db-shm
+
+# Audio recordings
+audio/
+
+# Benchmark results
+benchmarks/
+
+# Config (user-specific)
+config.toml
+
+# Docker
+docker/.env
+
+# Claude Code
+.claude/
+
+# Evaluation harness
+.jbeval/
+
+# Open-source release planning (internal)
+.open-source-docs/
+
+# Personal CI/CD notes — written as a learning document, not project documentation
+CI-CD-doc.md
+
+# Backlog — internal planning; the public repo is a reference, not a roadmap
+BACKLOG.md
+
+# Business/marketing material — stays private, never ships in the public repo
+landing/
+product/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

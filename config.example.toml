@@ -1,0 +1,81 @@
+[general]
+# Language for transcription: "en" or "de"
+language = "en"
+# Delay in ms between releasing modifier keys and sending Ctrl+V paste.
+# Increase if text is not being injected at the cursor position.
+injection_delay_ms = 500
+# Enable automatic language detection per recording (experimental)
+auto_language_detection = false
+[hotkey]
+# Push-to-talk: hold all listed modifiers simultaneously to record
+# Modifier options: ctrl, shift, alt, win
+modifiers = ["ctrl", "shift", "alt"]
+
+[audio]
+# Sample rate in Hz (must match model expectation)
+sample_rate = 16000
+# Audio chunk size in bytes for WebSocket streaming
+chunk_size = 4096
+
+[inference]
+# Inference server URL (automatically set when switching GPU-backed models).
+# Ignored when running Whisper in-process on CPU.
+server_url = "ws://localhost:8000/v1/realtime"
+# Transcription delay in ms (multiples of 80, range 80-2400)
+transcription_delay_ms = 480
+# Transcription model. In-process on CPU (no Docker): "whisper-small", "whisper-base",
+# "whisper-medium", "whisper-large-v3-turbo", "distil-whisper-large-v3" (EN),
+# "distil-whisper-medium-en" (EN).
+# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe", "parakeet-tdt-0.6b".
+# See the model table in README.md for resources and model licenses.
+model = "voxtral-mini-4b"
+# Compute device: "auto" (detect CUDA, fall back to CPU), "cuda", or "cpu".
+# Use "cpu" to force in-process Whisper, including for benchmarking on a GPU machine.
+device = "auto"
+# Optional compute type override. Defaults: "int8" on CPU, "float16" on GPU.
+# Valid values for faster-whisper: "int8", "int8_float16", "float16", "float32".
+# compute_type = "int8"
+
+[database]
+# SQLite database path (relative to config file or absolute)
+path = "nexusvox.db"
+# Directory for saved audio recordings (relative to database path)
+audio_dir = "audio"
+
+[os_commands]
+# Enable "nexus" voice commands for OS-level window management.
+# Say "nexus open chrome" to launch, "nexus focus discord" to bring to front, etc.
+# Supported actions: open, close, focus, fullscreen, minimize, snap left, snap right
+enabled = false
+
+[os_commands.apps]
+# Map app aliases to executable paths. Use the alias in voice commands.
+# chrome = "C:/Program Files/Google/Chrome/Application/chrome.exe"
+# discord = "C:/Users/YourUser/AppData/Local/Discord/Update.exe"
+# terminal = "wt.exe"
+# code = "code"
+
+[voice_commands]
+# Enable voice commands for text formatting (new line, new paragraph, tab, all caps, symbols).
+enabled = true
+# When true, spoken number words are converted to digits: "twenty five" → "25".
+# Disabled by default — numbers pass through as spoken text.
+numbers_as_digits = false
+# When true, symbol substitutions are skipped but your symbol list is preserved.
+# Structural commands (new line, tab, all caps) remain active.
+# Useful for quick benchmarking without losing your configured symbols.
+bypass_symbols = false
+# Symbol commands to recognise. Remove entries that conflict with your natural speech patterns.
+#
+# Safe defaults (rarely appear as plain words in dictation):
+#   slash, backslash, pipe, tilde, asterisk,
+#   open paren, close paren, open bracket, close bracket, open brace, close brace,
+#   less than, greater than
+#
+# Opt-in (common English words — add only if you need them):
+#   hash, percent, dash, hyphen, plus, equal, colon, star
+symbols = [
+  "slash", "backslash", "pipe", "tilde", "asterisk",
+  "open paren", "close paren", "open bracket", "close bracket",
+  "open brace", "close brace", "less than", "greater than"
+]

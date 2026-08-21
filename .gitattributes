@@ -1,0 +1,14 @@
+# Normalise line endings so the repository always stores LF, regardless of each
+# contributor's core.autocrlf setting. Working trees still get native endings.
+# Without this, CI runs on both Linux and Windows and contributors on either can
+# produce diffs that are nothing but line-ending churn.
+* text=auto
+
+# Consumed by Linux tooling inside the containers — must stay LF in the work tree too.
+Dockerfile* text eol=lf
+*.sh text eol=lf
+
+# Git hooks are run by sh on every platform, including Git Bash on Windows. A CRLF
+# line ending here fails on macOS and Linux with "bad interpreter: /bin/sh^M", so
+# pin them to LF no matter what the contributor's core.autocrlf is set to.
+.githooks/** text eol=lf

@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=77.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nexusvox"
+version = "0.1.1"
+description = "Local speech-to-text with push-to-talk and auto-insert — runs on CPU, optional NVIDIA GPU backends"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
+authors = [{ name = "NightShift AI GmbH", email = "info@nightshift-ai.de" }]
+keywords = [
+    "speech-to-text",
+    "speech-recognition",
+    "whisper",
+    "dictation",
+    "push-to-talk",
+    "transcription",
+    "windows",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "pynput>=1.7.6",
+    "sounddevice>=0.4.6",
+    "numpy>=1.24",
+    "websockets>=12.0",
+    "pystray>=0.19.5",
+    "Pillow>=10.0",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "pyperclip>=1.8.2",
+    "flask>=3.0",
+    "httpx>=0.27",
+    "lingua-language-detector>=2.1",
+    "pydub>=0.25",
+    "audioop-lts>=0.2; python_version>='3.13'",
+    "faster-whisper>=1.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    # Pinned exactly: ruff releases add rules and change formatting, which would
+    # turn CI red without a code change. Bump deliberately, never implicitly.
+    "ruff==0.16.1",
+]
+
+[project.scripts]
+nexusvox = "nexusvox.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+nexusvox = ["dashboard/static/*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort (import ordering)
+    "UP",  # pyupgrade (modern Python syntax)
+    "B",   # flake8-bugbear (common bugs)
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI declares request parameters via calls in argument defaults by design,
+# so B008 is a false positive for the inference servers under docker/.
+extend-immutable-calls = ["fastapi.File", "fastapi.Form"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

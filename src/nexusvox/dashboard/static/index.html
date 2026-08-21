@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexusVox Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>NexusVox</h1>
+    <nav class="tabs">
+      <button class="tab active" data-tab="settings">Settings</button>
+      <button class="tab" data-tab="analytics">Analytics</button>
+      <button class="tab" data-tab="edit">Edit</button>
+      <button class="tab" data-tab="upload">Upload</button>
+      <button class="tab" data-tab="review">Review</button>
+      <button class="tab tab-dev" data-tab="dev" data-dev-only style="display:none">Dev</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Settings Tab -->
+    <section id="tab-settings" class="tab-content active">
+      <div class="settings-card">
+        <div class="setting-row">
+          <div class="setting-info">
+            <h3>Auto Language Detection</h3>
+            <p>Automatically detect the spoken language per recording instead of using a fixed setting. <span class="badge">Experimental</span></p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="auto-lang-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-card" style="margin-top: 12px;">
+        <div class="setting-row">
+          <div class="setting-info">
+            <h3>Compute Device</h3>
+            <p>CPU runs Whisper in-process with no Docker. GPU enables all models via Docker-backed inference servers.</p>
+          </div>
+          <select id="device-select" class="select-input">
+            <option value="auto">Auto-detect</option>
+            <option value="cuda">GPU (CUDA)</option>
+            <option value="cpu">CPU</option>
+          </select>
+        </div>
+        <p id="device-resolved" class="settings-hint"></p>
+        <p class="settings-hint">Changing the device takes effect after restarting NexusVox.</p>
+      </div>
+
+      <div class="settings-card" style="margin-top: 12px;">
+        <div class="setting-row">
+          <div class="setting-info">
+            <h3>Transcription Model</h3>
+            <p>Select which model to use for speech-to-text.</p>
+          </div>
+          <select id="model-select" class="select-input">
+          </select>
+        </div>
+        <div id="model-switch-status" class="model-status" style="display: none;">
+          <span class="model-status-spinner"></span>
+          <span id="model-status-text"></span>
+        </div>
+        <p class="settings-hint model-caution">Switching GPU-backed models restarts Docker containers and reloads weights. CPU (in-process Whisper) switches reload the model directly — may take 5–20s on first load.</p>
+      </div>
+
+      <div class="settings-card" id="model-overview-card" style="margin-top: 12px;">
+        <h3 class="overview-title">Model Overview</h3>
+        <div id="model-overview-grid" class="overview-grid"></div>
+      </div>
+
+      <div class="settings-card" style="margin-top: 12px;">
+        <div class="setting-row">
+          <div class="setting-info">
+            <h3>Nexus OS Commands</h3>
+            <p>Voice-triggered window management. Say <code>nexus &lt;action&gt; &lt;app&gt;</code> while recording.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="os-commands-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div id="nexus-details" class="nexus-details">
+          <h4 class="nexus-section-title">Supported Commands</h4>
+          <div id="nexus-actions" class="nexus-actions"></div>
+
+          <h4 class="nexus-section-title" style="margin-top: 14px;">Registered Apps</h4>
+          <div id="nexus-apps" class="nexus-apps"></div>
+          <p class="settings-hint">Edit <code>config.toml</code> under <code>[os_commands.apps]</code> to add or remove apps.</p>
+        </div>
+      </div>
+
+      <div class="settings-card" style="margin-top: 12px;">
+        <div class="setting-row">
+          <div class="setting-info">
+            <h3>Voice Commands</h3>
+            <p>Format injected text with spoken phrases: <code>new line</code>, <code>tab</code>, <code>all caps</code>, symbols, and more.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="voice-commands-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div id="voice-commands-details" class="voice-commands-details">
+          <div class="setting-row" style="margin-top: 16px;">
+            <div class="setting-info">
+              <h3>Numbers as Digits</h3>
+              <p>Convert spoken numbers to digits: "twenty five" → "25".</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="voice-numbers-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-row" style="margin-top: 16px;">
+            <div class="setting-info">
+              <h3>Bypass Symbol Commands</h3>
+              <p>Skip symbol substitutions without clearing your list. Structural commands still apply. Useful for benchmarking.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="voice-bypass-symbols-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div style="margin-top: 20px;">
+            <h4 class="nexus-section-title">Symbol Commands</h4>
+            <p class="settings-hint" style="margin-top: 6px;">Click to toggle symbols you want recognised as voice commands. <span class="symbol-ambiguous-label">Ambiguous</span> symbols share common English words and may fire accidentally.</p>
+            <div id="voice-symbols-grid" class="voice-symbols-grid"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Analytics Tab -->
+    <section id="tab-analytics" class="tab-content">
+      <div class="stats-row">
+        <div class="stat-card">
+          <span class="stat-value" id="stat-total">--</span>
+          <span class="stat-label">Transcriptions</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-wpm">--</span>
+          <span class="stat-label">Avg WPM</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-min-wpm">--</span>
+          <span class="stat-label">Min WPM</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-max-wpm">--</span>
+          <span class="stat-label">Max WPM</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-duration">--</span>
+          <span class="stat-label">Avg Duration</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-confidence">--</span>
+          <span class="stat-label">Avg Confidence</span>
+        </div>
+        <div class="stat-card accent">
+          <span class="stat-value" id="stat-saved">--</span>
+          <span class="stat-label">Minutes Saved</span>
+        </div>
+      </div>
+
+      <div class="filter-bar">
+        <div class="period-selector">
+          <button class="period-btn active" data-period="day">Daily</button>
+          <button class="period-btn" data-period="week">Weekly</button>
+          <button class="period-btn" data-period="month">Monthly</button>
+        </div>
+        <div class="date-filter">
+          <label class="date-label" for="filter-start">From</label>
+          <input type="date" id="filter-start" class="date-input">
+          <label class="date-label" for="filter-end">To</label>
+          <input type="date" id="filter-end" class="date-input">
+          <button class="period-btn" id="btn-apply-dates">Apply</button>
+          <button class="period-btn" id="btn-clear-dates">Clear</button>
+        </div>
+        <button class="refresh-btn" id="btn-refresh" title="Refresh data">&#x21bb;</button>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-card wide">
+          <h3>Transcriptions Over Time</h3>
+          <canvas id="chart-timeline"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Language Distribution</h3>
+          <canvas id="chart-language"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Peak Usage Hours</h3>
+          <canvas id="chart-hours"></canvas>
+        </div>
+        <div class="chart-card wide">
+          <h3>Confidence Trend</h3>
+          <canvas id="chart-confidence"></canvas>
+        </div>
+        <div class="chart-card wide">
+          <h3>Top Words</h3>
+          <canvas id="chart-words"></canvas>
+        </div>
+        <div class="chart-card wide">
+          <h3>Activity Heatmap</h3>
+          <div id="heatmap-container"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Edit Tab -->
+    <section id="tab-edit" class="tab-content">
+      <h2 class="edit-heading">Flagged Transcriptions</h2>
+      <p class="settings-hint" style="margin-bottom: 16px;">Transcriptions flagged as incorrect via hotkey. Enter the correct text and save to build ground-truth data.</p>
+      <div id="flagged-list" class="flagged-list"></div>
+    </section>
+    <!-- Upload Tab -->
+    <section id="tab-upload" class="tab-content">
+      <h2 class="edit-heading">Upload Audio File</h2>
+      <p class="settings-hint" style="margin-bottom: 16px;">Upload an audio file to transcribe using the current model. Supported formats: WAV, MP3, FLAC, OGG, WebM (max 25 MB).</p>
+
+      <div class="upload-zone" id="upload-zone">
+        <input type="file" id="upload-input" accept=".wav,.mp3,.flac,.ogg,.webm" hidden>
+        <div class="upload-zone-content">
+          <div class="upload-icon">&#x1F4C1;</div>
+          <p>Drag &amp; drop an audio file here, or <button class="upload-browse-btn" id="upload-browse">browse</button></p>
+        </div>
+      </div>
+
+      <div id="upload-status" class="upload-status" style="display: none;">
+        <span class="model-status-spinner"></span>
+        <span id="upload-status-text">Transcribing...</span>
+      </div>
+
+      <div id="upload-error" class="upload-error" style="display: none;"></div>
+
+      <h3 class="upload-history-heading">Previous Uploads</h3>
+      <div id="upload-list" class="flagged-list"></div>
+    </section>
+    <!-- Review Tab -->
+    <section id="tab-review" class="tab-content">
+      <h2 class="edit-heading">Review Transcriptions</h2>
+      <p class="settings-hint" style="margin-bottom: 16px;">Review recordings that haven't been manually verified yet. Listen to the audio and confirm whether the transcription is correct.</p>
+      <div id="review-list" class="flagged-list"></div>
+    </section>
+
+    <!-- Dev Tab (hidden unless ?dev query param) -->
+    <section id="tab-dev" class="tab-content" data-dev-only style="display:none">
+      <h2 class="edit-heading">Benchmark Analytics</h2>
+      <p class="settings-hint" style="margin-bottom: 16px;">Model accuracy and performance benchmarks from FLEURS dataset runs. Visible in dev mode only (<code>?dev</code>).</p>
+
+      <div id="dev-empty" class="empty-state" style="display:none;">
+        <p>No benchmark files found in <code>benchmarks/</code>. Run <code>python scripts/benchmark.py</code> to generate results.</p>
+      </div>
+
+      <div id="dev-content">
+        <!-- Benchmark selector -->
+        <div class="filter-bar">
+          <div class="period-selector">
+            <button class="period-btn active" id="dev-view-compare">Compare All</button>
+          </div>
+          <select id="dev-benchmark-select" class="select-input" style="min-width: 280px;">
+            <option value="">-- Select a benchmark --</option>
+          </select>
+        </div>
+
+        <!-- Comparison view (default) -->
+        <div id="dev-comparison">
+          <div class="stats-row dev-stats-row" id="dev-stats-row"></div>
+          <div id="dev-comparison-table-container" style="margin-top: 16px;"></div>
+
+          <div class="charts-grid" style="margin-top: 20px;">
+            <div class="chart-card">
+              <h3>WER by Model & Language</h3>
+              <canvas id="chart-dev-wer"></canvas>
+            </div>
+            <div class="chart-card">
+              <h3>Real-Time Factor (Speed)</h3>
+              <canvas id="chart-dev-rtf"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Detail view (single benchmark) -->
+        <div id="dev-detail" style="display:none;">
+          <div class="stats-row dev-stats-row" id="dev-detail-stats"></div>
+
+          <div class="charts-grid" style="margin-top: 20px;">
+            <div class="chart-card wide">
+              <h3>WER Distribution</h3>
+              <canvas id="chart-dev-wer-dist"></canvas>
+            </div>
+            <div class="chart-card wide">
+              <h3>Latency vs Audio Duration</h3>
+              <canvas id="chart-dev-latency"></canvas>
+            </div>
+          </div>
+
+          <div class="settings-card" style="margin-top: 20px;">
+            <h3 class="overview-title">Sample Explorer</h3>
+            <div class="sample-explorer-controls">
+              <label class="date-label">Max WER %</label>
+              <input type="number" id="dev-wer-filter" class="date-input" value="100" min="0" max="100" step="1" style="width: 80px;">
+              <label class="date-label" style="margin-left: 12px;">Search</label>
+              <input type="text" id="dev-sample-search" class="date-input" placeholder="Filter by text..." style="width: 200px;">
+              <span id="dev-sample-count" class="settings-hint" style="margin-left: 12px;"></span>
+            </div>
+            <div id="dev-sample-list" class="sample-explorer-list"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="chart.min.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

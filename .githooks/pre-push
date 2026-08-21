@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# Reject pushes that update or delete a protected branch on the remote.
+#
+# Creating the branch is allowed, so the very first push of a fresh repository
+# works without a bypass. Every later change to main must arrive through a
+# merged pull request.
+#
+# git feeds one line per ref on stdin:
+#     <local ref> <local sha> <remote ref> <remote sha>
+#
+# Deliberately POSIX sh with no bashisms, so it behaves the same under macOS,
+# Linux and Git Bash on Windows.
+
+set -u
+
+PROTECTED='refs/heads/main refs/heads/master'
+
+if [ "${GIT_ALLOW_PROTECTED:-0}" = "1" ]; then
+	printf 'hook: GIT_ALLOW_PROTECTED=1 set, protected-branch check skipped.\n' >&2
+	exit 0
+fi
+
+# An all-zero object id means "this ref does not exist on that side".
+# Works for both SHA-1 and SHA-256 repositories, since neither length is assumed.
+is_absent() {
+	case "$1" in
+		'')     return 1 ;;
+		*[!0]*) return 1 ;;
+		*)      return 0 ;;
+	esac
+}
+
+while read -r local_ref local_sha remote_ref remote_sha
+do
+	for protected in $PROTECTED
+	do
+		[ "$remote_ref" = "$protected" ] || continue
+
+		# The remote branch does not exist yet: this push creates it. Allowed,
+		# so bootstrapping a new repository needs no bypass.
+		if is_absent "$remote_sha"; then
+			continue
+		fi
+
+		printf '\n'
+		if is_absent "$local_sha"; then
+			printf 'Refusing to delete the protected branch "%s".\n' "$remote_ref"
+		else
+			printf 'Refusing to push directly to "%s".\n' "$remote_ref"
+			printf '\n'
+			printf 'Push the branch and open a pull request instead:\n'
+			printf '\n'
+			printf '    git push -u origin %s\n' "${local_ref#refs/heads/}"
+			printf '    gh pr create --fill\n'
+		fi
+		printf '\n'
+		printf 'To bypass deliberately (bootstrap, emergency):\n'
+		printf '    sh/bash        GIT_ALLOW_PROTECTED=1 git push ...\n'
+		printf '    PowerShell     $env:GIT_ALLOW_PROTECTED=1; git push ...\n'
+		printf '    cmd.exe        set GIT_ALLOW_PROTECTED=1 && git push ...\n'
+		printf '\n'
+		exit 1
+	done
+done
+
+exit 0

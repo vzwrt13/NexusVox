@@ -1,0 +1,99 @@
+services:
+  vllm-voxtral:
+    profiles: [ "voxtral" ]
+    build: .
+    image: nexusvox-vllm:latest
+    runtime: nvidia
+    container_name: nexusvox-vllm-voxtral
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    ports:
+      - "8000:8000"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - VLLM_DISABLE_COMPILE_CACHE=1
+    command: >
+      --model mistralai/Voxtral-Mini-4B-Realtime-2602 --enforce-eager --gpu-memory-utilization 0.70 --max-model-len 1800
+    ipc: host
+    restart: unless-stopped
+
+  vllm-cohere:
+    profiles: [ "cohere" ]
+    build: .
+    image: nexusvox-vllm:latest
+    runtime: nvidia
+    container_name: nexusvox-vllm-cohere
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    ports:
+      - "8001:8000"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - VLLM_DISABLE_COMPILE_CACHE=1
+    command: >
+      --model CohereLabs/cohere-transcribe-03-2026 --enforce-eager --trust-remote-code --gpu-memory-utilization 0.50
+    ipc: host
+    restart: unless-stopped
+
+  parakeet-fastapi:
+    profiles: [ "parakeet" ]
+    build:
+      context: .
+      dockerfile: Dockerfile.parakeet
+    image: nexusvox-parakeet:latest
+    runtime: nvidia
+    container_name: nexusvox-parakeet
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    ports:
+      - "8002:8000"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+    ipc: host
+    restart: unless-stopped
+
+  whisper-fastapi:
+    profiles: [ "whisper" ]
+    build:
+      context: .
+      dockerfile: Dockerfile.whisper
+    image: nexusvox-whisper:latest
+    runtime: nvidia
+    container_name: nexusvox-whisper
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    ports:
+      - "8003:8000"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    ipc: host
+    restart: unless-stopped
+
+volumes:
+  huggingface-cache:

@@ -104,6 +104,45 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # Checked out before the artifacts, because actions/checkout cleans the
+      # workspace and would otherwise delete the downloaded dist/.
+      - uses: actions/checkout@v4
+        with:
+          # The annotation lives on the tag object, which a shallow fetch of the
+          # ref alone does not reliably bring along.
+          fetch-depth: 0
+
+      - name: Take the release title and body from the tag annotation
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # An annotated tag is its own object; a lightweight tag is just a ref
+          # pointing at a commit. The distinction matters: on a lightweight tag
+          # %(contents) falls through to the *commit* message, so the release
+          # would be titled something like "Merge pull request #5 from ..."
+          # rather than being empty. Check the object type instead of the string.
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" ]; then
+            subject=$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")
+            body=$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")
+          else
+            subject="$GITHUB_REF_NAME"
+            body=""
+          fi
+
+          # Belt and braces: an annotated tag with an empty message is possible.
+          if [ -z "$subject" ]; then
+            subject="$GITHUB_REF_NAME"
+          fi
+
+          echo "subject=$subject" >> "$GITHUB_OUTPUT"
+          {
+            echo "body<<TAG_ANNOTATION_EOF"
+            echo "$body"
+            echo "TAG_ANNOTATION_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -113,5 +152,12 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          # Without an explicit body, generate_release_notes produces only the
+          # merged-pull-request list. That is a reasonable changelog and a poor
+          # answer to "what is this and what changed"; supplying a body keeps
+          # both, because the generated notes are appended rather than replacing
+          # it. Writing the tag annotation properly is then the only work needed.
+          name: ${{ steps.tag.outputs.subject }}
+          body: ${{ steps.tag.outputs.body }}
           files: dist/*
           generate_release_notes: true

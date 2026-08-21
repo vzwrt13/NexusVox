@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from .config import DatabaseConfig
-from .models import Base, FileTranscription, Transcription
+from .models import Base, FileTranscription, Transcription, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,7 @@ class Database:
                 text=text,
                 language=language,
                 duration_ms=duration_ms,
-                created_at=datetime.utcnow(),
+                created_at=utc_now(),
                 confidence=confidence,
                 model=model,
                 audio_path=audio_path,
@@ -165,7 +164,7 @@ class Database:
                 language=language,
                 duration_ms=duration_ms,
                 original_filename=original_filename,
-                created_at=datetime.utcnow(),
+                created_at=utc_now(),
                 model=model,
                 confidence=confidence,
             )

@@ -2,6 +2,34 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
+from nexusvox.models import utc_now
+
+
+def test_utc_now_is_naive_utc():
+    """Timestamps must stay naive, and must actually be UTC.
+
+    analytics.py compares created_at against plain date strings and runs SQLite
+    strftime() over the column, neither of which survives a "+00:00" offset. It
+    would also sort new rows inconsistently against every row already stored. If
+    this test ever fails because someone made the timestamps timezone-aware,
+    that change needs a schema migration and a rewrite of the analytics queries,
+    not a fix to this assertion.
+    """
+    now = utc_now()
+
+    assert now.tzinfo is None, "timestamps must be naive; see utc_now() docstring"
+    # Naive, but genuinely UTC rather than local time.
+    assert abs(now - datetime.now(UTC).replace(tzinfo=None)) < timedelta(seconds=5)
+
+
+def test_saved_timestamps_are_naive(db):
+    record = db.save_transcription("hello", "en", 1000)
+
+    assert record.created_at is not None
+    assert record.created_at.tzinfo is None
+
 
 def test_save_transcription_returns_record(db):
     record = db.save_transcription("hello world", "en", 1200)

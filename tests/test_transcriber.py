@@ -16,8 +16,16 @@ from nexusvox.transcriber import (
 )
 
 
-def test_factory_returns_voxtral_by_default():
+def test_factory_returns_openai_http_by_default():
+    # The default model is Parakeet, which speaks the OpenAI-compatible HTTP protocol.
     config = InferenceConfig()
+    transcriber = create_transcriber(config, device="cuda")
+    assert isinstance(transcriber, OpenAIHttpTranscriber)
+
+
+def test_factory_returns_voxtral_for_voxtral_model():
+    # Voxtral is no longer the default, so the realtime WebSocket path needs its own case.
+    config = InferenceConfig(server_url="ws://localhost:8000/v1/realtime", model="voxtral-mini-4b")
     transcriber = create_transcriber(config, device="cuda")
     assert isinstance(transcriber, VoxtralRealtimeTranscriber)
 
@@ -79,7 +87,7 @@ def test_factory_raises_for_unknown_model():
 
 
 def test_all_transcribers_are_base_transcriber():
-    voxtral = create_transcriber(InferenceConfig(), device="cuda")
+    voxtral = create_transcriber(InferenceConfig(model="voxtral-mini-4b"), device="cuda")
     cohere = create_transcriber(InferenceConfig(model="cohere-transcribe"), device="cuda")
     parakeet = create_transcriber(InferenceConfig(model="parakeet-tdt-0.6b"), device="cuda")
     whisper = create_transcriber(InferenceConfig(model="whisper-large-v3-turbo"), device="cuda")
@@ -94,7 +102,8 @@ def test_base_transcriber_needs_docker_default():
 
 
 def test_voxtral_needs_docker():
-    assert create_transcriber(InferenceConfig(), device="cuda").needs_docker is True
+    config = InferenceConfig(model="voxtral-mini-4b")
+    assert create_transcriber(config, device="cuda").needs_docker is True
 
 
 def test_local_whisper_does_not_need_docker():

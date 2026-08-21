@@ -172,9 +172,9 @@ class AudioConfig:
 
 @dataclass
 class InferenceConfig:
-    server_url: str = "ws://localhost:8000/v1/realtime"
+    server_url: str = "http://localhost:8002/v1/audio/transcriptions"
     transcription_delay_ms: int = 480
-    model: str = "voxtral-mini-4b"
+    model: str = "parakeet-tdt-0.6b"
     device: str = "auto"
     compute_type: str | None = None
 
@@ -297,9 +297,9 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             chunk_size=audio_data.get("chunk_size", 4096),
         ),
         inference=InferenceConfig(
-            server_url=inference_data.get("server_url", "ws://localhost:8000/v1/realtime"),
+            server_url=inference_data.get("server_url", "http://localhost:8002/v1/audio/transcriptions"),
             transcription_delay_ms=inference_data.get("transcription_delay_ms", 480),
-            model=inference_data.get("model", "voxtral-mini-4b"),
+            model=inference_data.get("model", "parakeet-tdt-0.6b"),
             device=inference_data.get("device", "auto"),
             compute_type=inference_data.get("compute_type", None),
         ),

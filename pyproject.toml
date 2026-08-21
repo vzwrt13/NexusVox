@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nexusvox"
 version = "0.1.1"
-description = "Local speech-to-text with push-to-talk and auto-insert — runs on CPU, optional NVIDIA GPU backends"
+description = "Local speech-to-text with push-to-talk and auto-insert — NVIDIA GPU recommended, CPU fallback available"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"

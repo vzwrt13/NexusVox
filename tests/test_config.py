@@ -30,9 +30,9 @@ def test_config_dataclass_defaults():
     assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
     assert cfg.audio.sample_rate == 16_000
     assert cfg.audio.chunk_size == 4096
-    assert cfg.inference.server_url == "ws://localhost:8000/v1/realtime"
+    assert cfg.inference.server_url == "http://localhost:8002/v1/audio/transcriptions"
     assert cfg.inference.transcription_delay_ms == 480
-    assert cfg.inference.model == "voxtral-mini-4b"
+    assert cfg.inference.model == "parakeet-tdt-0.6b"
     assert cfg.database.path == "nexusvox.db"
     assert cfg.database.audio_dir == "audio"
     assert cfg.os_commands.enabled is False
@@ -129,7 +129,7 @@ def test_load_config_missing_sections_uses_defaults(tmp_path):
     assert cfg.audio.sample_rate == 16_000
     assert cfg.audio.chunk_size == 4096
     assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
-    assert cfg.inference.server_url == "ws://localhost:8000/v1/realtime"
+    assert cfg.inference.server_url == "http://localhost:8002/v1/audio/transcriptions"
 
 
 def test_load_config_missing_keys_in_section_uses_defaults(tmp_path):

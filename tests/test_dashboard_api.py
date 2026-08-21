@@ -181,7 +181,7 @@ def test_get_current_model(flask_client):
     assert resp.status_code == 200
     data = resp.get_json()
     assert "model" in data
-    assert data["model"] == "voxtral-mini-4b"
+    assert data["model"] == "parakeet-tdt-0.6b"
 
 
 def test_switch_model(flask_client):

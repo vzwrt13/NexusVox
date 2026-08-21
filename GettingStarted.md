@@ -1,12 +1,18 @@
 # NexusVox — Getting Started
 
-Local speech-to-text with push-to-talk and auto-insert. Hold a hotkey, speak, release — your words appear at the cursor. Runs on CPU out of the box, with an optional NVIDIA GPU path for streaming models.
+Local speech-to-text with push-to-talk and auto-insert. Hold a hotkey, speak, release — your words appear at the cursor.
+
+**An NVIDIA GPU is strongly recommended.** The CPU-only path below needs no Docker and no GPU, but it is slow enough that dictation stops feeling immediate — see the Performance table in [README.md](README.md#performance) before committing to it.
 
 ---
 
-## CPU-only install (no Docker, no NVIDIA)
+## CPU-only install (no Docker, no NVIDIA) — fallback
 
-If you don't have an NVIDIA GPU — or don't want to deal with Docker — this is the whole setup:
+If you have an NVIDIA GPU, skip this section and start at [Prerequisites](#prerequisites); the GPU path is both faster and more accurate. This section is for machines that have no other option.
+
+Be aware of what you are trading away: on CPU, Whisper Medium reaches GPU-grade accuracy but needs about 6.8 seconds for a 10-second utterance, while Whisper Small answers in about 2 seconds at roughly twice the German error rate. The numbers are in the [Performance table](README.md#performance).
+
+That said, the setup really is this short:
 
 ```bash
 pip install -e .
@@ -91,18 +97,18 @@ Use `--profile` to select your model:
 
 ```bash
 cd docker
+docker compose --profile parakeet up --build  # Parakeet (HTTP, port 8002) -- default
 docker compose --profile voxtral up --build   # Voxtral (WebSocket, port 8000)
 docker compose --profile cohere up --build    # Cohere (HTTP, port 8001)
-docker compose --profile parakeet up --build  # Parakeet (HTTP, port 8002)
 ```
 
 The first start will download the model and cache it in a Docker volume. Subsequent starts are fast.
 
-Wait until the server reports it is ready. The default Voxtral endpoint will be available at `ws://localhost:8000/v1/realtime`.
+Wait until the server reports it is ready. The default Parakeet endpoint will be available at `http://localhost:8002/v1/audio/transcriptions`.
 
 > To run the container in the background, add `-d`:
 > ```bash
-> docker compose --profile voxtral up --build -d
+> docker compose --profile parakeet up --build -d
 > ```
 
 ---

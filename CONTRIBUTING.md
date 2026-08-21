@@ -61,22 +61,36 @@ Nothing is pushed straight to `main` — not features, not one-line fixes, not t
 in the README. Everything goes through a branch and a pull request, so that every change has a
 diff someone can look at and a CI run attached to it.
 
-Two hooks in `.githooks/` enforce this locally: `pre-commit` refuses a commit made while
-`main` is checked out, and `pre-push` refuses a push that updates or deletes `main` on the
+Two hooks in `.githooks/` enforce this locally. `pre-commit` runs two checks: it refuses a
+commit whose staged changes look like they contain a credential, and it refuses a commit made
+while `main` is checked out. `pre-push` refuses a push that updates or deletes `main` on the
 remote. They are plain POSIX shell and behave identically on macOS, Linux and Git Bash under
 Windows. Git does not pick up a hooks directory on its own, so activate it once per clone --
 `git config core.hooksPath .githooks`, as in the setup above.
 
-Both hooks step aside where blocking would do damage rather than good: a detached HEAD, and a
-merge, rebase, cherry-pick or revert that git is in the middle of. Creating `main` on an empty
-remote is allowed, so cloning and pushing a fresh fork works without ceremony. For a genuine
-emergency, set `GIT_ALLOW_PROTECTED=1` for the one command -- the hooks print the exact syntax
-for your shell when they block you.
+The branch check steps aside where blocking would do damage rather than good: a detached HEAD,
+and a merge, rebase, cherry-pick or revert that git is in the middle of. Creating `main` on an
+empty remote is allowed, so cloning and pushing a fresh fork works without ceremony. The
+credential check has no such exemptions -- a merge commit can leak a token just as easily as an
+ordinary one.
+
+For a genuine emergency, set `GIT_ALLOW_PROTECTED=1` or `GIT_ALLOW_SECRET=1` for that one
+command; the hooks print the exact syntax for your shell when they block you. They are separate
+variables on purpose, so silencing one does not silence the other.
+
+If the credential check ever fires on something real, do not simply unstage it. A credential
+that reached your working tree should be treated as compromised and rotated.
+
+CI runs a second, independent pass: a `Secret scan` job scans the whole commit history with
+[gitleaks](https://github.com/gitleaks/gitleaks), pinned to an exact version and verified by
+checksum before it runs. It uses roughly 150 curated rules against the hook's dozen, so it
+catches token formats the hook does not know.
 
 Client-side hooks are a guard rail, not a wall: `--no-verify` skips them, and a fresh clone
-without the `core.hooksPath` line has no hooks at all. Branch protection on the forge is the
-enforcement that cannot be talked out of; the hooks exist to catch the honest mistake before
-it reaches the remote.
+without the `core.hooksPath` line has no hooks at all. CI is a backstop rather than a
+preventative -- by the time it reports, the commit exists. Branch protection and GitHub's push
+protection are the enforcement that cannot be talked out of; the hooks and the CI job exist to
+catch the honest mistake earlier and more cheaply.
 
 CI runs on every push and pull request — lint on Linux, then the test suite across Linux and Windows on Python 3.11, 3.12, and 3.13. Please merge only when all checks are green. Branch protection is not enabled yet, so this is convention rather than something the repo enforces for you.
 

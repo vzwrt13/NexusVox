@@ -15,6 +15,10 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 > working, but not under active development — no new features are planned. Issues and pull
 > requests are welcome; responses may be slow.
 
+![The NexusVox analytics dashboard: a dark interface with tiles for transcription count, average, minimum and maximum words per minute, average duration and minutes saved, above a line chart of transcriptions over time with a date-range filter.](docs/images/dashboard.png)
+
+*Every transcription is stored locally and analysed in the built-in dashboard — words per minute, session length, usage over time.*
+
 ---
 
 ## Features
@@ -141,6 +145,10 @@ Open `http://localhost:47392` while NexusVox is running:
 | Edit | Correct transcriptions in-line |
 | Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg) |
 | Review | Flag and replay recordings |
+
+![The NexusVox settings tab: toggles for automatic language detection, a compute device selector resolved to GPU (CUDA), a transcription model selector set to Parakeet TDT 0.6B, and a model overview listing architecture, parameter count, protocol, runtime, supported languages and VRAM.](docs/images/settings.png)
+
+*Models are switched from the Settings tab. Selecting a GPU-backed model restarts the matching Docker container and points the app at the right port; the panel below shows what you are switching to.*
 
 ---
 

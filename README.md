@@ -149,6 +149,7 @@ Open `http://localhost:47392` while NexusVox is running:
 - [GettingStarted.md](GettingStarted.md) — full setup guide
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, lint, tests, PR conventions
 - [docs/TESTING.md](docs/TESTING.md) — running the test suite
+- [SECURITY.md](SECURITY.md) — what NexusVox does on your machine, and how to report a vulnerability
 
 ---
 

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/vzwrt13/NexusVox/security/policy
+    about: Report privately instead. Never in a public issue.
+  - name: Feature idea
+    url: https://github.com/vzwrt13/NexusVox/blob/main/CONTRIBUTING.md
+    about: >
+      No new features are planned, so a feature request will most likely sit
+      unanswered. A pull request that fixes something has a far better chance.
+      Read CONTRIBUTING first.

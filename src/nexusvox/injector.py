@@ -29,6 +29,11 @@ SCAN_SHIFT = 0x2A
 SCAN_ALT = 0x38
 SCAN_LWIN = 0x5B
 
+VK_RWIN = 0x5C
+
+# Modifiers that may still be physically held when the transcription arrives
+_MODIFIER_VKS = (VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN)
+
 # Window message for paste
 WM_PASTE = 0x0302
 
@@ -66,6 +71,20 @@ class INPUT(ctypes.Structure):
     ]
 
 
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("flags", wintypes.DWORD),
+        ("hwndActive", wintypes.HWND),
+        ("hwndFocus", wintypes.HWND),
+        ("hwndCapture", wintypes.HWND),
+        ("hwndMenuOwner", wintypes.HWND),
+        ("hwndMoveSize", wintypes.HWND),
+        ("hwndCaret", wintypes.HWND),
+        ("rcCaret", wintypes.RECT),
+    ]
+
+
 def _make_key_input(vk: int, scan: int = 0, flags: int = 0) -> INPUT:
     inp = INPUT()
     inp.type = INPUT_KEYBOARD
@@ -88,20 +107,33 @@ def _release_all_modifiers() -> None:
     user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
 
 
+def _wait_for_physical_release(timeout_s: float = 1.5) -> bool:
+    """Block until the user has physically released every modifier key.
+
+    The hotkey deactivates as soon as the *first* modifier goes up, so with a
+    fast backend the transcription can be ready while Ctrl or Shift is still
+    held. Pasting at that moment would send Ctrl+Shift+V (or worse). Returns
+    True if all modifiers are up, False on timeout.
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if not any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in _MODIFIER_VKS):
+            return True
+        time.sleep(0.01)
+    logger.warning("Modifier keys still held after %.1fs, forcing synthetic release", timeout_s)
+    return False
+
+
 def _send_ctrl_v() -> bool:
     """Simulate Ctrl+V keypress via SendInput with hardware scan codes.
 
-    Attaches to the foreground window's thread input queue first so that
-    Windows accepts the synthetic input even from a background thread.
+    Deliberately does NOT call AttachThreadInput: SendInput does not need it,
+    and attaching/detaching around the call races with the target app
+    processing the V keydown. When the detach re-synchronises the target
+    thread's key state before the app reads GetKeyState(VK_CONTROL), the app
+    sees a plain "v" instead of a paste.
     Returns True if all events were injected successfully.
     """
-    hwnd = user32.GetForegroundWindow()
-    current_thread = ctypes.windll.kernel32.GetCurrentThreadId()
-    target_thread = user32.GetWindowThreadProcessId(hwnd, None) if hwnd else 0
-    attached = False
-    if hwnd and current_thread != target_thread:
-        attached = bool(user32.AttachThreadInput(current_thread, target_thread, True))
-
     inputs = [
         _make_key_input(VK_CONTROL, SCAN_CONTROL),  # Ctrl down
         _make_key_input(VK_V, SCAN_V),  # V down
@@ -111,13 +143,24 @@ def _send_ctrl_v() -> bool:
     array = (INPUT * len(inputs))(*inputs)
     sent = user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
 
-    if attached:
-        user32.AttachThreadInput(current_thread, target_thread, False)
-
-    logger.info("SendInput Ctrl+V: sent %d/%d events (attached=%s)", sent, len(inputs), attached)
+    logger.info("SendInput Ctrl+V: sent %d/%d events", sent, len(inputs))
     if sent == 0:
-        logger.error("SendInput returned 0 — blocked by UIPI or thread not attached")
+        logger.error("SendInput returned 0 — blocked by UIPI (target runs elevated?)")
     return sent == len(inputs)
+
+
+def _focused_control(hwnd: int) -> int | None:
+    """Return the focused child control of ``hwnd``'s thread via GetGUIThreadInfo.
+
+    Unlike the AttachThreadInput + GetFocus trick this does not touch the
+    target thread's input queue or key state.
+    """
+    target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+    info = GUITHREADINFO()
+    info.cbSize = ctypes.sizeof(GUITHREADINFO)
+    if target_thread and user32.GetGUIThreadInfo(target_thread, ctypes.byref(info)):
+        return info.hwndFocus or None
+    return None
 
 
 def _paste_via_message() -> bool:
@@ -131,18 +174,7 @@ def _paste_via_message() -> bool:
         logger.error("No foreground window found")
         return False
 
-    # Get the focused control within the foreground window.
-    # GetFocus() only works within our own thread, so we must temporarily
-    # attach to the target window's thread input queue.
-    current_thread = ctypes.windll.kernel32.GetCurrentThreadId()
-    target_thread = user32.GetWindowThreadProcessId(hwnd, None)
-
-    focused = None
-    if current_thread != target_thread:
-        if user32.AttachThreadInput(current_thread, target_thread, True):
-            focused = user32.GetFocus()
-            user32.AttachThreadInput(current_thread, target_thread, False)
-
+    focused = _focused_control(hwnd)
     target = focused or hwnd
     result = user32.PostMessageW(target, WM_PASTE, 0, 0)
     logger.info(
@@ -172,8 +204,10 @@ def inject_text(text: str, injection_delay_ms: int = 500) -> None:
         pyperclip.copy(text)
         # Small delay to ensure clipboard is set
         time.sleep(0.05)
-        # Release any modifier keys still held from the push-to-talk hotkey
-        # (Ctrl+Shift+Alt) to prevent sending Ctrl+Shift+Alt+V instead of Ctrl+V
+        # The hotkey fires on the first modifier going up; wait until the user
+        # has let go of all of them, then clear any stale state synthetically
+        # so Ctrl+V is not turned into Ctrl+Shift+Alt+V.
+        _wait_for_physical_release()
         _release_all_modifiers()
         time.sleep(injection_delay_ms / 1000)
         # Try SendInput Ctrl+V first (works for browsers and most apps),

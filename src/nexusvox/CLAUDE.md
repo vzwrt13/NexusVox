@@ -31,7 +31,7 @@ Without step 3, the server never starts processing audio. This was a hard-won bu
 
 ## SendInput INPUT Struct
 
-The ctypes `INPUT` struct union **must** include `MOUSEINPUT` (not just `KEYBDINPUT`) so that `ctypes.sizeof(INPUT)` returns 40 bytes on 64-bit Windows. With only `KEYBDINPUT` the struct is 32 bytes, and `SendInput` silently returns 0 — no error code, no exception. The modifier-release step (`_release_all_modifiers`) and configurable `injection_delay_ms` are also required because the push-to-talk hotkey (Ctrl+Shift+Alt) can leave stale modifier state.
+The ctypes `INPUT` struct union **must** include `MOUSEINPUT` (not just `KEYBDINPUT`) so that `ctypes.sizeof(INPUT)` returns 40 bytes on 64-bit Windows. With only `KEYBDINPUT` the struct is 32 bytes, and `SendInput` silently returns 0 — no error code, no exception. The modifier-release step (`_release_all_modifiers`) and configurable `injection_delay_ms` are also required because the push-to-talk hotkey (Ctrl+Shift+Alt) can leave stale modifier state. `inject_text` first polls `GetAsyncKeyState` until the user has physically released all modifiers, because the hotkey deactivates on the *first* modifier going up. **Never wrap the Ctrl+V `SendInput` in `AttachThreadInput`**: SendInput does not need it, and detaching right after the call re-syncs the target thread's key state while it may still be processing the V keydown — the app then reads Ctrl as up and types a literal "v" (intermittent). `_paste_via_message` uses `GetGUIThreadInfo` to find the focused control for the same reason.
 
 ## Voice Commands
 

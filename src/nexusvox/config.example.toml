@@ -92,3 +92,13 @@ host = "127.0.0.1"
 port = 49730
 service = "voice-assistant"
 timeout_s = 5.0
+
+[translator]
+# Translate what you dictated into English before it is typed. The recording and the
+# transcript are stored as spoken; only the injected text is translated. Built for the
+# personal-tooling `translator` server (TranslateGemma via Ollama on port 8003): German
+# sentences are translated, English sentences pass through unchanged, so a mix works.
+# If the server does not answer within timeout_s, the original text is typed instead.
+enabled = false
+url = "http://127.0.0.1:8003/translate"
+timeout_s = 8.0

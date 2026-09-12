@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import sessionmaker
 
 from .config import DatabaseConfig
-from .models import Base, FileTranscription, Transcription, utc_now
+from .dictionary import DictionaryEntry
+from .models import Base, DictionaryEntryRow, FileTranscription, Transcription, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,12 @@ class Database:
                 .limit(limit)
                 .all()
             )
+
+    def get_transcription_text(self, tid: int) -> str | None:
+        """Return the stored text of a transcription, or None when it does not exist."""
+        with self._session_factory() as session:
+            row = session.get(Transcription, tid)
+            return row.text if row is not None else None
 
     def flag_transcription(self, tid: int) -> bool:
         """Mark a transcription as incorrectly recognized."""
@@ -143,6 +150,48 @@ class Database:
             row.reviewed = 1 if is_correct else 2
             if not is_correct and corrected_text is not None:
                 row.corrected_text = corrected_text
+            session.commit()
+            return True
+
+    # ---- Correction dictionary ----------------------------------------------
+
+    def list_dictionary(self) -> list[dict]:
+        """All dictionary entries, newest first, as plain dicts."""
+        with self._session_factory() as session:
+            rows = session.query(DictionaryEntryRow).order_by(DictionaryEntryRow.id.desc()).all()
+            return [{"id": r.id, "wrong": r.wrong, "right": r.right} for r in rows]
+
+    def get_dictionary_entries(self) -> list[DictionaryEntry]:
+        """Dictionary entries ready for ``apply_dictionary``."""
+        with self._session_factory() as session:
+            rows = session.query(DictionaryEntryRow).all()
+            return [DictionaryEntry(wrong=r.wrong, right=r.right) for r in rows]
+
+    def add_dictionary_entry(self, wrong: str, right: str) -> dict | None:
+        """Insert or update an entry. Returns the entry, or None when either side is blank."""
+        wrong = " ".join(wrong.split())
+        right = right.strip()
+        if not wrong or not right:
+            return None
+        with self._session_factory() as session:
+            row = (
+                session.query(DictionaryEntryRow).filter(func.lower(DictionaryEntryRow.wrong) == wrong.lower()).first()
+            )
+            if row is None:
+                row = DictionaryEntryRow(wrong=wrong, right=right)
+                session.add(row)
+            else:
+                row.wrong = wrong
+                row.right = right
+            session.commit()
+            return {"id": row.id, "wrong": row.wrong, "right": row.right}
+
+    def delete_dictionary_entry(self, entry_id: int) -> bool:
+        with self._session_factory() as session:
+            row = session.get(DictionaryEntryRow, entry_id)
+            if row is None:
+                return False
+            session.delete(row)
             session.commit()
             return True
 

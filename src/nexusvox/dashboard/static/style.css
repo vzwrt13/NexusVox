@@ -586,6 +586,63 @@ canvas { width: 100% !important; max-height: 260px; }
 .flagged-play-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .review-load-more { display: block; margin: 16px auto 0; padding: 8px 20px; }
 
+.dict-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 12px;
+  flex-wrap: wrap;
+}
+.dict-input {
+  flex: 1 1 180px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  padding: 6px 10px;
+}
+.dict-input:focus { outline: none; border-color: var(--accent); }
+.dict-arrow { color: var(--text-dim); }
+.dict-add-btn { margin-bottom: 0; }
+.dict-list { display: flex; flex-direction: column; gap: 6px; }
+.dict-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 6px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.dict-row .dict-wrong { color: var(--text-dim); text-decoration: line-through; }
+.dict-row .dict-right { font-weight: 500; }
+.dict-row .dict-delete {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+}
+.dict-row .dict-delete:hover { color: var(--red); }
+
+.review-suggestions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-dim);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--surface);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+}
+.review-suggestions .flagged-play-btn { margin-bottom: 0; }
+
 .review-keys kbd {
   font-family: inherit;
   font-size: 11px;

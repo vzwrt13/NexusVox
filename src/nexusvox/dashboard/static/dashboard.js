@@ -117,8 +117,51 @@ toggle.addEventListener("change", async () => {
 async function loadSettings() {
   const s = await api("/api/settings");
   toggle.checked = s.auto_language_detection;
-  await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands()]);
+  await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary()]);
 }
+
+// ── Correction Dictionary ────────────────────────────────────────────
+async function loadDictionary() {
+  const { entries } = await fetch("/api/dictionary").then((r) => r.json());
+  const list = document.getElementById("dict-list");
+  if (!entries.length) {
+    list.innerHTML = '<p class="nexus-empty">No entries yet.</p>';
+    return;
+  }
+  list.innerHTML = entries.map((e) => `
+    <div class="dict-row" data-id="${e.id}">
+      <span class="dict-wrong">${escapeHtml(e.wrong)}</span>
+      <span class="dict-arrow">&rarr;</span>
+      <span class="dict-right">${escapeHtml(e.right)}</span>
+      <button class="dict-delete" title="Remove" onclick="deleteDictionaryEntry(${e.id})">&#10005;</button>
+    </div>`).join("");
+}
+
+async function addDictionaryEntry(wrong, right) {
+  const res = await fetch("/api/dictionary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ wrong, right }),
+  }).then((r) => r.json());
+  if (res.ok) loadDictionary();
+  return res.ok;
+}
+
+async function deleteDictionaryEntry(id) {
+  await fetch(`/api/dictionary/${id}`, { method: "DELETE" });
+  loadDictionary();
+}
+
+document.getElementById("dict-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const wrongEl = document.getElementById("dict-wrong");
+  const rightEl = document.getElementById("dict-right");
+  if (await addDictionaryEntry(wrongEl.value, rightEl.value)) {
+    wrongEl.value = "";
+    rightEl.value = "";
+    wrongEl.focus();
+  }
+});
 
 // ── Device (CPU/GPU) ─────────────────────────────────────────────────
 const deviceSelect = document.getElementById("device-select");
@@ -784,6 +827,31 @@ async function loadMoreReviewTranscriptions() {
   if (!cards.length) activateTopReviewCard(false);
 }
 
+function showReviewSuggestions(suggestions) {
+  const box = document.getElementById("review-suggestions");
+  box.innerHTML = "<span>Add to dictionary?</span>" + suggestions.map((sg) => `
+    <button class="flagged-play-btn" onclick="acceptReviewSuggestion(this)"
+      data-wrong="${escapeHtml(sg.wrong)}" data-right="${escapeHtml(sg.right)}">
+      <s>${escapeHtml(sg.wrong)}</s> &rarr; ${escapeHtml(sg.right)}
+    </button>`).join("") + '<button class="flagged-play-btn" onclick="dismissReviewSuggestions()">Dismiss</button>';
+  box.hidden = false;
+}
+
+async function acceptReviewSuggestion(btn) {
+  btn.disabled = true;
+  if (await addDictionaryEntry(btn.dataset.wrong, btn.dataset.right)) {
+    btn.textContent = "Added";
+  } else {
+    btn.disabled = false;
+  }
+}
+
+function dismissReviewSuggestions() {
+  const box = document.getElementById("review-suggestions");
+  box.hidden = true;
+  box.innerHTML = "";
+}
+
 function toggleReviewTextarea(cb) {
   const card = cb.closest(".flagged-card");
   card.querySelector(".review-correction").style.display = cb.checked ? "none" : "block";
@@ -807,6 +875,7 @@ async function submitReview(id, btn) {
     const data = await res.json();
     if (data.ok) {
       reviewSessionCount += 1;
+      if (data.suggestions && data.suggestions.length) showReviewSuggestions(data.suggestions);
       card.style.transition = "opacity 0.3s";
       card.style.opacity = "0";
       setTimeout(async () => {

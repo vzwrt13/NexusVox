@@ -95,6 +95,21 @@
       </div>
 
       <div class="settings-card" style="margin-top: 12px;">
+        <div class="setting-info">
+          <h3>Correction Dictionary</h3>
+          <p>Words the model keeps getting wrong. Every match (whole word, any case) is replaced before the text is typed.</p>
+        </div>
+        <form id="dict-form" class="dict-form">
+          <input type="text" id="dict-wrong" class="dict-input" placeholder="As transcribed, e.g. nexus fox" required>
+          <span class="dict-arrow">&rarr;</span>
+          <input type="text" id="dict-right" class="dict-input" placeholder="Should be, e.g. NexusVox" required>
+          <button type="submit" class="flagged-play-btn dict-add-btn">Add</button>
+        </form>
+        <div id="dict-list" class="dict-list"></div>
+        <p class="settings-hint">Tip: correcting a recording in the Review tab suggests entries automatically.</p>
+      </div>
+
+      <div class="settings-card" style="margin-top: 12px;">
         <div class="setting-row">
           <div class="setting-info">
             <h3>Voice Commands</h3>
@@ -253,6 +268,7 @@
         <kbd>Space</kbd> play / stop &nbsp; <kbd>Enter</kbd> correct &nbsp; <kbd>E</kbd> wrong, edit &nbsp; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> submit correction &nbsp; <kbd>Esc</kbd> revert
       </p>
       <p id="review-progress" class="review-progress"></p>
+      <div id="review-suggestions" class="review-suggestions" hidden></div>
       <div id="review-list" class="flagged-list"></div>
       <button id="review-load-more" class="flagged-play-btn review-load-more" hidden onclick="loadMoreReviewTranscriptions()">Load more</button>
     </section>

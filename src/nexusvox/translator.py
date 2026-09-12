@@ -20,6 +20,7 @@ from .config import TranslatorConfig
 logger = logging.getLogger(__name__)
 
 _ERROR_LIMIT = 200
+_PROBE_TIMEOUT_S = 1.5
 
 
 @dataclass(frozen=True)
@@ -58,3 +59,18 @@ def translate(text: str, config: TranslatorConfig) -> TranslateResult:
         source=source if isinstance(source, str) else None,
         ms=ms if isinstance(ms, int) else None,
     )
+
+
+def is_reachable(config: TranslatorConfig) -> bool:
+    """Whether a translator answers at `config.url` right now. Sends an empty
+    translation so the check exercises the real endpoint, not just the port; any
+    HTTP answer counts, because a running server may still reject the empty body."""
+    body = json.dumps({"text": ""}).encode("utf-8")
+    request = urllib.request.Request(config.url, body, {"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(request, timeout=min(config.timeout_s, _PROBE_TIMEOUT_S)).close()
+    except urllib.error.HTTPError:
+        return True
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return False
+    return True

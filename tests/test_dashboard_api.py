@@ -13,6 +13,7 @@ def test_get_settings(flask_client):
     assert "auto_language_detection" in data
     assert "language" in data
     assert "translate_enabled" in data
+    assert data["translator_url"].startswith("http")
 
 
 def test_set_auto_language_detection(flask_client):
@@ -58,6 +59,17 @@ def test_set_translate_enabled(flask_client):
 
     assert resp.status_code == 200
     assert resp.get_json()["translate_enabled"] is True
+
+
+def test_translator_status_reports_unreachable_server(flask_client, monkeypatch):
+    monkeypatch.setattr("nexusvox.dashboard.api.is_reachable", lambda cfg: False)
+
+    resp = flask_client.get("/api/settings/translator-status")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["reachable"] is False
+    assert data["url"].startswith("http")
 
 
 def test_get_voice_commands(flask_client):

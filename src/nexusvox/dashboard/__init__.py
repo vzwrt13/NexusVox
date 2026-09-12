@@ -89,6 +89,10 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_translate_enabled(data.get("enabled", False)))
 
+    @app.route("/api/settings/translator-status")
+    def get_translator_status():
+        return jsonify(api.get_translator_status())
+
     # ---- Voice Commands endpoints ------------------------------------------
 
     @app.route("/api/voice-commands")

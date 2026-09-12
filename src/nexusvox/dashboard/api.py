@@ -14,6 +14,7 @@ from ..db import Database
 from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..os_commands import NEXUS_ACTIONS
+from ..translator import is_reachable
 from ..voice_commands import ALL_SYMBOL_INFO
 from . import analytics
 from . import benchmarks as bench
@@ -120,6 +121,15 @@ class DashboardAPI:
             "auto_language_detection": self._config.auto_language_detection,
             "language": self._config.language,
             "translate_enabled": self._config.translator.enabled,
+            "translator_url": self._config.translator.url,
+        }
+
+    def get_translator_status(self) -> dict:
+        """Whether the external translator server answers - probed live, so the
+        dashboard can say when the translate toggle would have no effect."""
+        return {
+            "url": self._config.translator.url,
+            "reachable": is_reachable(self._config.translator),
         }
 
     def set_auto_language_detection(self, enabled: bool) -> dict:

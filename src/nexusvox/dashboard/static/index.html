@@ -54,8 +54,9 @@
 
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
-            <h3>Translate to English</h3>
-            <p>Translate the dictation into English before injecting it. The stored transcript stays in the spoken language.</p>
+            <h3>Translate to English <span class="badge">external service</span></h3>
+            <p>Sends the transcript to a local translator server and types what comes back. NexusVox does not translate on its own: the server is a separate program you run yourself (<code>[translator]</code> in <code>config.toml</code>). If it does not answer, the original text is typed. The stored transcript stays in the spoken language.</p>
+            <p class="status-line" id="translator-status"></p>
           </div>
           <label class="toggle">
             <input type="checkbox" id="translate-toggle">

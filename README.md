@@ -32,7 +32,7 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 - **Voice commands** — spoken formatting shortcuts (new line, new paragraph, tab, all caps, punctuation symbols)
 - **Nexus OS commands** — window management via voice ("nexus open chrome", "nexus minimize")
 - **Assistant forward** — "nexus assistant <anything>" hands the sentence to a local voice assistant over a TCP port instead of typing it (off by default, `[assistant]` in `config.toml`); if nothing answers, the text is typed as usual
-- **Translate to English** — dictate in German, English or a mix and have the English version typed, while the recording and transcript are stored as spoken; a tray or dashboard toggle, backed by a local translator server (off by default, `[translator]` in `config.toml`); if the server does not answer, the original text is typed
+- **Translate to English** — dictate in German, English or a mix and have the English version typed, while the recording and transcript are stored as spoken; a tray or dashboard toggle (off by default, `[translator]` in `config.toml`). NexusVox does not translate itself: it needs a separate local translator server that is not part of this project — see [docs/TRANSLATOR.md](docs/TRANSLATOR.md). If the server does not answer, the original text is typed
 - **Flask dashboard** — analytics, settings, transcription history, audio review, and file upload on `http://localhost:47392`
 - **Beep feedback** — audio chimes on recording start and stop
 - **SQLite history** — every transcription is saved with audio for review and flagging
@@ -52,6 +52,8 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 **Fallback — CPU only** (Whisper in-process, no Docker):
 - No additional dependencies — `pip install` and you're done.
 - Expect a noticeable wait after every utterance. Read [Performance](#performance) first; on CPU you are choosing between accuracy and responsiveness, and cannot have both.
+
+**Optional — a local translator server:** only needed for the *Translate to English* toggle. It is a separate program, not shipped with NexusVox; [docs/TRANSLATOR.md](docs/TRANSLATOR.md) describes the one-endpoint HTTP contract so you can run your own. Without it the toggle has no effect and the dashboard says so.
 
 **Optional — [ffmpeg](https://ffmpeg.org/) on your `PATH`:** only needed to upload non-WAV audio files (MP3, FLAC, OGG, WEBM) in the dashboard's Upload tab. WAV uploads and push-to-talk dictation work without it. Install with `winget install Gyan.FFmpeg`, then verify with `ffmpeg -version`.
 
@@ -161,6 +163,7 @@ Open `http://localhost:47392` while NexusVox is running:
 - [GettingStarted.md](GettingStarted.md) — full setup guide
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, lint, tests, PR conventions
 - [docs/TESTING.md](docs/TESTING.md) — running the test suite
+- [docs/TRANSLATOR.md](docs/TRANSLATOR.md) — the external translator server behind *Translate to English*
 - [SECURITY.md](SECURITY.md) — what NexusVox does on your machine, and how to report a vulnerability
 
 ---

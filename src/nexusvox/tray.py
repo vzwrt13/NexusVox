@@ -78,7 +78,7 @@ class SystemTray:
         if self._on_toggle_translate is not None and self._get_translate is not None:
             items.append(
                 pystray.MenuItem(
-                    lambda _: f"Translate to English: {'ON' if self._get_translate() else 'OFF'}",
+                    lambda _: f"Translate to English (local server): {'ON' if self._get_translate() else 'OFF'}",
                     self._handle_toggle_translate,
                 )
             )

@@ -117,7 +117,27 @@ function postSetting(path, body) {
 }
 
 toggle.addEventListener("change", () => postSetting("/api/settings/auto-language-detection", { enabled: toggle.checked }));
-translateToggle.addEventListener("change", () => postSetting("/api/settings/translate", { enabled: translateToggle.checked }));
+translateToggle.addEventListener("change", async () => {
+  await postSetting("/api/settings/translate", { enabled: translateToggle.checked });
+  loadTranslatorStatus();
+});
+
+const translatorStatus = document.getElementById("translator-status");
+
+// Probed live so the toggle never looks like it works while nothing is listening.
+async function loadTranslatorStatus() {
+  translatorStatus.className = "status-line";
+  translatorStatus.textContent = "Checking translator…";
+  const s = await api("/api/settings/translator-status");
+  if (s.reachable) {
+    translatorStatus.className = "status-line ok";
+    translatorStatus.textContent = "● Translator reachable at " + s.url;
+  } else {
+    translatorStatus.className = "status-line down";
+    translatorStatus.textContent =
+      "○ No translator at " + s.url + (translateToggle.checked ? " — text is typed untranslated" : "");
+  }
+}
 languageSelect.addEventListener("change", () => postSetting("/api/settings/language", { language: languageSelect.value }));
 
 async function loadSettings() {
@@ -125,6 +145,7 @@ async function loadSettings() {
   toggle.checked = s.auto_language_detection;
   translateToggle.checked = s.translate_enabled;
   languageSelect.value = s.language;
+  loadTranslatorStatus();
   await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary()]);
 }
 

@@ -6,7 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from nexusvox.config import TranslatorConfig
-from nexusvox.translator import translate
+from nexusvox.translator import is_reachable, translate
 
 
 def _serve_once(status: int, body: bytes) -> tuple[HTTPServer, list[dict]]:
@@ -91,3 +91,26 @@ def test_translate_nothing_listening_falls_back_to_original():
 
     assert (result.text, result.translated) == ("Hallo Welt", False)
     assert result.error is not None
+
+
+def test_is_reachable_when_server_answers():
+    server, received = _serve_once(200, b'{"text": ""}')
+
+    assert is_reachable(_config(server)) is True
+    assert received == [{"text": ""}]
+    server.server_close()
+
+
+def test_is_reachable_counts_http_error_as_running_server():
+    server, _ = _serve_once(422, b'{"detail": "empty text"}')
+
+    assert is_reachable(_config(server)) is True
+    server.server_close()
+
+
+def test_is_reachable_false_when_nothing_listens():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        free_port = probe.getsockname()[1]
+
+    assert is_reachable(TranslatorConfig(url=f"http://127.0.0.1:{free_port}/translate")) is False

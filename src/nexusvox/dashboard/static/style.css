@@ -90,6 +90,10 @@ main { padding: 24px; max-width: 1100px; margin: 0 auto; }
 
 .setting-info h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
 .setting-info p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+.setting-info code { font-size: 12px; background: var(--surface2); padding: 1px 5px; border-radius: 4px; }
+.status-line { margin-top: 6px; }
+.status-line.ok { color: var(--green); }
+.status-line.down { color: var(--red); }
 
 .badge {
   display: inline-block;

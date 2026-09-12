@@ -47,20 +47,43 @@ async function api(path) {
 }
 
 // ── Tab Switching ────────────────────────────────────────────────────
+// The active tab is mirrored into the URL hash (e.g. "#analytics") so a page
+// refresh, bookmark, or back/forward navigation lands on the same tab.
+function activateTab(name) {
+  const btn = document.querySelector(`.tab[data-tab="${name}"]`);
+  const panel = document.getElementById("tab-" + name);
+  if (!btn || !panel) return false;
+
+  document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll(".tab-content").forEach((s) => s.classList.remove("active"));
+  btn.classList.add("active");
+  panel.classList.add("active");
+
+  if (name === "analytics") loadAnalytics();
+  if (name === "edit") loadFlaggedTranscriptions();
+  if (name === "upload") loadFileTranscriptions();
+  if (name === "review") loadReviewTranscriptions();
+  if (name === "dev") loadBenchmarks();
+  return true;
+}
+
 document.querySelectorAll(".tab").forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".tab-content").forEach((s) => s.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
-
-    if (btn.dataset.tab === "analytics") loadAnalytics();
-    if (btn.dataset.tab === "edit") loadFlaggedTranscriptions();
-    if (btn.dataset.tab === "upload") loadFileTranscriptions();
-    if (btn.dataset.tab === "review") loadReviewTranscriptions();
-    if (btn.dataset.tab === "dev") loadBenchmarks();
+    const name = btn.dataset.tab;
+    if (window.location.hash !== "#" + name) {
+      history.replaceState(null, "", "#" + name);
+    }
+    activateTab(name);
   });
 });
+
+function restoreTabFromHash() {
+  const name = window.location.hash.replace(/^#/, "");
+  if (!name || (name === "dev" && !DEV_MODE)) return;
+  activateTab(name);
+}
+
+window.addEventListener("hashchange", restoreTabFromHash);
 
 // ── Period Selector ──────────────────────────────────────────────────
 document.querySelectorAll(".period-btn").forEach((btn) => {
@@ -777,6 +800,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (DEV_MODE) {
     document.querySelectorAll("[data-dev-only]").forEach((el) => (el.style.display = ""));
   }
+  restoreTabFromHash();
 });
 
 // ── Benchmarks (Dev Tab) ─────────────────────────────────────────────

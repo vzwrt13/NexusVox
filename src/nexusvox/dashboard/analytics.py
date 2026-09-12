@@ -36,6 +36,9 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
             "min_wpm": 0,
             "max_wpm": 0,
             "time_saved_minutes": 0,
+            "translated_count": 0,
+            "avg_translate_ms": None,
+            "translate_failures": 0,
         }
 
     total = len(rows)
@@ -58,6 +61,15 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         conf_query = session.query(func.avg(Transcription.confidence)).filter(Transcription.confidence.isnot(None))
         avg_conf = _apply_date_filter(conf_query, start, end).scalar()
 
+    # Translate-before-inject: how often it ran, what it cost, how often it fell back.
+    with session_factory() as session:
+        tr_query = session.query(
+            func.sum(Transcription.translated),
+            func.avg(Transcription.translate_ms),
+            func.count(Transcription.translate_error),
+        )
+        translated_count, avg_translate_ms, translate_failures = _apply_date_filter(tr_query, start, end).one()
+
     return {
         "total_transcriptions": total,
         "avg_duration_ms": round(avg_duration_ms),
@@ -66,6 +78,9 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         "max_wpm": round(max(per_wpm), 1) if per_wpm else 0,
         "time_saved_minutes": round(max(time_saved_min, 0), 1),
         "avg_confidence": round(avg_conf, 4) if avg_conf is not None else None,
+        "translated_count": int(translated_count or 0),
+        "avg_translate_ms": round(avg_translate_ms) if avg_translate_ms is not None else None,
+        "translate_failures": int(translate_failures or 0),
     }
 
 

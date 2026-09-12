@@ -13,17 +13,31 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 
 from .config import TranslatorConfig
 
 logger = logging.getLogger(__name__)
 
+_ERROR_LIMIT = 200
 
-def translate(text: str, config: TranslatorConfig) -> str:
+
+@dataclass(frozen=True)
+class TranslateResult:
+    """What to inject, and what happened on the way - the part that is saved."""
+
+    text: str
+    translated: bool = False
+    source: str | None = None  # "de", "en" or "mixed" as the server saw it
+    ms: int | None = None  # the server's own timing
+    error: str | None = None  # set when the fallback to the original text fired
+
+
+def translate(text: str, config: TranslatorConfig) -> TranslateResult:
     """The English version of `text`, or `text` itself when translation is off,
     the text is blank, or the translator cannot be reached."""
     if not config.enabled or not text.strip():
-        return text
+        return TranslateResult(text)
     body = json.dumps({"text": text}).encode("utf-8")
     request = urllib.request.Request(config.url, body, {"Content-Type": "application/json"})
     try:
@@ -34,6 +48,13 @@ def translate(text: str, config: TranslatorConfig) -> str:
             raise TypeError("translator returned no text")
     except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, TypeError) as exc:
         logger.warning("Translator unavailable at %s (%s); injecting the original text", config.url, exc)
-        return text
-    logger.info("Translated (%s, %d ms): %r -> %r", result.get("source", "?"), result.get("ms", -1), text, translated)
-    return translated
+        return TranslateResult(text, error=f"{type(exc).__name__}: {exc}"[:_ERROR_LIMIT])
+    source = result.get("source")
+    ms = result.get("ms")
+    logger.info("Translated (%s, %s ms): %r -> %r", source, ms, text, translated)
+    return TranslateResult(
+        translated,
+        translated=True,
+        source=source if isinstance(source, str) else None,
+        ms=ms if isinstance(ms, int) else None,
+    )

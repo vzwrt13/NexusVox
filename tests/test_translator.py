@@ -38,7 +38,10 @@ def _config(server: HTTPServer, enabled: bool = True) -> TranslatorConfig:
 def test_translate_returns_server_text():
     server, received = _serve_once(200, b'{"text": "So, I think that is fine.", "source": "de", "ms": 400}')
 
-    assert translate("Also ich glaube, das passt.", _config(server)) == "So, I think that is fine."
+    result = translate("Also ich glaube, das passt.", _config(server))
+
+    assert result.text == "So, I think that is fine."
+    assert (result.translated, result.source, result.ms, result.error) == (True, "de", 400, None)
     assert received == [{"text": "Also ich glaube, das passt."}]
     server.server_close()
 
@@ -46,26 +49,34 @@ def test_translate_returns_server_text():
 def test_translate_disabled_does_not_call_server():
     server, received = _serve_once(200, b'{"text": "unused"}')
 
-    assert translate("Hallo Welt", _config(server, enabled=False)) == "Hallo Welt"
+    result = translate("Hallo Welt", _config(server, enabled=False))
+
+    assert (result.text, result.translated, result.error) == ("Hallo Welt", False, None)
     assert received == []
     server.server_close()
 
 
 def test_translate_blank_text_untouched():
-    assert translate("   ", TranslatorConfig(enabled=True)) == "   "
+    assert translate("   ", TranslatorConfig(enabled=True)).text == "   "
 
 
 def test_translate_server_error_falls_back_to_original():
     server, _ = _serve_once(502, b'{"error": "Ollama unreachable"}')
 
-    assert translate("Hallo Welt", _config(server)) == "Hallo Welt"
+    result = translate("Hallo Welt", _config(server))
+
+    assert (result.text, result.translated) == ("Hallo Welt", False)
+    assert result.error is not None and "502" in result.error
     server.server_close()
 
 
 def test_translate_malformed_reply_falls_back_to_original():
     server, _ = _serve_once(200, b"not json")
 
-    assert translate("Hallo Welt", _config(server)) == "Hallo Welt"
+    result = translate("Hallo Welt", _config(server))
+
+    assert (result.text, result.translated) == ("Hallo Welt", False)
+    assert result.error is not None
     server.server_close()
 
 
@@ -76,4 +87,7 @@ def test_translate_nothing_listening_falls_back_to_original():
     probe.close()
     config = TranslatorConfig(enabled=True, url=f"http://127.0.0.1:{free_port}/translate", timeout_s=0.5)
 
-    assert translate("Hallo Welt", config) == "Hallo Welt"
+    result = translate("Hallo Welt", config)
+
+    assert (result.text, result.translated) == ("Hallo Welt", False)
+    assert result.error is not None

@@ -350,7 +350,7 @@ class NexusVoxApp:
 
                 # Translate into English for injection only; the transcript below is
                 # saved as spoken. Blocking HTTP, so off the loop like the injection.
-                injected_text = await loop.run_in_executor(
+                translation = await loop.run_in_executor(
                     None,
                     translate,
                     processed_text,
@@ -361,7 +361,7 @@ class NexusVoxApp:
                 await loop.run_in_executor(
                     None,
                     inject_text,
-                    injected_text,
+                    translation.text,
                     delay,
                 )
                 language = detect_language(raw_text) if self._config.auto_language_detection else self._config.language
@@ -371,8 +371,12 @@ class NexusVoxApp:
                     duration_ms=duration_ms,
                     confidence=result.confidence,
                     model=self._transcriber.model,
+                    translated=translation.translated,
+                    translate_source=translation.source,
+                    translate_ms=translation.ms,
+                    translate_error=translation.error,
                 )
-                logger.info("Injected: %s", injected_text)
+                logger.info("Injected: %s", translation.text)
 
                 audio_path = self._save_audio_wav(audio_buffer, record.id)
                 self._db.update_audio_path(record.id, audio_path)

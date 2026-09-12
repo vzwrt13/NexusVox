@@ -287,3 +287,32 @@ def test_submit_review_incorrect_with_correction(db):
 
 def test_submit_review_nonexistent_id(db):
     assert db.submit_review(9999, is_correct=True) is False
+
+
+def test_save_transcription_translate_fields(db):
+    record = db.save_transcription(
+        text="Also ich glaube, das passt.",
+        language="de",
+        duration_ms=1200,
+        translated=True,
+        translate_source="de",
+        translate_ms=450,
+    )
+
+    assert (record.translated, record.translate_source, record.translate_ms, record.translate_error) == (
+        1,
+        "de",
+        450,
+        None,
+    )
+
+
+def test_save_transcription_translate_defaults(db):
+    record = db.save_transcription(text="Hello", language="en", duration_ms=800)
+
+    assert (record.translated, record.translate_source, record.translate_ms, record.translate_error) == (
+        0,
+        None,
+        None,
+        None,
+    )

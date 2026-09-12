@@ -458,6 +458,12 @@ function renderOverview(d) {
   document.getElementById("stat-confidence").textContent =
     d.avg_confidence != null ? (d.avg_confidence * 100).toFixed(1) + "%" : "--";
   document.getElementById("stat-saved").textContent = d.time_saved_minutes;
+  document.getElementById("stat-translated").textContent = d.translated_count;
+  const parts = [];
+  if (d.avg_translate_ms != null) parts.push("avg " + formatDuration(d.avg_translate_ms));
+  if (d.translate_failures) parts.push(d.translate_failures + " fell back");
+  document.getElementById("stat-translated-label").textContent =
+    "Translated" + (parts.length ? " (" + parts.join(", ") + ")" : "");
 }
 
 function formatDuration(ms) {

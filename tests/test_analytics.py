@@ -45,6 +45,55 @@ def test_overview_with_data(session_factory, sample_transcriptions):
     assert result["avg_wpm"] > 0
 
 
+def test_overview_translate_stats(session_factory):
+    now = datetime.now()
+    _seed(
+        session_factory,
+        [
+            {"text": "a", "language": "de", "duration_ms": 1000, "created_at": now},
+            {
+                "text": "b",
+                "language": "de",
+                "duration_ms": 1000,
+                "created_at": now,
+                "translated": 1,
+                "translate_source": "de",
+                "translate_ms": 400,
+            },
+            {
+                "text": "c",
+                "language": "de",
+                "duration_ms": 1000,
+                "created_at": now,
+                "translated": 1,
+                "translate_source": "mixed",
+                "translate_ms": 600,
+            },
+            {
+                "text": "d",
+                "language": "de",
+                "duration_ms": 1000,
+                "created_at": now,
+                "translate_error": "URLError: nothing listening",
+            },
+        ],
+    )
+
+    result = get_overview(session_factory)
+
+    assert result["translated_count"] == 2
+    assert result["avg_translate_ms"] == 500
+    assert result["translate_failures"] == 1
+
+
+def test_overview_translate_stats_empty(session_factory):
+    result = get_overview(session_factory)
+
+    assert result["translated_count"] == 0
+    assert result["avg_translate_ms"] is None
+    assert result["translate_failures"] == 0
+
+
 def test_overview_time_saved_not_negative(session_factory):
     """Even with very slow dictation, time_saved should be >= 0."""
     _seed(

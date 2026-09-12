@@ -29,6 +29,10 @@ class Database:
             "ALTER TABLE transcriptions ADD COLUMN model VARCHAR(100)",
             "ALTER TABLE transcriptions ADD COLUMN audio_path VARCHAR(500)",
             "ALTER TABLE transcriptions ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE transcriptions ADD COLUMN translated INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE transcriptions ADD COLUMN translate_source VARCHAR(5)",
+            "ALTER TABLE transcriptions ADD COLUMN translate_ms INTEGER",
+            "ALTER TABLE transcriptions ADD COLUMN translate_error VARCHAR(200)",
         ]
         with self._engine.connect() as conn:
             for sql in migrations:
@@ -46,6 +50,10 @@ class Database:
         confidence: float | None = None,
         model: str | None = None,
         audio_path: str | None = None,
+        translated: bool = False,
+        translate_source: str | None = None,
+        translate_ms: int | None = None,
+        translate_error: str | None = None,
     ) -> Transcription:
         """Save a transcription record to the database."""
         with self._session_factory() as session:
@@ -57,6 +65,10 @@ class Database:
                 confidence=confidence,
                 model=model,
                 audio_path=audio_path,
+                translated=int(translated),
+                translate_source=translate_source,
+                translate_ms=translate_ms,
+                translate_error=translate_error,
             )
             session.add(record)
             session.commit()

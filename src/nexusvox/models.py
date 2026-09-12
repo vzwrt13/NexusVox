@@ -41,6 +41,12 @@ class Transcription(Base):
     corrected_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     audio_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     reviewed: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    # Translate-before-inject: what happened on the way to the cursor. The text above
+    # is always the spoken one; these say whether English was typed instead.
+    translated: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    translate_source: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    translate_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    translate_error: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class FileTranscription(Base):

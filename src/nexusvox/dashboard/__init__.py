@@ -188,6 +188,21 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.submit_review(tid, data.get("is_correct", True), data.get("corrected_text")))
 
+    # ---- Correction dictionary endpoints -----------------------------------
+
+    @app.route("/api/dictionary")
+    def get_dictionary():
+        return jsonify(api.get_dictionary())
+
+    @app.route("/api/dictionary", methods=["POST"])
+    def add_dictionary_entry():
+        data = request.get_json(force=True)
+        return jsonify(api.add_dictionary_entry(data.get("wrong", ""), data.get("right", "")))
+
+    @app.route("/api/dictionary/<int:entry_id>", methods=["DELETE"])
+    def delete_dictionary_entry(entry_id):
+        return jsonify(api.delete_dictionary_entry(entry_id))
+
     @app.route("/api/confidence-trend")
     def confidence_trend():
         period = request.args.get("period", "day")

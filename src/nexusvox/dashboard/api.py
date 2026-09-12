@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from ..config import MODEL_REGISTRY, Config, resolve_device, save_config
 from ..db import Database
+from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..os_commands import NEXUS_ACTIONS
 from ..voice_commands import ALL_SYMBOL_INFO
@@ -231,8 +232,33 @@ class DashboardAPI:
     def submit_review(self, tid: int, is_correct: bool, corrected_text: str | None = None) -> dict:
         if self._db is None:
             return {"ok": False, "error": "DB not available"}
+        original = self._db.get_transcription_text(tid)
         ok = self._db.submit_review(tid, is_correct, corrected_text)
-        return {"ok": ok}
+        suggestions: list[dict] = []
+        if ok and not is_correct and corrected_text and original:
+            suggestions = [
+                {"wrong": e.wrong, "right": e.right}
+                for e in suggest_entries(original, corrected_text, self._db.get_dictionary_entries())
+            ]
+        return {"ok": ok, "suggestions": suggestions}
+
+    # ---- Correction dictionary ---------------------------------------------
+
+    def get_dictionary(self) -> dict:
+        return {"entries": self._db.list_dictionary() if self._db else []}
+
+    def add_dictionary_entry(self, wrong: str, right: str) -> dict:
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
+        entry = self._db.add_dictionary_entry(wrong, right)
+        if entry is None:
+            return {"ok": False, "error": "Both fields are required"}
+        return {"ok": True, "entry": entry}
+
+    def delete_dictionary_entry(self, entry_id: int) -> dict:
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
+        return {"ok": self._db.delete_dictionary_entry(entry_id)}
 
     def get_confidence_trend(self, period: str = "day", start: str | None = None, end: str | None = None) -> dict:
         return analytics.get_confidence_over_time(self._sf, period, start=start, end=end)

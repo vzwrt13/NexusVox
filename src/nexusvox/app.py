@@ -18,6 +18,7 @@ from .audio import AudioCapture
 from .config import MODEL_REGISTRY, Config, resolve_device, save_config
 from .dashboard import open_dashboard
 from .db import Database
+from .dictionary import apply_dictionary
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import HotkeyListener
 from .injector import inject_text
@@ -324,6 +325,11 @@ class NexusVoxApp:
                     await self._transcriber.disconnect()
                     return
 
+                # Correction dictionary: fix terms the model keeps mishearing
+                corrected_text = apply_dictionary(raw_text, self._db.get_dictionary_entries())
+                if corrected_text != raw_text:
+                    logger.info("Dictionary applied: %r -> %r", raw_text, corrected_text)
+
                 # Apply voice commands (new line, tab, all caps, symbols, etc.)
                 if self._config.voice_commands.enabled:
                     active_symbols = (
@@ -332,12 +338,12 @@ class NexusVoxApp:
                         else frozenset(self._config.voice_commands.symbols)
                     )
                     processed_text = process_voice_commands(
-                        raw_text,
+                        corrected_text,
                         active_symbols,
                         self._config.voice_commands.numbers_as_digits,
                     )
                 else:
-                    processed_text = raw_text
+                    processed_text = corrected_text
 
                 delay = self._config.injection_delay_ms
                 await loop.run_in_executor(

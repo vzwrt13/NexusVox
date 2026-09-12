@@ -78,6 +78,17 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_auto_language_detection(data.get("enabled", False)))
 
+    @app.route("/api/settings/language", methods=["POST"])
+    def set_language():
+        data = request.get_json(force=True)
+        result = api.set_language(data.get("language", ""))
+        return jsonify(result), (400 if "error" in result else 200)
+
+    @app.route("/api/settings/translate", methods=["POST"])
+    def set_translate():
+        data = request.get_json(force=True)
+        return jsonify(api.set_translate_enabled(data.get("enabled", False)))
+
     # ---- Voice Commands endpoints ------------------------------------------
 
     @app.route("/api/voice-commands")

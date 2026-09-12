@@ -12,6 +12,7 @@ def test_get_settings(flask_client):
     data = resp.get_json()
     assert "auto_language_detection" in data
     assert "language" in data
+    assert "translate_enabled" in data
 
 
 def test_set_auto_language_detection(flask_client):
@@ -24,6 +25,39 @@ def test_set_auto_language_detection(flask_client):
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["auto_language_detection"] is True
+
+
+def test_set_language(flask_client):
+    resp = flask_client.post(
+        "/api/settings/language",
+        data=json.dumps({"language": "de"}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["language"] == "de"
+
+
+def test_set_language_rejects_unknown_code(flask_client):
+    resp = flask_client.post(
+        "/api/settings/language",
+        data=json.dumps({"language": "xx"}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+
+
+def test_set_translate_enabled(flask_client):
+    resp = flask_client.post(
+        "/api/settings/translate",
+        data=json.dumps({"enabled": True}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["translate_enabled"] is True
 
 
 def test_get_voice_commands(flask_client):

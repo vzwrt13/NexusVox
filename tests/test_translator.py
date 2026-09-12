@@ -114,3 +114,20 @@ def test_is_reachable_false_when_nothing_listens():
         free_port = probe.getsockname()[1]
 
     assert is_reachable(TranslatorConfig(url=f"http://127.0.0.1:{free_port}/translate")) is False
+
+
+def test_is_reachable_false_when_port_does_not_speak_http():
+    """A non-HTTP service on the configured port must read as unreachable, not raise."""
+
+    def serve_garbage(listener: socket.socket) -> None:
+        conn, _ = listener.accept()
+        with conn:
+            conn.recv(1024)
+            conn.sendall(b"this is not http\r\n")
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        threading.Thread(target=serve_garbage, args=(listener,), daemon=True).start()
+
+        assert is_reachable(TranslatorConfig(url=f"http://127.0.0.1:{listener.getsockname()[1]}/translate")) is False

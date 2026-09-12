@@ -9,6 +9,7 @@ timeout - returns the original text, so a sentence is never lost to translation.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import urllib.error
@@ -69,8 +70,11 @@ def is_reachable(config: TranslatorConfig) -> bool:
     request = urllib.request.Request(config.url, body, {"Content-Type": "application/json"})
     try:
         urllib.request.urlopen(request, timeout=min(config.timeout_s, _PROBE_TIMEOUT_S)).close()
-    except urllib.error.HTTPError:
+    except urllib.error.HTTPError as exc:
+        exc.close()
         return True
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, http.client.HTTPException):
+        # HTTPException covers a non-HTTP service squatting on the port (bad status line,
+        # truncated reply); without it the probe would raise out of the dashboard request.
         return False
     return True

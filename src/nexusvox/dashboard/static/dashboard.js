@@ -128,7 +128,14 @@ const translatorStatus = document.getElementById("translator-status");
 async function loadTranslatorStatus() {
   translatorStatus.className = "status-line";
   translatorStatus.textContent = "Checking translator…";
-  const s = await api("/api/settings/translator-status");
+  let s;
+  try {
+    s = await api("/api/settings/translator-status");
+  } catch (err) {
+    translatorStatus.className = "status-line down";
+    translatorStatus.textContent = "○ Could not check the translator (" + err.message + ")";
+    return;
+  }
   if (s.reachable) {
     translatorStatus.className = "status-line ok";
     translatorStatus.textContent = "● Translator reachable at " + s.url;

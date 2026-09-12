@@ -634,15 +634,31 @@ async function saveCorrection(id, btn) {
 
 // ── Review Transcriptions (Review Tab) ───────────────────────────────
 async function loadReviewTranscriptions() {
-  const data = await fetch("/api/review").then((r) => r.json());
   const container = document.getElementById("review-list");
+  container.innerHTML = "";
+  await loadMoreReviewTranscriptions();
+}
 
-  if (!data.length) {
+async function loadMoreReviewTranscriptions() {
+  const container = document.getElementById("review-list");
+  const loadMore = document.getElementById("review-load-more");
+  const cards = container.querySelectorAll(".flagged-card[data-id]");
+  const lastId = cards.length ? cards[cards.length - 1].dataset.id : null;
+  const url = lastId ? `/api/review?before_id=${lastId}` : "/api/review";
+
+  loadMore.disabled = true;
+  const { items: data, remaining } = await fetch(url).then((r) => r.json());
+
+  loadMore.hidden = remaining === 0;
+  loadMore.disabled = false;
+  loadMore.textContent = `Load more (${remaining} older)`;
+
+  if (!data.length && !cards.length) {
     container.innerHTML = '<p class="empty-state">No unreviewed recordings. All caught up!</p>';
     return;
   }
 
-  container.innerHTML = data.map((item) => {
+  container.insertAdjacentHTML("beforeend", data.map((item) => {
     const isFlagged = item.flagged === 1;
     const defaultCorrect = !isFlagged;
     return `
@@ -666,7 +682,7 @@ async function loadReviewTranscriptions() {
         placeholder="Enter correct text..." style="display: ${defaultCorrect ? "none" : "block"}">${escapeHtml(item.corrected_text || "")}</textarea>
       <button class="flagged-save-btn" onclick="submitReview(${item.id}, this)">Submit Review</button>
     </div>`;
-  }).join("");
+  }).join(""));
 }
 
 function toggleReviewTextarea(cb) {
@@ -694,7 +710,7 @@ async function submitReview(id, btn) {
       setTimeout(() => {
         card.remove();
         if (!document.getElementById("review-list").children.length) {
-          document.getElementById("review-list").innerHTML = '<p class="empty-state">No unreviewed recordings. All caught up!</p>';
+          loadMoreReviewTranscriptions();
         }
       }, 300);
     } else {

@@ -257,13 +257,13 @@ def test_get_unreviewed_excludes_reviewed(db):
     assert result[0].text == "unreviewed"
 
 
-def test_get_unreviewed_oldest_first(db):
+def test_get_unreviewed_newest_first(db):
     db.save_transcription("first", "en", 1000, audio_path="audio/1.wav")
     db.save_transcription("second", "en", 1000, audio_path="audio/2.wav")
 
     result = db.get_unreviewed()
-    assert result[0].text == "first"
-    assert result[1].text == "second"
+    assert result[0].text == "second"
+    assert result[1].text == "first"
 
 
 def test_submit_review_correct(db):

@@ -433,17 +433,29 @@ def test_review_endpoint_get(flask_client):
     resp = flask_client.get("/api/review")
 
     assert resp.status_code == 200
-    assert isinstance(resp.get_json(), list)
+    assert resp.get_json() == {"items": [], "remaining": 0}
 
 
 def test_review_endpoint_get_with_data(flask_client, db):
     db.save_transcription("test audio", "en", 1000, audio_path="audio/1.wav")
 
     resp = flask_client.get("/api/review")
-    data = resp.get_json()
+    data = resp.get_json()["items"]
     assert len(data) == 1
     assert data[0]["text"] == "test audio"
     assert data[0]["audio_path"] == "audio/1.wav"
+
+
+def test_review_endpoint_before_id_pages_older(flask_client, db):
+    older = db.save_transcription("older", "en", 1000, audio_path="audio/1.wav")
+    newer = db.save_transcription("newer", "en", 1000, audio_path="audio/2.wav")
+
+    data = flask_client.get("/api/review").get_json()
+    assert [r["id"] for r in data["items"]] == [newer.id, older.id]
+
+    data = flask_client.get(f"/api/review?before_id={newer.id}").get_json()
+    assert [r["id"] for r in data["items"]] == [older.id]
+    assert data["remaining"] == 0
 
 
 def test_review_submit_correct(flask_client, db):
@@ -460,7 +472,7 @@ def test_review_submit_correct(flask_client, db):
 
     # Should no longer appear in unreviewed
     resp = flask_client.get("/api/review")
-    assert len(resp.get_json()) == 0
+    assert len(resp.get_json()["items"]) == 0
 
 
 def test_review_submit_incorrect(flask_client, db):

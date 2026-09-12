@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from nexusvox.dashboard.analytics import (
     get_activity_heatmap,
@@ -271,7 +271,7 @@ def test_unreviewed_transcriptions_dict_shape(session_factory):
         ],
     )
 
-    result = get_unreviewed_transcriptions(session_factory)
+    result = get_unreviewed_transcriptions(session_factory)["items"]
 
     assert len(result) == 1
     entry = result[0]
@@ -304,7 +304,7 @@ def test_unreviewed_excludes_no_audio(session_factory):
         ],
     )
 
-    result = get_unreviewed_transcriptions(session_factory)
+    result = get_unreviewed_transcriptions(session_factory)["items"]
     assert len(result) == 1
     assert result[0]["text"] == "has audio"
 
@@ -331,6 +331,51 @@ def test_unreviewed_excludes_reviewed(session_factory):
         ],
     )
 
-    result = get_unreviewed_transcriptions(session_factory)
+    result = get_unreviewed_transcriptions(session_factory)["items"]
     assert len(result) == 1
     assert result[0]["text"] == "unreviewed"
+
+
+def _seed_unreviewed(session_factory, count: int) -> None:
+    _seed(
+        session_factory,
+        [
+            {
+                "text": f"rec {i}",
+                "language": "en",
+                "duration_ms": 1000,
+                "audio_path": f"audio/{i}.wav",
+                "created_at": datetime(2026, 3, 1) + timedelta(minutes=i),
+            }
+            for i in range(count)
+        ],
+    )
+
+
+def test_unreviewed_newest_first(session_factory):
+    _seed_unreviewed(session_factory, 3)
+
+    result = get_unreviewed_transcriptions(session_factory)
+    assert [r["text"] for r in result["items"]] == ["rec 2", "rec 1", "rec 0"]
+    assert result["remaining"] == 0
+
+
+def test_unreviewed_pages_with_before_id(session_factory):
+    _seed_unreviewed(session_factory, 5)
+
+    page1 = get_unreviewed_transcriptions(session_factory, limit=2)
+    assert [r["text"] for r in page1["items"]] == ["rec 4", "rec 3"]
+    assert page1["remaining"] == 3
+
+    page2 = get_unreviewed_transcriptions(session_factory, limit=2, before_id=page1["items"][-1]["id"])
+    assert [r["text"] for r in page2["items"]] == ["rec 2", "rec 1"]
+    assert page2["remaining"] == 1
+
+    page3 = get_unreviewed_transcriptions(session_factory, limit=2, before_id=page2["items"][-1]["id"])
+    assert [r["text"] for r in page3["items"]] == ["rec 0"]
+    assert page3["remaining"] == 0
+
+
+def test_unreviewed_empty_page(session_factory):
+    result = get_unreviewed_transcriptions(session_factory)
+    assert result == {"items": [], "remaining": 0}

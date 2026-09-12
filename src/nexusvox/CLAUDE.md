@@ -52,6 +52,10 @@ Symbol commands do not break `all caps` mode; structural commands do. Pattern is
 - Force-foreground uses AttachThreadInput + Alt key trick + SPI timeout fallback (Vista+ restriction workaround)
 - **"nexus flag"** is always available regardless of `os_commands.enabled` — flags most recent transcription for review, no DB record for the flag itself
 
+## Assistant Forward
+
+`assistant.py` — checked after the nexus flag/OS commands, before voice commands, only when `[assistant].enabled`. `"nexus assistant <text>"` (also `assistent`, an optional comma/colon) sends `send <service> <text>` to `host:port` over TCP, one request per connection, client shuts its write side, reply is one line. Saved to the DB as `[assistant] <text>`, nothing injected. `OSError` (nothing listening) plays `beep_error` and falls through to normal injection, so a sentence is never lost.
+
 ## Audio Persistence
 
 Each recording saved as 16kHz mono WAV in the configurable `audio/` directory alongside the database. Enables batch review with playback in the dashboard Review/Edit tabs.

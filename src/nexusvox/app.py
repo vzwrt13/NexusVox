@@ -13,11 +13,12 @@ from pathlib import Path
 import numpy as np
 
 from . import docker_ctl
+from .assistant import parse_assistant_command, send_to_assistant
 from .audio import AudioCapture
 from .config import MODEL_REGISTRY, Config, resolve_device, save_config
 from .dashboard import open_dashboard
 from .db import Database
-from .feedback import beep_flag, beep_start, beep_stop
+from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import HotkeyListener
 from .injector import inject_text
 from .lang_detect import detect_language
@@ -265,6 +266,39 @@ class NexusVoxApp:
                         logger.info("Nexus flag: no transcription to flag")
                     await self._transcriber.disconnect()
                     return
+
+                assistant_text = parse_assistant_command(raw_text) if self._config.assistant.enabled else None
+                if assistant_text is not None:
+                    # "nexus assistant <text>" — hand the sentence to the voice assistant.
+                    # If nothing answers on its port, fall through and type it as usual.
+                    try:
+                        reply = await loop.run_in_executor(
+                            None,
+                            send_to_assistant,
+                            assistant_text,
+                            self._config.assistant,
+                        )
+                    except OSError as exc:
+                        logger.warning("Assistant not reachable (%s); typing the text instead", exc)
+                        threading.Thread(target=beep_error, daemon=True).start()
+                    else:
+                        if reply.startswith("error:"):
+                            logger.warning("Assistant refused the command: %s", reply)
+                            threading.Thread(target=beep_error, daemon=True).start()
+                        language = (
+                            detect_language(raw_text) if self._config.auto_language_detection else self._config.language
+                        )
+                        record = self._db.save_transcription(
+                            text=f"[assistant] {assistant_text}",
+                            language=language,
+                            duration_ms=duration_ms,
+                            confidence=result.confidence,
+                            model=self._transcriber.model,
+                        )
+                        audio_path = self._save_audio_wav(audio_buffer, record.id)
+                        self._db.update_audio_path(record.id, audio_path)
+                        await self._transcriber.disconnect()
+                        return
 
                 if nexus_cmd is not None and self._config.os_commands.enabled:
                     # Window management nexus commands — only when os_commands enabled

@@ -218,6 +218,18 @@ class OSCommandsConfig:
     apps: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass
+class AssistantConfig:
+    """Where "nexus assistant <text>" is forwarded: a local TCP port that answers
+    `send <service> <text>` (the personal-tooling Controller's control port)."""
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 49730
+    service: str = "voice-assistant"
+    timeout_s: float = 5.0
+
+
 _DEFAULT_SYMBOLS: list[str] = [
     "slash",
     "backslash",
@@ -254,6 +266,7 @@ class Config:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     os_commands: OSCommandsConfig = field(default_factory=OSCommandsConfig)
     voice_commands: VoiceCommandsConfig = field(default_factory=VoiceCommandsConfig)
+    assistant: AssistantConfig = field(default_factory=AssistantConfig)
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
@@ -274,6 +287,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     db_data = data.get("database", {})
     os_cmd_data = data.get("os_commands", {})
     vc_data = data.get("voice_commands", None)
+    assistant_data = data.get("assistant", {})
 
     # Backward compat: old configs use general.voice_commands_enabled (bool only)
     if vc_data is not None:
@@ -317,6 +331,13 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             apps=dict(os_cmd_data.get("apps", {})),
         ),
         voice_commands=vc_config,
+        assistant=AssistantConfig(
+            enabled=assistant_data.get("enabled", False),
+            host=assistant_data.get("host", "127.0.0.1"),
+            port=int(assistant_data.get("port", 49730)),
+            service=assistant_data.get("service", "voice-assistant"),
+            timeout_s=float(assistant_data.get("timeout_s", 5.0)),
+        ),
     )
 
 
@@ -362,6 +383,13 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"numbers_as_digits = {'true' if config.voice_commands.numbers_as_digits else 'false'}",
             f"bypass_symbols = {'true' if config.voice_commands.bypass_symbols else 'false'}",
             f"symbols = {symbols_toml}",
+            "",
+            "[assistant]",
+            f"enabled = {'true' if config.assistant.enabled else 'false'}",
+            f'host = "{config.assistant.host}"',
+            f"port = {config.assistant.port}",
+            f'service = "{config.assistant.service}"',
+            f"timeout_s = {config.assistant.timeout_s}",
             "",
         ]
         path.write_text("\n".join(lines), encoding="utf-8")

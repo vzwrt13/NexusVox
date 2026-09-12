@@ -584,6 +584,8 @@ canvas { width: 100% !important; max-height: 260px; }
 }
 .flagged-play-btn:hover { border-color: var(--accent); color: var(--accent); }
 .flagged-play-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.review-load-more { display: block; margin: 16px auto 0; padding: 8px 20px; }
+.review-load-more[hidden] { display: none; }
 
 .nexus-empty {
   font-size: 13px;

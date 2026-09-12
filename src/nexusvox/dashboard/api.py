@@ -225,8 +225,8 @@ class DashboardAPI:
 
     # ---- Review ------------------------------------------------------------
 
-    def get_unreviewed_transcriptions(self) -> list[dict]:
-        return analytics.get_unreviewed_transcriptions(self._sf)
+    def get_unreviewed_transcriptions(self, *, before_id: int | None = None) -> dict:
+        return analytics.get_unreviewed_transcriptions(self._sf, before_id=before_id)
 
     def submit_review(self, tid: int, is_correct: bool, corrected_text: str | None = None) -> dict:
         if self._db is None:

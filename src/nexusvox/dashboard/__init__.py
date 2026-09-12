@@ -180,7 +180,8 @@ def _create_app(api: DashboardAPI) -> Flask:
 
     @app.route("/api/review")
     def review_transcriptions():
-        return jsonify(api.get_unreviewed_transcriptions())
+        before_id = request.args.get("before_id", type=int)
+        return jsonify(api.get_unreviewed_transcriptions(before_id=before_id))
 
     @app.route("/api/review/<int:tid>", methods=["POST"])
     def submit_review(tid):

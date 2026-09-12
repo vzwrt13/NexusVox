@@ -49,7 +49,7 @@ Flask server starts once on first tray menu click, runs in a daemon thread on `1
 | GET | `/api/audio/<tid>` | Serve WAV audio file |
 | POST | `/api/file-transcribe` | Upload + transcribe audio file |
 | GET | `/api/file-transcriptions` | List file transcription results |
-| GET | `/api/review` | List unreviewed recordings |
+| GET | `/api/review` | Page of unreviewed recordings, newest first (`?before_id=` cursor; returns `items` + `remaining`) |
 | POST | `/api/review/<tid>` | Submit review (correct/incorrect + correction) |
 | GET | `/api/benchmarks` | List benchmark files with summary stats |
 | GET | `/api/benchmarks/compare` | Cross-model comparison with pass/fail |

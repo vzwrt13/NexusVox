@@ -124,12 +124,12 @@ class Database:
     # ---- Review -------------------------------------------------------------
 
     def get_unreviewed(self, limit: int = 50) -> list[Transcription]:
-        """Get unreviewed transcriptions that have audio, oldest first."""
+        """Get unreviewed transcriptions that have audio, newest first."""
         with self._session_factory() as session:
             return (
                 session.query(Transcription)
                 .filter(Transcription.reviewed == 0, Transcription.audio_path.isnot(None))
-                .order_by(Transcription.created_at.asc(), Transcription.id.asc())
+                .order_by(Transcription.created_at.desc(), Transcription.id.desc())
                 .limit(limit)
                 .all()
             )

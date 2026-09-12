@@ -248,7 +248,11 @@
     <!-- Review Tab -->
     <section id="tab-review" class="tab-content">
       <h2 class="edit-heading">Review Transcriptions</h2>
-      <p class="settings-hint" style="margin-bottom: 16px;">Review recordings that haven't been manually verified yet. Listen to the audio and confirm whether the transcription is correct.</p>
+      <p class="settings-hint">Review recordings that haven't been manually verified yet. Listen to the audio and confirm whether the transcription is correct.</p>
+      <p class="settings-hint review-keys">
+        <kbd>Space</kbd> play / stop &nbsp; <kbd>Enter</kbd> correct &nbsp; <kbd>E</kbd> wrong, edit &nbsp; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> submit correction &nbsp; <kbd>Esc</kbd> revert
+      </p>
+      <p id="review-progress" class="review-progress"></p>
       <div id="review-list" class="flagged-list"></div>
       <button id="review-load-more" class="flagged-play-btn review-load-more" hidden onclick="loadMoreReviewTranscriptions()">Load more</button>
     </section>

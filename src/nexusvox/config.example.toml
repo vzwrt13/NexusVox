@@ -79,3 +79,16 @@ symbols = [
   "open paren", "close paren", "open bracket", "close bracket",
   "open brace", "close brace", "less than", "greater than"
 ]
+
+[assistant]
+# Forward "nexus assistant <anything>" to a voice assistant instead of typing it.
+# The text goes to a local TCP port as `send <service> <text>`; the reply is logged.
+# Built for the personal-tooling Controller (port 49730), which hands it to the
+# voice-assistant service: "nexus assistant remember to buy milk" ends up as a note,
+# "nexus assistant start" opens live voice mode. If nothing answers on the port,
+# the sentence is typed at the cursor as usual.
+enabled = false
+host = "127.0.0.1"
+port = 49730
+service = "voice-assistant"
+timeout_s = 5.0

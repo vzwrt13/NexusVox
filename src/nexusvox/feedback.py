@@ -49,6 +49,8 @@ def _chime(frequency: float, duration: float, *, fade_in_ms: float = 80.0) -> np
 _START_CHIME = _chime(880, 0.50)  # A5 — bright, airy chime
 _STOP_CHIME = _chime(523, 0.50)  # C5 — warmer, settling chime
 _FLAG_CHIME = _chime(660, 0.20)  # E5 — short, distinct confirmation
+# Two short low chimes — something was not delivered (the assistant did not answer)
+_ERROR_CHIME = np.concatenate([_chime(330, 0.15), np.zeros(int(_SAMPLE_RATE * 0.08), np.float32), _chime(330, 0.15)])
 
 
 def beep_start() -> None:
@@ -66,4 +68,10 @@ def beep_stop() -> None:
 def beep_flag() -> None:
     """Play a short chime to confirm transcription was flagged."""
     sd.play(_FLAG_CHIME, samplerate=_SAMPLE_RATE)
+    sd.wait()
+
+
+def beep_error() -> None:
+    """Play two short low chimes: the utterance could not be delivered."""
+    sd.play(_ERROR_CHIME, samplerate=_SAMPLE_RATE)
     sd.wait()

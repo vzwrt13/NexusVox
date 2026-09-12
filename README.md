@@ -29,6 +29,7 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 - **Nine transcription models** — pick per recording in the dashboard
 - **Voice commands** — spoken formatting shortcuts (new line, new paragraph, tab, all caps, punctuation symbols)
 - **Nexus OS commands** — window management via voice ("nexus open chrome", "nexus minimize")
+- **Assistant forward** — "nexus assistant <anything>" hands the sentence to a local voice assistant over a TCP port instead of typing it (off by default, `[assistant]` in `config.toml`); if nothing answers, the text is typed as usual
 - **Flask dashboard** — analytics, settings, transcription history, audio review, and file upload on `http://localhost:47392`
 - **Beep feedback** — audio chimes on recording start and stop
 - **SQLite history** — every transcription is saved with audio for review and flagging

@@ -37,14 +37,18 @@ header {
   z-index: 10;
 }
 
+.brand { display: flex; align-items: center; gap: 10px; }
+
+.brand-mark { display: block; width: 26px; height: 26px; }
+
 header h1 {
   font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.3px;
-  background: linear-gradient(135deg, var(--accent), var(--green));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--text);
 }
+
+.brand-vox { color: var(--green); }
 
 .tabs { display: flex; gap: 4px; }
 

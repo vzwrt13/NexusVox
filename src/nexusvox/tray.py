@@ -2,20 +2,49 @@
 
 from __future__ import annotations
 
+import math
 import threading
 from collections.abc import Callable
 
 import pystray
 from PIL import Image, ImageDraw
 
+# Logo colors, matching the dashboard's --accent / --green / --red tokens.
+_RING_COLOR = "#6c5ce7"
+_IDLE_COLOR = "#00d2a0"
+_RECORDING_COLOR = "#ff6b6b"
 
-def _create_icon_image(color: str = "green") -> Image.Image:
-    """Create a simple colored circle icon."""
+
+def _create_icon_image(active: bool = False) -> Image.Image:
+    """Render the NexusVox logo: an open ring around a status dot.
+
+    Mirrors ``dashboard/static/logo.svg`` (64px grid: ring r=22, stroke 7, ~78° gap, dot r=8).
+    The dot is green while idle and red while recording.
+    """
     size = 64
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    scale = 4  # draw oversized, then downsample for anti-aliased edges
+    s = size * scale
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    draw.ellipse([4, 4, size - 4, size - 4], fill=color)
-    return img
+
+    cx = cy = s / 2
+    ring_r = 22 * scale
+    stroke = 7 * scale
+    dot_r = 8 * scale
+    # Arc angles follow the SVG: 0° at 3 o'clock, clockwise; gap of ~78° starting at 211°.
+    start, end = -70, 211
+
+    box = [cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r]
+    draw.arc(box, start=start, end=end, fill=_RING_COLOR, width=stroke)
+    for angle in (start, end):  # round caps
+        x = cx + ring_r * math.cos(math.radians(angle))
+        y = cy + ring_r * math.sin(math.radians(angle))
+        draw.ellipse([x - stroke / 2, y - stroke / 2, x + stroke / 2, y + stroke / 2], fill=_RING_COLOR)
+
+    dot = _RECORDING_COLOR if active else _IDLE_COLOR
+    draw.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], fill=dot)
+
+    return img.resize((size, size), Image.LANCZOS)
 
 
 class SystemTray:
@@ -79,13 +108,13 @@ class SystemTray:
     def set_active(self, active: bool) -> None:
         """Update tray icon to reflect recording state."""
         if self._icon is not None:
-            self._icon.icon = _create_icon_image("red" if active else "green")
+            self._icon.icon = _create_icon_image(active)
 
     def start(self) -> None:
         """Start the system tray icon in a background thread."""
         self._icon = pystray.Icon(
             name="NexusVox",
-            icon=_create_icon_image("green"),
+            icon=_create_icon_image(),
             title="NexusVox — Ready",
             menu=self._build_menu(),
         )

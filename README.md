@@ -1,3 +1,5 @@
+<img src="src/nexusvox/dashboard/static/logo.svg" alt="NexusVox logo" width="72" align="left">
+
 # NexusVox
 
 [![CI](https://github.com/vzwrt13/NexusVox/actions/workflows/ci.yml/badge.svg)](https://github.com/vzwrt13/NexusVox/actions/workflows/ci.yml)

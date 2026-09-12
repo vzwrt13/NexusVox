@@ -230,6 +230,17 @@ class AssistantConfig:
     timeout_s: float = 5.0
 
 
+@dataclass
+class TranslatorConfig:
+    """Translate the text into English before injecting it, via a local HTTP
+    translator (the personal-tooling `translator` tool). The stored transcript stays
+    in the spoken language; only the injected text is translated."""
+
+    enabled: bool = False
+    url: str = "http://127.0.0.1:8003/translate"
+    timeout_s: float = 8.0
+
+
 _DEFAULT_SYMBOLS: list[str] = [
     "slash",
     "backslash",
@@ -267,6 +278,7 @@ class Config:
     os_commands: OSCommandsConfig = field(default_factory=OSCommandsConfig)
     voice_commands: VoiceCommandsConfig = field(default_factory=VoiceCommandsConfig)
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
+    translator: TranslatorConfig = field(default_factory=TranslatorConfig)
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
@@ -288,6 +300,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     os_cmd_data = data.get("os_commands", {})
     vc_data = data.get("voice_commands", None)
     assistant_data = data.get("assistant", {})
+    translator_data = data.get("translator", {})
 
     # Backward compat: old configs use general.voice_commands_enabled (bool only)
     if vc_data is not None:
@@ -337,6 +350,11 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             port=int(assistant_data.get("port", 49730)),
             service=assistant_data.get("service", "voice-assistant"),
             timeout_s=float(assistant_data.get("timeout_s", 5.0)),
+        ),
+        translator=TranslatorConfig(
+            enabled=translator_data.get("enabled", False),
+            url=translator_data.get("url", "http://127.0.0.1:8003/translate"),
+            timeout_s=float(translator_data.get("timeout_s", 8.0)),
         ),
     )
 
@@ -390,6 +408,11 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"port = {config.assistant.port}",
             f'service = "{config.assistant.service}"',
             f"timeout_s = {config.assistant.timeout_s}",
+            "",
+            "[translator]",
+            f"enabled = {'true' if config.translator.enabled else 'false'}",
+            f'url = "{config.translator.url}"',
+            f"timeout_s = {config.translator.timeout_s}",
             "",
         ]
         path.write_text("\n".join(lines), encoding="utf-8")

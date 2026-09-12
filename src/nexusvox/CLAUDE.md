@@ -60,6 +60,10 @@ Symbol commands do not break `all caps` mode; structural commands do. Pattern is
 
 `assistant.py` — checked after the nexus flag/OS commands, before voice commands, only when `[assistant].enabled`. `"nexus assistant <text>"` (also `assistent`, an optional comma/colon) sends `send <service> <text>` to `host:port` over TCP, one request per connection, client shuts its write side, reply is one line. Saved to the DB as `[assistant] <text>`, nothing injected. `OSError` (nothing listening) plays `beep_error` and falls through to normal injection, so a sentence is never lost.
 
+## Translate Before Inject
+
+`translator.py` — `translate(text, config)` runs on the processed text (after dictionary and voice commands) right before injection, only when `[translator].enabled`. It POSTs `{"text": ...}` to `[translator].url` - the personal-tooling `translator` server, TranslateGemma via Ollama on 127.0.0.1:8003, which translates German sentences and passes English ones through byte for byte - and injects the reply. The transcript is saved as spoken, never translated. Any failure (nothing listening, non-200, malformed reply, timeout) logs a warning and returns the original text, so a sentence is never lost. The tray item "Translate to English: ON/OFF" flips `enabled` and saves the config. Blocking HTTP, run in the executor like the injection.
+
 ## Audio Persistence
 
 Each recording saved as 16kHz mono WAV in the configurable `audio/` directory alongside the database. Enables batch review with playback in the dashboard Review/Edit tabs.

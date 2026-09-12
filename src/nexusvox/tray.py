@@ -26,11 +26,15 @@ class SystemTray:
         on_quit: Callable[[], None],
         on_toggle_language: Callable[[], None],
         get_language: Callable[[], str],
+        on_toggle_translate: Callable[[], None] | None = None,
+        get_translate: Callable[[], bool] | None = None,
         on_open_dashboard: Callable[[], None] | None = None,
     ) -> None:
         self._on_quit = on_quit
         self._on_toggle_language = on_toggle_language
         self._get_language = get_language
+        self._on_toggle_translate = on_toggle_translate
+        self._get_translate = get_translate
         self._on_open_dashboard = on_open_dashboard
         self._icon: pystray.Icon | None = None
         self._thread: threading.Thread | None = None
@@ -42,6 +46,13 @@ class SystemTray:
                 self._handle_toggle_language,
             ),
         ]
+        if self._on_toggle_translate is not None and self._get_translate is not None:
+            items.append(
+                pystray.MenuItem(
+                    lambda _: f"Translate to English: {'ON' if self._get_translate() else 'OFF'}",
+                    self._handle_toggle_translate,
+                )
+            )
         if self._on_open_dashboard is not None:
             items.append(pystray.MenuItem("Dashboard", self._handle_open_dashboard))
         items.append(pystray.Menu.SEPARATOR)
@@ -54,6 +65,11 @@ class SystemTray:
 
     def _handle_toggle_language(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         self._on_toggle_language()
+        icon.update_menu()
+
+    def _handle_toggle_translate(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
+        if self._on_toggle_translate is not None:
+            self._on_toggle_translate()
         icon.update_menu()
 
     def _handle_quit(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:

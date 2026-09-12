@@ -25,6 +25,7 @@ from .injector import inject_text
 from .lang_detect import detect_language
 from .os_commands import execute_nexus_command, parse_nexus_command
 from .transcriber import create_transcriber
+from .translator import translate
 from .tray import SystemTray
 from .voice_commands import process_voice_commands
 
@@ -79,6 +80,8 @@ class NexusVoxApp:
             on_quit=self._on_quit,
             on_toggle_language=self._toggle_language,
             get_language=lambda: self._config.language,
+            on_toggle_translate=self._toggle_translate,
+            get_translate=lambda: self._config.translator.enabled,
             on_open_dashboard=self._open_dashboard,
         )
 
@@ -345,11 +348,20 @@ class NexusVoxApp:
                 else:
                     processed_text = corrected_text
 
+                # Translate into English for injection only; the transcript below is
+                # saved as spoken. Blocking HTTP, so off the loop like the injection.
+                injected_text = await loop.run_in_executor(
+                    None,
+                    translate,
+                    processed_text,
+                    self._config.translator,
+                )
+
                 delay = self._config.injection_delay_ms
                 await loop.run_in_executor(
                     None,
                     inject_text,
-                    processed_text,
+                    injected_text,
                     delay,
                 )
                 language = detect_language(raw_text) if self._config.auto_language_detection else self._config.language
@@ -360,7 +372,7 @@ class NexusVoxApp:
                     confidence=result.confidence,
                     model=self._transcriber.model,
                 )
-                logger.info("Injected: %s", processed_text)
+                logger.info("Injected: %s", injected_text)
 
                 audio_path = self._save_audio_wav(audio_buffer, record.id)
                 self._db.update_audio_path(record.id, audio_path)
@@ -394,6 +406,12 @@ class NexusVoxApp:
         """Toggle between English and German."""
         self._config.language = "de" if self._config.language == "en" else "en"
         logger.info("Language switched to: %s", self._config.language)
+
+    def _toggle_translate(self) -> None:
+        """Switch translate-before-inject on or off, and keep it across restarts."""
+        self._config.translator.enabled = not self._config.translator.enabled
+        save_config(self._config)
+        logger.info("Translate before inject: %s", "on" if self._config.translator.enabled else "off")
 
     def _on_quit(self) -> None:
         """Handle quit from system tray."""

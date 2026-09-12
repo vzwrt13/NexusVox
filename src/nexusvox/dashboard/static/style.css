@@ -585,6 +585,26 @@ canvas { width: 100% !important; max-height: 260px; }
 .flagged-play-btn:hover { border-color: var(--accent); color: var(--accent); }
 .flagged-play-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .review-load-more { display: block; margin: 16px auto 0; padding: 8px 20px; }
+
+.review-keys kbd {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface2);
+  color: var(--text);
+}
+.review-progress {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0 0 16px;
+}
+.review-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
 .review-load-more[hidden] { display: none; }
 
 .nexus-empty {

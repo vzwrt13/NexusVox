@@ -2,44 +2,49 @@
 
 from __future__ import annotations
 
+import math
 import threading
 from collections.abc import Callable
 
 import pystray
 from PIL import Image, ImageDraw
 
-# Brand colors from product/brand/ColorPalette (Tech Noir).md.
-_READY_COLOR = (0, 229, 255, 255)  # Electric Cyan
-_RECORDING_COLOR = (255, 59, 92, 255)  # Alert red while the microphone is open
-_BACKGROUND_COLOR = (10, 14, 23, 255)  # Midnight Void
+# Logo colors, matching the dashboard's --accent / --green / --red tokens.
+_RING_COLOR = "#6c5ce7"
+_IDLE_COLOR = "#00d2a0"
+_RECORDING_COLOR = "#ff6b6b"
 
 
 def _create_icon_image(active: bool = False) -> Image.Image:
-    """Draw the NexusVox mark: a rounded dark tile with a five-bar waveform.
+    """Render the NexusVox logo: an open ring around a status dot.
 
-    Drawn at 4x and downsampled so the bars stay crisp at the 16 px the
-    Windows tray uses. The waveform turns red while recording.
+    Mirrors ``dashboard/static/logo.svg`` (64px grid: ring r=22, stroke 7, ~78° gap, dot r=8).
+    The dot is green while idle and red while recording.
     """
-    scale = 4
-    size = 64 * scale
-    color = _RECORDING_COLOR if active else _READY_COLOR
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    size = 64
+    scale = 4  # draw oversized, then downsample for anti-aliased edges
+    s = size * scale
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=size // 5, fill=_BACKGROUND_COLOR)
 
-    # Five vertical bars, heights as fractions of the tile, mirrored around the centre.
-    heights = (0.28, 0.52, 0.76, 0.52, 0.28)
-    bar_w = size * 0.12
-    gap = size * 0.04
-    total_w = len(heights) * bar_w + (len(heights) - 1) * gap
-    x = (size - total_w) / 2
-    for h in heights:
-        bar_h = size * h
-        y0 = (size - bar_h) / 2
-        draw.rounded_rectangle([x, y0, x + bar_w, y0 + bar_h], radius=bar_w / 2, fill=color)
-        x += bar_w + gap
+    cx = cy = s / 2
+    ring_r = 22 * scale
+    stroke = 7 * scale
+    dot_r = 8 * scale
+    # Arc angles follow the SVG: 0° at 3 o'clock, clockwise; gap of ~78° starting at 211°.
+    start, end = -70, 211
 
-    return img.resize((64, 64), Image.LANCZOS)
+    box = [cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r]
+    draw.arc(box, start=start, end=end, fill=_RING_COLOR, width=stroke)
+    for angle in (start, end):  # round caps
+        x = cx + ring_r * math.cos(math.radians(angle))
+        y = cy + ring_r * math.sin(math.radians(angle))
+        draw.ellipse([x - stroke / 2, y - stroke / 2, x + stroke / 2, y + stroke / 2], fill=_RING_COLOR)
+
+    dot = _RECORDING_COLOR if active else _IDLE_COLOR
+    draw.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], fill=dot)
+
+    return img.resize((size, size), Image.LANCZOS)
 
 
 class SystemTray:

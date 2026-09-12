@@ -9,7 +9,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import sessionmaker
 
-from ..config import MODEL_REGISTRY, Config, resolve_device, save_config
+from ..config import MODEL_REGISTRY, SUPPORTED_LANGUAGES, Config, resolve_device, save_config
 from ..db import Database
 from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
@@ -119,10 +119,23 @@ class DashboardAPI:
         return {
             "auto_language_detection": self._config.auto_language_detection,
             "language": self._config.language,
+            "translate_enabled": self._config.translator.enabled,
         }
 
     def set_auto_language_detection(self, enabled: bool) -> dict:
         self._config.auto_language_detection = enabled
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_language(self, language: str) -> dict:
+        if language not in SUPPORTED_LANGUAGES:
+            return {"error": f"Unsupported language: {language}", **self.get_settings()}
+        self._config.language = language
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_translate_enabled(self, enabled: bool) -> dict:
+        self._config.translator.enabled = enabled
         save_config(self._config)
         return self.get_settings()
 

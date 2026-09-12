@@ -8,18 +8,42 @@ from collections.abc import Callable
 import pystray
 from PIL import Image, ImageDraw
 
+# Brand colors from product/brand/ColorPalette (Tech Noir).md.
+_READY_COLOR = (0, 229, 255, 255)  # Electric Cyan
+_RECORDING_COLOR = (255, 59, 92, 255)  # Alert red while the microphone is open
+_BACKGROUND_COLOR = (10, 14, 23, 255)  # Midnight Void
 
-def _create_icon_image(color: str = "green") -> Image.Image:
-    """Create a simple colored circle icon."""
-    size = 64
+
+def _create_icon_image(active: bool = False) -> Image.Image:
+    """Draw the NexusVox mark: a rounded dark tile with a five-bar waveform.
+
+    Drawn at 4x and downsampled so the bars stay crisp at the 16 px the
+    Windows tray uses. The waveform turns red while recording.
+    """
+    scale = 4
+    size = 64 * scale
+    color = _RECORDING_COLOR if active else _READY_COLOR
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    draw.ellipse([4, 4, size - 4, size - 4], fill=color)
-    return img
+    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=size // 5, fill=_BACKGROUND_COLOR)
+
+    # Five vertical bars, heights as fractions of the tile, mirrored around the centre.
+    heights = (0.28, 0.52, 0.76, 0.52, 0.28)
+    bar_w = size * 0.12
+    gap = size * 0.04
+    total_w = len(heights) * bar_w + (len(heights) - 1) * gap
+    x = (size - total_w) / 2
+    for h in heights:
+        bar_h = size * h
+        y0 = (size - bar_h) / 2
+        draw.rounded_rectangle([x, y0, x + bar_w, y0 + bar_h], radius=bar_w / 2, fill=color)
+        x += bar_w + gap
+
+    return img.resize((64, 64), Image.LANCZOS)
 
 
 class SystemTray:
-    """System tray icon with right-click menu."""
+    """System tray icon: left-click opens the dashboard, right-click shows the menu."""
 
     def __init__(
         self,
@@ -54,7 +78,8 @@ class SystemTray:
                 )
             )
         if self._on_open_dashboard is not None:
-            items.append(pystray.MenuItem("Dashboard", self._handle_open_dashboard))
+            # ``default=True`` makes a left-click on the icon open the dashboard.
+            items.append(pystray.MenuItem("Dashboard", self._handle_open_dashboard, default=True))
         items.append(pystray.Menu.SEPARATOR)
         items.append(pystray.MenuItem("Quit", self._handle_quit))
         return pystray.Menu(*items)
@@ -79,13 +104,13 @@ class SystemTray:
     def set_active(self, active: bool) -> None:
         """Update tray icon to reflect recording state."""
         if self._icon is not None:
-            self._icon.icon = _create_icon_image("red" if active else "green")
+            self._icon.icon = _create_icon_image(active)
 
     def start(self) -> None:
         """Start the system tray icon in a background thread."""
         self._icon = pystray.Icon(
             name="NexusVox",
-            icon=_create_icon_image("green"),
+            icon=_create_icon_image(),
             title="NexusVox — Ready",
             menu=self._build_menu(),
         )

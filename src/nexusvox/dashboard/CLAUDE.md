@@ -2,7 +2,7 @@
 
 ## Server
 
-Flask server starts once on first tray menu click, runs in a daemon thread on `127.0.0.1:47392`. Static files in `src/nexusvox/dashboard/static/` (HTML, CSS, JS, bundled Chart.js — no CDN). API endpoints under `/api/*` return JSON, consumed by vanilla JS `fetch()` calls.
+Flask server starts once on first tray click (left-click on the icon or the Dashboard menu item), runs in a daemon thread on `127.0.0.1:47392`. Static files in `src/nexusvox/dashboard/static/` (HTML, CSS, JS, bundled Chart.js — no CDN). API endpoints under `/api/*` return JSON, consumed by vanilla JS `fetch()` calls.
 
 - `analytics.py` — all SQLAlchemy query functions
 - `api.py` — Flask route wrappers around analytics queries

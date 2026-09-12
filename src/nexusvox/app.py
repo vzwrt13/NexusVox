@@ -409,6 +409,7 @@ class NexusVoxApp:
     def _toggle_language(self) -> None:
         """Toggle between English and German."""
         self._config.language = "de" if self._config.language == "en" else "en"
+        save_config(self._config)
         logger.info("Language switched to: %s", self._config.language)
 
     def _toggle_translate(self) -> None:

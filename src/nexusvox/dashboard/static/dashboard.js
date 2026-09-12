@@ -105,18 +105,26 @@ document.getElementById("btn-clear-dates").addEventListener("click", () => {
 
 // ── Settings ─────────────────────────────────────────────────────────
 const toggle = document.getElementById("auto-lang-toggle");
+const translateToggle = document.getElementById("translate-toggle");
+const languageSelect = document.getElementById("language-select");
 
-toggle.addEventListener("change", async () => {
-  await fetch("/api/settings/auto-language-detection", {
+function postSetting(path, body) {
+  return fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled: toggle.checked }),
+    body: JSON.stringify(body),
   });
-});
+}
+
+toggle.addEventListener("change", () => postSetting("/api/settings/auto-language-detection", { enabled: toggle.checked }));
+translateToggle.addEventListener("change", () => postSetting("/api/settings/translate", { enabled: translateToggle.checked }));
+languageSelect.addEventListener("change", () => postSetting("/api/settings/language", { language: languageSelect.value }));
 
 async function loadSettings() {
   const s = await api("/api/settings");
   toggle.checked = s.auto_language_detection;
+  translateToggle.checked = s.translate_enabled;
+  languageSelect.value = s.language;
   await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary()]);
 }
 

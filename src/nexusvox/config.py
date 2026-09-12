@@ -230,6 +230,10 @@ class AssistantConfig:
     timeout_s: float = 5.0
 
 
+# Languages the tray toggle and the dashboard's language selector cycle through.
+SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "de")
+
+
 @dataclass
 class TranslatorConfig:
     """Translate the text into English before injecting it, via a local HTTP

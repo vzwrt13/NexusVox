@@ -27,13 +27,38 @@
     <!-- Settings Tab -->
     <section id="tab-settings" class="tab-content active">
       <div class="settings-card">
-        <div class="setting-row">
+        <h4 class="nexus-section-title">Language &amp; Translation</h4>
+        <p class="settings-hint" style="margin-top: 6px;">Which language you speak, and which language ends up at the cursor.</p>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Spoken Language</h3>
+            <p>Language used for transcription while auto detection is off.</p>
+          </div>
+          <select id="language-select" class="select-input">
+            <option value="en">English</option>
+            <option value="de">German</option>
+          </select>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
             <h3>Auto Language Detection</h3>
-            <p>Automatically detect the spoken language per recording instead of using a fixed setting. <span class="badge">Experimental</span></p>
+            <p>Automatically detect the spoken language per recording instead of using the fixed setting above. <span class="badge">Experimental</span></p>
           </div>
           <label class="toggle">
             <input type="checkbox" id="auto-lang-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Translate to English</h3>
+            <p>Translate the dictation into English before injecting it. The stored transcript stays in the spoken language.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="translate-toggle">
             <span class="toggle-slider"></span>
           </label>
         </div>

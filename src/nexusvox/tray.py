@@ -48,7 +48,7 @@ def _create_icon_image(active: bool = False) -> Image.Image:
 
 
 class SystemTray:
-    """System tray icon with right-click menu."""
+    """System tray icon: left-click opens the dashboard, right-click shows the menu."""
 
     def __init__(
         self,
@@ -83,7 +83,8 @@ class SystemTray:
                 )
             )
         if self._on_open_dashboard is not None:
-            items.append(pystray.MenuItem("Dashboard", self._handle_open_dashboard))
+            # ``default=True`` makes a left-click on the icon open the dashboard.
+            items.append(pystray.MenuItem("Dashboard", self._handle_open_dashboard, default=True))
         items.append(pystray.Menu.SEPARATOR)
         items.append(pystray.MenuItem("Quit", self._handle_quit))
         return pystray.Menu(*items)

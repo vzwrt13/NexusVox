@@ -107,6 +107,16 @@ document.getElementById("btn-clear-dates").addEventListener("click", () => {
 const toggle = document.getElementById("auto-lang-toggle");
 const translateToggle = document.getElementById("translate-toggle");
 const languageSelect = document.getElementById("language-select");
+const hotkeyModeSelect = document.getElementById("hotkey-mode-select");
+const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
+
+function renderHotkeyHint(mode, modifiers) {
+  const keys = modifiers.map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join("+");
+  hotkeyModeHint.textContent =
+    mode === "toggle"
+      ? "Press " + keys + " once to start recording, press it again to stop."
+      : "Hold " + keys + " to record, release to stop.";
+}
 
 function postSetting(path, body) {
   return fetch(path, {
@@ -146,12 +156,20 @@ async function loadTranslatorStatus() {
   }
 }
 languageSelect.addEventListener("change", () => postSetting("/api/settings/language", { language: languageSelect.value }));
+hotkeyModeSelect.addEventListener("change", async () => {
+  const resp = await postSetting("/api/settings/hotkey-mode", { mode: hotkeyModeSelect.value });
+  const s = await resp.json();
+  hotkeyModeSelect.value = s.hotkey_mode;
+  renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers);
+});
 
 async function loadSettings() {
   const s = await api("/api/settings");
   toggle.checked = s.auto_language_detection;
   translateToggle.checked = s.translate_enabled;
   languageSelect.value = s.language;
+  hotkeyModeSelect.value = s.hotkey_mode;
+  renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers);
   loadTranslatorStatus();
   await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary()]);
 }

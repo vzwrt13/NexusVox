@@ -167,6 +167,12 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
 @dataclass
 class HotkeyConfig:
     modifiers: list[str] = field(default_factory=lambda: ["ctrl", "shift", "alt"])
+    # "hold": record while the modifiers are held (push-to-talk).
+    # "toggle": press once to start recording, press again to stop.
+    mode: str = "hold"
+
+
+HOTKEY_MODES = ("hold", "toggle")
 
 
 @dataclass
@@ -310,6 +316,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
 
     general = data.get("general", {})
     hotkey_data = data.get("hotkey", {})
+    hotkey_mode = hotkey_data.get("mode", "hold")
     audio_data = data.get("audio", {})
     inference_data = data.get("inference", {})
     db_data = data.get("database", {})
@@ -340,6 +347,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         auto_language_detection=general.get("auto_language_detection", False),
         hotkey=HotkeyConfig(
             modifiers=hotkey_data.get("modifiers", ["ctrl", "shift", "alt"]),
+            mode=hotkey_mode if hotkey_mode in HOTKEY_MODES else "hold",
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
@@ -395,6 +403,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             "",
             "[hotkey]",
             "modifiers = [{}]".format(", ".join(f'"{m}"' for m in config.hotkey.modifiers)),
+            f'mode = "{config.hotkey.mode}"',
             "",
             "[audio]",
             f"sample_rate = {config.audio.sample_rate}",

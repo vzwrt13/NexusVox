@@ -1,4 +1,4 @@
-"""Global hotkey listener for push-to-talk."""
+"""Global hotkey listener for voice input: hold (push-to-talk) or toggle mode."""
 
 from __future__ import annotations
 
@@ -27,7 +27,15 @@ _VK_MAP: dict[str, int] = {
 
 
 class HotkeyListener:
-    """Listens for a modifier-only push-to-talk hotkey (hold to record, release to stop)."""
+    """Listens for a modifier-only hotkey.
+
+    `config.mode` is read on every key event, so switching it in the dashboard takes
+    effect immediately:
+
+    - "hold": activate when all modifiers are down, deactivate when the first goes up
+    - "toggle": each complete press flips between active and inactive; releasing
+      the keys changes nothing
+    """
 
     def __init__(
         self,
@@ -35,33 +43,61 @@ class HotkeyListener:
         on_activate: Callable[[], None],
         on_deactivate: Callable[[], None],
     ) -> None:
+        self._config = config
         self._modifiers = {_MODIFIER_MAP[m] for m in config.modifiers}
         self._vks = [_VK_MAP[m] for m in config.modifiers]
         self._on_activate = on_activate
         self._on_deactivate = on_deactivate
 
         self._pressed_modifiers: set[keyboard.Key] = set()
+        self._combo_down = False  # all modifiers currently pressed (edge detection)
         self._active = False
         self._listener: keyboard.Listener | None = None
 
-    def _on_press(self, key: keyboard.Key | keyboard.KeyCode) -> None:
-        if key in self._modifiers:
-            self._pressed_modifiers.add(key)
-            if not self._active and self._modifiers.issubset(self._pressed_modifiers):
-                self._active = True
-                self._on_activate()
+    @property
+    def mode(self) -> str:
+        return self._config.mode
 
-    def _on_release(self, key: keyboard.Key | keyboard.KeyCode) -> None:
-        if key in self._modifiers:
-            self._pressed_modifiers.discard(key)
-            if self._active and not self._modifiers.issubset(self._pressed_modifiers):
+    def _on_press(self, key: keyboard.Key | keyboard.KeyCode) -> None:
+        if key not in self._modifiers:
+            return
+        self._pressed_modifiers.add(key)
+        if self._combo_down or not self._modifiers.issubset(self._pressed_modifiers):
+            return
+        self._combo_down = True
+        if self._active:
+            if self.mode == "toggle":
                 self._active = False
                 self._on_deactivate()
+        else:
+            self._active = True
+            self._on_activate()
+
+    def _on_release(self, key: keyboard.Key | keyboard.KeyCode) -> None:
+        if key not in self._modifiers:
+            return
+        self._pressed_modifiers.discard(key)
+        if self._modifiers.issubset(self._pressed_modifiers):
+            return
+        self._combo_down = False
+        if self._active and self.mode == "hold":
+            self._active = False
+            self._on_deactivate()
 
     @property
     def active(self) -> bool:
-        """True between the activate and deactivate callbacks (a hold is in progress)."""
+        """True between the activate and deactivate callbacks (recording is intended)."""
         return self._active
+
+    def cancel(self) -> None:
+        """Drop the recording intent without firing on_deactivate.
+
+        The app calls this when a cycle aborts before its recording was stopped.
+        In toggle mode nothing else would ever clear `_active`: the next press
+        would count as the "stop" of a recording that no longer exists, and the
+        mic guard would stay muted because `still_recording()` keeps saying yes.
+        """
+        self._active = False
 
     def modifiers_physically_down(self) -> bool:
         """True while every hotkey modifier is physically held, asked straight from Win32.
@@ -71,6 +107,13 @@ class HotkeyListener:
         """
         user32 = ctypes.windll.user32
         return all(user32.GetAsyncKeyState(vk) & 0x8000 for vk in self._vks)
+
+    def still_recording(self) -> bool:
+        """Whether the user still means to record: physical keys in hold mode, the
+        toggle state in toggle mode (there the keys are up while recording)."""
+        if self.mode == "toggle":
+            return self._active
+        return self.modifiers_physically_down()
 
     def start(self) -> None:
         """Start listening for the hotkey. Runs the listener in a daemon thread."""

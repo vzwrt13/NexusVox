@@ -39,6 +39,29 @@ def test_set_language(flask_client):
     assert resp.get_json()["language"] == "de"
 
 
+def test_set_hotkey_mode(flask_client):
+    resp = flask_client.post(
+        "/api/settings/hotkey-mode",
+        data=json.dumps({"mode": "toggle"}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["hotkey_mode"] == "toggle"
+    assert flask_client.get("/api/settings").get_json()["hotkey_mode"] == "toggle"
+
+
+def test_set_hotkey_mode_rejects_unknown(flask_client):
+    resp = flask_client.post(
+        "/api/settings/hotkey-mode",
+        data=json.dumps({"mode": "double-tap"}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 400
+    assert "error" in resp.get_json()
+
+
 def test_set_language_rejects_unknown_code(flask_client):
     resp = flask_client.post(
         "/api/settings/language",

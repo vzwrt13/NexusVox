@@ -7,9 +7,13 @@ injection_delay_ms = 500
 # Enable automatic language detection per recording (experimental)
 auto_language_detection = false
 [hotkey]
-# Push-to-talk: hold all listed modifiers simultaneously to record
+# Press all listed modifiers simultaneously to record
 # Modifier options: ctrl, shift, alt, win
 modifiers = ["ctrl", "shift", "alt"]
+# "hold": record while the modifiers are held (push-to-talk)
+# "toggle": press once to start recording, press again to stop
+# Also switchable in the dashboard Settings tab.
+mode = "hold"
 
 [audio]
 # Sample rate in Hz (must match model expectation)

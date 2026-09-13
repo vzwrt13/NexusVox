@@ -23,6 +23,7 @@ from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import HotkeyListener
 from .injector import inject_text
 from .lang_detect import detect_language
+from .mic_guard import MicGuard, create_mic_guard
 from .os_commands import execute_nexus_command, parse_nexus_command
 from .transcriber import create_transcriber
 from .translator import translate
@@ -76,6 +77,15 @@ class NexusVoxApp:
             on_deactivate=self._on_hotkey_deactivate,
         )
 
+        # Mutes other apps' microphone sessions while the hotkey is held (opt-in).
+        self._mic_guard: MicGuard | None = None
+        if config.mic_guard.enabled:
+            self._mic_guard = create_mic_guard(
+                Path(config.database.path).parent,
+                watchdog_s=config.mic_guard.watchdog_s,
+                still_held=self._hotkey.modifiers_physically_down,
+            )
+
         self._tray = SystemTray(
             on_quit=self._on_quit,
             on_toggle_language=self._toggle_language,
@@ -96,11 +106,15 @@ class NexusVoxApp:
 
     def _on_hotkey_activate(self) -> None:
         """Called from hotkey thread when push-to-talk starts."""
+        if self._mic_guard is not None:
+            self._mic_guard.hold_async()
         if self._loop is not None and self._record_start_event is not None:
             self._loop.call_soon_threadsafe(self._record_start_event.set)
 
     def _on_hotkey_deactivate(self) -> None:
         """Called from hotkey thread when push-to-talk ends."""
+        if self._mic_guard is not None:
+            self._mic_guard.release_async()
         if self._loop is not None and self._record_stop_event is not None:
             self._loop.call_soon_threadsafe(self._record_stop_event.set)
 
@@ -387,6 +401,10 @@ class NexusVoxApp:
             logger.exception("Transcription cycle failed")
             self._tray.set_active(False)
             await self._transcriber.disconnect()
+        finally:
+            # Key-up already queued a release; this covers a cycle that died mid-hold.
+            if self._mic_guard is not None:
+                self._mic_guard.release_async()
 
     async def _stream_audio(self) -> bytearray:
         """Stream audio chunks from microphone to the transcription server, returning the full buffer."""
@@ -440,6 +458,12 @@ class NexusVoxApp:
             "+".join(m.capitalize() for m in self._config.hotkey.modifiers),
         )
 
+        if self._mic_guard is not None:
+            # Repair what a killed previous run left muted, and pay the one-off COM
+            # wrapper cost now instead of on the first key-down.
+            await self._loop.run_in_executor(None, self._mic_guard.restore_leftovers)
+            await self._loop.run_in_executor(None, self._mic_guard.warm_up)
+
         # For in-process transcribers (Whisper on CPU), eagerly load the model
         # so the first hotkey press doesn't pay the full load + download latency.
         if not self._transcriber.needs_docker:
@@ -474,6 +498,8 @@ class NexusVoxApp:
         self._hotkey.stop()
         self._tray.stop()
         self._audio.stop()
+        if self._mic_guard is not None:
+            self._mic_guard.release()
         await self._transcriber.disconnect()
 
     def run(self) -> None:

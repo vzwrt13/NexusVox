@@ -102,3 +102,15 @@ timeout_s = 5.0
 enabled = false
 url = "http://127.0.0.1:8003/translate"
 timeout_s = 8.0
+
+[mic_guard]
+# Mute every other app's microphone (Discord, Teams, browser calls, ...) while the
+# push-to-talk keys are held, so what you dictate is not broadcast to the call. Each
+# app's own mute switch is put back exactly as it was on release; an app you muted
+# yourself stays muted. Per-app WASAPI session mute, never the microphone device.
+# If the keys are released but NexusVox never sees it, the microphones are restored
+# after watchdog_s seconds; a crash mid-hold is repaired on the next start.
+# Discord ignores per-session mute: bind Discord's own "Push to Mute" keybind to the
+# NexusVox hotkey instead (Settings > search "Keybinds").
+enabled = false
+watchdog_s = 30.0

@@ -104,6 +104,11 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_mic_guard_enabled(data.get("enabled", False)))
 
+    @app.route("/api/settings/store-audio", methods=["POST"])
+    def set_store_audio():
+        data = request.get_json(force=True)
+        return jsonify(api.set_store_audio(bool(data.get("enabled", True))))
+
     @app.route("/api/settings/translate", methods=["POST"])
     def set_translate():
         data = request.get_json(force=True)

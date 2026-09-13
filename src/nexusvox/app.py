@@ -208,6 +208,16 @@ class NexusVoxApp:
             samples = np.clip(samples * (29491.0 / peak), -32768, 32767)
         return samples.astype(np.int16).tobytes()
 
+    def _store_audio(self, pcm_buffer: bytearray, record_id: int) -> None:
+        """Keep the recording's WAV next to the database, unless `[database].store_audio` is off.
+
+        The flag is read per recording, so the dashboard toggle is live. The transcript
+        row is saved either way; only the playback file is skipped.
+        """
+        if not self._config.database.store_audio:
+            return
+        self._db.update_audio_path(record_id, self._save_audio_wav(pcm_buffer, record_id))
+
     def _save_audio_wav(self, pcm_buffer: bytearray, record_id: int) -> str:
         """Write a PCM16 buffer to a WAV file and return its relative path."""
         db_dir = Path(self._config.database.path).parent
@@ -315,8 +325,7 @@ class NexusVoxApp:
                             confidence=result.confidence,
                             model=self._transcriber.model,
                         )
-                        audio_path = self._save_audio_wav(audio_buffer, record.id)
-                        self._db.update_audio_path(record.id, audio_path)
+                        self._store_audio(audio_buffer, record.id)
                         await self._transcriber.disconnect()
                         return
 
@@ -339,8 +348,7 @@ class NexusVoxApp:
                         model=self._transcriber.model,
                     )
                     logger.info("Nexus command: %s %s", nexus_cmd.action, nexus_cmd.app_name)
-                    audio_path = self._save_audio_wav(audio_buffer, record.id)
-                    self._db.update_audio_path(record.id, audio_path)
+                    self._store_audio(audio_buffer, record.id)
                     await self._transcriber.disconnect()
                     return
 
@@ -394,8 +402,7 @@ class NexusVoxApp:
                 )
                 logger.info("Injected: %s", translation.text)
 
-                audio_path = self._save_audio_wav(audio_buffer, record.id)
-                self._db.update_audio_path(record.id, audio_path)
+                self._store_audio(audio_buffer, record.id)
             else:
                 logger.info("Empty transcription, nothing to inject")
 

@@ -18,6 +18,7 @@ from nexusvox.config import (
     resolve_compute_type,
     resolve_device,
     save_config,
+    validate_hotkey,
 )
 
 
@@ -365,3 +366,40 @@ def test_unknown_hotkey_mode_falls_back_to_hold(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[hotkey]\nmodifiers = ["ctrl", "alt"]\nmode = "double-tap"\n')
     assert load_config(path).hotkey.mode == "hold"
+
+
+def test_hotkey_key_is_loaded_normalized_and_saved(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[hotkey]\nmodifiers = ["ctrl", "shift"]\nkey = "a"\nmode = "hold"\n')
+    cfg = load_config(path)
+    assert cfg.hotkey.modifiers == ["ctrl", "shift"] and cfg.hotkey.key == "A"
+    save_config(cfg, path)
+    assert 'key = "A"' in path.read_text()
+    assert load_config(path).hotkey.key == "A"
+
+
+def test_hotkey_key_defaults_to_none(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[hotkey]\nmodifiers = ["ctrl", "alt"]\n')
+    assert load_config(path).hotkey.key == ""
+
+
+def test_unusable_hotkey_falls_back_to_default(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[hotkey]\nmodifiers = []\nkey = ""\n')
+    assert load_config(path).hotkey.modifiers == ["ctrl", "shift", "alt"]
+    path.write_text('[hotkey]\nmodifiers = ["ctrl"]\nkey = "enter"\n')
+    cfg = load_config(path)
+    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"] and cfg.hotkey.key == ""
+    path.write_text('[hotkey]\nmodifiers = ["hyper"]\n')
+    assert load_config(path).hotkey.modifiers == ["ctrl", "shift", "alt"]
+
+
+def test_validate_hotkey():
+    assert validate_hotkey(["ctrl", "shift"], "a") is None
+    assert validate_hotkey([], "F9") is None
+    assert validate_hotkey(["ctrl", "shift", "alt"], "") is None
+    assert validate_hotkey([], "") is not None
+    assert validate_hotkey(["ctrl", "ctrl"], "") is not None
+    assert validate_hotkey(["ctrl"], "enter") is not None
+    assert validate_hotkey(["meta"], "a") is not None

@@ -8,8 +8,13 @@ injection_delay_ms = 500
 auto_language_detection = false
 [hotkey]
 # Press all listed modifiers simultaneously to record
-# Modifier options: ctrl, shift, alt, win
+# Modifier options: ctrl, shift, alt, win (may be empty when a key is set)
 modifiers = ["ctrl", "shift", "alt"]
+# Optional key that completes the combo: a letter, digit, F1-F24, SPACE, CAPS_LOCK,
+# SCROLL_LOCK, PAUSE, INSERT, HOME, END, PAGE_UP or PAGE_DOWN. Empty: modifiers only.
+# The key is swallowed while it is held as part of the combo, so it never types.
+# Also editable in the dashboard Settings tab.
+key = ""
 # "hold": record while the modifiers are held (push-to-talk)
 # "toggle": press once to start recording, press again to stop
 # Also switchable in the dashboard Settings tab.

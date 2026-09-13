@@ -110,13 +110,123 @@ const languageSelect = document.getElementById("language-select");
 const hotkeyModeSelect = document.getElementById("hotkey-mode-select");
 const micGuardToggle = document.getElementById("mic-guard-toggle");
 const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
+const hotkeyMods = Array.from(document.querySelectorAll("#hotkey-mods input"));
+const hotkeyKeySelect = document.getElementById("hotkey-key-select");
+const hotkeyRecordBtn = document.getElementById("hotkey-record-btn");
+const hotkeyStatus = document.getElementById("hotkey-status");
+const hotkeyResetBtn = document.getElementById("hotkey-reset-btn");
+const hotkeyKeycaps = document.getElementById("hotkey-keycaps");
+const hotkeyBadge = document.getElementById("hotkey-badge");
+const hotkeyDefaultName = document.getElementById("hotkey-default-name");
+let hotkeyDefault = { modifiers: ["ctrl", "shift", "alt"], key: "" };
 
-function renderHotkeyHint(mode, modifiers) {
-  const keys = modifiers.map((m) => m.charAt(0).toUpperCase() + m.slice(1)).join("+");
+function describeHotkey(modifiers, key) {
+  const parts = modifiers.map((m) => m.charAt(0).toUpperCase() + m.slice(1));
+  if (key) parts.push(key.length > 1 ? key.replace("_", " ") : key);
+  return parts.join("+");
+}
+
+function renderHotkeyHint(mode, modifiers, key) {
+  const keys = describeHotkey(modifiers, key);
   hotkeyModeHint.textContent =
     mode === "toggle"
       ? "Press " + keys + " once to start recording, press it again to stop."
       : "Hold " + keys + " to record, release to stop.";
+}
+
+function renderKeycaps(modifiers, key) {
+  hotkeyKeycaps.replaceChildren();
+  describeHotkey(modifiers, key).split("+").forEach((name, i) => {
+    if (i) hotkeyKeycaps.append(Object.assign(document.createElement("span"), { className: "keycaps-plus", textContent: "+" }));
+    hotkeyKeycaps.append(Object.assign(document.createElement("kbd"), { textContent: name }));
+  });
+}
+
+function isDefaultHotkey(modifiers, key) {
+  return key === hotkeyDefault.key && modifiers.join("+") === hotkeyDefault.modifiers.join("+");
+}
+
+function renderHotkey(s) {
+  if (s.hotkey_default) hotkeyDefault = s.hotkey_default;
+  hotkeyDefaultName.textContent = describeHotkey(hotkeyDefault.modifiers, hotkeyDefault.key);
+  const key = s.hotkey_key || "";
+  if (!hotkeyKeySelect.options.length) {
+    hotkeyKeySelect.append(new Option("No key (modifiers only)", ""));
+    for (const k of s.hotkey_key_options || []) hotkeyKeySelect.append(new Option(k.replace("_", " "), k));
+  }
+  for (const cb of hotkeyMods) cb.checked = s.hotkey_modifiers.includes(cb.value);
+  hotkeyKeySelect.value = key;
+  renderKeycaps(s.hotkey_modifiers, key);
+  const isDefault = isDefaultHotkey(s.hotkey_modifiers, key);
+  hotkeyBadge.hidden = false;
+  hotkeyBadge.textContent = isDefault ? "default" : "custom";
+  hotkeyResetBtn.disabled = isDefault;
+  renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers, key);
+}
+
+function showHotkeyStatus(text, cls) {
+  hotkeyStatus.hidden = !text;
+  hotkeyStatus.className = "status-line " + (cls || "");
+  hotkeyStatus.textContent = text;
+}
+
+async function saveHotkey() {
+  const modifiers = hotkeyMods.filter((cb) => cb.checked).map((cb) => cb.value);
+  const resp = await postSetting("/api/settings/hotkey", { modifiers, key: hotkeyKeySelect.value });
+  const s = await resp.json();
+  renderHotkey(s);
+  if (s.error) showHotkeyStatus("\u2715 " + s.error, "down");
+  else showHotkeyStatus("\u25CF Hotkey is now " + describeHotkey(s.hotkey_modifiers, s.hotkey_key), "ok");
+}
+
+// Maps a browser KeyboardEvent to a key name the server knows: "" for a modifier
+// on its own, null for keys we do not bind.
+function hotkeyKeyFromEvent(e) {
+  const code = e.code || "";
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
+  const named = { Space: "SPACE", CapsLock: "CAPS_LOCK", ScrollLock: "SCROLL_LOCK", Pause: "PAUSE",
+    Insert: "INSERT", Home: "HOME", End: "END", PageUp: "PAGE_UP", PageDown: "PAGE_DOWN" };
+  if (code in named) return named[code];
+  if (/^(Control|Shift|Alt|Meta)(Left|Right)$/.test(code)) return "";
+  return null;
+}
+
+// "Record": the next key-down in this page becomes the binding. A modifier-only combo
+// is taken when the first modifier is released, because no key completes it.
+function startHotkeyRecording() {
+  hotkeyRecordBtn.textContent = "Press keys\u2026";
+  hotkeyRecordBtn.classList.add("recording");
+  let held = { ctrl: false, shift: false, alt: false, win: false };
+  const finish = (key) => {
+    document.removeEventListener("keydown", onDown, true);
+    document.removeEventListener("keyup", onUp, true);
+    hotkeyRecordBtn.textContent = "Record";
+    hotkeyRecordBtn.classList.remove("recording");
+    if (key === null) return;
+    for (const cb of hotkeyMods) cb.checked = held[cb.value];
+    hotkeyKeySelect.value = key;
+    saveHotkey();
+  };
+  const onDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === "Escape") return finish(null);
+    held = { ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, win: e.metaKey };
+    const key = hotkeyKeyFromEvent(e);
+    if (key === null) {
+      showHotkeyStatus("\u2715 That key cannot be bound; use a letter, digit, F-key or Space", "down");
+      return;
+    }
+    if (key !== "") finish(key);
+  };
+  const onUp = (e) => {
+    e.preventDefault();
+    if (hotkeyKeyFromEvent(e) === "" && Object.values(held).some(Boolean)) finish("");
+  };
+  document.addEventListener("keydown", onDown, true);
+  document.addEventListener("keyup", onUp, true);
 }
 
 function postSetting(path, body) {
@@ -162,7 +272,15 @@ hotkeyModeSelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/hotkey-mode", { mode: hotkeyModeSelect.value });
   const s = await resp.json();
   hotkeyModeSelect.value = s.hotkey_mode;
-  renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers);
+  renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers, s.hotkey_key);
+});
+for (const cb of hotkeyMods) cb.addEventListener("change", saveHotkey);
+hotkeyKeySelect.addEventListener("change", saveHotkey);
+hotkeyRecordBtn.addEventListener("click", startHotkeyRecording);
+hotkeyResetBtn.addEventListener("click", () => {
+  for (const cb of hotkeyMods) cb.checked = hotkeyDefault.modifiers.includes(cb.value);
+  hotkeyKeySelect.value = hotkeyDefault.key;
+  saveHotkey();
 });
 
 async function loadSettings() {
@@ -171,7 +289,7 @@ async function loadSettings() {
   translateToggle.checked = s.translate_enabled;
   languageSelect.value = s.language;
   hotkeyModeSelect.value = s.hotkey_mode;
-  renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers);
+  renderHotkey(s);
   micGuardToggle.checked = s.mic_guard_enabled;
   loadTranslatorStatus();
   await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary()]);

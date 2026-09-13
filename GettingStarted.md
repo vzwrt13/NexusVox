@@ -154,8 +154,11 @@ voice_commands_enabled = true
 
 [hotkey]
 # Press all listed modifiers simultaneously to record
-# Options: ctrl, shift, alt, win
+# Options: ctrl, shift, alt, win (may be empty when a key is set)
 modifiers = ["ctrl", "shift", "alt"]
+# Optional key that completes the combo (letter, digit, F1-F24, SPACE, ...), e.g. "a"
+# for Ctrl+Shift+Alt+A. Swallowed while held as part of the combo, so it never types.
+key = ""
 # "hold": record while the keys are held (push-to-talk)
 # "toggle": press once to start, press again to stop
 mode = "hold"

@@ -153,6 +153,42 @@ main { padding: 24px; max-width: 1100px; margin: 0 auto; }
 .select-input:focus { outline: none; border-color: var(--accent); }
 .select-input:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.hotkey-current { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; }
+.keycaps { display: inline-flex; align-items: center; gap: 4px; }
+.keycaps kbd {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-bottom-width: 3px;
+  border-radius: 6px;
+  padding: 3px 9px;
+}
+.keycaps .keycaps-plus { color: var(--text-dim); font-size: 12px; }
+.hotkey-editor { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; flex-shrink: 0; }
+.hotkey-mods { display: flex; gap: 6px; align-items: center; }
+.hotkey-plus { color: var(--text-dim); font-size: 13px; padding: 0 2px; }
+.hotkey-mod {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  cursor: pointer;
+  user-select: none;
+}
+.hotkey-mod:has(input:checked) { border-color: var(--accent); color: var(--text); background: var(--accent-glow); }
+.hotkey-mod input { accent-color: var(--accent); margin: 0; }
+.hotkey-actions { display: flex; gap: 6px; }
+.hotkey-key { min-width: 150px; padding-top: 5px; padding-bottom: 5px; }
+.period-btn.recording { color: var(--text); border-color: var(--red); animation: hotkey-pulse 1s ease-in-out infinite; }
+@keyframes hotkey-pulse { 50% { border-color: var(--border); } }
+
 .settings-hint {
   margin-top: 16px;
   font-size: 12px;
@@ -224,6 +260,8 @@ main { padding: 24px; max-width: 1100px; margin: 0 auto; }
   transition: all 0.15s;
 }
 .period-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.period-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.period-btn:disabled:hover { color: var(--text-dim); border-color: var(--border); }
 .period-btn.active { color: var(--text); background: var(--accent); border-color: var(--accent); }
 
 .refresh-btn {

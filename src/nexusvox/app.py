@@ -224,6 +224,7 @@ class NexusVoxApp:
 
     async def _transcription_cycle(self) -> None:
         """Run one full transcription cycle: connect, record, transcribe, inject."""
+        recording_stopped = False
         try:
             # Connect to inference server BEFORE signalling readiness so the
             # WebSocket handshake doesn't race against hotkey release.
@@ -252,6 +253,7 @@ class NexusVoxApp:
             # Wait for hotkey release
             await self._record_stop_event.wait()
             self._record_stop_event.clear()
+            recording_stopped = True
 
             # Stop audio (sends None sentinel, ending the stream task)
             self._audio.stop()
@@ -400,6 +402,11 @@ class NexusVoxApp:
         except Exception:
             logger.exception("Transcription cycle failed")
             self._tray.set_active(False)
+            if not recording_stopped:
+                # The recording this intent belonged to is gone. Without this, toggle
+                # mode would treat the next press as "stop" (and keep the mic guard
+                # muted); hold mode would queue a stale stop that skips the next cycle.
+                self._hotkey.cancel()
             await self._transcriber.disconnect()
         finally:
             # Key-up already queued a release; this covers a cycle that died mid-hold.

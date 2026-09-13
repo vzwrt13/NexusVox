@@ -89,6 +89,16 @@ class HotkeyListener:
         """True between the activate and deactivate callbacks (recording is intended)."""
         return self._active
 
+    def cancel(self) -> None:
+        """Drop the recording intent without firing on_deactivate.
+
+        The app calls this when a cycle aborts before its recording was stopped.
+        In toggle mode nothing else would ever clear `_active`: the next press
+        would count as the "stop" of a recording that no longer exists, and the
+        mic guard would stay muted because `still_recording()` keeps saying yes.
+        """
+        self._active = False
+
     def modifiers_physically_down(self) -> bool:
         """True while every hotkey modifier is physically held, asked straight from Win32.
 

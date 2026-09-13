@@ -1,9 +1,13 @@
 """Tests for the hotkey listener's hold and toggle modes (key events fed by hand)."""
 
-from pynput import keyboard
+import pytest
 
-from nexusvox.config import HotkeyConfig
-from nexusvox.hotkey import HotkeyListener
+# pynput picks a backend at import time and fails on a headless Linux runner
+# (no X display), so these tests only run where the listener can be imported.
+keyboard = pytest.importorskip("pynput.keyboard", reason="pynput needs a display backend")
+
+from nexusvox.config import HotkeyConfig  # noqa: E402
+from nexusvox.hotkey import HotkeyListener  # noqa: E402
 
 CTRL, ALT = keyboard.Key.ctrl_l, keyboard.Key.alt_l
 
@@ -82,3 +86,13 @@ def test_still_recording_uses_toggle_state_in_toggle_mode():
     assert hk.still_recording() is True
     _press_combo(hk)
     assert hk.still_recording() is False
+
+
+def test_cancel_drops_intent_without_callback():
+    hk, events, _ = _listener("toggle")
+    _press_combo(hk)
+    _release_combo(hk)
+    hk.cancel()
+    assert events == ["start"] and not hk.active and hk.still_recording() is False
+    _press_combo(hk)  # the next press starts a new recording instead of "stopping" the lost one
+    assert events == ["start", "start"] and hk.active

@@ -58,6 +58,11 @@ class HotkeyListener:
                 self._active = False
                 self._on_deactivate()
 
+    @property
+    def active(self) -> bool:
+        """True between the activate and deactivate callbacks (a hold is in progress)."""
+        return self._active
+
     def modifiers_physically_down(self) -> bool:
         """True while every hotkey modifier is physically held, asked straight from Win32.
 

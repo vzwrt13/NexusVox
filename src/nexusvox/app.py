@@ -403,7 +403,9 @@ class NexusVoxApp:
             await self._transcriber.disconnect()
         finally:
             # Key-up already queued a release; this covers a cycle that died mid-hold.
-            if self._mic_guard is not None:
+            # Skip it while the hotkey is held again: the user may already be in the
+            # next dictation (pressed during transcription), and its hold must stand.
+            if self._mic_guard is not None and not self._hotkey.active:
                 self._mic_guard.release_async()
 
     async def _stream_audio(self) -> bytearray:

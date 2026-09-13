@@ -105,6 +105,32 @@ def test_enumeration_failure_mutes_nothing():
     assert not g.active
 
 
+def test_release_keeps_state_when_enumeration_fails(tmp_path):
+    s = FakeSession(1, app="discord")
+    path = tmp_path / STATE_FILENAME
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("default capture device changed")
+        return [s]
+
+    g = MicGuard(flaky, own_pids=set(), watchdog_s=0, state_path=path)
+    g.hold()
+
+    # The failed release touches nothing and forgets nothing, so the next one can retry.
+    assert g.release() == 0
+    assert g.active
+    assert s.muted is True
+    assert path.exists()
+
+    assert g.release() == 1
+    assert not g.active
+    assert s.muted is False
+    assert not path.exists()
+
+
 def test_set_mute_failure_is_not_remembered():
     good = FakeSession(1)
     bad = FakeSession(2)

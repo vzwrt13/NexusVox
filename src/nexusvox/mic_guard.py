@@ -175,6 +175,11 @@ class MicGuard:
                 return 0
             wanted = {e.instance_id for e in self._muted}
             restored = self._unmute_matching(instance_ids=wanted, session_ids=set())
+            if restored is None:
+                # Nothing was touched: keep the list and the state file so the next
+                # release (or the next start) retries instead of leaving them muted.
+                logger.error("Mic guard: %d session(s) still muted, will retry on the next release", len(wanted))
+                return 0
             missing = len(wanted) - restored
             if missing:
                 logger.warning("Mic guard: %d muted session(s) vanished before restore", missing)
@@ -227,16 +232,19 @@ class MicGuard:
                 instance_ids={e.instance_id for e in entries},
                 session_ids={e.session_id for e in entries},
             )
+            if restored is None:
+                return 0  # state file kept, the next start tries again
             self._clear_state()
         logger.info("Mic guard: restored %d microphone session(s) left muted by a previous run", restored)
         return restored
 
-    def _unmute_matching(self, *, instance_ids: set[str], session_ids: set[str]) -> int:
+    def _unmute_matching(self, *, instance_ids: set[str], session_ids: set[str]) -> int | None:
+        """Unmute the matching sessions; None when enumeration failed and nothing was touched."""
         try:
             sessions = self._enumerate()
         except Exception:
             logger.exception("Mic guard: enumerating capture sessions failed, nothing restored")
-            return 0
+            return None
         restored = 0
         for s in sessions:
             if s.instance_id in instance_ids or s.session_id in session_ids:

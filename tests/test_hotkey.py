@@ -4,7 +4,7 @@ import pytest
 
 # pynput picks a backend at import time and fails on a headless Linux runner
 # (no X display), so these tests only run where the listener can be imported.
-keyboard = pytest.importorskip("pynput.keyboard", reason="pynput needs a display backend")
+keyboard = pytest.importorskip("pynput.keyboard", reason="pynput needs a display backend", exc_type=ImportError)
 
 from nexusvox.config import HotkeyConfig  # noqa: E402
 from nexusvox.hotkey import HotkeyListener  # noqa: E402

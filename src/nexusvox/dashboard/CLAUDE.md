@@ -13,7 +13,7 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 **Analytics (tab 1)** — Avg Confidence stat card and Confidence Trend chart (empty until vLLM exposes logprobs).
 
 **Settings (tab 2)**
-- Voice Input card: Hotkey Mode select (`hold` / `toggle`), `POST /api/settings/hotkey-mode`. Live: `HotkeyListener` reads the shared `Config` on every key event, no restart and no app bridge needed.
+- Voice Input card: Hotkey Mode select (`hold` / `toggle`), `POST /api/settings/hotkey-mode`, and the Mute Other Apps While Recording toggle, `POST /api/settings/mic-guard`. Both live: `HotkeyListener` reads the shared `Config` on every key event and `app.py` checks `[mic_guard].enabled` on every hold, no restart and no app bridge needed.
 - Compute Device dropdown (`Auto`/`GPU (CUDA)`/`CPU`): writes `[inference].device` to `config.toml`; requires app restart. On CPU, GPU-only models are filtered out of the model dropdown server-side.
 - Model switcher dropdown: for GPU-backed models, selecting stops the old Docker container, starts the new one, waits for health check, reconnects the transcriber. For in-process Whisper (CPU), just reloads the model — no Docker calls. JS polls `GET /api/models/status` every 2s for spinner/status updates.
 - Nexus OS Commands card: toggle enable/disable, lists supported actions and registered apps.
@@ -33,6 +33,7 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 |--------|------|---------|
 | GET | `/api/settings` | Language, auto detection, translate, hotkey mode + modifiers |
 | POST | `/api/settings/hotkey-mode` | Set `hold` or `toggle` (400 on anything else) |
+| POST | `/api/settings/mic-guard` | Toggle muting other apps' microphone sessions while recording |
 | GET | `/api/models` | List available models (filtered: GPU-only hidden on CPU systems) |
 | GET | `/api/models/current` | Active model |
 | POST | `/api/models/switch` | Switch model |

@@ -77,14 +77,14 @@ class NexusVoxApp:
             on_deactivate=self._on_hotkey_deactivate,
         )
 
-        # Mutes other apps' microphone sessions while the hotkey is held (opt-in).
-        self._mic_guard: MicGuard | None = None
-        if config.mic_guard.enabled:
-            self._mic_guard = create_mic_guard(
-                Path(config.database.path).parent,
-                watchdog_s=config.mic_guard.watchdog_s,
-                still_held=self._hotkey.still_recording,
-            )
+        # Mutes other apps' microphone sessions while the hotkey is held. Always built
+        # (None only when pycaw is missing); `[mic_guard].enabled` is checked per hold so
+        # the dashboard toggle is live. Release is unconditional and idempotent.
+        self._mic_guard: MicGuard | None = create_mic_guard(
+            Path(config.database.path).parent,
+            watchdog_s=config.mic_guard.watchdog_s,
+            still_held=self._hotkey.still_recording,
+        )
 
         self._tray = SystemTray(
             on_quit=self._on_quit,
@@ -106,7 +106,7 @@ class NexusVoxApp:
 
     def _on_hotkey_activate(self) -> None:
         """Called from hotkey thread when push-to-talk starts."""
-        if self._mic_guard is not None:
+        if self._mic_guard is not None and self._config.mic_guard.enabled:
             self._mic_guard.hold_async()
         if self._loop is not None and self._record_start_event is not None:
             self._loop.call_soon_threadsafe(self._record_start_event.set)

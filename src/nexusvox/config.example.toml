@@ -116,5 +116,6 @@ timeout_s = 8.0
 # after watchdog_s seconds; a crash mid-hold is repaired on the next start.
 # Discord ignores per-session mute: bind Discord's own "Push to Mute" keybind to the
 # NexusVox hotkey instead (Settings > search "Keybinds").
+# Also switchable in the dashboard Settings tab.
 enabled = false
 watchdog_s = 30.0

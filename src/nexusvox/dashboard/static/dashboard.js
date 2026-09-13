@@ -108,6 +108,7 @@ const toggle = document.getElementById("auto-lang-toggle");
 const translateToggle = document.getElementById("translate-toggle");
 const languageSelect = document.getElementById("language-select");
 const hotkeyModeSelect = document.getElementById("hotkey-mode-select");
+const micGuardToggle = document.getElementById("mic-guard-toggle");
 const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
 
 function renderHotkeyHint(mode, modifiers) {
@@ -156,6 +157,7 @@ async function loadTranslatorStatus() {
   }
 }
 languageSelect.addEventListener("change", () => postSetting("/api/settings/language", { language: languageSelect.value }));
+micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 hotkeyModeSelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/hotkey-mode", { mode: hotkeyModeSelect.value });
   const s = await resp.json();
@@ -170,6 +172,7 @@ async function loadSettings() {
   languageSelect.value = s.language;
   hotkeyModeSelect.value = s.hotkey_mode;
   renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers);
+  micGuardToggle.checked = s.mic_guard_enabled;
   loadTranslatorStatus();
   await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary()]);
 }

@@ -359,7 +359,7 @@ def create_mic_guard(
         import comtypes  # noqa: F401
         import pycaw  # noqa: F401
     except ImportError:
-        logger.warning("Mic guard enabled but pycaw/comtypes are not installed; other apps will not be muted")
+        logger.warning("pycaw/comtypes are not installed; the mic guard is unavailable")
         return None
     guard = MicGuard(
         enumerate_capture_sessions,

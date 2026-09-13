@@ -90,6 +90,11 @@ def _create_app(api: DashboardAPI) -> Flask:
         result = api.set_hotkey_mode(data.get("mode", ""))
         return jsonify(result), (400 if "error" in result else 200)
 
+    @app.route("/api/settings/mic-guard", methods=["POST"])
+    def set_mic_guard():
+        data = request.get_json(force=True)
+        return jsonify(api.set_mic_guard_enabled(data.get("enabled", False)))
+
     @app.route("/api/settings/translate", methods=["POST"])
     def set_translate():
         data = request.get_json(force=True)

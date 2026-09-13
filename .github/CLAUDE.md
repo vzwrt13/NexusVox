@@ -2,7 +2,7 @@
 
 ## Workflows
 
-**CI** (`.github/workflows/ci.yml`) — runs on every push and PR: Ruff lint + format check on Linux/3.11, then pytest across a matrix of `ubuntu-latest` × `windows-latest` and Python 3.11/3.12/3.13 (6 jobs, `fail-fast: false`).
+**CI** (`.github/workflows/ci.yml`) — runs once per PR (`pull_request`) and on every push to `main`: Ruff lint + format check on Linux/3.11, then pytest across a matrix of `ubuntu-latest` × `windows-latest` and Python 3.11/3.12/3.13 (6 jobs, `fail-fast: false`).
 
 **Release** (`.github/workflows/release.yml`) — runs on version tags (`v*.*.*`): lint, the same test matrix, build `.whl` + `.tar.gz` on Linux/3.11, publish GitHub Release.
 

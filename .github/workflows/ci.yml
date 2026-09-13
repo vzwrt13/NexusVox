@@ -1,8 +1,10 @@
 name: CI
 
+# Feature branches run once, through the pull_request event; pushing to a branch
+# that has a PR open would otherwise trigger the same run a second time.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
 
 permissions:

@@ -27,6 +27,22 @@
     <!-- Settings Tab -->
     <section id="tab-settings" class="tab-content active">
       <div class="settings-card">
+        <h4 class="nexus-section-title">Voice Input</h4>
+        <p class="settings-hint" style="margin-top: 6px;">How the hotkey starts and stops a recording. Takes effect immediately.</p>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Hotkey Mode</h3>
+            <p id="hotkey-mode-hint">Hold: record while the keys are held. Toggle: press once to start, press again to stop.</p>
+          </div>
+          <select id="hotkey-mode-select" class="select-input">
+            <option value="hold">Hold (push-to-talk)</option>
+            <option value="toggle">Toggle</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-card" style="margin-top: 12px;">
         <h4 class="nexus-section-title">Language &amp; Translation</h4>
         <p class="settings-hint" style="margin-top: 6px;">Which language you speak, and which language ends up at the cursor.</p>
 

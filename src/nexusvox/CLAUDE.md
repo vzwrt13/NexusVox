@@ -1,5 +1,9 @@
 # NexusVox — Core Runtime
 
+## Hotkey Modes
+
+`hotkey.py` — `HotkeyListener` reads `config.mode` on every key event (`hold` or `toggle`), so the dashboard switch is live. Edge detection via `_combo_down`: a *complete press* is the moment the last missing modifier goes down; releasing any modifier resets it, so a new press needs the combo to be re-completed. Hold: complete press activates, first modifier up deactivates. Toggle: each complete press flips `_active`; releases do nothing. `active` is the recording intent in both modes and is what `app.py` consults before the cycle's `finally` release of the mic guard. `still_recording()` is the mic-guard watchdog check: physical key state (`GetAsyncKeyState`) in hold mode, `_active` in toggle mode, because in toggle mode the keys are up while recording. Mode switch mid-recording: hold→toggle keeps recording until the next press; toggle→hold stops on the next modifier release.
+
 ## Transcriber Architecture
 
 `BaseTranscriber` ABC (`needs_docker: bool = True` class attr) with a factory pattern. Three implementations:

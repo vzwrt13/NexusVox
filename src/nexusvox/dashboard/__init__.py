@@ -84,6 +84,12 @@ def _create_app(api: DashboardAPI) -> Flask:
         result = api.set_language(data.get("language", ""))
         return jsonify(result), (400 if "error" in result else 200)
 
+    @app.route("/api/settings/hotkey-mode", methods=["POST"])
+    def set_hotkey_mode():
+        data = request.get_json(force=True)
+        result = api.set_hotkey_mode(data.get("mode", ""))
+        return jsonify(result), (400 if "error" in result else 200)
+
     @app.route("/api/settings/translate", methods=["POST"])
     def set_translate():
         data = request.get_json(force=True)

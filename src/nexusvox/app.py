@@ -83,7 +83,7 @@ class NexusVoxApp:
             self._mic_guard = create_mic_guard(
                 Path(config.database.path).parent,
                 watchdog_s=config.mic_guard.watchdog_s,
-                still_held=self._hotkey.modifiers_physically_down,
+                still_held=self._hotkey.still_recording,
             )
 
         self._tray = SystemTray(
@@ -456,7 +456,8 @@ class NexusVoxApp:
         self._tray.start()
 
         logger.info(
-            "NexusVox started. Hold %s to talk.",
+            "NexusVox started. %s %s to talk.",
+            "Press" if self._config.hotkey.mode == "toggle" else "Hold",
             "+".join(m.capitalize() for m in self._config.hotkey.modifiers),
         )
 

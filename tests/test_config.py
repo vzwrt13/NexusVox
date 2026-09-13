@@ -47,6 +47,7 @@ def test_config_dataclass_defaults():
     assert "slash" in cfg.voice_commands.symbols
     assert "plus" not in cfg.voice_commands.symbols
     assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert cfg.hotkey.mode == "hold"
     assert cfg.audio.sample_rate == 16_000
     assert cfg.audio.chunk_size == 4096
     assert cfg.inference.server_url == "http://localhost:8002/v1/audio/transcriptions"
@@ -171,7 +172,7 @@ def test_save_config_roundtrip(tmp_path):
         injection_delay_ms=200,
         auto_language_detection=True,
         voice_commands=VoiceCommandsConfig(enabled=False, symbols=["slash", "plus"]),
-        hotkey=HotkeyConfig(modifiers=["ctrl", "alt"]),
+        hotkey=HotkeyConfig(modifiers=["ctrl", "alt"], mode="toggle"),
         audio=AudioConfig(sample_rate=44100, chunk_size=2048),
         inference=InferenceConfig(
             server_url="ws://test:8000/v1/realtime", transcription_delay_ms=160, model="cohere-transcribe"
@@ -189,6 +190,7 @@ def test_save_config_roundtrip(tmp_path):
     assert loaded.voice_commands.enabled == original.voice_commands.enabled
     assert loaded.voice_commands.symbols == original.voice_commands.symbols
     assert loaded.hotkey.modifiers == original.hotkey.modifiers
+    assert loaded.hotkey.mode == "toggle"
     assert loaded.audio.sample_rate == original.audio.sample_rate
     assert loaded.audio.chunk_size == original.audio.chunk_size
     assert loaded.inference.server_url == original.inference.server_url
@@ -357,3 +359,9 @@ def test_resolve_compute_type_defaults():
 def test_resolve_compute_type_override_wins():
     assert resolve_compute_type("cpu", "float16") == "float16"
     assert resolve_compute_type("cuda", "int8") == "int8"
+
+
+def test_unknown_hotkey_mode_falls_back_to_hold(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[hotkey]\nmodifiers = ["ctrl", "alt"]\nmode = "double-tap"\n')
+    assert load_config(path).hotkey.mode == "hold"

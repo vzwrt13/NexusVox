@@ -153,9 +153,12 @@ auto_language_detection = false
 voice_commands_enabled = true
 
 [hotkey]
-# Push-to-talk: hold all listed modifiers simultaneously to record
+# Press all listed modifiers simultaneously to record
 # Options: ctrl, shift, alt, win
 modifiers = ["ctrl", "shift", "alt"]
+# "hold": record while the keys are held (push-to-talk)
+# "toggle": press once to start, press again to stop
+mode = "hold"
 
 [audio]
 # Sample rate in Hz (must match model expectation)
@@ -233,6 +236,8 @@ A system tray icon also appears, where you can toggle the language or quit the a
 2. **Speak** into your microphone
 3. **Release** any of the modifier keys — recording stops (second beep)
 4. The transcribed text is automatically pasted at your cursor position
+
+Prefer not to keep the keys down? Switch **Hotkey Mode** to *Toggle* in the dashboard's Settings tab (or `mode = "toggle"` in `config.toml`): press `Ctrl + Shift + Alt` once to start, press it again to stop. The change takes effect immediately.
 
 > NexusVox uses the clipboard to inject text (Ctrl+V). Your previous clipboard content is saved and restored after each injection.
 

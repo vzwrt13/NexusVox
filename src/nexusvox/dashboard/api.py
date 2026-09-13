@@ -9,7 +9,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import sessionmaker
 
-from ..config import MODEL_REGISTRY, SUPPORTED_LANGUAGES, Config, resolve_device, save_config
+from ..config import HOTKEY_MODES, MODEL_REGISTRY, SUPPORTED_LANGUAGES, Config, resolve_device, save_config
 from ..db import Database
 from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
@@ -122,6 +122,8 @@ class DashboardAPI:
             "language": self._config.language,
             "translate_enabled": self._config.translator.enabled,
             "translator_url": self._config.translator.url,
+            "hotkey_mode": self._config.hotkey.mode,
+            "hotkey_modifiers": list(self._config.hotkey.modifiers),
         }
 
     def get_translator_status(self) -> dict:
@@ -141,6 +143,14 @@ class DashboardAPI:
         if language not in SUPPORTED_LANGUAGES:
             return {"error": f"Unsupported language: {language}", **self.get_settings()}
         self._config.language = language
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_hotkey_mode(self, mode: str) -> dict:
+        """The listener reads the shared config on every key event, so this is live."""
+        if mode not in HOTKEY_MODES:
+            return {"error": f"Unsupported hotkey mode: {mode}", **self.get_settings()}
+        self._config.hotkey.mode = mode
         save_config(self._config)
         return self.get_settings()
 

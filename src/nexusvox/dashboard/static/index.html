@@ -40,6 +40,17 @@
             <option value="toggle">Toggle</option>
           </select>
         </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Mute Other Apps While Recording</h3>
+            <p>Mutes every other app's microphone session (Teams, browser calls, ...) while you record, so your dictation is not broadcast to a call, and puts each one back as it was afterwards. An app you muted yourself stays muted. Discord's desktop app ignores this: bind Discord's own <em>Push to Mute</em> keybind to the NexusVox hotkey instead.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="mic-guard-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
       </div>
 
       <div class="settings-card" style="margin-top: 12px;">

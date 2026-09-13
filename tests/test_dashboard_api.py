@@ -51,6 +51,18 @@ def test_set_hotkey_mode(flask_client):
     assert flask_client.get("/api/settings").get_json()["hotkey_mode"] == "toggle"
 
 
+def test_set_mic_guard_enabled(flask_client):
+    resp = flask_client.post(
+        "/api/settings/mic-guard",
+        data=json.dumps({"enabled": True}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["mic_guard_enabled"] is True
+    assert flask_client.get("/api/settings").get_json()["mic_guard_enabled"] is True
+
+
 def test_set_hotkey_mode_rejects_unknown(flask_client):
     resp = flask_client.post(
         "/api/settings/hotkey-mode",

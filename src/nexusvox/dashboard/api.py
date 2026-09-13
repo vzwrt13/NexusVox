@@ -124,6 +124,7 @@ class DashboardAPI:
             "translator_url": self._config.translator.url,
             "hotkey_mode": self._config.hotkey.mode,
             "hotkey_modifiers": list(self._config.hotkey.modifiers),
+            "mic_guard_enabled": self._config.mic_guard.enabled,
         }
 
     def get_translator_status(self) -> dict:
@@ -151,6 +152,12 @@ class DashboardAPI:
         if mode not in HOTKEY_MODES:
             return {"error": f"Unsupported hotkey mode: {mode}", **self.get_settings()}
         self._config.hotkey.mode = mode
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_mic_guard_enabled(self, enabled: bool) -> dict:
+        """Checked by the app on every hold, so this is live."""
+        self._config.mic_guard.enabled = enabled
         save_config(self._config)
         return self.get_settings()
 

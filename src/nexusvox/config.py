@@ -167,12 +167,55 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
 @dataclass
 class HotkeyConfig:
     modifiers: list[str] = field(default_factory=lambda: ["ctrl", "shift", "alt"])
+    # Optional non-modifier key that completes the combo (e.g. "a", "f9", "space").
+    # Empty: the modifiers alone are the hotkey. Its keystrokes are swallowed while
+    # it is held as part of the combo, so the target app never sees the letter.
+    key: str = ""
     # "hold": record while the modifiers are held (push-to-talk).
     # "toggle": press once to start recording, press again to stop.
     mode: str = "hold"
 
 
 HOTKEY_MODES = ("hold", "toggle")
+HOTKEY_MODIFIERS = ("ctrl", "shift", "alt", "win")
+
+# Non-modifier keys a hotkey may end with, name -> Win32 virtual-key code. Layout
+# independent keys only: letters, digits, function keys and a few that never type.
+HOTKEY_KEY_VKS: dict[str, int] = {
+    **{chr(c): c for c in range(ord("A"), ord("Z") + 1)},
+    **{chr(c): c for c in range(ord("0"), ord("9") + 1)},
+    **{f"F{n}": 0x6F + n for n in range(1, 25)},
+    "SPACE": 0x20,
+    "CAPS_LOCK": 0x14,
+    "SCROLL_LOCK": 0x91,
+    "PAUSE": 0x13,
+    "INSERT": 0x2D,
+    "HOME": 0x24,
+    "END": 0x23,
+    "PAGE_UP": 0x21,
+    "PAGE_DOWN": 0x22,
+}
+
+
+def normalize_hotkey_key(key: str) -> str | None:
+    """Canonical (upper-case) key name, "" for none, None if unknown."""
+    name = (key or "").strip().upper()
+    if name == "":
+        return ""
+    return name if name in HOTKEY_KEY_VKS else None
+
+
+def validate_hotkey(modifiers: list[str], key: str) -> str | None:
+    """Error message for an unusable binding, None if it is fine."""
+    if any(m not in HOTKEY_MODIFIERS for m in modifiers):
+        return "Unknown modifier; use ctrl, shift, alt, win"
+    if len(set(modifiers)) != len(modifiers):
+        return "Duplicate modifier"
+    if normalize_hotkey_key(key) is None:
+        return f"Unknown key: {key}"
+    if not modifiers and not key:
+        return "A hotkey needs at least one modifier or a key"
+    return None
 
 
 @dataclass
@@ -317,6 +360,11 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     general = data.get("general", {})
     hotkey_data = data.get("hotkey", {})
     hotkey_mode = hotkey_data.get("mode", "hold")
+    hotkey_modifiers = list(hotkey_data.get("modifiers", ["ctrl", "shift", "alt"]))
+    hotkey_key = str(hotkey_data.get("key", ""))
+    if validate_hotkey(hotkey_modifiers, hotkey_key) is not None:
+        # An unusable binding would make the app unreachable; fall back to the default.
+        hotkey_modifiers, hotkey_key = ["ctrl", "shift", "alt"], ""
     audio_data = data.get("audio", {})
     inference_data = data.get("inference", {})
     db_data = data.get("database", {})
@@ -346,7 +394,8 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         injection_delay_ms=general.get("injection_delay_ms", 500),
         auto_language_detection=general.get("auto_language_detection", False),
         hotkey=HotkeyConfig(
-            modifiers=hotkey_data.get("modifiers", ["ctrl", "shift", "alt"]),
+            modifiers=hotkey_modifiers,
+            key=normalize_hotkey_key(hotkey_key) or "",
             mode=hotkey_mode if hotkey_mode in HOTKEY_MODES else "hold",
         ),
         audio=AudioConfig(
@@ -403,6 +452,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             "",
             "[hotkey]",
             "modifiers = [{}]".format(", ".join(f'"{m}"' for m in config.hotkey.modifiers)),
+            f'key = "{config.hotkey.key}"',
             f'mode = "{config.hotkey.mode}"',
             "",
             "[audio]",

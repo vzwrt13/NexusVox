@@ -26,6 +26,7 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 ## Features
 
 - **Push-to-talk** — hold `Ctrl+Shift+Alt`, speak, release; text is injected at the cursor instantly. Or switch to *Toggle* mode in Settings: press once to start, press again to stop
+- **Your own hotkey** — any modifiers, optionally ending in a key (`Ctrl+Shift+A`, `F9`, ...), set in Settings → Voice Input with a *Record* button or in `config.toml`. A bound letter is swallowed while it is held as part of the combo, so it never lands in the app you are dictating into
 - **GPU-backed transcription** — Voxtral (WebSocket streaming), Cohere and Parakeet run on NVIDIA GPUs via Docker; Whisper runs there too and is far quicker than on CPU
 - **CPU fallback** — six Whisper variants run in-process with no Docker and no GPU, for machines that have no other option
 - **Nine transcription models** — pick per recording in the dashboard

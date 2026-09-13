@@ -28,7 +28,30 @@
     <section id="tab-settings" class="tab-content active">
       <div class="settings-card">
         <h4 class="nexus-section-title">Voice Input</h4>
-        <p class="settings-hint" style="margin-top: 6px;">How the hotkey starts and stops a recording. Takes effect immediately.</p>
+        <p class="settings-hint" style="margin-top: 6px;">Which keys start a recording, and how. Takes effect immediately.</p>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Hotkey</h3>
+            <p class="hotkey-current">Current: <span id="hotkey-keycaps" class="keycaps"></span> <span id="hotkey-badge" class="badge" hidden></span></p>
+            <p>Default is <span id="hotkey-default-name">Ctrl+Shift+Alt</span>. Tick the modifiers you want and optionally pick one key to complete the combo, or click <em>Record</em> and press the combo. A key such as <code>A</code> is swallowed while it is held as part of the combo, so the letter never reaches the app you are dictating into.</p>
+            <p id="hotkey-status" class="status-line" hidden></p>
+          </div>
+          <div class="hotkey-editor">
+            <div class="hotkey-mods" id="hotkey-mods">
+              <label class="hotkey-mod"><input type="checkbox" value="ctrl"> Ctrl</label>
+              <label class="hotkey-mod"><input type="checkbox" value="shift"> Shift</label>
+              <label class="hotkey-mod"><input type="checkbox" value="alt"> Alt</label>
+              <label class="hotkey-mod"><input type="checkbox" value="win"> Win</label>
+              <span class="hotkey-plus">+</span>
+              <select id="hotkey-key-select" class="select-input hotkey-key"></select>
+            </div>
+            <div class="hotkey-actions">
+              <button type="button" id="hotkey-record-btn" class="period-btn">Record</button>
+              <button type="button" id="hotkey-reset-btn" class="period-btn">Reset to default</button>
+            </div>
+          </div>
+        </div>
 
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">

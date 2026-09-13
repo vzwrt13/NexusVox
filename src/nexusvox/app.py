@@ -20,7 +20,7 @@ from .dashboard import open_dashboard
 from .db import Database
 from .dictionary import apply_dictionary
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
-from .hotkey import HotkeyListener
+from .hotkey import HotkeyListener, describe_hotkey
 from .injector import inject_text
 from .lang_detect import detect_language
 from .mic_guard import MicGuard, create_mic_guard
@@ -465,7 +465,7 @@ class NexusVoxApp:
         logger.info(
             "NexusVox started. %s %s to talk.",
             "Press" if self._config.hotkey.mode == "toggle" else "Hold",
-            "+".join(m.capitalize() for m in self._config.hotkey.modifiers),
+            describe_hotkey(self._config.hotkey),
         )
 
         if self._mic_guard is not None:

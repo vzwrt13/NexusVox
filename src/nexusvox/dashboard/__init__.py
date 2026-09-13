@@ -90,6 +90,15 @@ def _create_app(api: DashboardAPI) -> Flask:
         result = api.set_hotkey_mode(data.get("mode", ""))
         return jsonify(result), (400 if "error" in result else 200)
 
+    @app.route("/api/settings/hotkey", methods=["POST"])
+    def set_hotkey():
+        data = request.get_json(force=True)
+        modifiers = data.get("modifiers", [])
+        if not isinstance(modifiers, list):
+            return jsonify({"error": "modifiers must be a list", **api.get_settings()}), 400
+        result = api.set_hotkey(modifiers, data.get("key", ""))
+        return jsonify(result), (400 if "error" in result else 200)
+
     @app.route("/api/settings/mic-guard", methods=["POST"])
     def set_mic_guard():
         data = request.get_json(force=True)

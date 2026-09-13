@@ -9,7 +9,19 @@ from pathlib import Path
 
 from sqlalchemy.orm import sessionmaker
 
-from ..config import HOTKEY_MODES, MODEL_REGISTRY, SUPPORTED_LANGUAGES, Config, resolve_device, save_config
+from ..config import (
+    HOTKEY_KEY_VKS,
+    HOTKEY_MODES,
+    HOTKEY_MODIFIERS,
+    MODEL_REGISTRY,
+    SUPPORTED_LANGUAGES,
+    Config,
+    HotkeyConfig,
+    normalize_hotkey_key,
+    resolve_device,
+    save_config,
+    validate_hotkey,
+)
 from ..db import Database
 from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
@@ -124,6 +136,10 @@ class DashboardAPI:
             "translator_url": self._config.translator.url,
             "hotkey_mode": self._config.hotkey.mode,
             "hotkey_modifiers": list(self._config.hotkey.modifiers),
+            "hotkey_key": self._config.hotkey.key,
+            "hotkey_default": {"modifiers": list(HotkeyConfig().modifiers), "key": HotkeyConfig().key},
+            "hotkey_modifier_options": list(HOTKEY_MODIFIERS),
+            "hotkey_key_options": list(HOTKEY_KEY_VKS),
             "mic_guard_enabled": self._config.mic_guard.enabled,
         }
 
@@ -152,6 +168,19 @@ class DashboardAPI:
         if mode not in HOTKEY_MODES:
             return {"error": f"Unsupported hotkey mode: {mode}", **self.get_settings()}
         self._config.hotkey.mode = mode
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_hotkey(self, modifiers: list, key: str) -> dict:
+        """Change the key binding. Live as well: the listener re-reads it on the next key event."""
+        modifiers = [str(m).lower() for m in modifiers]
+        key = str(key or "")
+        error = validate_hotkey(modifiers, key)
+        if error is not None:
+            return {"error": error, **self.get_settings()}
+        # Keep the canonical order so the config file and the hint read the same everywhere.
+        self._config.hotkey.modifiers = [m for m in HOTKEY_MODIFIERS if m in modifiers]
+        self._config.hotkey.key = normalize_hotkey_key(key) or ""
         save_config(self._config)
         return self.get_settings()
 

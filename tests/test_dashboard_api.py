@@ -591,3 +591,26 @@ def test_set_os_commands_apps(flask_client):
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["apps"] == apps
+
+
+def test_set_hotkey_binding(flask_client):
+    resp = flask_client.post(
+        "/api/settings/hotkey",
+        data=json.dumps({"modifiers": ["shift", "ctrl"], "key": "a"}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["hotkey_modifiers"] == ["ctrl", "shift"]  # canonical order
+    assert data["hotkey_key"] == "A"
+    assert "A" in data["hotkey_key_options"] and "F9" in data["hotkey_key_options"]
+    settings = flask_client.get("/api/settings").get_json()
+    assert settings["hotkey_modifiers"] == ["ctrl", "shift"] and settings["hotkey_key"] == "A"
+
+
+def test_set_hotkey_binding_rejects_unusable(flask_client):
+    for body in ({"modifiers": [], "key": ""}, {"modifiers": ["ctrl"], "key": "enter"}, {"modifiers": "ctrl"}):
+        resp = flask_client.post("/api/settings/hotkey", data=json.dumps(body), content_type="application/json")
+        assert resp.status_code == 400
+        assert "error" in resp.get_json()

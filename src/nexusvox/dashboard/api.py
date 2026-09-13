@@ -141,6 +141,7 @@ class DashboardAPI:
             "hotkey_modifier_options": list(HOTKEY_MODIFIERS),
             "hotkey_key_options": list(HOTKEY_KEY_VKS),
             "mic_guard_enabled": self._config.mic_guard.enabled,
+            "store_audio": self._config.database.store_audio,
         }
 
     def get_translator_status(self) -> dict:
@@ -187,6 +188,12 @@ class DashboardAPI:
     def set_mic_guard_enabled(self, enabled: bool) -> dict:
         """Checked by the app on every hold, so this is live."""
         self._config.mic_guard.enabled = enabled
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_store_audio(self, enabled: bool) -> dict:
+        """Checked by the app on every recording, so this is live."""
+        self._config.database.store_audio = enabled
         save_config(self._config)
         return self.get_settings()
 

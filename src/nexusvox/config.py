@@ -259,6 +259,8 @@ def resolve_compute_type(device: str, override: str | None) -> str:
 class DatabaseConfig:
     path: str = "nexusvox.db"
     audio_dir: str = "audio"
+    # Keep a WAV of every recording next to the database (the Review tab needs it).
+    store_audio: bool = True
 
 
 @dataclass
@@ -412,6 +414,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         database=DatabaseConfig(
             path=db_data.get("path", "nexusvox.db"),
             audio_dir=db_data.get("audio_dir", "audio"),
+            store_audio=bool(db_data.get("store_audio", True)),
         ),
         os_commands=OSCommandsConfig(
             enabled=os_cmd_data.get("enabled", False),
@@ -469,6 +472,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             "[database]",
             f'path = "{config.database.path}"',
             f'audio_dir = "{config.database.audio_dir}"',
+            f"store_audio = {'true' if config.database.store_audio else 'false'}",
             "",
             "[os_commands]",
             f"enabled = {'true' if config.os_commands.enabled else 'false'}",

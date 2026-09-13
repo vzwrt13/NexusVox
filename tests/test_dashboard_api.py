@@ -614,3 +614,16 @@ def test_set_hotkey_binding_rejects_unusable(flask_client):
         resp = flask_client.post("/api/settings/hotkey", data=json.dumps(body), content_type="application/json")
         assert resp.status_code == 400
         assert "error" in resp.get_json()
+
+
+def test_set_store_audio(flask_client):
+    assert flask_client.get("/api/settings").get_json()["store_audio"] is True
+    resp = flask_client.post(
+        "/api/settings/store-audio",
+        data=json.dumps({"enabled": False}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["store_audio"] is False
+    assert flask_client.get("/api/settings").get_json()["store_audio"] is False

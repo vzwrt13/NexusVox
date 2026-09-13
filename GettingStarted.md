@@ -190,6 +190,8 @@ device = "auto"
 path = "nexusvox.db"
 # Directory for saved audio recordings (relative to database path)
 audio_dir = "audio"
+# Keep a WAV file of every recording (needed for playback in the Review tab)
+store_audio = true
 
 [os_commands]
 # Enable "nexus" voice commands for OS-level window management

@@ -74,4 +74,4 @@ Symbol commands do not break `all caps` mode; structural commands do. Pattern is
 
 ## Audio Persistence
 
-Each recording saved as 16kHz mono WAV in the configurable `audio/` directory alongside the database. Enables batch review with playback in the dashboard Review/Edit tabs.
+Each recording saved as 16kHz mono WAV in the configurable `audio/` directory alongside the database, unless `[database].store_audio` is false (`App._store_audio` checks the flag per recording, so the dashboard toggle is live; the transcript row is saved either way with `audio_path` NULL, which the Review queue already filters out). Enables batch review with playback in the dashboard Review/Edit tabs.

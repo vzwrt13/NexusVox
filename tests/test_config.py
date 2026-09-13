@@ -403,3 +403,15 @@ def test_validate_hotkey():
     assert validate_hotkey(["ctrl", "ctrl"], "") is not None
     assert validate_hotkey(["ctrl"], "enter") is not None
     assert validate_hotkey(["meta"], "a") is not None
+
+
+def test_store_audio_defaults_on_and_roundtrips(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[database]\npath = "x.db"\n')
+    assert load_config(path).database.store_audio is True
+    path.write_text('[database]\npath = "x.db"\nstore_audio = false\n')
+    cfg = load_config(path)
+    assert cfg.database.store_audio is False
+    save_config(cfg, path)
+    assert "store_audio = false" in path.read_text()
+    assert load_config(path).database.store_audio is False

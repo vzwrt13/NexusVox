@@ -469,10 +469,12 @@ class NexusVoxApp:
         )
 
         if self._mic_guard is not None:
-            # Repair what a killed previous run left muted, and pay the one-off COM
-            # wrapper cost now instead of on the first key-down.
+            # Repair what a killed previous run left muted, even if the guard has been
+            # switched off since. The warm-up (one-off COM wrapper cost, otherwise paid
+            # on the first key-down) is only worth it while the guard is enabled.
             await self._loop.run_in_executor(None, self._mic_guard.restore_leftovers)
-            await self._loop.run_in_executor(None, self._mic_guard.warm_up)
+            if self._config.mic_guard.enabled:
+                await self._loop.run_in_executor(None, self._mic_guard.warm_up)
 
         # For in-process transcribers (Whisper on CPU), eagerly load the model
         # so the first hotkey press doesn't pay the full load + download latency.

@@ -245,6 +245,17 @@ class TranslatorConfig:
     timeout_s: float = 8.0
 
 
+@dataclass
+class MicGuardConfig:
+    """Mute every other app's microphone session (Discord, Teams, browser calls) while
+    push-to-talk is held, and put each back the way it was on release. Per-session
+    WASAPI mute, never the device. `watchdog_s` restores the microphones if no key-up
+    is ever seen while the keys are no longer physically down."""
+
+    enabled: bool = False
+    watchdog_s: float = 30.0
+
+
 _DEFAULT_SYMBOLS: list[str] = [
     "slash",
     "backslash",
@@ -283,6 +294,7 @@ class Config:
     voice_commands: VoiceCommandsConfig = field(default_factory=VoiceCommandsConfig)
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
     translator: TranslatorConfig = field(default_factory=TranslatorConfig)
+    mic_guard: MicGuardConfig = field(default_factory=MicGuardConfig)
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
@@ -305,6 +317,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     vc_data = data.get("voice_commands", None)
     assistant_data = data.get("assistant", {})
     translator_data = data.get("translator", {})
+    mic_guard_data = data.get("mic_guard", {})
 
     # Backward compat: old configs use general.voice_commands_enabled (bool only)
     if vc_data is not None:
@@ -359,6 +372,10 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             enabled=translator_data.get("enabled", False),
             url=translator_data.get("url", "http://127.0.0.1:8003/translate"),
             timeout_s=float(translator_data.get("timeout_s", 8.0)),
+        ),
+        mic_guard=MicGuardConfig(
+            enabled=mic_guard_data.get("enabled", False),
+            watchdog_s=float(mic_guard_data.get("watchdog_s", 30.0)),
         ),
     )
 
@@ -417,6 +434,10 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"enabled = {'true' if config.translator.enabled else 'false'}",
             f'url = "{config.translator.url}"',
             f"timeout_s = {config.translator.timeout_s}",
+            "",
+            "[mic_guard]",
+            f"enabled = {'true' if config.mic_guard.enabled else 'false'}",
+            f"watchdog_s = {config.mic_guard.watchdog_s}",
             "",
         ]
         path.write_text("\n".join(lines), encoding="utf-8")

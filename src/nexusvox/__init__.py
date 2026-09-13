@@ -8,4 +8,4 @@ Software Foundation, either version 3 of the License, or (at your option) any
 later version. See the LICENSE file for the full text.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

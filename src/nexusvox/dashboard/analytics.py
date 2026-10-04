@@ -23,7 +23,7 @@ def _apply_date_filter(query, start: str | None, end: str | None):
 
 
 def get_overview(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> dict:
-    """Total transcriptions, avg duration, WPM, and estimated time saved."""
+    """Totals, WPM, duration, latency, and estimated time saved."""
     with session_factory() as session:
         query = session.query(Transcription.text, Transcription.duration_ms)
         rows = _apply_date_filter(query, start, end).all()
@@ -31,11 +31,17 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
     if not rows:
         return {
             "total_transcriptions": 0,
+            "total_words": 0,
             "avg_duration_ms": 0,
+            "longest_duration_ms": 0,
+            "longest_words": 0,
             "avg_wpm": 0,
             "min_wpm": 0,
             "max_wpm": 0,
             "time_saved_minutes": 0,
+            "avg_transcribe_ms": None,
+            "avg_latency_ms": None,
+            "avg_rtf": None,
             "translated_count": 0,
             "avg_translate_ms": None,
             "translate_failures": 0,
@@ -43,7 +49,8 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
 
     total = len(rows)
     total_duration_ms = sum(r.duration_ms for r in rows)
-    total_words = sum(len(r.text.split()) for r in rows)
+    word_counts = [len(r.text.split()) for r in rows]
+    total_words = sum(word_counts)
 
     avg_duration_ms = total_duration_ms / total
     avg_wpm = (total_words / (total_duration_ms / 60_000)) if total_duration_ms > 0 else 0
@@ -56,10 +63,20 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         if r.duration_ms > 0:
             per_wpm.append(len(r.text.split()) / (r.duration_ms / 60_000))
 
-    # Average confidence (only over transcriptions that have one).
+    # Timing: how long the transcript took to arrive, how long until it was typed,
+    # and the real-time factor (transcribe time / audio length; below 1 is faster
+    # than real time). Only rows recorded since these columns exist count.
     with session_factory() as session:
-        conf_query = session.query(func.avg(Transcription.confidence)).filter(Transcription.confidence.isnot(None))
-        avg_conf = _apply_date_filter(conf_query, start, end).scalar()
+        timing_query = session.query(
+            func.avg(Transcription.transcribe_ms),
+            func.avg(Transcription.latency_ms),
+            func.sum(Transcription.transcribe_ms),
+            func.sum(Transcription.duration_ms).filter(Transcription.transcribe_ms.isnot(None)),
+        )
+        avg_transcribe_ms, avg_latency_ms, timed_transcribe_ms, timed_duration_ms = _apply_date_filter(
+            timing_query, start, end
+        ).one()
+    avg_rtf = timed_transcribe_ms / timed_duration_ms if timed_transcribe_ms and timed_duration_ms else None
 
     # Translate-before-inject: how often it ran, what it cost, how often it fell back.
     with session_factory() as session:
@@ -72,12 +89,17 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
 
     return {
         "total_transcriptions": total,
+        "total_words": total_words,
         "avg_duration_ms": round(avg_duration_ms),
+        "longest_duration_ms": max(r.duration_ms for r in rows),
+        "longest_words": max(word_counts),
         "avg_wpm": round(avg_wpm, 1),
         "min_wpm": round(min(per_wpm), 1) if per_wpm else 0,
         "max_wpm": round(max(per_wpm), 1) if per_wpm else 0,
         "time_saved_minutes": round(max(time_saved_min, 0), 1),
-        "avg_confidence": round(avg_conf, 4) if avg_conf is not None else None,
+        "avg_transcribe_ms": round(avg_transcribe_ms) if avg_transcribe_ms is not None else None,
+        "avg_latency_ms": round(avg_latency_ms) if avg_latency_ms is not None else None,
+        "avg_rtf": round(avg_rtf, 2) if avg_rtf is not None else None,
         "translated_count": int(translated_count or 0),
         "avg_translate_ms": round(avg_translate_ms) if avg_translate_ms is not None else None,
         "translate_failures": int(translate_failures or 0),
@@ -230,21 +252,59 @@ def get_unreviewed_transcriptions(
         }
 
 
-def get_confidence_over_time(
+def get_latency_over_time(
     session_factory: sessionmaker, period: str = "day", *, start: str | None = None, end: str | None = None
 ) -> dict:
-    """Average confidence grouped by time period."""
+    """Average transcribe and injection latency grouped by time period."""
     fmt = {"day": "%Y-%m-%d", "week": "%Y-W%W", "month": "%Y-%m"}.get(period, "%Y-%m-%d")
 
     with session_factory() as session:
         query = session.query(
             func.strftime(fmt, Transcription.created_at).label("period"),
-            func.avg(Transcription.confidence).label("avg_confidence"),
-        ).filter(Transcription.confidence.isnot(None))
+            func.avg(Transcription.transcribe_ms).label("transcribe_ms"),
+            func.avg(Transcription.latency_ms).label("latency_ms"),
+        ).filter(Transcription.transcribe_ms.isnot(None))
 
         rows = _apply_date_filter(query, start, end).group_by("period").order_by("period").all()
 
     return {
         "labels": [r.period for r in rows],
-        "values": [round(r.avg_confidence, 4) for r in rows],
+        "transcribe_ms": [round(r.transcribe_ms) for r in rows],
+        "latency_ms": [round(r.latency_ms) if r.latency_ms is not None else None for r in rows],
     }
+
+
+def get_model_breakdown(
+    session_factory: sessionmaker, *, start: str | None = None, end: str | None = None
+) -> list[dict]:
+    """Per-model count, WPM, duration, and transcribe latency, busiest model first."""
+    with session_factory() as session:
+        query = session.query(
+            Transcription.model,
+            Transcription.text,
+            Transcription.duration_ms,
+            Transcription.transcribe_ms,
+        )
+        rows = _apply_date_filter(query, start, end).all()
+
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(r.model or "unknown", []).append(r)
+
+    out = []
+    for model, items in groups.items():
+        words = sum(len(r.text.split()) for r in items)
+        duration_ms = sum(r.duration_ms for r in items)
+        timed = [r.transcribe_ms for r in items if r.transcribe_ms is not None]
+        out.append(
+            {
+                "model": model,
+                "count": len(items),
+                "words": words,
+                "avg_wpm": round(words / (duration_ms / 60_000), 1) if duration_ms > 0 else 0,
+                "avg_duration_ms": round(duration_ms / len(items)),
+                "avg_transcribe_ms": round(sum(timed) / len(timed)) if timed else None,
+            }
+        )
+    out.sort(key=lambda m: m["count"], reverse=True)
+    return out

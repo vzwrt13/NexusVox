@@ -603,13 +603,13 @@ function pollModelStatus(prevModel) {
 
 // ── Analytics Loading ────────────────────────────────────────────────
 async function loadAnalytics() {
-  const [overview, lang, hours, words, heatmap, confidence] = await Promise.all([
+  const [overview, lang, hours, words, heatmap, models] = await Promise.all([
     api("/api/overview"),
     api("/api/language-distribution"),
     api("/api/peak-usage-hours"),
     api("/api/top-words?n=20"),
     api("/api/activity-heatmap"),
-    api("/api/confidence-trend?period=" + currentPeriod),
+    api("/api/model-breakdown"),
   ]);
 
   renderOverview(overview);
@@ -617,24 +617,36 @@ async function loadAnalytics() {
   renderHours(hours);
   renderWords(words);
   renderHeatmap(heatmap);
-  renderConfidence(confidence);
+  renderModelBreakdown(models);
   loadTimeline();
 }
 
 async function loadTimeline() {
-  const data = await api("/api/transcriptions-over-time?period=" + currentPeriod);
-  renderTimeline(data);
+  const [timeline, latency] = await Promise.all([
+    api("/api/transcriptions-over-time?period=" + currentPeriod),
+    api("/api/latency-trend?period=" + currentPeriod),
+  ]);
+  renderTimeline(timeline);
+  renderLatency(latency);
 }
 
 // ── Render Functions ─────────────────────────────────────────────────
 function renderOverview(d) {
   document.getElementById("stat-total").textContent = d.total_transcriptions;
+  document.getElementById("stat-words").textContent = d.total_words.toLocaleString();
   document.getElementById("stat-wpm").textContent = d.avg_wpm;
-  document.getElementById("stat-min-wpm").textContent = d.min_wpm;
-  document.getElementById("stat-max-wpm").textContent = d.max_wpm;
+  document.getElementById("stat-wpm-label").textContent =
+    d.total_transcriptions ? `Avg WPM (${Math.round(d.min_wpm)} to ${Math.round(d.max_wpm)})` : "Avg WPM";
   document.getElementById("stat-duration").textContent = formatDuration(d.avg_duration_ms);
-  document.getElementById("stat-confidence").textContent =
-    d.avg_confidence != null ? (d.avg_confidence * 100).toFixed(1) + "%" : "--";
+  document.getElementById("stat-longest").textContent = formatDuration(d.longest_duration_ms);
+  document.getElementById("stat-longest-label").textContent =
+    d.longest_words ? `Longest (${d.longest_words} words)` : "Longest Dictation";
+  document.getElementById("stat-transcribe").textContent =
+    d.avg_transcribe_ms != null ? formatDuration(d.avg_transcribe_ms) : "--";
+  document.getElementById("stat-transcribe-label").textContent =
+    d.avg_rtf != null ? `Transcribe (${d.avg_rtf}x real time)` : "Transcribe Time";
+  document.getElementById("stat-latency").textContent =
+    d.avg_latency_ms != null ? formatDuration(d.avg_latency_ms) : "--";
   document.getElementById("stat-saved").textContent = d.time_saved_minutes;
   document.getElementById("stat-translated").textContent = d.translated_count;
   const parts = [];
@@ -770,34 +782,75 @@ function renderHeatmap(d) {
   container.innerHTML = html;
 }
 
-// ── Confidence Trend Chart ───────────────────────────────────────────
-function renderConfidence(d) {
-  if (charts.confidence) charts.confidence.destroy();
+// ── Latency Trend Chart ──────────────────────────────────────────────
+function renderLatency(d) {
+  if (charts.latency) charts.latency.destroy();
   if (!d.labels.length) return;
-  const ctx = document.getElementById("chart-confidence").getContext("2d");
-  charts.confidence = new Chart(ctx, {
+  const ctx = document.getElementById("chart-latency").getContext("2d");
+  const pointRadius = d.labels.length > 30 ? 0 : 3;
+  charts.latency = new Chart(ctx, {
     type: "line",
     data: {
       labels: d.labels,
-      datasets: [{
-        data: d.values.map((v) => +(v * 100).toFixed(1)),
-        borderColor: COLORS.green,
-        backgroundColor: COLORS.greenAlpha,
-        fill: true,
-        tension: 0.3,
-        pointRadius: d.labels.length > 30 ? 0 : 3,
-        pointBackgroundColor: COLORS.green,
-      }],
+      datasets: [
+        {
+          label: "Transcribe",
+          data: d.transcribe_ms,
+          borderColor: COLORS.green,
+          backgroundColor: COLORS.greenAlpha,
+          fill: true,
+          tension: 0.3,
+          pointRadius,
+          pointBackgroundColor: COLORS.green,
+        },
+        {
+          label: "Release to text",
+          data: d.latency_ms,
+          borderColor: COLORS.accent,
+          backgroundColor: "transparent",
+          tension: 0.3,
+          pointRadius,
+          pointBackgroundColor: COLORS.accent,
+        },
+      ],
     },
     options: {
       ...chartDefaults,
       scales: {
         ...chartDefaults.scales,
-        y: { ...chartDefaults.scales.y, min: 0, max: 100, ticks: { ...chartDefaults.scales.y.ticks, callback: (v) => v + "%" } },
+        y: { ...chartDefaults.scales.y, ticks: { ...chartDefaults.scales.y.ticks, callback: (v) => formatDuration(v) } },
       },
-      plugins: { ...chartDefaults.plugins, tooltip: { mode: "index", intersect: false, callbacks: { label: (c) => c.parsed.y + "%" } } },
+      plugins: {
+        legend: { display: true, labels: { color: COLORS.dim, boxWidth: 12 } },
+        tooltip: {
+          mode: "index",
+          intersect: false,
+          callbacks: { label: (c) => c.dataset.label + ": " + (c.parsed.y != null ? formatDuration(c.parsed.y) : "--") },
+        },
+      },
     },
   });
+}
+
+// ── Per-Model Table ──────────────────────────────────────────────────
+function renderModelBreakdown(rows) {
+  const body = document.getElementById("model-breakdown");
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">No transcriptions yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows
+    .map(
+      (m) => `<tr>
+        <td>${escapeHtml(m.model)}</td>
+        <td>${m.count}</td>
+        <td>${m.words.toLocaleString()}</td>
+        <td>${m.avg_wpm}</td>
+        <td>${formatDuration(m.avg_duration_ms)}</td>
+        <td>${m.avg_transcribe_ms != null ? formatDuration(m.avg_transcribe_ms) : "--"}</td>
+      </tr>`
+    )
+    .join("");
 }
 
 // ── Flagged Transcriptions (Edit Tab) ────────────────────────────────

@@ -269,7 +269,8 @@ class NexusVoxApp:
             self._audio.stop()
             audio_buffer = await stream_task
 
-            duration_ms = int((time.monotonic() - start_time) * 1000)
+            stop_time = time.monotonic()
+            duration_ms = int((stop_time - start_time) * 1000)
             logger.info("Recording stopped (duration=%dms)", duration_ms)
 
             self._tray.set_active(False)
@@ -277,6 +278,8 @@ class NexusVoxApp:
 
             # Finalize transcription
             result = await self._transcriber.finish()
+            transcribe_ms = int((time.monotonic() - stop_time) * 1000)
+            logger.info("Transcript received after %dms", transcribe_ms)
 
             if result.text.strip():
                 raw_text = result.text.strip()
@@ -324,6 +327,7 @@ class NexusVoxApp:
                             duration_ms=duration_ms,
                             confidence=result.confidence,
                             model=self._transcriber.model,
+                            transcribe_ms=transcribe_ms,
                         )
                         self._store_audio(audio_buffer, record.id)
                         await self._transcriber.disconnect()
@@ -346,6 +350,7 @@ class NexusVoxApp:
                         duration_ms=duration_ms,
                         confidence=result.confidence,
                         model=self._transcriber.model,
+                        transcribe_ms=transcribe_ms,
                     )
                     logger.info("Nexus command: %s %s", nexus_cmd.action, nexus_cmd.app_name)
                     self._store_audio(audio_buffer, record.id)
@@ -388,6 +393,7 @@ class NexusVoxApp:
                     translation.text,
                     delay,
                 )
+                latency_ms = int((time.monotonic() - stop_time) * 1000)
                 language = detect_language(raw_text) if self._config.auto_language_detection else self._config.language
                 record = self._db.save_transcription(
                     text=processed_text,
@@ -399,8 +405,10 @@ class NexusVoxApp:
                     translate_source=translation.source,
                     translate_ms=translation.ms,
                     translate_error=translation.error,
+                    transcribe_ms=transcribe_ms,
+                    latency_ms=latency_ms,
                 )
-                logger.info("Injected: %s", translation.text)
+                logger.info("Injected after %dms: %s", latency_ms, translation.text)
 
                 self._store_audio(audio_buffer, record.id)
             else:

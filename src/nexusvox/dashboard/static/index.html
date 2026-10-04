@@ -252,24 +252,28 @@
           <span class="stat-label">Transcriptions</span>
         </div>
         <div class="stat-card">
+          <span class="stat-value" id="stat-words">--</span>
+          <span class="stat-label">Words Dictated</span>
+        </div>
+        <div class="stat-card">
           <span class="stat-value" id="stat-wpm">--</span>
-          <span class="stat-label">Avg WPM</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value" id="stat-min-wpm">--</span>
-          <span class="stat-label">Min WPM</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value" id="stat-max-wpm">--</span>
-          <span class="stat-label">Max WPM</span>
+          <span class="stat-label" id="stat-wpm-label">Avg WPM</span>
         </div>
         <div class="stat-card">
           <span class="stat-value" id="stat-duration">--</span>
           <span class="stat-label">Avg Duration</span>
         </div>
         <div class="stat-card">
-          <span class="stat-value" id="stat-confidence">--</span>
-          <span class="stat-label">Avg Confidence</span>
+          <span class="stat-value" id="stat-longest">--</span>
+          <span class="stat-label" id="stat-longest-label">Longest Dictation</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-transcribe">--</span>
+          <span class="stat-label" id="stat-transcribe-label">Transcribe Time</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value" id="stat-latency">--</span>
+          <span class="stat-label">Release to Text</span>
         </div>
         <div class="stat-card">
           <span class="stat-value" id="stat-translated">--</span>
@@ -312,8 +316,26 @@
           <canvas id="chart-hours"></canvas>
         </div>
         <div class="chart-card wide">
-          <h3>Confidence Trend</h3>
-          <canvas id="chart-confidence"></canvas>
+          <h3>Latency Trend</h3>
+          <canvas id="chart-latency"></canvas>
+        </div>
+        <div class="chart-card wide">
+          <h3>By Model</h3>
+          <div class="table-wrap">
+            <table class="model-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Transcriptions</th>
+                  <th>Words</th>
+                  <th>Avg WPM</th>
+                  <th>Avg Duration</th>
+                  <th>Transcribe Time</th>
+                </tr>
+              </thead>
+              <tbody id="model-breakdown"></tbody>
+            </table>
+          </div>
         </div>
         <div class="chart-card wide">
           <h3>Top Words</h3>

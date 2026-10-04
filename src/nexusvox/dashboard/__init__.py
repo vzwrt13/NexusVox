@@ -243,11 +243,16 @@ def _create_app(api: DashboardAPI) -> Flask:
     def delete_dictionary_entry(entry_id):
         return jsonify(api.delete_dictionary_entry(entry_id))
 
-    @app.route("/api/confidence-trend")
-    def confidence_trend():
+    @app.route("/api/latency-trend")
+    def latency_trend():
         period = request.args.get("period", "day")
         start, end = _date_args()
-        return jsonify(api.get_confidence_trend(period, start, end))
+        return jsonify(api.get_latency_trend(period, start, end))
+
+    @app.route("/api/model-breakdown")
+    def model_breakdown():
+        start, end = _date_args()
+        return jsonify(api.get_model_breakdown(start, end))
 
     # ---- File Upload Transcription endpoints --------------------------------
 

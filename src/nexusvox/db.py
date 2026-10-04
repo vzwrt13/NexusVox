@@ -33,6 +33,8 @@ class Database:
             "ALTER TABLE transcriptions ADD COLUMN translate_source VARCHAR(5)",
             "ALTER TABLE transcriptions ADD COLUMN translate_ms INTEGER",
             "ALTER TABLE transcriptions ADD COLUMN translate_error VARCHAR(200)",
+            "ALTER TABLE transcriptions ADD COLUMN transcribe_ms INTEGER",
+            "ALTER TABLE transcriptions ADD COLUMN latency_ms INTEGER",
         ]
         with self._engine.connect() as conn:
             for sql in migrations:
@@ -54,6 +56,8 @@ class Database:
         translate_source: str | None = None,
         translate_ms: int | None = None,
         translate_error: str | None = None,
+        transcribe_ms: int | None = None,
+        latency_ms: int | None = None,
     ) -> Transcription:
         """Save a transcription record to the database."""
         with self._session_factory() as session:
@@ -69,6 +73,8 @@ class Database:
                 translate_source=translate_source,
                 translate_ms=translate_ms,
                 translate_error=translate_error,
+                transcribe_ms=transcribe_ms,
+                latency_ms=latency_ms,
             )
             session.add(record)
             session.commit()

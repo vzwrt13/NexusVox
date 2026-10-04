@@ -63,7 +63,6 @@ class HotkeyListener:
         self._command_config = command_config
         self._on_command = on_command
         self._command = False  # this recording is a command
-        self._command_pending = False  # command key came before the combo completed
         self._command_swallowed = False  # command key is held since a swallowed key-down
 
         self._binding: tuple[tuple[str, ...], str] | None = None
@@ -117,9 +116,6 @@ class HotkeyListener:
             self._active = True
             self._command = False
             self._on_activate()
-            if self._command_pending:
-                self._command_pending = False
-                self._mark_command()
 
     def _command_vk(self) -> int | None:
         cfg = self._command_config
@@ -133,20 +129,19 @@ class HotkeyListener:
             self._on_command()
 
     def _handle_command_key(self, pressed: bool) -> bool:
-        """The command key: swallowed while it belongs to a recording, typed otherwise."""
+        """The command key: swallowed when it completes the chord during a recording, typed otherwise.
+
+        It only counts with every binding modifier down, so Shift+key, AltGr+key and a
+        bare key typed while a toggle recording runs still reach the application.
+        """
         if not pressed:
             swallowed, self._command_swallowed = self._command_swallowed, False
             return swallowed
         if self._command_swallowed:
             return True  # auto-repeat
-        if self._active:
+        if self._active and self._modifiers <= self._pressed_modifiers:
             self._command_swallowed = True
             self._mark_command()
-            return True
-        if self._pressed_modifiers & self._modifiers:
-            # Pressed a moment before the last modifier: count it for the coming recording.
-            self._command_swallowed = True
-            self._command_pending = True
             return True
         return False
 
@@ -188,8 +183,6 @@ class HotkeyListener:
                 self._complete_press()
             return False
         self._pressed_modifiers.discard(modifier)
-        if not self._pressed_modifiers:
-            self._command_pending = False  # the combo never completed
         if self._combo_down:
             self._combo_broken()
         return False

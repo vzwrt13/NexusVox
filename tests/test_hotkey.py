@@ -212,17 +212,17 @@ def test_describe_hotkey():
 
 # -- command key (os-control) -----------------------------------------------------
 
-VK_OEM_102 = 0xE2
+VK_Y, VK_OEM_102, RALT = ord("Y"), 0xE2, 0xA5
 
 
-def _command_listener(mode: str = "hold", enabled: bool = True):
+def _command_listener(mode: str = "hold", enabled: bool = True, modifiers=("ctrl", "alt"), command_key: str = "Y"):
     events: list[str] = []
-    config = HotkeyConfig(modifiers=["ctrl", "alt"], key="", mode=mode)
+    config = HotkeyConfig(modifiers=list(modifiers), key="", mode=mode)
     hk = HotkeyListener(
         config,
         lambda: events.append("start"),
         lambda: events.append("stop"),
-        command_config=OsControlConfig(enabled=enabled),
+        command_config=OsControlConfig(enabled=enabled, command_key=command_key),
         on_command=lambda: events.append("command"),
     )
     return hk, events
@@ -231,9 +231,9 @@ def _command_listener(mode: str = "hold", enabled: bool = True):
 def test_command_key_during_hold_marks_the_recording_and_is_swallowed():
     hk, events = _command_listener()
     _press_combo(hk)
-    assert hk._handle(VK_OEM_102, True) is True
-    assert hk._handle(VK_OEM_102, True) is True  # auto-repeat
-    assert hk._handle(VK_OEM_102, False) is True
+    assert hk._handle(VK_Y, True) is True
+    assert hk._handle(VK_Y, True) is True  # auto-repeat
+    assert hk._handle(VK_Y, False) is True
     _release_combo(hk)
     assert events == ["start", "command", "stop"]
     assert hk.command  # still readable after the stop
@@ -242,10 +242,10 @@ def test_command_key_during_hold_marks_the_recording_and_is_swallowed():
 def test_command_key_fires_once_and_resets_on_next_recording():
     hk, events = _command_listener()
     _press_combo(hk)
-    hk._handle(VK_OEM_102, True)
-    hk._handle(VK_OEM_102, False)
-    hk._handle(VK_OEM_102, True)
-    hk._handle(VK_OEM_102, False)
+    hk._handle(VK_Y, True)
+    hk._handle(VK_Y, False)
+    hk._handle(VK_Y, True)
+    hk._handle(VK_Y, False)
     _release_combo(hk)
     assert events.count("command") == 1
     _press_combo(hk)
@@ -253,33 +253,40 @@ def test_command_key_fires_once_and_resets_on_next_recording():
     _release_combo(hk)
 
 
-def test_command_key_before_the_last_modifier_still_counts():
+def test_command_key_before_the_last_modifier_types_normally():
     hk, events = _command_listener()
     hk._handle(LCTRL, True)
-    assert hk._handle(VK_OEM_102, True) is True
+    assert hk._handle(VK_Y, True) is False
     hk._handle(LALT, True)
-    assert events == ["start", "command"] and hk.command
-    assert hk._handle(VK_OEM_102, False) is True
+    assert hk._handle(VK_Y, False) is False
     _release_combo(hk)
+    assert events == ["start", "stop"] and not hk.command
 
 
-def test_pending_command_is_dropped_when_the_combo_never_completes():
-    hk, events = _command_listener()
+def test_command_key_with_some_binding_modifiers_types_normally():
+    # Shift+Y (a capital Y) and AltGr+key (reported as LCtrl+RAlt) must reach the app
+    # while the binding is Ctrl+Shift+Alt.
+    hk, events = _command_listener(modifiers=("ctrl", "shift", "alt"))
+    hk._handle(LSHIFT, True)
+    assert hk._handle(VK_Y, True) is False
+    assert hk._handle(VK_Y, False) is False
+    hk._handle(LSHIFT, False)
     hk._handle(LCTRL, True)
-    hk._handle(VK_OEM_102, True)
-    hk._handle(VK_OEM_102, False)
+    hk._handle(RALT, True)
+    assert hk._handle(VK_Y, True) is False
+    assert hk._handle(VK_Y, False) is False
+    hk._handle(RALT, False)
     hk._handle(LCTRL, False)
-    _press_combo(hk)
-    assert events == ["start"] and not hk.command
+    assert events == [] and not hk.command
 
 
 def test_command_key_types_normally_outside_a_recording_or_when_disabled():
     hk, events = _command_listener()
-    assert hk._handle(VK_OEM_102, True) is False
-    assert hk._handle(VK_OEM_102, False) is False
+    assert hk._handle(VK_Y, True) is False
+    assert hk._handle(VK_Y, False) is False
     off, off_events = _command_listener(enabled=False)
     _press_combo(off)
-    assert off._handle(VK_OEM_102, True) is False
+    assert off._handle(VK_Y, True) is False
     _release_combo(off)
     assert "command" not in off_events and not off.command
 
@@ -287,8 +294,27 @@ def test_command_key_types_normally_outside_a_recording_or_when_disabled():
 def test_command_key_in_toggle_mode():
     hk, events = _command_listener(mode="toggle")
     _press_combo(hk)
+    assert hk._handle(VK_Y, True) is True
+    hk._handle(VK_Y, False)
     _release_combo(hk)
-    hk._handle(VK_OEM_102, True)
-    hk._handle(VK_OEM_102, False)
     _press_combo(hk)
     assert events == ["start", "command", "stop"] and hk.command
+
+
+def test_bare_command_key_during_a_toggle_recording_types_normally():
+    hk, events = _command_listener(mode="toggle")
+    _press_combo(hk)
+    _release_combo(hk)
+    assert hk._handle(VK_Y, True) is False
+    assert hk._handle(VK_Y, False) is False
+    assert events == ["start"] and not hk.command
+
+
+def test_oem_102_still_works_as_command_key():
+    hk, events = _command_listener(command_key="OEM_102")
+    _press_combo(hk)
+    assert hk._handle(VK_OEM_102, True) is True
+    assert hk._handle(VK_Y, True) is False  # Y is not the command key here
+    hk._handle(VK_OEM_102, False)
+    _release_combo(hk)
+    assert events == ["start", "command", "stop"]

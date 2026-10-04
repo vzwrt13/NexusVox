@@ -281,9 +281,10 @@ class AssistantConfig:
     timeout_s: float = 5.0
 
 
-# Keys that can mark a recording as an os-control command. OEM_102 is the "<" key left of Y/Z
-# on a German (ISO) keyboard.
-COMMAND_KEY_VKS: dict[str, int] = {"OEM_102": 0xE2}
+# Keys that can mark a recording as an os-control command, pressed as the last key of the
+# hotkey chord (Ctrl+Shift+Alt+Y by default). OEM_102 is the "<" key left of Y/Z on a
+# German (ISO) keyboard.
+COMMAND_KEY_VKS: dict[str, int] = {"Y": 0x59, "OEM_102": 0xE2}
 
 
 @dataclass
@@ -293,7 +294,7 @@ class OsControlConfig:
     typing it (the personal-tooling Controller's os-control service)."""
 
     enabled: bool = False
-    command_key: str = "OEM_102"
+    command_key: str = "Y"
     host: str = "127.0.0.1"
     port: int = 49730
     service: str = "os-control"
@@ -394,7 +395,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     vc_data = data.get("voice_commands", None)
     assistant_data = data.get("assistant", {})
     switcher_data = data.get("os_control", {})
-    command_key = str(switcher_data.get("command_key", "OEM_102")).upper()
+    command_key = str(switcher_data.get("command_key", "Y")).upper()
     translator_data = data.get("translator", {})
     mic_guard_data = data.get("mic_guard", {})
 
@@ -452,7 +453,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         ),
         os_control=OsControlConfig(
             enabled=switcher_data.get("enabled", False),
-            command_key=command_key if command_key in COMMAND_KEY_VKS else "OEM_102",
+            command_key=command_key if command_key in COMMAND_KEY_VKS else "Y",
             host=switcher_data.get("host", "127.0.0.1"),
             port=int(switcher_data.get("port", 49730)),
             service=switcher_data.get("service", "os-control"),

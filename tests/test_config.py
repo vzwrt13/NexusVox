@@ -432,4 +432,10 @@ def test_os_control_unknown_command_key_falls_back(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[os_control]\ncommand_key = "tilde"\n')
     cfg = load_config(path)
-    assert cfg.os_control.command_key == "OEM_102" and not cfg.os_control.enabled
+    assert cfg.os_control.command_key == "Y" and not cfg.os_control.enabled
+
+
+def test_os_control_command_key_defaults_to_y(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[os_control]\nenabled = true\n")
+    assert load_config(path).os_control.command_key == "Y"

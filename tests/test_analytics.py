@@ -8,6 +8,8 @@ from nexusvox.dashboard.analytics import (
     get_activity_heatmap,
     get_flagged_transcriptions,
     get_language_distribution,
+    get_latency_over_time,
+    get_model_breakdown,
     get_overview,
     get_peak_usage_hours,
     get_top_words,
@@ -107,38 +109,183 @@ def test_overview_time_saved_not_negative(session_factory):
     assert result["time_saved_minutes"] >= 0
 
 
-def test_overview_avg_confidence(session_factory):
-    """Average confidence computed only from records that have one."""
+def test_overview_word_and_longest_stats(session_factory):
     _seed(
         session_factory,
         [
-            {
-                "text": "a b c",
-                "language": "en",
-                "duration_ms": 1000,
-                "confidence": 0.90,
-                "created_at": datetime(2026, 3, 15),
-            },
-            {
-                "text": "d e f",
-                "language": "en",
-                "duration_ms": 1000,
-                "confidence": 0.80,
-                "created_at": datetime(2026, 3, 15),
-            },
-            {
-                "text": "g h i",
-                "language": "en",
-                "duration_ms": 1000,
-                "confidence": None,
-                "created_at": datetime(2026, 3, 15),
-            },
+            {"text": "one two three", "language": "en", "duration_ms": 3000, "created_at": datetime(2026, 3, 15)},
+            {"text": "four five", "language": "en", "duration_ms": 9000, "created_at": datetime(2026, 3, 15)},
+            {"text": "a b c d e f", "language": "en", "duration_ms": 4000, "created_at": datetime(2026, 3, 15)},
         ],
     )
 
     result = get_overview(session_factory)
-    assert result["avg_confidence"] is not None
-    assert abs(result["avg_confidence"] - 0.85) < 0.01
+
+    assert result["total_words"] == 11
+    assert result["longest_duration_ms"] == 9000
+    assert result["longest_words"] == 6
+
+
+def test_overview_timing_stats(session_factory):
+    """Latency averages skip rows recorded before the timing columns existed."""
+    _seed(
+        session_factory,
+        [
+            {
+                "text": "a",
+                "language": "en",
+                "duration_ms": 2000,
+                "created_at": datetime(2026, 3, 15),
+                "transcribe_ms": 400,
+                "latency_ms": 700,
+            },
+            {
+                "text": "b",
+                "language": "en",
+                "duration_ms": 4000,
+                "created_at": datetime(2026, 3, 15),
+                "transcribe_ms": 800,
+                "latency_ms": 900,
+            },
+            {"text": "c", "language": "en", "duration_ms": 100_000, "created_at": datetime(2026, 3, 15)},
+        ],
+    )
+
+    result = get_overview(session_factory)
+
+    assert result["avg_transcribe_ms"] == 600
+    assert result["avg_latency_ms"] == 800
+    # (400 + 800) / (2000 + 4000); the untimed 100 s row must not dilute it.
+    assert result["avg_rtf"] == 0.2
+
+
+def test_overview_timing_stats_empty(session_factory):
+    result = get_overview(session_factory)
+
+    assert result["avg_transcribe_ms"] is None
+    assert result["avg_latency_ms"] is None
+    assert result["avg_rtf"] is None
+
+
+def test_overview_timing_stats_untimed_rows_only(session_factory):
+    _seed(
+        session_factory,
+        [{"text": "a", "language": "en", "duration_ms": 2000, "created_at": datetime(2026, 3, 15)}],
+    )
+
+    result = get_overview(session_factory)
+
+    assert result["avg_transcribe_ms"] is None
+    assert result["avg_rtf"] is None
+
+
+# ---- get_latency_over_time ------------------------------------------------
+
+
+def test_latency_over_time_by_day(session_factory):
+    _seed(
+        session_factory,
+        [
+            {
+                "text": "a",
+                "language": "en",
+                "duration_ms": 1000,
+                "created_at": datetime(2026, 3, 15),
+                "transcribe_ms": 100,
+                "latency_ms": 300,
+            },
+            {
+                "text": "b",
+                "language": "en",
+                "duration_ms": 1000,
+                "created_at": datetime(2026, 3, 15),
+                "transcribe_ms": 300,
+                "latency_ms": None,
+            },
+            {
+                "text": "c",
+                "language": "en",
+                "duration_ms": 1000,
+                "created_at": datetime(2026, 3, 16),
+                "transcribe_ms": 500,
+                "latency_ms": 600,
+            },
+            {"text": "d", "language": "en", "duration_ms": 1000, "created_at": datetime(2026, 3, 17)},
+        ],
+    )
+
+    result = get_latency_over_time(session_factory, "day")
+
+    assert result["labels"] == ["2026-03-15", "2026-03-16"]
+    assert result["transcribe_ms"] == [200, 500]
+    assert result["latency_ms"] == [300, 600]
+
+
+def test_latency_over_time_empty(session_factory):
+    result = get_latency_over_time(session_factory, "day")
+
+    assert result == {"labels": [], "transcribe_ms": [], "latency_ms": []}
+
+
+# ---- get_model_breakdown --------------------------------------------------
+
+
+def test_model_breakdown(session_factory):
+    _seed(
+        session_factory,
+        [
+            {
+                "text": "one two",
+                "language": "en",
+                "duration_ms": 1000,
+                "created_at": datetime(2026, 3, 15),
+                "model": "parakeet-tdt-0.6b",
+                "transcribe_ms": 200,
+            },
+            {
+                "text": "three four five six",
+                "language": "en",
+                "duration_ms": 3000,
+                "created_at": datetime(2026, 3, 15),
+                "model": "parakeet-tdt-0.6b",
+                "transcribe_ms": 400,
+            },
+            {
+                "text": "seven",
+                "language": "en",
+                "duration_ms": 1000,
+                "created_at": datetime(2026, 3, 15),
+                "model": "whisper-small",
+            },
+        ],
+    )
+
+    result = get_model_breakdown(session_factory)
+
+    assert [m["model"] for m in result] == ["parakeet-tdt-0.6b", "whisper-small"]
+    parakeet, whisper = result
+    assert parakeet["count"] == 2
+    assert parakeet["words"] == 6
+    assert parakeet["avg_wpm"] == 90.0
+    assert parakeet["avg_duration_ms"] == 2000
+    assert parakeet["avg_transcribe_ms"] == 300
+    assert whisper["count"] == 1
+    assert whisper["avg_transcribe_ms"] is None
+
+
+def test_model_breakdown_unknown_model(session_factory):
+    _seed(
+        session_factory,
+        [{"text": "a", "language": "en", "duration_ms": 1000, "created_at": datetime(2026, 3, 15)}],
+    )
+
+    result = get_model_breakdown(session_factory)
+
+    assert result[0]["model"] == "unknown"
+
+
+def test_model_breakdown_empty(session_factory):
+    assert get_model_breakdown(session_factory) == []
 
 
 # ---- get_transcriptions_over_time -----------------------------------------

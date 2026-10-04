@@ -336,8 +336,11 @@ class DashboardAPI:
             return {"ok": False, "error": "DB not available"}
         return {"ok": self._db.delete_dictionary_entry(entry_id)}
 
-    def get_confidence_trend(self, period: str = "day", start: str | None = None, end: str | None = None) -> dict:
-        return analytics.get_confidence_over_time(self._sf, period, start=start, end=end)
+    def get_latency_trend(self, period: str = "day", start: str | None = None, end: str | None = None) -> dict:
+        return analytics.get_latency_over_time(self._sf, period, start=start, end=end)
+
+    def get_model_breakdown(self, start: str | None = None, end: str | None = None) -> list[dict]:
+        return analytics.get_model_breakdown(self._sf, start=start, end=end)
 
     # ---- File Upload Transcription -----------------------------------------
 

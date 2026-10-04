@@ -47,6 +47,10 @@ class Transcription(Base):
     translate_source: Mapped[str | None] = mapped_column(String(5), nullable=True)
     translate_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     translate_error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Timing, both measured from the moment recording stopped: how long the
+    # transcript took to arrive, and how long until the text was at the cursor.
+    transcribe_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class FileTranscription(Base):

@@ -48,6 +48,18 @@ def test_save_transcription_with_confidence(db):
     assert record.confidence == 0.95
 
 
+def test_save_transcription_timing_defaults_to_none(db):
+    record = db.save_transcription("hi", "en", 500)
+    assert record.transcribe_ms is None
+    assert record.latency_ms is None
+
+
+def test_save_transcription_with_timing(db):
+    record = db.save_transcription("hi", "en", 500, transcribe_ms=320, latency_ms=610)
+    assert record.transcribe_ms == 320
+    assert record.latency_ms == 610
+
+
 def test_save_transcription_with_audio_path(db):
     record = db.save_transcription("hi", "en", 500, audio_path="audio/1_123.wav")
     assert record.audio_path == "audio/1_123.wav"

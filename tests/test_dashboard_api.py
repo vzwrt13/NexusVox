@@ -228,13 +228,21 @@ def test_correct_transcription_endpoint(flask_client, db):
     assert resp.get_json()["ok"] is True
 
 
-def test_confidence_trend_endpoint(flask_client):
-    resp = flask_client.get("/api/confidence-trend?period=week")
+def test_latency_trend_endpoint(flask_client):
+    resp = flask_client.get("/api/latency-trend?period=week")
 
     assert resp.status_code == 200
     data = resp.get_json()
-    assert "labels" in data
-    assert "values" in data
+    assert set(data.keys()) == {"labels", "transcribe_ms", "latency_ms"}
+
+
+def test_model_breakdown_endpoint(flask_client, sample_transcriptions):
+    resp = flask_client.get("/api/model-breakdown")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert len(data) == 1
+    assert data[0]["count"] == len(sample_transcriptions)
 
 
 # ── Model endpoints ──────────────────────────────────────────────────

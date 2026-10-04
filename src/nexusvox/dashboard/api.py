@@ -27,7 +27,7 @@ from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..os_commands import NEXUS_ACTIONS
 from ..translator import is_reachable
-from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_SYMBOL_INFO
+from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
 from . import analytics
 from . import benchmarks as bench
 
@@ -237,7 +237,7 @@ class DashboardAPI:
         return self.get_voice_commands()
 
     def set_voice_commands_structural(self, structural: list[str]) -> dict:
-        self._config.voice_commands.structural = structural
+        self._config.voice_commands.structural = [k for k in structural if k in ALL_STRUCTURAL_KEYWORDS]
         save_config(self._config)
         return self.get_voice_commands()
 

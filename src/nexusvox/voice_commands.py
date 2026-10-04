@@ -187,7 +187,8 @@ def _words_to_int(words: list[str]) -> int:
 
 
 _WORD_RE: re.Pattern[str] = re.compile(r"[^\W\d_]+")
-_SEP_RE: re.Pattern[str] = re.compile(r"[\s-]+")
+# Horizontal whitespace or hyphen only: a number run must not span a line break.
+_SEP_RE: re.Pattern[str] = re.compile(r"(?:[^\S\r\n]|-)+")
 
 _DE_UNITS: dict[str, int] = {
     "null": 0,
@@ -345,6 +346,15 @@ def _convert_numbers_de(text: str) -> str:
                     and _SEP_RE.fullmatch(text[m.end() : nxt.start()])
                     and (nxt_word in _DE_BIG_SCALES or nxt_word in ("hundert", "tausend"))
                 ):
+                    break
+            if run and info[0] == "num" and word not in ("hundert", "tausend"):
+                # Two standalone numbers only form one number if the second fits into the zeros
+                # of the first ("zwanzig fünf", "hundert dreißig"); "zwei drei" stays two numbers.
+                prev_value = run[-1][2]
+                places = 1
+                while prev_value and prev_value % (places * 10) == 0:
+                    places *= 10
+                if info[1] >= places:
                     break
             run.append((word, info[0], info[1]))
             j += 1

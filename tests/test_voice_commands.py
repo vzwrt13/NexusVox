@@ -381,3 +381,13 @@ def test_structural_disabled_does_not_affect_symbols_or_numbers():
         frozenset(),
     )
     assert out == "25/new line"
+
+
+def test_numbers_de_adjacent_numbers_are_not_summed():
+    assert process_voice_commands("eins zwei drei", numbers_as_digits=True) == "1 2 3"
+    assert process_voice_commands("zwanzig fünf", numbers_as_digits=True) == "25"
+    assert process_voice_commands("hundert dreißig", numbers_as_digits=True) == "130"
+
+
+def test_numbers_de_do_not_span_a_new_line():
+    assert process_voice_commands("zwei new line drei", numbers_as_digits=True) == "2\n3"

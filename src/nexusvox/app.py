@@ -320,6 +320,7 @@ class NexusVoxApp:
                         duration_ms=duration_ms,
                         confidence=result.confidence,
                         model=self._transcriber.model,
+                        transcribe_ms=transcribe_ms,
                     )
                     self._store_audio(audio_buffer, record.id)
                 await self._transcriber.disconnect()

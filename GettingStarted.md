@@ -205,8 +205,12 @@ enabled = false
 [voice_commands]
 # Enable voice command text formatting substitutions
 enabled = true
-# Transcribe numbers as digits ("five" → "5") instead of words
+# Transcribe numbers as digits ("five" / "fünf" → "5") instead of words
 numbers_as_digits = false
+# Structural commands (new line, new paragraph, tab, all caps) are their own category:
+# pick which ones fire, or bypass them all without clearing the list
+structural = ["new paragraph", "new line", "tab", "all caps"]
+bypass_structural = false
 # When true, spoken symbol keywords bypass voice command processing and are injected literally
 bypass_symbols = false
 # Active symbol keywords (spoken words that insert punctuation)
@@ -248,14 +252,15 @@ Prefer not to keep the keys down? Switch **Hotkey Mode** to *Toggle* in the dash
 
 ### Voice Commands
 
-With `voice_commands_enabled = true`, certain spoken phrases are converted before injection:
+With `[voice_commands].enabled = true`, certain spoken phrases are converted before injection. English and German are always both recognised:
 
 | Say | Result |
 |---|---|
-| "new line" | `\n` |
-| "new paragraph" | `\n\n` |
-| "tab" | `\t` |
-| "all caps [text]" | `TEXT` |
+| "new line" / "neue Zeile" | `\n` |
+| "new paragraph" / "neuer Absatz" | `\n\n` |
+| "tab" / "Tabulator" | `\t` |
+| "all caps [text]" / "alles groß [text]" | `TEXT` |
+| "twenty five" / "fünfundzwanzig" (with `numbers_as_digits`) | `25` |
 | "period", "comma", etc. | `.`, `,`, etc. (configurable via `symbols`) |
 
 ---

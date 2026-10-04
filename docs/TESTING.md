@@ -99,7 +99,7 @@ tests/
 | `test_docker_ctl.py` | `docker_ctl.py` | Docker profile start/stop, health-check waiting |
 | `test_file_transcribe.py` | `file_transcribe.py` | Extension detection, WAV passthrough, audio conversion, chunking |
 | `test_os_commands.py` | `os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
-| `test_voice_commands.py` | `voice_commands.py` | New line/paragraph/tab/all-caps substitutions, comma interactions, passthrough |
+| `test_voice_commands.py` | `voice_commands.py` | New line/paragraph/tab/all-caps substitutions (English and German), structural category toggles, German number words, comma interactions, passthrough |
 
 ### What we DON'T test (and why)
 

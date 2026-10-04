@@ -144,6 +144,16 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_voice_commands_bypass_symbols(data.get("enabled", False)))
 
+    @app.route("/api/voice-commands/structural", methods=["POST"])
+    def set_voice_commands_structural():
+        data = request.get_json(force=True)
+        return jsonify(api.set_voice_commands_structural(data.get("structural", [])))
+
+    @app.route("/api/voice-commands/bypass-structural", methods=["POST"])
+    def set_voice_commands_bypass_structural():
+        data = request.get_json(force=True)
+        return jsonify(api.set_voice_commands_bypass_structural(data.get("enabled", False)))
+
     # ---- OS Commands endpoints ---------------------------------------------
 
     @app.route("/api/os-commands")

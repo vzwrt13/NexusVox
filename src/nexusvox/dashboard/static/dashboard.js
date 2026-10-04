@@ -447,12 +447,52 @@ vcBypassSymbolsToggle.addEventListener("change", async () => {
   });
 });
 
+const vcBypassStructuralToggle = document.getElementById("voice-bypass-structural-toggle");
+
+vcBypassStructuralToggle.addEventListener("change", async () => {
+  await fetch("/api/voice-commands/bypass-structural", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: vcBypassStructuralToggle.checked }),
+  });
+});
+
 async function loadVoiceCommands() {
   const data = await fetch("/api/voice-commands").then((r) => r.json());
   vcToggle.checked = data.enabled;
   vcNumbersToggle.checked = data.numbers_as_digits;
   vcBypassSymbolsToggle.checked = data.bypass_symbols;
+  vcBypassStructuralToggle.checked = data.bypass_structural;
   renderSymbolGrid(data.all_symbols, data.symbols);
+  renderStructuralGrid(data.all_structural, data.structural);
+}
+
+function renderStructuralGrid(allStructural, activeStructural) {
+  const activeSet = new Set(activeStructural);
+  const grid = document.getElementById("voice-structural-grid");
+  grid.innerHTML = allStructural.map((s) => {
+    const checked = activeSet.has(s.keyword) ? "checked" : "";
+    const alias = s.aliases.length ? ` title="${escapeHtml(s.aliases.join(", "))}"` : "";
+    return `<label class="symbol-chip"${alias}>` +
+      `<input type="checkbox" class="structural-checkbox" data-keyword="${escapeHtml(s.keyword)}" ${checked}>` +
+      `<code>${escapeHtml(s.keyword)}</code>` +
+      `<span class="symbol-char">${escapeHtml(s.char)}</span>` +
+      `</label>`;
+  }).join("");
+
+  grid.querySelectorAll(".structural-checkbox").forEach((cb) => {
+    cb.addEventListener("change", saveStructural);
+  });
+}
+
+async function saveStructural() {
+  const structural = [...document.querySelectorAll(".structural-checkbox:checked")]
+    .map((cb) => cb.dataset.keyword);
+  await fetch("/api/voice-commands/structural", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ structural }),
+  });
 }
 
 function renderSymbolGrid(allSymbols, activeSymbols) {

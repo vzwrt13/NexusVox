@@ -27,7 +27,7 @@ from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..os_commands import NEXUS_ACTIONS
 from ..translator import is_reachable
-from ..voice_commands import ALL_SYMBOL_INFO
+from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_SYMBOL_INFO
 from . import analytics
 from . import benchmarks as bench
 
@@ -211,6 +211,9 @@ class DashboardAPI:
             "bypass_symbols": self._config.voice_commands.bypass_symbols,
             "symbols": self._config.voice_commands.symbols,
             "all_symbols": ALL_SYMBOL_INFO,
+            "bypass_structural": self._config.voice_commands.bypass_structural,
+            "structural": self._config.voice_commands.structural,
+            "all_structural": ALL_STRUCTURAL_INFO,
         }
 
     def set_voice_commands_enabled(self, enabled: bool) -> dict:
@@ -230,6 +233,16 @@ class DashboardAPI:
 
     def set_voice_commands_bypass_symbols(self, enabled: bool) -> dict:
         self._config.voice_commands.bypass_symbols = enabled
+        save_config(self._config)
+        return self.get_voice_commands()
+
+    def set_voice_commands_structural(self, structural: list[str]) -> dict:
+        self._config.voice_commands.structural = structural
+        save_config(self._config)
+        return self.get_voice_commands()
+
+    def set_voice_commands_bypass_structural(self, enabled: bool) -> dict:
+        self._config.voice_commands.bypass_structural = enabled
         save_config(self._config)
         return self.get_voice_commands()
 

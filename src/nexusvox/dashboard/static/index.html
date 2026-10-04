@@ -204,7 +204,7 @@
         <div class="setting-row">
           <div class="setting-info">
             <h3>Voice Commands</h3>
-            <p>Format injected text with spoken phrases: <code>new line</code>, <code>tab</code>, <code>all caps</code>, symbols, and more.</p>
+            <p>Format injected text with spoken phrases: <code>new line</code>, <code>tab</code>, <code>all caps</code>, symbols, and more (English and German).</p>
           </div>
           <label class="toggle">
             <input type="checkbox" id="voice-commands-toggle">
@@ -216,7 +216,7 @@
           <div class="setting-row" style="margin-top: 16px;">
             <div class="setting-info">
               <h3>Numbers as Digits</h3>
-              <p>Convert spoken numbers to digits: "twenty five" → "25".</p>
+              <p>Convert spoken numbers to digits, English and German: "twenty five" / "fünfundzwanzig" → "25".</p>
             </div>
             <label class="toggle">
               <input type="checkbox" id="voice-numbers-toggle">
@@ -233,6 +233,23 @@
               <input type="checkbox" id="voice-bypass-symbols-toggle">
               <span class="toggle-slider"></span>
             </label>
+          </div>
+
+          <div class="setting-row" style="margin-top: 16px;">
+            <div class="setting-info">
+              <h3>Bypass Structural Commands</h3>
+              <p>Skip new line, new paragraph, tab and all caps without clearing your list. Useful for benchmarking.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="voice-bypass-structural-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div style="margin-top: 20px;">
+            <h4 class="nexus-section-title">Structural Commands</h4>
+            <p class="settings-hint" style="margin-top: 6px;">Click to toggle formatting phrases: <code>new line</code> / <code>neue Zeile</code>, <code>new paragraph</code> / <code>neuer Absatz</code>, <code>tab</code> / <code>Tabulator</code>, <code>all caps</code> / <code>alles groß</code>. English and German are always both recognised.</p>
+            <div id="voice-structural-grid" class="voice-symbols-grid"></div>
           </div>
 
           <div style="margin-top: 20px;">

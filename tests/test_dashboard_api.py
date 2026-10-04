@@ -635,3 +635,33 @@ def test_set_store_audio(flask_client):
     assert resp.status_code == 200
     assert resp.get_json()["store_audio"] is False
     assert flask_client.get("/api/settings").get_json()["store_audio"] is False
+
+
+def test_get_voice_commands_includes_structural(flask_client):
+    data = flask_client.get("/api/voice-commands").get_json()
+
+    assert data["bypass_structural"] is False
+    assert "new line" in data["structural"]
+    assert all("keyword" in s and "char" in s for s in data["all_structural"])
+
+
+def test_set_voice_commands_structural(flask_client):
+    resp = flask_client.post(
+        "/api/voice-commands/structural",
+        data=json.dumps({"structural": ["tab"]}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["structural"] == ["tab"]
+
+
+def test_set_voice_commands_bypass_structural(flask_client):
+    resp = flask_client.post(
+        "/api/voice-commands/bypass-structural",
+        data=json.dumps({"enabled": True}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["bypass_structural"] is True

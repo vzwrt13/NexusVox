@@ -428,10 +428,16 @@ class NexusVoxApp:
                         if self._config.voice_commands.bypass_symbols
                         else frozenset(self._config.voice_commands.symbols)
                     )
+                    active_structural = (
+                        frozenset()
+                        if self._config.voice_commands.bypass_structural
+                        else frozenset(self._config.voice_commands.structural)
+                    )
                     processed_text = process_voice_commands(
                         corrected_text,
                         active_symbols,
                         self._config.voice_commands.numbers_as_digits,
+                        active_structural,
                     )
                 else:
                     processed_text = corrected_text

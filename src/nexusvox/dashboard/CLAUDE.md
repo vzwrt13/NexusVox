@@ -17,7 +17,7 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 - Compute Device dropdown (`Auto`/`GPU (CUDA)`/`CPU`): writes `[inference].device` to `config.toml`; requires app restart. On CPU, GPU-only models are filtered out of the model dropdown server-side.
 - Model switcher dropdown: for GPU-backed models, selecting stops the old Docker container, starts the new one, waits for health check, reconnects the transcriber. For in-process Whisper (CPU), just reloads the model — no Docker calls. JS polls `GET /api/models/status` every 2s for spinner/status updates.
 - Nexus OS Commands card: toggle enable/disable, lists supported actions and registered apps.
-- Voice Commands card: master enable/disable toggle; Numbers as Digits toggle; symbol command chips (click to activate/deactivate individual symbols, persisted immediately via `POST /api/voice-commands/symbols`).
+- Voice Commands card: master enable/disable toggle; Numbers as Digits toggle; Bypass Structural Commands toggle + structural command chips (`new line`, `new paragraph`, `tab`, `all caps`; `POST /api/voice-commands/structural`); Bypass Symbol Commands toggle + symbol command chips (click to activate/deactivate individual symbols, persisted immediately via `POST /api/voice-commands/symbols`).
 
 **Edit (tab 3)** — flagged transcriptions with editable correction textarea and audio playback. Saves via `POST /api/flagged/<id>/correct`. Audio served via `GET /api/audio/<tid>`.
 
@@ -47,6 +47,8 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 | POST | `/api/voice-commands/numbers` | Toggle numbers-as-digits |
 | POST | `/api/voice-commands/symbols` | Update active symbol list |
 | POST | `/api/voice-commands/bypass-symbols` | Toggle bypass symbol commands |
+| POST | `/api/voice-commands/structural` | Update active structural command list |
+| POST | `/api/voice-commands/bypass-structural` | Toggle bypass structural commands |
 | GET | `/api/os-commands` | OS commands config |
 | POST | `/api/os-commands/enabled` | Toggle OS commands |
 | POST | `/api/os-commands/apps` | Update registered apps |

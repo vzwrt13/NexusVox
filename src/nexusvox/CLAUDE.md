@@ -45,11 +45,13 @@ The ctypes `INPUT` struct union **must** include `MOUSEINPUT` (not just `KEYBDIN
 
 `voice_commands.py` converts spoken phrases into characters/transforms before text injection. Runs after nexus check, only if `[voice_commands].enabled = true` in config.
 
-- **Structural** (always active): `new line`, `new paragraph`, `tab`, `tabulator`, `all caps`
-- **Symbols** (opt-in via `symbols` list): `slash`, `backslash`, `pipe`, `tilde`, `asterisk`, `open/close paren/bracket/brace`, `less/greater than` (safe defaults) + `hash`, `percent`, `dash`, `hyphen`, `plus`, `equal`, `colon`, `star` (ambiguous, disabled by default)
-- **Numbers** (opt-in via `numbers_as_digits = true`): spoken number words → digits, including compounds ("twenty five" → "25", "one thousand five hundred" → "1500")
+- **Structural** (own category, opt-out via `structural` list, `bypass_structural` skips them all; default all on): `new line`, `new paragraph`, `tab`, `all caps`. Keywords in `structural` are the canonical English ones; their aliases (`newline`, `tabulator`, `neue Zeile`, `neuer Absatz`, `Tabulator`, `alles groß`, ...) fire whenever the canonical keyword is enabled
+- **Symbols** (opt-in via `symbols` list, German aliases such as `Schrägstrich`, `Klammer auf` fire with the English keyword): `slash`, `backslash`, `pipe`, `tilde`, `asterisk`, `open/close paren/bracket/brace`, `less/greater than` (safe defaults) + `hash`, `percent`, `dash`, `hyphen`, `plus`, `equal`, `colon`, `star` (ambiguous, disabled by default)
+- **Numbers** (opt-in via `numbers_as_digits = true`): spoken number words → digits in English and German in one pass (German first), including compounds ("twenty five" → "25", "one thousand five hundred" → "1500", "fünfundzwanzig" → "25", "zweihundertdreiundvierzig" → "243", "zwei tausend fünf hundert" → "2500"). German `ein`/`eine`/... are articles and only count directly before `hundert`/`tausend`/`Million(en)`/`Milliarde(n)`; `Million(en)`/`Milliarde(n)` need a multiplier in front
 
-Symbol commands do not break `all caps` mode; structural commands do. Pattern is compiled per active-symbol set and cached via `lru_cache`. `ALL_SYMBOL_INFO` (public) is consumed by the dashboard UI to render per-symbol toggle chips.
+**Bilingual rule:** every spoken vocabulary (commands, numbers, anything new that matches speech) covers English and German from the start. There is no language switch in the matcher; both are always recognised, and every new feature ships with German tests.
+
+Symbol commands do not break `all caps` mode; structural commands do. Pattern is compiled per (active symbols, active structural) pair and cached via `lru_cache`. `ALL_SYMBOL_INFO` and `ALL_STRUCTURAL_INFO` (public) are consumed by the dashboard UI to render per-keyword toggle chips (with the German aliases as tooltip data).
 
 ## Nexus OS Command Layer
 

@@ -344,12 +344,18 @@ _DEFAULT_SYMBOLS: list[str] = [
 ]
 
 
+_DEFAULT_STRUCTURAL = ["new paragraph", "new line", "tab", "all caps"]
+
+
 @dataclass
 class VoiceCommandsConfig:
     enabled: bool = True
     symbols: list[str] = field(default_factory=lambda: list(_DEFAULT_SYMBOLS))
     numbers_as_digits: bool = False
     bypass_symbols: bool = False
+    # Structural commands (new line, new paragraph, tab, all caps): own category, own list, own bypass.
+    structural: list[str] = field(default_factory=lambda: list(_DEFAULT_STRUCTURAL))
+    bypass_structural: bool = False
 
 
 @dataclass
@@ -406,6 +412,8 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             symbols=list(vc_data.get("symbols", _DEFAULT_SYMBOLS)),
             numbers_as_digits=vc_data.get("numbers_as_digits", False),
             bypass_symbols=vc_data.get("bypass_symbols", False),
+            structural=list(vc_data.get("structural", _DEFAULT_STRUCTURAL)),
+            bypass_structural=vc_data.get("bypass_structural", False),
         )
     else:
         vc_config = VoiceCommandsConfig(
@@ -478,6 +486,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
     """Write the current configuration back to TOML."""
     with _config_lock:
         symbols_toml = "[{}]".format(", ".join(f'"{s}"' for s in config.voice_commands.symbols))
+        structural_toml = "[{}]".format(", ".join(f'"{s}"' for s in config.voice_commands.structural))
         lines = [
             "[general]",
             f'language = "{config.language}"',
@@ -516,6 +525,8 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"numbers_as_digits = {'true' if config.voice_commands.numbers_as_digits else 'false'}",
             f"bypass_symbols = {'true' if config.voice_commands.bypass_symbols else 'false'}",
             f"symbols = {symbols_toml}",
+            f"bypass_structural = {'true' if config.voice_commands.bypass_structural else 'false'}",
+            f"structural = {structural_toml}",
             "",
             "[assistant]",
             f"enabled = {'true' if config.assistant.enabled else 'false'}",

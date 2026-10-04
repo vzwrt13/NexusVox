@@ -295,3 +295,99 @@ def test_numbers_with_symbols():
 
 def test_numbers_hyphenated():
     assert process_voice_commands("twenty-five items", numbers_as_digits=True) == "25 items"
+
+
+# ---------------------------------------------------------------------------
+# German number words
+# ---------------------------------------------------------------------------
+
+
+def test_numbers_de_compound():
+    assert process_voice_commands("Ich habe fünfundzwanzig Euro", numbers_as_digits=True) == "Ich habe 25 Euro"
+
+
+def test_numbers_de_hundreds():
+    assert process_voice_commands("zweihundertdreiundvierzig Leute", numbers_as_digits=True) == "243 Leute"
+
+
+def test_numbers_de_spaced_scales():
+    assert process_voice_commands("zwei tausend fünf hundert", numbers_as_digits=True) == "2500"
+    assert process_voice_commands("dreitausend zwei hundert", numbers_as_digits=True) == "3200"
+
+
+def test_numbers_de_million():
+    assert process_voice_commands("eine Million zweihunderttausend", numbers_as_digits=True) == "1200000"
+
+
+def test_numbers_de_year():
+    assert process_voice_commands("neunzehnhundertneunundachtzig", numbers_as_digits=True) == "1989"
+
+
+def test_numbers_de_simple_and_punctuation():
+    assert process_voice_commands("drei Tage, einundzwanzig Uhr", numbers_as_digits=True) == "3 Tage, 21 Uhr"
+
+
+def test_numbers_de_article_ein_untouched():
+    text = "ein Haus und eine Katze"
+    assert process_voice_commands(text, numbers_as_digits=True) == text
+
+
+def test_numbers_de_disabled_passthrough():
+    assert process_voice_commands("fünfundzwanzig Euro") == "fünfundzwanzig Euro"
+
+
+def test_numbers_english_million_still_works_next_to_german_logic():
+    assert process_voice_commands("I have two million", numbers_as_digits=True) == "I have 2000000"
+
+
+# ---------------------------------------------------------------------------
+# German structural and symbol phrases
+# ---------------------------------------------------------------------------
+
+
+def test_structural_de():
+    assert process_voice_commands("hallo neue Zeile welt Tabulator x neuer Absatz y") == "hallo\nwelt\tx\n\ny"
+
+
+def test_all_caps_de():
+    assert process_voice_commands("alles groß hallo welt") == "HALLO WELT"
+
+
+def test_symbols_de():
+    active = frozenset({"open paren", "close paren", "slash"})
+    assert process_voice_commands("f Klammer auf x Klammer zu Schrägstrich", active) == "f(x)/"
+
+
+# ---------------------------------------------------------------------------
+# Structural category is independent
+# ---------------------------------------------------------------------------
+
+
+def test_structural_empty_set_disables_all():
+    text = "a new line b tab c all caps d"
+    assert process_voice_commands(text, active_structural=frozenset()) == text
+
+
+def test_structural_subset_only_enabled_fire():
+    out = process_voice_commands("a new line b tab c", active_structural=frozenset({"tab"}))
+    assert out == "a new line b\tc"
+
+
+def test_structural_disabled_does_not_affect_symbols_or_numbers():
+    out = process_voice_commands(
+        "twenty five slash new line",
+        frozenset({"slash"}),
+        True,
+        frozenset(),
+    )
+    assert out == "25/new line"
+
+
+def test_numbers_de_adjacent_numbers_are_not_summed():
+    assert process_voice_commands("eins zwei drei", numbers_as_digits=True) == "1 2 3"
+    assert process_voice_commands("zwanzig fünf", numbers_as_digits=True) == "25"
+    assert process_voice_commands("hundert dreißig", numbers_as_digits=True) == "130"
+
+
+def test_numbers_de_do_not_span_a_new_line():
+    assert process_voice_commands("zwei new line drei", numbers_as_digits=True) == "2\n3"

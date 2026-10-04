@@ -68,15 +68,20 @@ enabled = false
 # code = "code"
 
 [voice_commands]
-# Enable voice commands for text formatting (new line, new paragraph, tab, all caps, symbols).
+# Master switch for voice commands. English and German phrases are always both recognised.
 enabled = true
-# When true, spoken number words are converted to digits: "twenty five" → "25".
+# When true, spoken number words are converted to digits: "twenty five" / "fünfundzwanzig" → "25".
 # Disabled by default — numbers pass through as spoken text.
 numbers_as_digits = false
 # When true, symbol substitutions are skipped but your symbol list is preserved.
 # Structural commands (new line, tab, all caps) remain active.
 # Useful for quick benchmarking without losing your configured symbols.
 bypass_symbols = false
+# When true, structural commands are skipped but your structural list is preserved.
+bypass_structural = false
+# Structural commands to recognise (German: neue Zeile, neuer Absatz, Tabulator, alles groß).
+# Remove entries to type those words literally.
+structural = ["new paragraph", "new line", "tab", "all caps"]
 # Symbol commands to recognise. Remove entries that conflict with your natural speech patterns.
 #
 # Safe defaults (rarely appear as plain words in dictation):

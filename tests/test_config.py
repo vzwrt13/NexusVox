@@ -14,6 +14,7 @@ from nexusvox.config import (
     HotkeyConfig,
     InferenceConfig,
     OSCommandsConfig,
+    VoiceCommandsConfig,
     load_config,
     resolve_compute_type,
     resolve_device,
@@ -439,3 +440,24 @@ def test_os_control_command_key_defaults_to_y(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[os_control]\nenabled = true\n")
     assert load_config(path).os_control.command_key == "Y"
+
+
+def test_voice_commands_structural_roundtrip(tmp_path):
+    path = tmp_path / "config.toml"
+    cfg = Config(voice_commands=VoiceCommandsConfig(structural=["tab"], bypass_structural=True))
+    save_config(cfg, path)
+
+    loaded = load_config(path)
+
+    assert loaded.voice_commands.structural == ["tab"]
+    assert loaded.voice_commands.bypass_structural is True
+
+
+def test_voice_commands_structural_defaults_when_missing(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[voice_commands]\nenabled = true\n", encoding="utf-8")
+
+    loaded = load_config(path)
+
+    assert loaded.voice_commands.structural == ["new paragraph", "new line", "tab", "all caps"]
+    assert loaded.voice_commands.bypass_structural is False

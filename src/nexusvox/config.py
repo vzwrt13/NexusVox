@@ -281,6 +281,25 @@ class AssistantConfig:
     timeout_s: float = 5.0
 
 
+# Keys that can mark a recording as an os-control command. OEM_102 is the "<" key left of Y/Z
+# on a German (ISO) keyboard.
+COMMAND_KEY_VKS: dict[str, int] = {"OEM_102": 0xE2}
+
+
+@dataclass
+class OsControlConfig:
+    """Command recordings: pressing `command_key` while the voice hotkey is held sends
+    that recording's transcript to a local TCP port as `send <service> <text>` instead of
+    typing it (the personal-tooling Controller's os-control service)."""
+
+    enabled: bool = False
+    command_key: str = "OEM_102"
+    host: str = "127.0.0.1"
+    port: int = 49730
+    service: str = "os-control"
+    timeout_s: float = 5.0
+
+
 # Languages the tray toggle and the dashboard's language selector cycle through.
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "de")
 
@@ -344,6 +363,7 @@ class Config:
     os_commands: OSCommandsConfig = field(default_factory=OSCommandsConfig)
     voice_commands: VoiceCommandsConfig = field(default_factory=VoiceCommandsConfig)
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
+    os_control: OsControlConfig = field(default_factory=OsControlConfig)
     translator: TranslatorConfig = field(default_factory=TranslatorConfig)
     mic_guard: MicGuardConfig = field(default_factory=MicGuardConfig)
 
@@ -373,6 +393,8 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     os_cmd_data = data.get("os_commands", {})
     vc_data = data.get("voice_commands", None)
     assistant_data = data.get("assistant", {})
+    switcher_data = data.get("os_control", {})
+    command_key = str(switcher_data.get("command_key", "OEM_102")).upper()
     translator_data = data.get("translator", {})
     mic_guard_data = data.get("mic_guard", {})
 
@@ -427,6 +449,14 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             port=int(assistant_data.get("port", 49730)),
             service=assistant_data.get("service", "voice-assistant"),
             timeout_s=float(assistant_data.get("timeout_s", 5.0)),
+        ),
+        os_control=OsControlConfig(
+            enabled=switcher_data.get("enabled", False),
+            command_key=command_key if command_key in COMMAND_KEY_VKS else "OEM_102",
+            host=switcher_data.get("host", "127.0.0.1"),
+            port=int(switcher_data.get("port", 49730)),
+            service=switcher_data.get("service", "os-control"),
+            timeout_s=float(switcher_data.get("timeout_s", 5.0)),
         ),
         translator=TranslatorConfig(
             enabled=translator_data.get("enabled", False),
@@ -492,6 +522,14 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"port = {config.assistant.port}",
             f'service = "{config.assistant.service}"',
             f"timeout_s = {config.assistant.timeout_s}",
+            "",
+            "[os_control]",
+            f"enabled = {'true' if config.os_control.enabled else 'false'}",
+            f'command_key = "{config.os_control.command_key}"',
+            f'host = "{config.os_control.host}"',
+            f"port = {config.os_control.port}",
+            f'service = "{config.os_control.service}"',
+            f"timeout_s = {config.os_control.timeout_s}",
             "",
             "[translator]",
             f"enabled = {'true' if config.translator.enabled else 'false'}",

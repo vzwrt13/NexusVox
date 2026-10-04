@@ -10,7 +10,7 @@ import pytest
 # (no X display), so these tests only run where the listener can be imported.
 pytest.importorskip("pynput.keyboard", reason="pynput needs a display backend", exc_type=ImportError)
 
-from nexusvox.config import HotkeyConfig  # noqa: E402
+from nexusvox.config import HotkeyConfig, OsControlConfig  # noqa: E402
 from nexusvox.hotkey import HotkeyListener, describe_hotkey  # noqa: E402
 
 LCTRL, RCTRL, LSHIFT, LALT = 0xA2, 0xA3, 0xA0, 0xA4
@@ -208,3 +208,87 @@ def test_describe_hotkey():
     assert describe_hotkey(HotkeyConfig(modifiers=["ctrl", "shift", "alt"])) == "Ctrl+Shift+Alt"
     assert describe_hotkey(HotkeyConfig(modifiers=["ctrl", "shift"], key="A")) == "Ctrl+Shift+A"
     assert describe_hotkey(HotkeyConfig(modifiers=[], key="PAGE_UP")) == "Page Up"
+
+
+# -- command key (os-control) -----------------------------------------------------
+
+VK_OEM_102 = 0xE2
+
+
+def _command_listener(mode: str = "hold", enabled: bool = True):
+    events: list[str] = []
+    config = HotkeyConfig(modifiers=["ctrl", "alt"], key="", mode=mode)
+    hk = HotkeyListener(
+        config,
+        lambda: events.append("start"),
+        lambda: events.append("stop"),
+        command_config=OsControlConfig(enabled=enabled),
+        on_command=lambda: events.append("command"),
+    )
+    return hk, events
+
+
+def test_command_key_during_hold_marks_the_recording_and_is_swallowed():
+    hk, events = _command_listener()
+    _press_combo(hk)
+    assert hk._handle(VK_OEM_102, True) is True
+    assert hk._handle(VK_OEM_102, True) is True  # auto-repeat
+    assert hk._handle(VK_OEM_102, False) is True
+    _release_combo(hk)
+    assert events == ["start", "command", "stop"]
+    assert hk.command  # still readable after the stop
+
+
+def test_command_key_fires_once_and_resets_on_next_recording():
+    hk, events = _command_listener()
+    _press_combo(hk)
+    hk._handle(VK_OEM_102, True)
+    hk._handle(VK_OEM_102, False)
+    hk._handle(VK_OEM_102, True)
+    hk._handle(VK_OEM_102, False)
+    _release_combo(hk)
+    assert events.count("command") == 1
+    _press_combo(hk)
+    assert not hk.command
+    _release_combo(hk)
+
+
+def test_command_key_before_the_last_modifier_still_counts():
+    hk, events = _command_listener()
+    hk._handle(LCTRL, True)
+    assert hk._handle(VK_OEM_102, True) is True
+    hk._handle(LALT, True)
+    assert events == ["start", "command"] and hk.command
+    assert hk._handle(VK_OEM_102, False) is True
+    _release_combo(hk)
+
+
+def test_pending_command_is_dropped_when_the_combo_never_completes():
+    hk, events = _command_listener()
+    hk._handle(LCTRL, True)
+    hk._handle(VK_OEM_102, True)
+    hk._handle(VK_OEM_102, False)
+    hk._handle(LCTRL, False)
+    _press_combo(hk)
+    assert events == ["start"] and not hk.command
+
+
+def test_command_key_types_normally_outside_a_recording_or_when_disabled():
+    hk, events = _command_listener()
+    assert hk._handle(VK_OEM_102, True) is False
+    assert hk._handle(VK_OEM_102, False) is False
+    off, off_events = _command_listener(enabled=False)
+    _press_combo(off)
+    assert off._handle(VK_OEM_102, True) is False
+    _release_combo(off)
+    assert "command" not in off_events and not off.command
+
+
+def test_command_key_in_toggle_mode():
+    hk, events = _command_listener(mode="toggle")
+    _press_combo(hk)
+    _release_combo(hk)
+    hk._handle(VK_OEM_102, True)
+    hk._handle(VK_OEM_102, False)
+    _press_combo(hk)
+    assert events == ["start", "command", "stop"] and hk.command

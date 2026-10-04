@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from nexusvox.assistant import parse_assistant_command, send_to_assistant
+from nexusvox.assistant import parse_assistant_command, send_to_assistant, send_to_service
 from nexusvox.config import AssistantConfig
 
 # --- Parsing ---
@@ -88,3 +88,12 @@ def test_send_to_assistant_nothing_listening():
 
     with pytest.raises(OSError):
         send_to_assistant("remember to buy milk", config)
+
+
+def test_send_to_service_names_the_service():
+    server, received = _serve_once(b"opened 3 chrome")
+
+    reply = send_to_service("os-control", "öffne 3", "127.0.0.1", server.getsockname()[1], 2.0)
+
+    assert reply == "opened 3 chrome"
+    assert received == ["send os-control öffne 3".encode()]

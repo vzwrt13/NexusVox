@@ -105,6 +105,20 @@ port = 49730
 service = "voice-assistant"
 timeout_s = 5.0
 
+[os_control]
+# Command recordings: press command_key while the voice hotkey is held ("<" by default,
+# so Ctrl+Shift+Alt+<) and that recording is not typed - its transcript goes to a local
+# TCP port as `send <service> <text>`. Built for the personal-tooling Controller's
+# os-control service: "öffne 3" or "hol das Terminal" brings that window to the
+# front. NexusVox also sends `::show` when the key is pressed, so the window numbers
+# appear while you speak, and `::hide` when the recording turns out empty.
+enabled = false
+command_key = "OEM_102"
+host = "127.0.0.1"
+port = 49730
+service = "os-control"
+timeout_s = 5.0
+
 [translator]
 # Translate what you dictated into English before it is typed. The recording and the
 # transcript are stored as spoken; only the injected text is translated. Built for the

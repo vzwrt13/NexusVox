@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 from pynput import keyboard
 
-from .config import HOTKEY_KEY_VKS, HotkeyConfig
+from .config import COMMAND_KEY_VKS, HOTKEY_KEY_VKS, HotkeyConfig, OsControlConfig
 
 # Win32 virtual-key codes of the modifiers, left and right variants included: the
 # low-level hook reports the side-specific code, GetAsyncKeyState wants the generic one.
@@ -42,6 +42,11 @@ class HotkeyListener:
     - "hold": activate on the complete press, deactivate when the first key goes up
     - "toggle": each complete press flips between active and inactive; releasing
       the keys changes nothing
+
+    With `command_config` enabled, its command key pressed during a recording - or while
+    the binding's modifiers are on their way down - marks that recording as a command:
+    `on_command` fires once, `command` stays True until the next recording starts, and
+    the key itself is swallowed so it never types.
     """
 
     def __init__(
@@ -49,10 +54,17 @@ class HotkeyListener:
         config: HotkeyConfig,
         on_activate: Callable[[], None],
         on_deactivate: Callable[[], None],
+        command_config: OsControlConfig | None = None,
+        on_command: Callable[[], None] | None = None,
     ) -> None:
         self._config = config
         self._on_activate = on_activate
         self._on_deactivate = on_deactivate
+        self._command_config = command_config
+        self._on_command = on_command
+        self._command = False  # this recording is a command
+        self._command_pending = False  # command key came before the combo completed
+        self._command_swallowed = False  # command key is held since a swallowed key-down
 
         self._binding: tuple[tuple[str, ...], str] | None = None
         self._modifiers: frozenset[str] = frozenset()
@@ -68,6 +80,11 @@ class HotkeyListener:
     @property
     def mode(self) -> str:
         return self._config.mode
+
+    @property
+    def command(self) -> bool:
+        """True when the current (or just finished) recording was marked as a command."""
+        return self._command
 
     @property
     def active(self) -> bool:
@@ -98,7 +115,40 @@ class HotkeyListener:
                 self._on_deactivate()
         else:
             self._active = True
+            self._command = False
             self._on_activate()
+            if self._command_pending:
+                self._command_pending = False
+                self._mark_command()
+
+    def _command_vk(self) -> int | None:
+        cfg = self._command_config
+        if cfg is None or not cfg.enabled or self._on_command is None:
+            return None
+        return COMMAND_KEY_VKS.get(cfg.command_key)
+
+    def _mark_command(self) -> None:
+        if not self._command:
+            self._command = True
+            self._on_command()
+
+    def _handle_command_key(self, pressed: bool) -> bool:
+        """The command key: swallowed while it belongs to a recording, typed otherwise."""
+        if not pressed:
+            swallowed, self._command_swallowed = self._command_swallowed, False
+            return swallowed
+        if self._command_swallowed:
+            return True  # auto-repeat
+        if self._active:
+            self._command_swallowed = True
+            self._mark_command()
+            return True
+        if self._pressed_modifiers & self._modifiers:
+            # Pressed a moment before the last modifier: count it for the coming recording.
+            self._command_swallowed = True
+            self._command_pending = True
+            return True
+        return False
 
     def _combo_broken(self) -> None:
         self._combo_down = False
@@ -109,6 +159,9 @@ class HotkeyListener:
     def _handle(self, vk: int, pressed: bool) -> bool:
         """Feed one key event. Returns True if the event must be swallowed."""
         self._sync_binding()
+
+        if vk == self._command_vk() and vk != self._key_vk:
+            return self._handle_command_key(pressed)
 
         if vk == self._key_vk:
             if pressed:
@@ -135,6 +188,8 @@ class HotkeyListener:
                 self._complete_press()
             return False
         self._pressed_modifiers.discard(modifier)
+        if not self._pressed_modifiers:
+            self._command_pending = False  # the combo never completed
         if self._combo_down:
             self._combo_broken()
         return False

@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from . import docker_ctl
-from .assistant import parse_assistant_command, send_to_assistant
+from .assistant import parse_assistant_command, send_to_assistant, send_to_service
 from .audio import AudioCapture
 from .config import MODEL_REGISTRY, Config, resolve_device, save_config
 from .dashboard import open_dashboard
@@ -75,6 +75,8 @@ class NexusVoxApp:
             config=config.hotkey,
             on_activate=self._on_hotkey_activate,
             on_deactivate=self._on_hotkey_deactivate,
+            command_config=config.os_control,
+            on_command=self._on_hotkey_command,
         )
 
         # Mutes other apps' microphone sessions while the hotkey is held. Always built
@@ -117,6 +119,22 @@ class NexusVoxApp:
             self._mic_guard.release_async()
         if self._loop is not None and self._record_stop_event is not None:
             self._loop.call_soon_threadsafe(self._record_stop_event.set)
+
+    def _on_hotkey_command(self) -> None:
+        """Called from the hotkey thread when the command key marks this recording.
+        Shows the window numbers now, while the user speaks; never blocks the hook."""
+        threading.Thread(target=self._send_os_command, args=("::show",), daemon=True).start()
+
+    def _send_os_command(self, text: str) -> str | None:
+        """Send one line to the os-control service; None when nothing answers."""
+        cfg = self._config.os_control
+        try:
+            reply = send_to_service(cfg.service, text, cfg.host, cfg.port, cfg.timeout_s)
+        except OSError as exc:
+            logger.warning("os-control not reachable (%s)", exc)
+            return None
+        logger.info("os-control command %r -> %s", text, reply or "(no reply)")
+        return reply
 
     def get_switch_status(self) -> dict:
         """Return the current model-switch status for the dashboard."""
@@ -264,6 +282,7 @@ class NexusVoxApp:
             await self._record_stop_event.wait()
             self._record_stop_event.clear()
             recording_stopped = True
+            is_command = self._hotkey.command
 
             # Stop audio (sends None sentinel, ending the stream task)
             self._audio.stop()
@@ -280,6 +299,31 @@ class NexusVoxApp:
             result = await self._transcriber.finish()
             transcribe_ms = int((time.monotonic() - stop_time) * 1000)
             logger.info("Transcript received after %dms", transcribe_ms)
+
+            if is_command:
+                # A command recording (command key pressed during the hold) is never
+                # typed: the transcript goes to os-control, which also hides
+                # its widget again when there is nothing to act on.
+                command_text = result.text.strip()
+                reply = await asyncio.get_running_loop().run_in_executor(
+                    None, self._send_os_command, command_text or "::hide"
+                )
+                if reply is None or reply.startswith("error:"):
+                    threading.Thread(target=beep_error, daemon=True).start()
+                if command_text:
+                    language = (
+                        detect_language(command_text) if self._config.auto_language_detection else self._config.language
+                    )
+                    record = self._db.save_transcription(
+                        text=f"[os-control] {command_text}",
+                        language=language,
+                        duration_ms=duration_ms,
+                        confidence=result.confidence,
+                        model=self._transcriber.model,
+                    )
+                    self._store_audio(audio_buffer, record.id)
+                await self._transcriber.disconnect()
+                return
 
             if result.text.strip():
                 raw_text = result.text.strip()

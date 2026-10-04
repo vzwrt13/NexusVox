@@ -415,3 +415,27 @@ def test_store_audio_defaults_on_and_roundtrips(tmp_path):
     save_config(cfg, path)
     assert "store_audio = false" in path.read_text()
     assert load_config(path).database.store_audio is False
+
+
+def test_os_control_defaults_load_and_roundtrip(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[os_control]\nenabled = true\ncommand_key = "oem_102"\n')
+    cfg = load_config(path)
+    ws = cfg.os_control
+    assert ws.enabled and ws.command_key == "OEM_102"
+    assert (ws.host, ws.port, ws.service, ws.timeout_s) == ("127.0.0.1", 49730, "os-control", 5.0)
+    save_config(cfg, path)
+    assert load_config(path).os_control == ws
+
+
+def test_os_control_unknown_command_key_falls_back(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[os_control]\ncommand_key = "tilde"\n')
+    cfg = load_config(path)
+    assert cfg.os_control.command_key == "Y" and not cfg.os_control.enabled
+
+
+def test_os_control_command_key_defaults_to_y(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[os_control]\nenabled = true\n")
+    assert load_config(path).os_control.command_key == "Y"

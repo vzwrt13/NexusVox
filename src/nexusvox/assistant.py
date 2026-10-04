@@ -39,8 +39,16 @@ def parse_assistant_command(text: str) -> str | None:
 def send_to_assistant(text: str, config: AssistantConfig) -> str:
     """Hand `text` to the assistant service. Returns its reply; raises OSError when
     nothing answers on the port, so the caller can fall back to typing the text."""
-    request = f"send {config.service} {text}".encode()
-    with socket.create_connection((config.host, config.port), timeout=config.timeout_s) as conn:
+    reply = send_to_service(config.service, text, config.host, config.port, config.timeout_s)
+    logger.info("Assistant command forwarded to %s:%d -> %s", config.host, config.port, reply or "(no reply)")
+    return reply
+
+
+def send_to_service(service: str, text: str, host: str, port: int, timeout_s: float) -> str:
+    """One `send <service> <text>` request to the Controller's control port. Returns the
+    reply; raises OSError when nothing answers."""
+    request = f"send {service} {text}".encode()
+    with socket.create_connection((host, port), timeout=timeout_s) as conn:
         conn.sendall(request)
         conn.shutdown(socket.SHUT_WR)
         chunks: list[bytes] = []
@@ -51,6 +59,4 @@ def send_to_assistant(text: str, config: AssistantConfig) -> str:
                 break
             chunks.append(chunk)
             total += len(chunk)
-    reply = b"".join(chunks).decode("utf-8", "replace").strip()
-    logger.info("Assistant command forwarded to %s:%d -> %s", config.host, config.port, reply or "(no reply)")
-    return reply
+    return b"".join(chunks).decode("utf-8", "replace").strip()

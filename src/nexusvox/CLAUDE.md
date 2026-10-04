@@ -62,7 +62,7 @@ Symbol commands do not break `all caps` mode; structural commands do. Pattern is
 
 ## Assistant Forward
 
-`assistant.py` — checked after the nexus flag/OS commands, before voice commands, only when `[assistant].enabled`. `"nexus assistant <text>"` (also `assistent`, an optional comma/colon) sends `send <service> <text>` to `host:port` over TCP, one request per connection, client shuts its write side, reply is one line. Saved to the DB as `[assistant] <text>`, nothing injected. `OSError` (nothing listening) plays `beep_error` and falls through to normal injection, so a sentence is never lost.
+`assistant.py` — checked after the nexus flag/OS commands, before voice commands, only when `[assistant].enabled`. `"nexus assistant <text>"` (also `assistent`, an optional comma/colon) sends `send <service> <text>` to `host:port` over TCP, one request per connection, client shuts its write side, reply is one line. Saved to the DB as `[assistant] <text>`, nothing injected. `OSError` (nothing listening) plays `beep_error` and falls through to normal injection, so a sentence is never lost. The TCP contract, shared with `[os_control]` command recordings, is documented for users in `docs/CONTROL_PORT.md`; keep it in sync when the protocol changes.
 
 ## Translate Before Inject
 

@@ -125,6 +125,19 @@ class NexusVoxApp:
         Shows the window numbers now, while the user speaks; never blocks the hook."""
         threading.Thread(target=self._send_os_command, args=("::show",), daemon=True).start()
 
+    async def _hide_os_control(self) -> None:
+        """Hide the window numbers again when a command recording ends without a transcript.
+
+        `::show` went out on the key press; a skipped or failed cycle never reaches the
+        normal send, and the widget would otherwise stay on screen.
+        """
+        if not self._hotkey.command:
+            return
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, self._send_os_command, "::hide")
+        except Exception:
+            logger.exception("Could not hide the os-control window numbers")
+
     def _send_os_command(self, text: str) -> str | None:
         """Send one line to the os-control service; None when nothing answers."""
         cfg = self._config.os_control
@@ -264,6 +277,7 @@ class NexusVoxApp:
                 self._record_stop_event.clear()
                 logger.info("Hotkey released before recording could start, skipping")
                 await self._transcriber.disconnect()
+                await self._hide_os_control()
                 return
 
             # Now we are ready — start recording
@@ -467,6 +481,7 @@ class NexusVoxApp:
                 # mode would treat the next press as "stop" (and keep the mic guard
                 # muted); hold mode would queue a stale stop that skips the next cycle.
                 self._hotkey.cancel()
+            await self._hide_os_control()
             await self._transcriber.disconnect()
         finally:
             # Key-up already queued a release; this covers a cycle that died mid-hold.

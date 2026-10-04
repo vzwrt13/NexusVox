@@ -32,7 +32,8 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 - **Nine transcription models** — pick per recording in the dashboard
 - **Voice commands** — spoken formatting shortcuts (new line, new paragraph, tab, all caps, punctuation symbols)
 - **Nexus OS commands** — window management via voice ("nexus open chrome", "nexus minimize")
-- **Assistant forward** — "nexus assistant <anything>" hands the sentence to a local voice assistant over a TCP port instead of typing it (off by default, `[assistant]` in `config.toml`); if nothing answers, the text is typed as usual
+- **Assistant forward** — "nexus assistant <anything>" hands the sentence to a local voice assistant over a TCP port instead of typing it (off by default, `[assistant]` in `config.toml`); if nothing answers, the text is typed as usual. The assistant is a separate program you provide — see [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md)
+- **Command recordings** — add `Y` to the hotkey (`Ctrl+Shift+Alt+Y`) and that recording is not typed but sent as a command to a local program over a TCP port, for example a window switcher that understands "focus 3" (off by default, `[os_control]` in `config.toml`). Without the full chord `Y` types normally. The receiving program is not part of this project — see [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md) for the contract
 - **Translate to English** — dictate in German, English or a mix and have the English version typed, while the recording and transcript are stored as spoken; a tray or dashboard toggle (off by default, `[translator]` in `config.toml`). NexusVox does not translate itself: it needs a separate local translator server that is not part of this project — see [docs/TRANSLATOR.md](docs/TRANSLATOR.md). If the server does not answer, the original text is typed
 - **Mute other apps' microphone while you dictate** — while the push-to-talk keys are held, every other app's WASAPI microphone session is muted so your dictation is not broadcast to a call; on release each app is put back exactly as it was, and an app you muted yourself stays muted. Per-app mute, never the microphone device; a crash mid-hold is repaired on the next start. Verified with browser calls (Chrome/WebRTC goes silent within 300 ms). Off by default; toggle in Settings → Voice Input or `[mic_guard]` in `config.toml`. **Discord's desktop app ignores per-session mute** (its voice engine reads the raw input): for Discord, bind its *Push to Mute* keybind to the same keys as the NexusVox hotkey — that is the reliable way and needs nothing from NexusVox
 - **Flask dashboard** — analytics, settings, transcription history, audio review, and file upload on `http://localhost:47392`
@@ -56,6 +57,8 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 - Expect a noticeable wait after every utterance. Read [Performance](#performance) first; on CPU you are choosing between accuracy and responsiveness, and cannot have both.
 
 **Optional — a local translator server:** only needed for the *Translate to English* toggle. It is a separate program, not shipped with NexusVox; [docs/TRANSLATOR.md](docs/TRANSLATOR.md) describes the one-endpoint HTTP contract so you can run your own. Without it the toggle has no effect and the dashboard says so.
+
+**Optional — a program on the control port:** only needed for *Command recordings* and the *Assistant forward*. It is a separate program, not shipped with NexusVox; [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md) describes the one-line TCP contract and has a minimal example server. Both features are off by default.
 
 **Optional — [ffmpeg](https://ffmpeg.org/) on your `PATH`:** only needed to upload non-WAV audio files (MP3, FLAC, OGG, WEBM) in the dashboard's Upload tab. WAV uploads and push-to-talk dictation work without it. Install with `winget install Gyan.FFmpeg`, then verify with `ffmpeg -version`.
 
@@ -166,6 +169,7 @@ Open `http://localhost:47392` while NexusVox is running:
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, lint, tests, PR conventions
 - [docs/TESTING.md](docs/TESTING.md) — running the test suite
 - [docs/TRANSLATOR.md](docs/TRANSLATOR.md) — the external translator server behind *Translate to English*
+- [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md) — the external program behind *Command recordings* and the *Assistant forward*
 - [SECURITY.md](SECURITY.md) — what NexusVox does on your machine, and how to report a vulnerability
 
 ---

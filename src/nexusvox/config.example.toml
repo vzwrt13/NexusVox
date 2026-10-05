@@ -36,6 +36,7 @@ transcription_delay_ms = 480
 # "whisper-medium", "whisper-large-v3-turbo", "distil-whisper-large-v3" (EN),
 # "distil-whisper-medium-en" (EN).
 # Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe", "parakeet-tdt-0.6b".
+# Your own server (see [inference.custom] below): "custom-server".
 # See the model table in README.md for resources and model licenses.
 model = "parakeet-tdt-0.6b"
 # Compute device: "auto" (detect CUDA, fall back to CPU), "cuda", or "cpu".
@@ -44,6 +45,17 @@ device = "auto"
 # Optional compute type override. Defaults: "int8" on CPU, "float16" on GPU.
 # Valid values for faster-whisper: "int8", "int8_float16", "float16", "float32".
 # compute_type = "int8"
+
+[inference.custom]
+# Your own transcription server, used when model = "custom-server". Not started by
+# NexusVox. Audio goes to this URL, so it leaves this PC if the server is remote.
+# Protocol contract: docs/CUSTOM_SERVER.md in the NexusVox repository.
+url = ""
+# "http": WAV POSTed after the recording stops (OpenAI /v1/audio/transcriptions).
+# "realtime": audio streamed while recording (vLLM /v1/realtime WebSocket).
+protocol = "http"
+# Sent to the server as the model field, and stored with each transcript.
+model_name = "custom-server"
 
 [database]
 # SQLite database path (relative to config file or absolute)

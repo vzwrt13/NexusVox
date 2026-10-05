@@ -543,7 +543,9 @@ function renderModelOverview(modelId) {
   if (!m) return;
   const protocolLabel = m.protocol === "realtime_ws" ? "WebSocket (Realtime)" : "HTTP (OpenAI-compatible)";
   let runtimeLabel;
-  if (m.inprocess_supported && !m.requires_gpu) {
+  if (m.custom) {
+    runtimeLabel = "External server (no Docker)";
+  } else if (m.inprocess_supported && !m.requires_gpu) {
     runtimeLabel = "CPU in-process · GPU via Docker";
   } else if (m.requires_gpu) {
     runtimeLabel = "GPU only (Docker)";
@@ -559,7 +561,9 @@ function renderModelOverview(modelId) {
     ["Streaming", m.streaming ? "Yes" : "No"],
     ["Languages", escapeHtml(m.languages)],
     ["VRAM (approx.)", escapeHtml(m.vram_gb)],
-    ["HuggingFace", `<span class="overview-hf-link" title="${escapeHtml(m.hf_name)}">${escapeHtml(m.hf_name)}</span>`],
+    m.custom
+      ? ["Server", escapeHtml(m.server_url || "Not set: add [inference.custom] url to config.toml")]
+      : ["HuggingFace", `<span class="overview-hf-link" title="${escapeHtml(m.hf_name)}">${escapeHtml(m.hf_name)}</span>`],
   ];
   document.getElementById("model-overview-grid").innerHTML = rows.map(([label, value]) =>
     `<div class="overview-row"><span class="overview-label">${label}</span><span class="overview-value">${value}</span></div>`

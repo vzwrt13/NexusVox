@@ -15,7 +15,7 @@ import numpy as np
 from . import docker_ctl
 from .assistant import parse_assistant_command, send_to_assistant, send_to_service
 from .audio import AudioCapture
-from .config import MODEL_REGISTRY, Config, resolve_device, save_config
+from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker, resolve_device, save_config
 from .dashboard import open_dashboard
 from .db import Database
 from .dictionary import apply_dictionary
@@ -35,6 +35,27 @@ _CPU_FALLBACK_MODEL = "whisper-large-v3-turbo"
 logger = logging.getLogger(__name__)
 
 
+def apply_startup_fallback(inference: InferenceConfig, device: str) -> None:
+    """Swap a model that cannot start on this machine for a bundled one, for this session.
+
+    A GPU model on CPU falls back to Whisper in-process. The custom-server slot without
+    a URL cannot build a client, so it falls back too instead of crashing before the
+    dashboard is up. The TOML is not rewritten here.
+    """
+    info = MODEL_REGISTRY.get(inference.model, {})
+    if device == "cpu" and info.get("requires_gpu"):
+        reason = "requires a GPU but device is CPU"
+    elif info.get("custom") and not inference.custom.url:
+        reason = "needs [inference.custom].url in config.toml"
+    else:
+        return
+    fallback = _CPU_FALLBACK_MODEL if device == "cpu" else InferenceConfig().model
+    logger.warning("Configured model %s %s. Falling back to %s for this session.", inference.model, reason, fallback)
+    inference.model = fallback
+    if model_needs_docker(fallback, device):
+        inference.server_url = str(MODEL_REGISTRY[fallback]["default_url"])
+
+
 class NexusVoxApp:
     """Orchestrates the push-to-talk transcription pipeline."""
 
@@ -52,14 +73,7 @@ class NexusVoxApp:
             self._device,
             config.inference.device,
         )
-        info = MODEL_REGISTRY.get(config.inference.model, {})
-        if self._device == "cpu" and info.get("requires_gpu"):
-            logger.warning(
-                "Configured model %s requires a GPU but device is CPU. Falling back to %s for this session.",
-                config.inference.model,
-                _CPU_FALLBACK_MODEL,
-            )
-            config.inference.model = _CPU_FALLBACK_MODEL
+        apply_startup_fallback(config.inference, self._device)
 
         # Components
         self._audio = AudioCapture(config.audio)
@@ -156,8 +170,8 @@ class NexusVoxApp:
     async def switch_model(self, model_id: str) -> None:
         """Switch to a different transcription model.
 
-        In-process (Whisper-on-CPU) switches skip Docker entirely; GPU-backed
-        switches stop the old container, start the new one, and wait for health.
+        In-process (Whisper-on-CPU) and custom-server switches skip Docker entirely;
+        GPU-backed switches stop the old container, start the new one, and wait for health.
         """
         if model_id not in MODEL_REGISTRY:
             raise ValueError(f"Unknown model: {model_id}")
@@ -169,12 +183,13 @@ class NexusVoxApp:
         old_model = self._config.inference.model
         if old_model == model_id:
             return
+        old_url = self._config.inference.server_url
 
         new_info = MODEL_REGISTRY[model_id]
         old_info = MODEL_REGISTRY[old_model]
         loop = asyncio.get_event_loop()
 
-        new_inprocess = bool(new_info.get("inprocess_supported")) and self._device == "cpu"
+        new_needs_docker = model_needs_docker(model_id, self._device)
         old_was_docker = self._transcriber.needs_docker
 
         try:
@@ -184,7 +199,7 @@ class NexusVoxApp:
             if old_was_docker:
                 await loop.run_in_executor(None, docker_ctl.stop_profile, old_info["docker_profile"])
 
-            if not new_inprocess:
+            if new_needs_docker:
                 self._switch_status = "starting"
                 await loop.run_in_executor(None, docker_ctl.start_profile, new_info["docker_profile"])
                 self._switch_status = "waiting"
@@ -193,7 +208,7 @@ class NexusVoxApp:
                     raise RuntimeError(f"Container for {model_id} did not become healthy")
 
             self._config.inference.model = model_id
-            if not new_inprocess:
+            if new_needs_docker:
                 self._config.inference.server_url = str(new_info["default_url"])
             self._transcriber = create_transcriber(
                 self._config.inference,
@@ -217,6 +232,9 @@ class NexusVoxApp:
             self._switch_status = "error"
             self._switch_error = str(exc)
             logger.exception("Model switch failed")
+            # Keep the config on the model that is actually serving.
+            self._config.inference.model = old_model
+            self._config.inference.server_url = old_url
             # Fallback: restart the old container if it was Docker-backed.
             try:
                 if old_was_docker:
@@ -559,7 +577,8 @@ class NexusVoxApp:
 
         # For in-process transcribers (Whisper on CPU), eagerly load the model
         # so the first hotkey press doesn't pay the full load + download latency.
-        if not self._transcriber.needs_docker:
+        # A custom server is remote and has nothing to preload.
+        if not self._transcriber.needs_docker and not MODEL_REGISTRY[self._config.inference.model].get("custom"):
             asyncio.create_task(self._preload_transcriber())
 
         # Main loop: wait for hotkey press, run transcription cycle

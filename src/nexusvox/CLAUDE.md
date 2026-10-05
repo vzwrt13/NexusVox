@@ -13,6 +13,7 @@
 - **`LocalWhisperTranscriber`** (`transcribers/local_whisper.py`) — in-process faster-whisper, no Docker. Class-level `_model_cache` keeps loaded models warm across switches. `needs_docker = False`. Blocking `WhisperModel.transcribe()` runs in `loop.run_in_executor` to keep the asyncio loop responsive.
 
 `create_transcriber(config, *, device, language, auto_detect_language)` dispatches:
+- `custom-server` (registry flag `custom`) → `_create_custom_transcriber`: `[inference.custom].protocol` `http`/`realtime` picks `OpenAIHttpTranscriber`/`VoxtralRealtimeTranscriber` on `[inference.custom].url`, with `model = model_name` and `needs_docker = False` set on the instance. Empty url raises. `[inference].server_url` is not touched. `model_needs_docker()` in `config.py` is the single Docker decision for `switch_model`; a failed switch restores the old model and URL in the config. The wire contract users implement is `docs/CUSTOM_SERVER.md`; keep it in sync with both transcriber classes.
 - CPU + `inprocess_supported=True` → `LocalWhisperTranscriber`
 - CPU + `requires_gpu=True` → raises with a clear "switch models" error
 - Otherwise → protocol-based dispatch (`realtime_ws` or `openai_http`)

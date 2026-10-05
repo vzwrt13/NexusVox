@@ -10,6 +10,7 @@ from pathlib import Path
 from sqlalchemy.orm import sessionmaker
 
 from ..config import (
+    CUSTOM_PROTOCOLS,
     HOTKEY_KEY_VKS,
     HOTKEY_MODES,
     HOTKEY_MODIFIERS,
@@ -57,16 +58,22 @@ class DashboardAPI:
 
     def get_available_models(self) -> list[dict]:
         resolved = resolve_device(self._config.inference.device)
+        custom = self._config.inference.custom
         return [
             {
                 "id": model_id,
                 "name": info["display_name"],
-                "protocol": info["protocol"],
+                # A custom server reports the protocol it is configured to speak.
+                "protocol": CUSTOM_PROTOCOLS[custom.protocol] if info.get("custom") else info["protocol"],
+                "custom": bool(info.get("custom", False)),
+                "server_url": custom.url if info.get("custom") else "",
                 "description": info.get("description", ""),
                 "parameters": info.get("parameters", "—"),
                 "architecture": info.get("architecture", "—"),
                 "languages": info.get("languages", "—"),
-                "streaming": info.get("streaming", "false") == "true",
+                "streaming": custom.protocol == "realtime"
+                if info.get("custom")
+                else info.get("streaming", "false") == "true",
                 "vram_gb": info.get("vram_gb", "—"),
                 "hf_name": info["hf_name"],
                 "requires_gpu": bool(info.get("requires_gpu", True)),

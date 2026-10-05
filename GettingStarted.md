@@ -60,9 +60,11 @@ ffmpeg -version               # verify — open a new terminal first so PATH is 
 | Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ² | Docker | ~2 GB VRAM | Yes |
 | Cohere Transcribe | `CohereLabs/cohere-transcribe-03-2026` | Apache-2.0 ¹ | Docker | ~6 GB VRAM | Yes |
 | Voxtral Mini 4B | `mistralai/Voxtral-Mini-4B-Realtime-2602` | Apache-2.0 | Docker | ≥16 GB VRAM | Yes |
+| Custom server ³ | — | your server's | your own server | none on this PC | **No** |
 
 ¹ **Gated on Hugging Face** — requires accepting the terms on the model page plus an `HF_TOKEN` (see step 1.1). It is the only model that needs a token.
 ² **Attribution required** — CC-BY-4.0 obliges you to credit NVIDIA if you redistribute the model.
+³ **Your own backend** — a server you run that speaks the OpenAI-compatible HTTP or vLLM realtime WebSocket protocol, set under `[inference.custom]`. Unlike every other entry, audio leaves this PC if that server is remote. Setup and protocol contract: [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md).
 
 Model licenses are separate from NexusVox's own AGPL-3.0 license; no model weights ship with NexusVox. Check the terms of the model you pick, especially for commercial use.
 
@@ -178,12 +180,19 @@ transcription_delay_ms = 480
 # "whisper-medium", "whisper-large-v3-turbo", "distil-whisper-large-v3" (EN),
 # "distil-whisper-medium-en" (EN).
 # Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe", "parakeet-tdt-0.6b".
+# Your own server (see [inference.custom] below): "custom-server".
 model = "voxtral-mini-4b"
 # Compute device: "auto" (detect CUDA, else CPU), "cuda", or "cpu".
 # Use "cpu" to force in-process Whisper — useful for benchmarking on a GPU machine.
 device = "auto"
 # Optional compute-type override for faster-whisper. Defaults: int8 on CPU, float16 on GPU.
 # compute_type = "int8"
+
+[inference.custom]
+# Your own transcription server, used when model = "custom-server" (docs/CUSTOM_SERVER.md).
+url = ""
+protocol = "http"             # "http" or "realtime"
+model_name = "custom-server"
 
 [database]
 # SQLite database path (relative to config file or absolute)

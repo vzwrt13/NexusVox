@@ -107,9 +107,11 @@ See [GettingStarted.md](GettingStarted.md) for the full setup guide including co
 | Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ² | Docker | ~2 GB VRAM | Yes |
 | Cohere Transcribe | `CohereLabs/cohere-transcribe-03-2026` | Apache-2.0 ¹ | Docker | ~6 GB VRAM | Yes |
 | Voxtral Mini 4B | `mistralai/Voxtral-Mini-4B-Realtime-2602` | Apache-2.0 | Docker | ≥16 GB VRAM | Yes |
+| Custom server ³ | — | your server's | your own server | none on this PC | **No** |
 
 ¹ **Gated on Hugging Face.** You must accept the terms on the model page and supply an `HF_TOKEN` before the container can download it. All other models download without a token.
 ² **Attribution required.** CC-BY-4.0 obliges you to credit NVIDIA if you redistribute the model.
+³ **Your own backend.** Any server that speaks the OpenAI-compatible HTTP or vLLM realtime WebSocket protocol, set under `[inference.custom]`. Audio leaves this PC if the server is remote — see [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md).
 
 Model licenses are **separate from NexusVox's own license** — NexusVox is AGPL-3.0, but no model weights ship with it; each model is downloaded from Hugging Face under its own terms. Check the license of the model you pick, especially for commercial use.
 
@@ -170,6 +172,7 @@ Open `http://localhost:47392` while NexusVox is running:
 - [docs/TESTING.md](docs/TESTING.md) — running the test suite
 - [docs/TRANSLATOR.md](docs/TRANSLATOR.md) — the external translator server behind *Translate to English*
 - [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md) — the external program behind *Command recordings* and the *Assistant forward*
+- [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md) — pointing NexusVox at your own transcription server, and the two protocols it must speak
 - [SECURITY.md](SECURITY.md) — what NexusVox does on your machine, and how to report a vulnerability
 
 ---

@@ -10,11 +10,12 @@ import logging
 import math
 import wave
 from abc import ABC, abstractmethod
+from dataclasses import replace
 
 import websockets
 from websockets.connection import State
 
-from .config import MODEL_REGISTRY, InferenceConfig, resolve_compute_type, resolve_device
+from .config import CUSTOM_PROTOCOLS, MODEL_REGISTRY, InferenceConfig, resolve_compute_type, resolve_device
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +325,9 @@ def create_transcriber(
     if registry is None:
         raise ValueError(f"Unknown model: {config.model}")
 
+    if registry.get("custom"):
+        return _create_custom_transcriber(config)
+
     resolved_device = resolve_device(device if device is not None else config.device)
     compute_type = resolve_compute_type(resolved_device, config.compute_type)
 
@@ -352,3 +356,23 @@ def create_transcriber(
         return OpenAIHttpTranscriber(config)
     else:
         raise ValueError(f"Unknown protocol: {protocol}")
+
+
+def _create_custom_transcriber(config: InferenceConfig) -> BaseTranscriber:
+    """Build the client for a user-run server from `[inference.custom]`."""
+    custom = config.custom
+    if not custom.url:
+        raise RuntimeError("Model 'custom-server' needs [inference.custom].url in config.toml.")
+    protocol = CUSTOM_PROTOCOLS.get(custom.protocol)
+    if protocol is None:
+        raise ValueError(f"Unknown custom server protocol: {custom.protocol!r} (use 'http' or 'realtime')")
+
+    server_config = replace(config, server_url=custom.url)
+    transcriber: BaseTranscriber
+    if protocol == "realtime_ws":
+        transcriber = VoxtralRealtimeTranscriber(server_config)
+    else:
+        transcriber = OpenAIHttpTranscriber(server_config)
+    transcriber.model = custom.model_name
+    transcriber.needs_docker = False
+    return transcriber

@@ -161,7 +161,38 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "requires_gpu": False,
         "inprocess_supported": True,
     },
+    "custom-server": {
+        # Not a model but a slot: any server the user runs, at [inference.custom].url,
+        # speaking one of the two wire protocols above. Never started through Docker.
+        "hf_name": "",
+        "default_url": "",
+        "protocol": "custom",
+        "display_name": "Custom server",
+        "docker_profile": "",
+        "health_url": "",
+        "description": "Your own server at [inference.custom] in config.toml — "
+        "audio leaves this machine if that URL is remote",
+        "parameters": "—",
+        "architecture": "OpenAI-compatible HTTP or realtime WebSocket",
+        "languages": "Depends on the server",
+        "streaming": "false",
+        "vram_gb": "None locally",
+        "requires_gpu": False,
+        "inprocess_supported": False,
+        "custom": True,
+    },
 }
+
+# Wire protocols a custom server can speak, mapped to the registry protocol they reuse.
+CUSTOM_PROTOCOLS = {"http": "openai_http", "realtime": "realtime_ws"}
+
+
+def model_needs_docker(model_id: str, device: str) -> bool:
+    """Whether `model_id` runs in a Docker container on the resolved `device`."""
+    info = MODEL_REGISTRY.get(model_id, {})
+    if info.get("custom"):
+        return False
+    return not (info.get("inprocess_supported") and device == "cpu")
 
 
 @dataclass
@@ -225,12 +256,25 @@ class AudioConfig:
 
 
 @dataclass
+class CustomServerConfig:
+    """A user-run transcription server, used when the model is "custom-server"."""
+
+    url: str = ""
+    # "http": WAV POSTed after recording stops (OpenAI /v1/audio/transcriptions).
+    # "realtime": audio streamed while recording (vLLM /v1/realtime WebSocket).
+    protocol: str = "http"
+    # Sent to the server as the model field, and stored with each transcript.
+    model_name: str = "custom-server"
+
+
+@dataclass
 class InferenceConfig:
     server_url: str = "http://localhost:8002/v1/audio/transcriptions"
     transcription_delay_ms: int = 480
     model: str = "parakeet-tdt-0.6b"
     device: str = "auto"
     compute_type: str | None = None
+    custom: CustomServerConfig = field(default_factory=CustomServerConfig)
 
 
 def resolve_device(requested: str) -> str:
@@ -396,6 +440,8 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         hotkey_modifiers, hotkey_key = ["ctrl", "shift", "alt"], ""
     audio_data = data.get("audio", {})
     inference_data = data.get("inference", {})
+    custom_data = inference_data.get("custom", {})
+    custom_protocol = custom_data.get("protocol", "http")
     db_data = data.get("database", {})
     os_cmd_data = data.get("os_commands", {})
     vc_data = data.get("voice_commands", None)
@@ -441,6 +487,11 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             model=inference_data.get("model", "parakeet-tdt-0.6b"),
             device=inference_data.get("device", "auto"),
             compute_type=inference_data.get("compute_type", None),
+            custom=CustomServerConfig(
+                url=custom_data.get("url", ""),
+                protocol=custom_protocol if custom_protocol in CUSTOM_PROTOCOLS else "http",
+                model_name=custom_data.get("model_name", "custom-server") or "custom-server",
+            ),
         ),
         database=DatabaseConfig(
             path=db_data.get("path", "nexusvox.db"),
@@ -508,6 +559,11 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f'model = "{config.inference.model}"',
             f'device = "{config.inference.device}"',
             *([f'compute_type = "{config.inference.compute_type}"'] if config.inference.compute_type else []),
+            "",
+            "[inference.custom]",
+            f'url = "{config.inference.custom.url}"',
+            f'protocol = "{config.inference.custom.protocol}"',
+            f'model_name = "{config.inference.custom.model_name}"',
             "",
             "[database]",
             f'path = "{config.database.path}"',

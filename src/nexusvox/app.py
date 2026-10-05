@@ -15,7 +15,7 @@ import numpy as np
 from . import docker_ctl
 from .assistant import parse_assistant_command, send_to_assistant, send_to_service
 from .audio import AudioCapture
-from .config import MODEL_REGISTRY, Config, model_needs_docker, resolve_device, save_config
+from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker, resolve_device, save_config
 from .dashboard import open_dashboard
 from .db import Database
 from .dictionary import apply_dictionary
@@ -35,6 +35,27 @@ _CPU_FALLBACK_MODEL = "whisper-large-v3-turbo"
 logger = logging.getLogger(__name__)
 
 
+def apply_startup_fallback(inference: InferenceConfig, device: str) -> None:
+    """Swap a model that cannot start on this machine for a bundled one, for this session.
+
+    A GPU model on CPU falls back to Whisper in-process. The custom-server slot without
+    a URL cannot build a client, so it falls back too instead of crashing before the
+    dashboard is up. The TOML is not rewritten here.
+    """
+    info = MODEL_REGISTRY.get(inference.model, {})
+    if device == "cpu" and info.get("requires_gpu"):
+        reason = "requires a GPU but device is CPU"
+    elif info.get("custom") and not inference.custom.url:
+        reason = "needs [inference.custom].url in config.toml"
+    else:
+        return
+    fallback = _CPU_FALLBACK_MODEL if device == "cpu" else InferenceConfig().model
+    logger.warning("Configured model %s %s. Falling back to %s for this session.", inference.model, reason, fallback)
+    inference.model = fallback
+    if model_needs_docker(fallback, device):
+        inference.server_url = str(MODEL_REGISTRY[fallback]["default_url"])
+
+
 class NexusVoxApp:
     """Orchestrates the push-to-talk transcription pipeline."""
 
@@ -52,14 +73,7 @@ class NexusVoxApp:
             self._device,
             config.inference.device,
         )
-        info = MODEL_REGISTRY.get(config.inference.model, {})
-        if self._device == "cpu" and info.get("requires_gpu"):
-            logger.warning(
-                "Configured model %s requires a GPU but device is CPU. Falling back to %s for this session.",
-                config.inference.model,
-                _CPU_FALLBACK_MODEL,
-            )
-            config.inference.model = _CPU_FALLBACK_MODEL
+        apply_startup_fallback(config.inference, self._device)
 
         # Components
         self._audio = AudioCapture(config.audio)

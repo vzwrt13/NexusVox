@@ -29,9 +29,12 @@ model_name = "custom-server"  # sent to the server, and stored with each transcr
 ```
 
 Or pick **Custom server** under Settings → **Model** in the dashboard; the `url`,
-`protocol`, and `model_name` still come from `config.toml`. The model overview shows the
-URL in use. If `url` is empty the switch fails with an error and the previous model stays
-active.
+`protocol`, and `model_name` still come from `config.toml`. NexusVox reads that file at
+startup and writes it back when settings change, so quit NexusVox before editing
+`[inference.custom]` and start it again afterwards. The model overview shows the URL in
+use. If `url` is empty the switch fails with an error and the previous model stays
+active; if `model = "custom-server"` is set with an empty `url`, NexusVox starts on a
+bundled model for that session instead.
 
 Switching to the custom server stops the previous model's container, if it had one. The
 `[inference].server_url` setting is left untouched, so switching back to a bundled model

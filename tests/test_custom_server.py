@@ -173,3 +173,35 @@ def test_failed_switch_to_custom_server_keeps_the_old_model(monkeypatch):
     assert "[inference.custom].url" in app._switch_error
     assert app._config.inference.model == "parakeet-tdt-0.6b"
     docker.start_profile.assert_called_once_with("parakeet")  # old container restored
+
+
+# ---- Startup fallback ------------------------------------------------------
+
+
+def _fallback(inference: InferenceConfig, device: str) -> InferenceConfig:
+    try:
+        from nexusvox.app import apply_startup_fallback
+    except Exception:  # Windows-only imports on other platforms
+        pytest.skip("nexusvox.app needs the Windows runtime")
+    apply_startup_fallback(inference, device)
+    return inference
+
+
+def test_custom_server_without_url_starts_on_parakeet_with_its_url():
+    inference = _custom(url="")
+    inference.server_url = "ws://stale:8000/v1/realtime"
+    _fallback(inference, "cuda")
+    assert inference.model == "parakeet-tdt-0.6b"
+    assert inference.server_url == "http://localhost:8002/v1/audio/transcriptions"
+
+
+def test_custom_server_without_url_starts_on_whisper_on_cpu():
+    assert _fallback(_custom(url=""), "cpu").model == "whisper-large-v3-turbo"
+
+
+def test_custom_server_with_url_is_kept():
+    assert _fallback(_custom(), "cuda").model == "custom-server"
+
+
+def test_gpu_model_on_cpu_still_falls_back():
+    assert _fallback(InferenceConfig(model="voxtral-mini-4b"), "cpu").model == "whisper-large-v3-turbo"

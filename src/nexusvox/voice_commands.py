@@ -122,9 +122,9 @@ ALL_SYMBOL_INFO: list[dict] = [
 PRESS_ENTER_PHRASES: tuple[str, ...] = ("press enter", "hit enter", "enter drücken", "drück enter", "drücke enter")
 
 _PRESS_ENTER_PATTERN: re.Pattern[str] = re.compile(
-    r"(?:^|(?<=[\s,.;:!?]))(?:"
+    r"(?:^|(?<=[\s,.;:!?\-–—\"'“„(]))(?:"
     + "|".join(r"\s+".join(re.escape(w) for w in p.split()) for p in PRESS_ENTER_PHRASES)
-    + r")[\s.!?]*$",
+    + r")[\s.,;:!?…\"'“”)]*$",
     re.IGNORECASE,
 )
 
@@ -134,13 +134,13 @@ def split_press_enter(text: str) -> tuple[str, bool]:
 
     Returns the remaining text and whether the phrase was found. Only the end of
     the dictation counts, so "press enter to continue" mid-sentence stays text.
-    A comma before the phrase is dropped; sentence punctuation is kept
-    ("Done. Press enter." -> "Done.").
+    A comma, dash or opening quote before the phrase is dropped; sentence
+    punctuation is kept ("Done. Press enter." -> "Done.").
     """
     m = _PRESS_ENTER_PATTERN.search(text)
     if not m:
         return text, False
-    return text[: m.start()].rstrip(" ,;:"), True
+    return text[: m.start()].rstrip(" ,;:-–—\"'“„("), True
 
 
 # ---------------------------------------------------------------------------

@@ -197,7 +197,21 @@ def _send_enter() -> bool:
     array = (INPUT * len(inputs))(*inputs)
     sent = user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
     logger.info("SendInput Enter: sent %d/%d events", sent, len(inputs))
+    if sent == 0:
+        logger.error("SendInput returned 0 for Enter — blocked by UIPI (target runs elevated?)")
     return sent == len(inputs)
+
+
+def _prepare_keyboard(injection_delay_ms: int) -> None:
+    """Wait until the user lets go of the hotkey, clear stale modifier state, then pause.
+
+    The hotkey fires on the first modifier going up; without this a synthetic
+    keystroke would be combined with the still-held modifiers (Ctrl+V turning
+    into Ctrl+Shift+Alt+V, Enter into Ctrl+Enter).
+    """
+    _wait_for_physical_release()
+    _release_all_modifiers()
+    time.sleep(injection_delay_ms / 1000)
 
 
 def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = False) -> None:
@@ -211,9 +225,7 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
     """
     if not text:
         if press_enter:
-            _wait_for_physical_release()
-            _release_all_modifiers()
-            time.sleep(injection_delay_ms / 1000)
+            _prepare_keyboard(injection_delay_ms)
             _send_enter()
         return
 
@@ -228,12 +240,7 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
         pyperclip.copy(text)
         # Small delay to ensure clipboard is set
         time.sleep(0.05)
-        # The hotkey fires on the first modifier going up; wait until the user
-        # has let go of all of them, then clear any stale state synthetically
-        # so Ctrl+V is not turned into Ctrl+Shift+Alt+V.
-        _wait_for_physical_release()
-        _release_all_modifiers()
-        time.sleep(injection_delay_ms / 1000)
+        _prepare_keyboard(injection_delay_ms)
         # Try SendInput Ctrl+V first (works for browsers and most apps),
         # fall back to WM_PASTE (works for native Win32 controls like Notepad)
         if not _send_ctrl_v():

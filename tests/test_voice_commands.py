@@ -411,6 +411,9 @@ def test_numbers_de_do_not_span_a_new_line():
         ("Okay, drücke Enter", "Okay"),
         ("press  enter", ""),
         ("Enter drücken.", ""),
+        ("Send it, press enter,", "Send it"),
+        ("Okay - hit enter…", "Okay"),
+        ("Schick es „Enter drücken“", "Schick es"),
     ],
 )
 def test_split_press_enter_trailing_phrase(text, expected):

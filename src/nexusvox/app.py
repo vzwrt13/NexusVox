@@ -547,7 +547,7 @@ class NexusVoxApp:
                 language = detect_language(raw_text) if self._config.auto_language_detection else self._config.language
                 record = self._db.save_transcription(
                     # A dictation that was only "press enter" leaves no text to save.
-                    text=processed_text or "[press enter]",
+                    text="[press enter]" if press_enter and not processed_text else processed_text,
                     language=language,
                     duration_ms=duration_ms,
                     confidence=result.confidence,

@@ -118,8 +118,13 @@ jobs:
       # Report every failing combination, not just the first one.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Every Python version on Linux; Windows minutes bill double, so Windows runs the
+        # suite once, on the newest Python, for the Win32 tests that skip on Linux.
+        os: [ubuntu-latest]
         python-version: ["3.11", "3.12", "3.13"]
+        include:
+          - os: windows-latest
+            python-version: "3.13"
     steps:
       - uses: actions/checkout@v7
 

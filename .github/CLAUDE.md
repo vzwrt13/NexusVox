@@ -2,9 +2,9 @@
 
 ## Workflows
 
-**CI** (`.github/workflows/ci.yml`) — runs once per PR (`pull_request`) and on every push to `main`: Ruff lint + format check on Linux/3.11, then pytest across a matrix of `ubuntu-latest` × `windows-latest` and Python 3.11/3.12/3.13 (6 jobs, `fail-fast: false`).
+**CI** (`.github/workflows/ci.yml`) — runs once per PR (`pull_request`) and on every push to `main`: Ruff lint + format check on Linux/3.11, then pytest on `ubuntu-latest` × Python 3.11/3.12/3.13 plus one `windows-latest` job on Python 3.13 (4 jobs, `fail-fast: false`). Windows minutes bill double and are slower, so Windows runs the suite once, for the Win32 tests that skip on Linux; the packaging smoke test still runs on both.
 
-**Release** (`.github/workflows/release.yml`) — runs on version tags (`v*.*.*`): lint, the same test matrix, build `.whl` + `.tar.gz` on Linux/3.11, publish GitHub Release.
+**Release** (`.github/workflows/release.yml`) — runs on version tags (`v*.*.*`): lint, the full test matrix (`ubuntu-latest` × `windows-latest` × Python 3.11/3.12/3.13, as releases are rare), build `.whl` + `.tar.gz` on Linux/3.11, publish GitHub Release.
 
 
 ## Releasing

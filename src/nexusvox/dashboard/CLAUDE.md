@@ -8,6 +8,10 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 - `api.py` — Flask route wrappers around analytics queries
 - `benchmarks.py` — benchmark JSON file I/O and cross-model comparison (Dev tab)
 
+## Look
+
+Aurora Precision theme, shared with the website. Tokens are the `:root` variables in `style.css` (`--bg`, `--surface*`, `--border*`, `--text*`, `--accent`/`--accent-light`, `--green`, `--red`, `--orange`, 18px cards); `COLORS` at the top of `dashboard.js` reads them (and the font) from the computed style at startup for Chart.js, so `style.css` is the only place to change a color; chart-only tints are the `--accent-soft`, `--accent-fill` and `--green-fill` tokens. Geist and Geist Mono (SIL OFL) are bundled flat in `static/` (`Geist-Variable.woff2`, `GeistMono-Variable.woff2`, license in `Geist-OFL.txt`; `pyproject.toml` packages `dashboard/static/*`, so they must stay flat) - no CDN, the dashboard works offline. The `<header>` is a left sidebar (brand + stacked `.tab` buttons) and stacks above the content below 800px; `.tab` / `.tab-content` / `data-tab` are what `activateTab` in `dashboard.js` keys on, so keep them.
+
 ## Tabs
 
 **Analytics (tab 1)** — stat cards (transcriptions, words dictated, avg WPM with min/max, avg and longest duration, transcribe time with real-time factor, release-to-text latency, translated, minutes saved), charts (timeline, language, peak hours, latency trend, top words, heatmap) and a per-model table (`GET /api/model-breakdown`). Timing comes from `transcribe_ms` / `latency_ms` on `Transcription`, both measured from the moment recording stopped; rows written before those columns existed are skipped in the averages. The `confidence` column still exists but no backend fills it (vLLM's realtime protocol sends no logprobs), so it is not shown.

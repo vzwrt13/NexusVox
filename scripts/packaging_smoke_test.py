@@ -57,7 +57,17 @@ def main() -> int:
     )
 
     static = package_dir / "dashboard" / "static"
-    for asset in ("index.html", "dashboard.js", "style.css", "chart.min.js"):
+    # The fonts and their license text: the OFL requires the license to travel with the fonts, and
+    # without them the dashboard silently falls back to system fonts.
+    for asset in (
+        "index.html",
+        "dashboard.js",
+        "style.css",
+        "chart.min.js",
+        "Geist-Variable.woff2",
+        "GeistMono-Variable.woff2",
+        "Geist-OFL.txt",
+    ):
         check(f"dashboard asset present: {asset}", (static / asset).is_file())
 
     # The first run, as a new user experiences it: an empty directory.

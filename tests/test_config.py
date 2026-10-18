@@ -14,7 +14,9 @@ from nexusvox.config import (
     HotkeyConfig,
     InferenceConfig,
     LearnFromEditsConfig,
+    LlmConfig,
     OSCommandsConfig,
+    PolishConfig,
     VoiceCommandsConfig,
     load_config,
     resolve_compute_type,
@@ -503,3 +505,29 @@ def test_paste_key_roundtrip_and_default(tmp_path):
     assert load_config(path).hotkey.paste_key == "V"
     path.write_text('[hotkey]\npaste_key = "nope"\n', encoding="utf-8")
     assert load_config(path).hotkey.paste_key == ""
+
+
+def test_llm_and_polish_key_roundtrip_and_defaults(tmp_path):
+    path = tmp_path / "config.toml"
+    llm = LlmConfig(url="http://127.0.0.1:1234/v1", protocol="openai", model="m", api_key='a"b', keep_alive="1m")
+    save_config(Config(llm=llm, hotkey=HotkeyConfig(polish_key="P")), path)
+    loaded = load_config(path)
+    assert loaded.llm == llm and loaded.hotkey.polish_key == "P"
+
+    path.write_text('[llm]\nprotocol = "grpc"\n', encoding="utf-8")
+    loaded = load_config(path)
+    assert loaded.llm == LlmConfig() and loaded.hotkey.polish_key == ""
+
+
+def test_polish_in_terminals_roundtrip(tmp_path):
+    path = tmp_path / "config.toml"
+    save_config(Config(polish=PolishConfig(in_terminals=True)), path)
+    assert load_config(path).polish.in_terminals is True
+    path.write_text("[general]\n", encoding="utf-8")
+    assert load_config(path).polish.in_terminals is False
+
+
+def test_polish_key_equal_to_the_paste_key_is_dropped(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[hotkey]\npaste_key = "V"\npolish_key = "v"\n', encoding="utf-8")
+    assert load_config(path).hotkey.polish_key == ""

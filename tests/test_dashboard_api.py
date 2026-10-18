@@ -694,6 +694,16 @@ def test_learn_from_edits_setting(flask_client):
     assert resp.get_json()["learn_from_edits"] is True
 
 
+def test_polish_in_terminals_setting(flask_client):
+    assert flask_client.get("/api/settings").get_json()["polish_in_terminals"] is False
+    resp = flask_client.post(
+        "/api/settings/polish-terminals",
+        data=json.dumps({"enabled": True}),
+        content_type="application/json",
+    )
+    assert resp.get_json()["polish_in_terminals"] is True
+
+
 def test_dictionary_suggestions_accept_and_dismiss(flask_client, db):
     db.add_dictionary_suggestions(
         [DictionaryEntry(wrong="nexus fox", right="NexusVox"), DictionaryEntry(wrong="Maya", right="Meier")]
@@ -818,3 +828,21 @@ def test_paste_key_rejects_keys_the_listener_would_ignore(flask_client):
 
     assert clash.status_code == 400 and "hotkey" in clash.get_json()["error"]
     assert clash.get_json()["paste_key"] == "V"
+
+
+def test_polish_key_and_model_settings(flask_client, monkeypatch):
+    import nexusvox.dashboard.api as api_module
+
+    def post(path, payload):
+        return flask_client.post(path, data=json.dumps(payload), content_type="application/json")
+
+    assert flask_client.get("/api/settings").get_json()["polish_key"] == ""
+    assert post("/api/settings/polish-key", {"key": "p"}).get_json()["polish_key"] == "P"
+    clash = post("/api/settings/paste-key", {"key": "P"})
+    assert clash.status_code == 400 and "polish" in clash.get_json()["error"]
+    assert post("/api/settings/llm-model", {"model": "gemma4:12b"}).get_json()["llm_model"] == "gemma4:12b"
+    assert post("/api/settings/llm-model", {"model": " "}).status_code == 400
+
+    monkeypatch.setattr(api_module, "llm_reachable", lambda cfg: False)
+    status = flask_client.get("/api/settings/llm-status").get_json()
+    assert status == {"url": "http://127.0.0.1:11434", "model": "gemma4:12b", "reachable": False}

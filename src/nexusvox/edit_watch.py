@@ -26,6 +26,7 @@ from typing import Protocol
 
 from .dictionary import DictionaryEntry, suggest_entries
 from .lang_detect import language_guess
+from .uia import automation as uia_automation
 
 logger = logging.getLogger(__name__)
 
@@ -176,10 +177,7 @@ class UiaTextField:
     @classmethod
     def focused(cls) -> UiaTextField | None:
         """The focused element, or None when there is none or it is a password field."""
-        import comtypes.client
-
-        uia = comtypes.client.GetModule("UIAutomationCore.dll")
-        automation = comtypes.client.CreateObject(uia.CUIAutomation, interface=uia.IUIAutomation)
+        uia, automation = uia_automation()
         element = automation.GetFocusedElement()
         if element is None or element.CurrentIsPassword:
             return None

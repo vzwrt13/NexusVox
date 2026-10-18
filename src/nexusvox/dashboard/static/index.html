@@ -74,6 +74,32 @@
 
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
+            <h3>Polish Selected Text Key</h3>
+            <p>Select text, start a recording with the hotkey, tap this key and say what to do ("make it shorter", "mach es formeller") - or nothing for a general polish. A local language model rewrites the selection and pastes it over it; Ctrl+Z in the app undoes it.</p>
+            <p id="llm-status" class="status-line"></p>
+          </div>
+          <select id="polish-key-select" class="select-input"></select>
+        </div>
+        <div class="setting-row" style="margin-top: 8px;">
+          <div class="setting-info">
+            <h3>Polish In Terminals Too</h3>
+            <p>Terminals do not tell NexusVox what is selected, so polish copies the selection with Ctrl+C there - which interrupts the running program when nothing is selected. The rewritten text is pasted at the prompt, not over the selection. Off: polish plays the error beep in terminals.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="polish-terminals-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="setting-row" style="margin-top: 8px;">
+          <div class="setting-info">
+            <h3>Polish Model</h3>
+            <p>The model name on the language model server in <code>[llm]</code> (default Ollama, e.g. <code>gemma4:e4b</code>). It shares the GPU with the speech model - mind the VRAM.</p>
+          </div>
+          <input type="text" id="llm-model-input" class="dict-input" style="max-width: 220px;">
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
             <h3>Mute Other Apps While Recording</h3>
             <p>Mutes every other app's microphone session (Teams, browser calls, ...) while you record, so your dictation is not broadcast to a call, and puts each one back as it was afterwards. An app you muted yourself stays muted. Discord's desktop app ignores this: bind Discord's own <em>Push to Mute</em> keybind to the NexusVox hotkey instead.</p>
           </div>

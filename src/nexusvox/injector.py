@@ -9,6 +9,8 @@ from ctypes import wintypes
 
 import pyperclip
 
+from .clipboard import ClipboardError, set_text
+
 logger = logging.getLogger(__name__)
 
 user32 = ctypes.windll.user32
@@ -21,11 +23,13 @@ VK_SHIFT = 0x10
 VK_MENU = 0x12  # Alt
 VK_LWIN = 0x5B
 VK_V = 0x56
+VK_C = 0x43
 VK_RETURN = 0x0D
 
 # Hardware scan codes — required for apps that ignore virtual-key-only input
 SCAN_CONTROL = 0x1D
 SCAN_V = 0x2F
+SCAN_C = 0x2E
 SCAN_RETURN = 0x1C
 SCAN_SHIFT = 0x2A
 SCAN_ALT = 0x38
@@ -126,29 +130,33 @@ def _wait_for_physical_release(timeout_s: float = 1.5) -> bool:
     return False
 
 
-def _send_ctrl_v() -> bool:
-    """Simulate Ctrl+V keypress via SendInput with hardware scan codes.
+def _send_ctrl_chord(vk: int, scan: int, name: str) -> bool:
+    """Simulate Ctrl+<key> via SendInput with hardware scan codes.
 
     Deliberately does NOT call AttachThreadInput: SendInput does not need it,
     and attaching/detaching around the call races with the target app
-    processing the V keydown. When the detach re-synchronises the target
+    processing the keydown. When the detach re-synchronises the target
     thread's key state before the app reads GetKeyState(VK_CONTROL), the app
     sees a plain "v" instead of a paste.
     Returns True if all events were injected successfully.
     """
     inputs = [
         _make_key_input(VK_CONTROL, SCAN_CONTROL),  # Ctrl down
-        _make_key_input(VK_V, SCAN_V),  # V down
-        _make_key_input(VK_V, SCAN_V, KEYEVENTF_KEYUP),  # V up
+        _make_key_input(vk, scan),  # key down
+        _make_key_input(vk, scan, KEYEVENTF_KEYUP),  # key up
         _make_key_input(VK_CONTROL, SCAN_CONTROL, KEYEVENTF_KEYUP),  # Ctrl up
     ]
     array = (INPUT * len(inputs))(*inputs)
     sent = user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
 
-    logger.info("SendInput Ctrl+V: sent %d/%d events", sent, len(inputs))
+    logger.info("SendInput Ctrl+%s: sent %d/%d events", name, sent, len(inputs))
     if sent == 0:
         logger.error("SendInput returned 0 — blocked by UIPI (target runs elevated?)")
     return sent == len(inputs)
+
+
+def _send_ctrl_v() -> bool:
+    return _send_ctrl_chord(VK_V, SCAN_V, "V")
 
 
 def _focused_control(hwnd: int) -> int | None:
@@ -214,10 +222,49 @@ def _prepare_keyboard(injection_delay_ms: int) -> None:
     time.sleep(injection_delay_ms / 1000)
 
 
+def foreground_window() -> int:
+    """The handle of the window that has the keyboard focus now (0 when none)."""
+    return user32.GetForegroundWindow() or 0
+
+
+def copy_selection(injection_delay_ms: int = 500, timeout_s: float = 1.0) -> str:
+    """The text selected in the focused app, copied with Ctrl+C; "" when nothing is selected.
+
+    The clipboard is emptied first, so an unchanged empty clipboard after Ctrl+C means
+    there was no selection, and it is put back as it was afterwards.
+    """
+    try:
+        original = pyperclip.paste()
+    except pyperclip.PyperclipException:
+        original = None
+    try:
+        set_text("")
+        _prepare_keyboard(injection_delay_ms)
+        if not _send_ctrl_chord(VK_C, SCAN_C, "C"):
+            return ""
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
+            try:
+                selected = pyperclip.paste()
+            except pyperclip.PyperclipException:
+                continue
+            if selected:
+                return selected
+        return ""
+    finally:
+        if original is not None:
+            try:
+                set_text(original)
+            except ClipboardError:
+                pass
+
+
 def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = False) -> None:
     """Inject text at the active cursor position using clipboard paste.
 
-    Saves the current clipboard, sets new content, pastes, then restores.
+    Saves the current clipboard, sets new content, pastes, then restores. Both writes
+    stay out of the Windows clipboard history (`clipboard.set_text`).
     ``injection_delay_ms`` is the pause between releasing modifier keys and
     sending the Ctrl+V keystroke, giving the OS time to clear stale state.
     With ``press_enter`` an Enter keypress follows the paste; an empty ``text``
@@ -237,7 +284,7 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
 
     try:
         # Set transcription text to clipboard
-        pyperclip.copy(text)
+        set_text(text)
         # Small delay to ensure clipboard is set
         time.sleep(0.05)
         _prepare_keyboard(injection_delay_ms)
@@ -257,6 +304,6 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
         if original is not None:
             time.sleep(0.05)
             try:
-                pyperclip.copy(original)
-            except pyperclip.PyperclipException:
+                set_text(original)
+            except ClipboardError:
                 pass

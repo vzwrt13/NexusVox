@@ -9,6 +9,7 @@ import os
 import threading
 import time
 import wave
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,21 +18,29 @@ import numpy as np
 from . import docker_ctl
 from .assistant import parse_assistant_command, send_to_assistant, send_to_service
 from .audio import AudioCapture
+from .clipboard import ClipboardError
 from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker, resolve_device, save_config
 from .dashboard import open_dashboard
 from .db import Database
 from .edit_watch import EditWatcher
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
-from .hotkey import HotkeyListener, describe_hotkey
-from .injector import inject_text
+from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, describe_hotkey
+from .injector import foreground_window, inject_text
 from .lang_detect import detect_language
+from .llm import LlmError
 from .mic_guard import MicGuard, create_mic_guard
 from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
 from .pipeline import process_text
+from .polish import polish, read_selection
 from .remote_mic import RemoteAudioSource, RemoteMicServer
 from .snippets import Snippet, resolve_open_target
 from .transcriber import create_transcriber
 from .tray import SystemTray
+
+
+def _play(beep: Callable[[], None]) -> None:
+    """Play a feedback sound on its own thread, so neither the hook nor the loop waits for it."""
+    threading.Thread(target=beep, daemon=True).start()
 
 
 @dataclass(frozen=True)
@@ -362,15 +371,19 @@ class NexusVoxApp:
                 logger.info("Hotkey released before recording could start, skipping")
                 await self._transcriber.disconnect()
                 await self._hide_os_control()
-                if self._hotkey.paste_last:
+                if self._hotkey.mark == PASTE_LAST:
                     # A quick tap of the paste chord (or one queued behind a running
                     # cycle) needs no recording: paste the last text all the same.
                     await self._paste_last_text()
+                elif self._hotkey.mark == POLISH:
+                    # A quick tap of the polish chord: nothing was said, so the default
+                    # instruction; there is no recording to save.
+                    await self._polish_selection("", None)
                 return
 
             # Now we are ready — start recording
             self._tray.set_active(True)
-            threading.Thread(target=beep_start, daemon=True).start()
+            _play(beep_start)
             logger.info("Recording started")
             start_time = time.monotonic()
 
@@ -385,8 +398,7 @@ class NexusVoxApp:
             await self._record_stop_event.wait()
             self._record_stop_event.clear()
             recording_stopped = True
-            is_command = self._hotkey.command and not remote
-            is_paste_last = self._hotkey.paste_last and not remote
+            mark = None if remote else self._hotkey.mark
 
             # Stop audio (sends None sentinel, ending the stream task)
             audio.stop()
@@ -403,9 +415,9 @@ class NexusVoxApp:
                 return
 
             self._tray.set_active(False)
-            threading.Thread(target=beep_stop, daemon=True).start()
+            _play(beep_stop)
 
-            if is_paste_last:
+            if mark == PASTE_LAST:
                 # The paste key was tapped during the hold: drop this recording and paste
                 # the last text again instead of transcribing.
                 await self._transcriber.disconnect()
@@ -419,7 +431,7 @@ class NexusVoxApp:
 
             recording = _Recording(audio_buffer, duration_ms, result.confidence, transcribe_ms)
 
-            if is_command:
+            if mark == COMMAND:
                 # A command recording (command key pressed during the hold) is never
                 # typed: the transcript goes to os-control, which also hides
                 # its widget again when there is nothing to act on.
@@ -428,10 +440,17 @@ class NexusVoxApp:
                     None, self._send_os_command, command_text or "::hide"
                 )
                 if reply is None or reply.startswith("error:"):
-                    threading.Thread(target=beep_error, daemon=True).start()
+                    _play(beep_error)
                 if command_text:
                     self._save_command(recording, f"[os-control] {command_text}", command_text)
                 await self._transcriber.disconnect()
+                return
+
+            if mark == POLISH:
+                # The polish key was tapped during the hold: what was said (maybe nothing)
+                # is an instruction for the selected text, not text to type.
+                await self._transcriber.disconnect()
+                await self._polish_selection(result.text.strip(), recording)
                 return
 
             raw_text = result.text.strip()
@@ -531,12 +550,53 @@ class NexusVoxApp:
         """Paste what the last dictation pasted, once more; the error beep when there is none yet."""
         if not self._last_typed:
             logger.info("Paste last: nothing pasted yet in this session")
-            threading.Thread(target=beep_error, daemon=True).start()
+            _play(beep_error)
             return
         logger.info("Paste last: %s", self._last_typed)
         await asyncio.get_running_loop().run_in_executor(
             None, inject_text, self._last_typed, self._config.injection_delay_ms
         )
+
+    async def _polish_selection(self, instruction: str, recording: _Recording | None) -> None:
+        """Rewrite the selected text by *instruction* through the [llm] model and paste it over the selection.
+
+        Nothing selected, or the model unreachable or failing: the error beep, and the
+        selection stays as it was. When the focus moved to another window while the model
+        worked, nothing is pasted (error beep); the paste key still pastes the reply.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            selection = await loop.run_in_executor(
+                None, read_selection, self._config.injection_delay_ms, self._config.polish.in_terminals
+            )
+        except ClipboardError as exc:
+            logger.warning("Polish: could not copy the selection (%s)", exc)
+            _play(beep_error)
+            return
+        if not selection.strip():
+            logger.info("Polish: nothing selected")
+            _play(beep_error)
+            return
+        window = foreground_window()
+        try:
+            rewritten = await loop.run_in_executor(None, polish, selection, instruction, self._config.llm)
+        except LlmError as exc:
+            logger.warning("Polish: model at %s failed (%s); the selection stays as it was", self._config.llm.url, exc)
+            _play(beep_error)
+            return
+        self._last_typed = rewritten
+        if foreground_window() != window:
+            logger.info("Polish: the focus moved to another window, not pasting (the paste key pastes it)")
+            _play(beep_error)
+        else:
+            # The selection is still selected, so pasting replaces it; Ctrl+Z in the app undoes it.
+            try:
+                await loop.run_in_executor(None, inject_text, rewritten, 0)
+            except ClipboardError as exc:
+                logger.warning("Polish: could not paste the reply (%s); the paste key pastes it", exc)
+                _play(beep_error)
+        if recording is not None:
+            self._save_command(recording, f"[polish] {instruction or 'default'}", instruction or selection)
 
     def _flag_last_transcription(self) -> None:
         """ "nexus flag" - always available, flags the most recent transcription for review."""
@@ -546,7 +606,7 @@ class NexusVoxApp:
             return
         self._db.flag_transcription(last_tid)
         logger.info("Nexus flag: flagged transcription id=%d", last_tid)
-        threading.Thread(target=beep_flag, daemon=True).start()
+        _play(beep_flag)
 
     async def _run_command(self, raw_text: str, nexus_cmd: NexusCommand | None, snippets: list[Snippet]) -> str | None:
         """Run the command *raw_text* is, if any. Returns the label to save it under, or None to type it.
@@ -567,7 +627,7 @@ class NexusVoxApp:
                 logger.exception("Opening %r failed", target)
                 opened = False
             if not opened:
-                threading.Thread(target=beep_error, daemon=True).start()
+                _play(beep_error)
             return f"[nexus] open {target}"
 
         assistant_text = parse_assistant_command(raw_text) if self._config.assistant.enabled else None
@@ -576,11 +636,11 @@ class NexusVoxApp:
                 reply = await loop.run_in_executor(None, send_to_assistant, assistant_text, self._config.assistant)
             except OSError as exc:
                 logger.warning("Assistant not reachable (%s); typing the text instead", exc)
-                threading.Thread(target=beep_error, daemon=True).start()
+                _play(beep_error)
             else:
                 if reply.startswith("error:"):
                     logger.warning("Assistant refused the command: %s", reply)
-                    threading.Thread(target=beep_error, daemon=True).start()
+                    _play(beep_error)
                 return f"[assistant] {assistant_text}"
 
         if nexus_cmd is not None and self._config.os_commands.enabled:

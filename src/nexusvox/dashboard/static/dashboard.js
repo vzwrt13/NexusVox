@@ -530,6 +530,7 @@ function editPolishPreset(id) {
 
 async function deletePolishPreset(id) {
   await fetch(`/api/polish-presets/${id}`, { method: "DELETE" });
+  if (document.getElementById("preset-id").value === String(id)) resetPresetForm();
   loadPolishPresets();
 }
 

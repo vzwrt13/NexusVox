@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .snippets import SnippetOption, best_option
+from .snippets import MAX_NAME_WORDS, SnippetOption, best_option
+
+# A spoken name is matched on its first words only (`snippets.best_option`); a longer name never matches in full.
+MAX_PRESET_NAME_WORDS = MAX_NAME_WORDS
 
 
 @dataclass(frozen=True)

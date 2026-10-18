@@ -55,6 +55,14 @@ def test_presets_need_a_unique_name_and_an_instruction(db):
     assert db.save_polish_preset(None, PolishPreset("short", "  ")) is None
     assert db.save_polish_preset(None, PolishPreset("PROMPT ENGINEER", "other")) is None
     assert db.save_polish_preset(999, PolishPreset("other", "x")) is None
+    assert db.save_polish_preset(None, PolishPreset("rewrite as a formal business email", "x")) is None
     edited = db.save_polish_preset(saved["id"], PolishPreset("Prompt Engineer", "New text."))
     assert edited == {"id": saved["id"], "name": "Prompt Engineer", "instruction": "New text.", "is_default": False}
     assert db.delete_polish_preset(saved["id"]) and not db.delete_polish_preset(saved["id"])
+
+
+def test_preset_names_clash_across_non_ascii_case(db):
+    assert db.save_polish_preset(None, PolishPreset("über", "x")) is not None
+    assert db.save_polish_preset(None, PolishPreset("ÜBER", "y")) is None
+    db.save_polish_preset(None, PolishPreset("zeta", "z"))
+    assert [p["name"] for p in db.list_polish_presets()] == ["über", "zeta"]

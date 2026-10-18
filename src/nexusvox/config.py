@@ -408,6 +408,16 @@ class CleanupConfig:
     timeout_s: float = 3.0
 
 
+def _cleanup_config(data: dict) -> CleanupConfig:
+    """An unknown level is off; a timeout of 0 or less would fail every request at once."""
+    level = str(data.get("level", "off")).strip().lower()
+    timeout_s = float(data.get("timeout_s", CleanupConfig.timeout_s))
+    return CleanupConfig(
+        level=level if level in CLEANUP_LEVELS else "off",
+        timeout_s=timeout_s if timeout_s > 0 else CleanupConfig.timeout_s,
+    )
+
+
 @dataclass
 class PolishConfig:
     """How polish reads the selection. In a terminal it needs Ctrl+C (the terminal does
@@ -627,10 +637,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             keep_alive=str(llm_data.get("keep_alive", LlmConfig.keep_alive)),
         ),
         polish=PolishConfig(in_terminals=bool(polish_data.get("in_terminals", False))),
-        cleanup=CleanupConfig(
-            level=cleanup_data.get("level") if cleanup_data.get("level") in CLEANUP_LEVELS else "off",
-            timeout_s=float(cleanup_data.get("timeout_s", CleanupConfig.timeout_s)),
-        ),
+        cleanup=_cleanup_config(cleanup_data),
         learn_from_edits=LearnFromEditsConfig(
             enabled=learn_data.get("enabled", False),
             window_s=float(learn_data.get("window_s", 30.0)),

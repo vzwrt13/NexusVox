@@ -711,6 +711,10 @@ def test_cleanup_level_setting(flask_client, monkeypatch):
     assert len(warmed) == 1  # switching cleanup on loads the model
     bad = post("heavy")
     assert bad.status_code == 400 and bad.get_json()["cleanup_level"] == "light"
+    flask_client.post(
+        "/api/settings/llm-model", data=json.dumps({"model": "qwen3.5:4b"}), content_type="application/json"
+    )
+    assert len(warmed) == 2  # a new model is loaded while cleanup is on
 
 
 def test_polish_in_terminals_setting(flask_client):

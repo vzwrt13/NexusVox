@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 
 from .config import CleanupConfig, LlmConfig
-from .llm import LlmError, complete
+from .llm import LlmError, clean_reply, complete
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,10 @@ _WORD_RE = re.compile(r"\w+", re.UNICODE)
 _TAG_RE = re.compile(r"</?dictation>")
 # Private-use characters: the pipeline's snippet placeholders (snippets.mark_snippets).
 _PLACEHOLDER_RE = re.compile("[\ue000-\uf8ff]")
+# Characters only voice commands put there (tab, symbols); the model must keep every one.
+_COMMAND_CHAR_RE = re.compile(r"[\t/\\|~*()\[\]{}<>#%+=]")
+# A sentence mark the model put after a snippet at the very end; mark_snippets dropped it on purpose.
+_TRAILING_MARK_RE = re.compile("(?<=[\ue000-\uf8ff])[.!?,;:]+$")
 
 
 @dataclass(frozen=True)
@@ -89,11 +93,21 @@ def _words(text: str) -> list[str]:
     return [w.lower() for w in _WORD_RE.findall(text)]
 
 
+def _command_output_kept(original: str, cleaned: str) -> bool:
+    """Tabs and symbols from voice commands, and words in capitals ("all caps", acronyms), survive."""
+    if sorted(_COMMAND_CHAR_RE.findall(original.strip())) != sorted(_COMMAND_CHAR_RE.findall(cleaned.strip())):
+        return False
+    kept = set(_WORD_RE.findall(cleaned))
+    return all(w in kept for w in _WORD_RE.findall(original) if len(w) > 1 and w.isupper())
+
+
 def plausible(original: str, cleaned: str, level: str) -> bool:
     """Whether *cleaned* looks like *original* tidied up at *level*, not an answer or a rewrite."""
     # Edge line breaks do not count: cleanup() puts the dictation's own edges back.
     if cleaned.strip().count("\n") != original.strip().count("\n") or _placeholders(cleaned) != _placeholders(original):
         return False  # a line break from "new line" or a snippet placeholder was lost
+    if not _command_output_kept(original, cleaned):
+        return False  # light fixes capitalisation and would undo "all caps"; a tab or symbol was dropped
     before, after = _words(original), _words(cleaned)
     if not after or len(after) > len(before) * _MAX_GROWTH + 1:
         return False
@@ -115,7 +129,10 @@ def cleanup(text: str, config: CleanupConfig, llm: LlmConfig) -> CleanupResult:
         logger.warning("Cleanup: model at %s failed (%s); typing the dictation unchanged", llm.url, exc)
         return CleanupResult(text, error=str(exc))
     ms = int((time.monotonic() - started) * 1000)
-    reply = _TAG_RE.sub("", reply)  # a small model sometimes echoes the tags
+    # A reasoning model may lead with its thinking; a small model sometimes echoes the tags.
+    reply = _TAG_RE.sub("", clean_reply(reply))
+    if _PLACEHOLDER_RE.fullmatch(text.rstrip()[-1:]):
+        reply = _TRAILING_MARK_RE.sub("", reply.strip())  # "my address." types the address without a period
     if not plausible(text, reply, config.level):
         logger.warning("Cleanup: the reply does not look like the dictation cleaned up; typing it unchanged")
         logger.debug("Cleanup rejected: %r -> %r", text, reply)

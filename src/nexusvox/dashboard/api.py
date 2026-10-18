@@ -241,6 +241,8 @@ class DashboardAPI:
             return {"error": "A model name is required", **self.get_settings()}
         self._config.llm.model = model
         save_config(self._config)
+        if self._config.cleanup.level != "off":
+            llm_warm_up(self._config.llm)  # cleanup's short timeout would skip dictations while it loads
         return self.get_settings()
 
     def get_llm_status(self) -> dict:

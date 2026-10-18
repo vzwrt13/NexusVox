@@ -87,6 +87,31 @@ def test_implausible_replies_are_ignored(model, dictation, reply):
     assert (result.text, result.cleaned, result.error) == (dictation, False, "implausible reply")
 
 
+def test_a_thinking_block_is_stripped(model):
+    model.reply = "<think>The user wants fillers removed.</think>\nIch komme heute später."
+    assert cleanup("Ähm ich komme äh heute später", LIGHT, LlmConfig()).text == "Ich komme heute später."
+
+
+def test_no_sentence_mark_after_a_snippet_at_the_end(model):
+    model.reply = "Danke schön, \ue000."
+    assert cleanup("ähm Danke schön \ue000", LIGHT, LlmConfig()).text == "Danke schön, \ue000"
+    model.reply = "Thanks, my address is \ue000."
+    assert cleanup("thanks my address is \ue000", LIGHT, LlmConfig()).text == "Thanks, my address is \ue000"
+
+
+@pytest.mark.parametrize(
+    "dictation, reply",
+    [
+        ("das ist WIRKLICH WICHTIG für uns", "Das ist wirklich wichtig für uns."),
+        ("der Pfad ist src / app und so", "Der Pfad ist src app und so."),
+        ("Name\tAlter und Ort hier", "Name Alter und Ort hier."),
+    ],
+    ids=["all-caps-recased", "symbol-lost", "tab-lost"],
+)
+def test_voice_command_output_must_survive(dictation, reply):
+    assert not plausible(dictation, reply, "light")
+
+
 def test_plausible_accepts_fillers_removed_and_punctuation_fixed():
     dictation = "ähm also ich ich glaube wir brauchen äh einen Test"
     assert plausible(dictation, "Ich glaube, wir brauchen einen Test.", "light")

@@ -526,6 +526,8 @@ def test_cleanup_roundtrip_and_unknown_level(tmp_path):
     assert load_config(path).cleanup == CleanupConfig(level="medium", timeout_s=4.5)
     path.write_text('[cleanup]\nlevel = "heavy"\n', encoding="utf-8")
     assert load_config(path).cleanup == CleanupConfig()
+    path.write_text('[cleanup]\nlevel = "Light"\ntimeout_s = 0\n', encoding="utf-8")
+    assert load_config(path).cleanup == CleanupConfig(level="light", timeout_s=3.0)
 
 
 def test_polish_in_terminals_roundtrip(tmp_path):

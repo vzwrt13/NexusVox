@@ -10,10 +10,9 @@ are versioned and tested with the code.
 from __future__ import annotations
 
 import logging
-import re
 
 from .config import LlmConfig
-from .llm import LlmError, complete
+from .llm import LlmError, clean_reply, complete
 from .mic_guard import _ensure_com
 from .uia import read_focus
 
@@ -34,20 +33,9 @@ SYSTEM_PROMPT = (
 
 logger = logging.getLogger(__name__)
 
-_FENCE_RE = re.compile(r"^```[\w-]*\n(.*)\n```$", re.DOTALL)
-# A reasoning model behind protocol = "openai" has no `think: false` and may put its thinking first.
-_THINK_RE = re.compile(r"^<think>.*?</think>", re.DOTALL)
-
 
 def build_user_message(selection: str, instruction: str) -> str:
     return f"Instruction: {instruction.strip() or DEFAULT_INSTRUCTION}\n\nText:\n{selection}"
-
-
-def clean_reply(reply: str) -> str:
-    """Strip a leading thinking block and a code fence the model wrapped around its answer."""
-    reply = _THINK_RE.sub("", reply.strip()).strip()
-    m = _FENCE_RE.match(reply)
-    return m.group(1).strip() if m else reply
 
 
 def polish(selection: str, instruction: str, config: LlmConfig) -> str:

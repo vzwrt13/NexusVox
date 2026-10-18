@@ -193,6 +193,19 @@ timeout_s = 60.0
 # sooner (the speech model needs its share); the first request after unloading takes 10-50 s.
 keep_alive = "10m"
 
+[cleanup]
+# Tidy every dictation through the [llm] model before it is typed (same model as polish).
+# "off" (default), "light": removes fillers ("um", "äh"), false starts and repeated words and
+# fixes punctuation, keeps the wording; "medium": also grammar, slightly more concise.
+# Adds ~0.6 s per dictation with gemma4:e4b. The transcript is saved as spoken. A reply that
+# does not look like the dictation cleaned up (an answer, a translation, a lost line break or
+# snippet) is ignored, and dictations under 3 words are not sent. Also in the dashboard.
+level = "off"
+# A model still loading (10-50 s after [llm].keep_alive ran out) must not hold the dictation
+# up: after this many seconds it is typed unchanged. NexusVox loads the model at start and
+# when cleanup is switched on; a longer keep_alive keeps it loaded (and its VRAM in use).
+timeout_s = 3.0
+
 [polish]
 # Polish in terminals too (Windows Terminal, console, Git Bash, VS Code/Orca terminals).
 # A terminal does not report its selection, so polish copies it with Ctrl+C - which

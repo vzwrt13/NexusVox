@@ -13,6 +13,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import threading
 import urllib.error
 import urllib.request
 
@@ -70,6 +71,20 @@ def complete(config: LlmConfig, system: str, user: str) -> str:
     if not isinstance(text, str) or not text.strip():
         raise LlmError("the model returned no text")
     return text.strip()
+
+
+def warm_up(config: LlmConfig) -> None:
+    """Load the model in the background, so the first real request does not wait 10-50 s for
+    it - auto cleanup gives up after a few seconds. Never raises; a failure is only logged."""
+
+    def run() -> None:
+        try:
+            complete(config, "Reply with OK.", "OK")
+            logger.info("Language model %s is loaded", config.model)
+        except LlmError as exc:
+            logger.info("Language model warm-up at %s failed (%s)", config.url, exc)
+
+    threading.Thread(target=run, daemon=True, name="llm-warm-up").start()
 
 
 def is_reachable(config: LlmConfig) -> bool:

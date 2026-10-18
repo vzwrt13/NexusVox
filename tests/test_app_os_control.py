@@ -166,6 +166,35 @@ def test_polish_does_not_paste_when_the_focus_moved(monkeypatch):
     assert app._last_typed == "Hallo zusammen"  # the paste key still pastes it
 
 
+def test_polish_beeps_when_the_clipboard_is_busy(monkeypatch):
+    import nexusvox.app as app_module
+    from nexusvox.clipboard import ClipboardError
+
+    app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
+
+    def busy(text, delay):
+        raise ClipboardError("OpenClipboard failed")
+
+    monkeypatch.setattr(app_module, "inject_text", busy)
+    asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
+    assert calls["beeps"] == ["error"]
+    assert app._last_typed == "Hallo zusammen"  # the paste key still pastes it
+
+
+def test_polish_beeps_when_the_selection_cannot_be_copied(monkeypatch):
+    import nexusvox.app as app_module
+    from nexusvox.clipboard import ClipboardError
+
+    app, calls = _polish_app(monkeypatch, "unused", "unused")
+
+    def busy(delay, in_terminals):
+        raise ClipboardError("OpenClipboard failed")
+
+    monkeypatch.setattr(app_module, "read_selection", busy)
+    asyncio.run(app._polish_selection("", MagicMock()))
+    assert calls == {"pasted": [], "beeps": ["error"]}
+
+
 def test_quick_tap_of_the_polish_chord_polishes_with_the_default_instruction():
     app = _app(command=False, polish=True)
     app._polish_selection = AsyncMock()

@@ -74,11 +74,18 @@ def read_focus() -> Focus:
             return Focus(terminal=False, selection=None)
         if element.CurrentClassName in _TERMINAL_ELEMENTS:
             return Focus(terminal=True, selection=None)
+        if element.CurrentIsPassword:
+            # Never hand a password to the model, and never Ctrl+C one: as if nothing were selected.
+            return Focus(terminal=False, selection="")
         pattern = element.GetCurrentPattern(_TEXT_PATTERN_ID)
         if not pattern:
             return Focus(terminal=False, selection=None)
         ranges = pattern.QueryInterface(uia.IUIAutomationTextPattern).GetSelection()
         text = "".join(ranges.GetElement(i).GetText(_SELECTION_CHARS) for i in range(ranges.Length))
+        if len(text) >= _SELECTION_CHARS:
+            # GetText cut the selection off: pasting the reply over it would drop the rest.
+            logger.info("UI Automation: the selection is too long to polish (%d+ characters)", _SELECTION_CHARS)
+            return Focus(terminal=False, selection="")
     except Exception:
         logger.debug("UI Automation could not read the focused control", exc_info=True)
         return Focus(terminal=False, selection=None)

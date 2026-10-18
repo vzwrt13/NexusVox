@@ -18,6 +18,7 @@ import numpy as np
 from . import docker_ctl
 from .assistant import parse_assistant_command, send_to_assistant, send_to_service
 from .audio import AudioCapture
+from .clipboard import ClipboardError
 from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker, resolve_device, save_config
 from .dashboard import open_dashboard
 from .db import Database
@@ -564,9 +565,14 @@ class NexusVoxApp:
         worked, nothing is pasted (error beep); the paste key still pastes the reply.
         """
         loop = asyncio.get_running_loop()
-        selection = await loop.run_in_executor(
-            None, read_selection, self._config.injection_delay_ms, self._config.polish.in_terminals
-        )
+        try:
+            selection = await loop.run_in_executor(
+                None, read_selection, self._config.injection_delay_ms, self._config.polish.in_terminals
+            )
+        except ClipboardError as exc:
+            logger.warning("Polish: could not copy the selection (%s)", exc)
+            _play(beep_error)
+            return
         if not selection.strip():
             logger.info("Polish: nothing selected")
             _play(beep_error)
@@ -584,7 +590,11 @@ class NexusVoxApp:
             _play(beep_error)
         else:
             # The selection is still selected, so pasting replaces it; Ctrl+Z in the app undoes it.
-            await loop.run_in_executor(None, inject_text, rewritten, 0)
+            try:
+                await loop.run_in_executor(None, inject_text, rewritten, 0)
+            except ClipboardError as exc:
+                logger.warning("Polish: could not paste the reply (%s); the paste key pastes it", exc)
+                _play(beep_error)
         if recording is not None:
             self._save_command(recording, f"[polish] {instruction or 'default'}", instruction or selection)
 

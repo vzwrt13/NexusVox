@@ -256,6 +256,9 @@ def _dictation_app(monkeypatch, inject):
     monkeypatch.setattr(app_module, "inject_text", inject)
     beeps = []
     monkeypatch.setattr(app_module, "beep_error", lambda: beeps.append("error"))
+    # CI runners have no audio device: a real start/stop beep would raise and end the cycle.
+    monkeypatch.setattr(app_module, "beep_start", lambda: None)
+    monkeypatch.setattr(app_module, "beep_stop", lambda: None)
     monkeypatch.setattr(app_module, "_play", lambda beep: beep())
     return app, beeps
 

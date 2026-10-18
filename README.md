@@ -172,6 +172,8 @@ Open `http://localhost:47392` while NexusVox is running:
 - [GettingStarted.md](GettingStarted.md) — full setup guide
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, lint, tests, PR conventions
 - [docs/TESTING.md](docs/TESTING.md) — running the test suite
+- [docs/architecture.html](docs/architecture.html) — interactive component diagram: inputs, transcription backends, storage, dashboard and the local services NexusVox talks to (download and open in a browser)
+- [docs/text-pipeline.html](docs/text-pipeline.html) — interactive diagram of one dictation: which commands end the cycle early, the text pipeline in order, injection and learn from edits
 - [docs/TRANSLATOR.md](docs/TRANSLATOR.md) — the external translator server behind *Translate to English*
 - [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md) — the external program behind *Command recordings* and the *Assistant forward*
 - [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md) — pointing NexusVox at your own transcription server, and the two protocols it must speak

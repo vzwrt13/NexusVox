@@ -453,6 +453,20 @@ def test_voice_commands_structural_roundtrip(tmp_path):
     assert loaded.voice_commands.bypass_structural is True
 
 
+def test_voice_commands_press_enter_roundtrip(tmp_path):
+    path = tmp_path / "config.toml"
+    save_config(Config(voice_commands=VoiceCommandsConfig(press_enter=True)), path)
+
+    assert load_config(path).voice_commands.press_enter is True
+
+
+def test_voice_commands_press_enter_off_when_missing(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[voice_commands]\nenabled = true\n", encoding="utf-8")
+
+    assert load_config(path).voice_commands.press_enter is False
+
+
 def test_voice_commands_structural_defaults_when_missing(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[voice_commands]\nenabled = true\n", encoding="utf-8")

@@ -413,6 +413,8 @@ class VoiceCommandsConfig:
     # Structural commands (new line, new paragraph, tab, all caps): own category, own list, own bypass.
     structural: list[str] = field(default_factory=lambda: list(_DEFAULT_STRUCTURAL))
     bypass_structural: bool = False
+    # Trailing "press enter" / "Enter drücken" presses Enter after the paste. Opt-in.
+    press_enter: bool = False
 
 
 @dataclass
@@ -475,6 +477,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             bypass_symbols=vc_data.get("bypass_symbols", False),
             structural=list(vc_data.get("structural", _DEFAULT_STRUCTURAL)),
             bypass_structural=vc_data.get("bypass_structural", False),
+            press_enter=vc_data.get("press_enter", False),
         )
     else:
         vc_config = VoiceCommandsConfig(
@@ -604,6 +607,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"symbols = {symbols_toml}",
             f"bypass_structural = {'true' if config.voice_commands.bypass_structural else 'false'}",
             f"structural = {structural_toml}",
+            f"press_enter = {'true' if config.voice_commands.press_enter else 'false'}",
             "",
             "[assistant]",
             f"enabled = {'true' if config.assistant.enabled else 'false'}",

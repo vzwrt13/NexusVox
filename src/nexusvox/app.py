@@ -29,7 +29,7 @@ from .remote_mic import RemoteAudioSource, RemoteMicServer
 from .transcriber import create_transcriber
 from .translator import translate
 from .tray import SystemTray
-from .voice_commands import process_voice_commands
+from .voice_commands import process_voice_commands, split_press_enter
 
 _CPU_FALLBACK_MODEL = "whisper-large-v3-turbo"
 
@@ -496,6 +496,12 @@ class NexusVoxApp:
                 if corrected_text != raw_text:
                     logger.info("Dictionary applied: %r -> %r", raw_text, corrected_text)
 
+                # A trailing "press enter" is not typed; Enter follows the paste. The phone
+                # inserts the text itself, so a remote recording keeps the phrase as text.
+                press_enter = False
+                if self._config.voice_commands.enabled and self._config.voice_commands.press_enter and not remote:
+                    corrected_text, press_enter = split_press_enter(corrected_text)
+
                 # Apply voice commands (new line, tab, all caps, symbols, etc.)
                 if self._config.voice_commands.enabled:
                     active_symbols = (
@@ -535,11 +541,13 @@ class NexusVoxApp:
                         inject_text,
                         translation.text,
                         self._config.injection_delay_ms,
+                        press_enter,
                     )
                 latency_ms = int((time.monotonic() - stop_time) * 1000)
                 language = detect_language(raw_text) if self._config.auto_language_detection else self._config.language
                 record = self._db.save_transcription(
-                    text=processed_text,
+                    # A dictation that was only "press enter" leaves no text to save.
+                    text=processed_text or "[press enter]",
                     language=language,
                     duration_ms=duration_ms,
                     confidence=result.confidence,

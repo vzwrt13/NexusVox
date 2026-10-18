@@ -220,6 +220,8 @@ numbers_as_digits = false
 # pick which ones fire, or bypass them all without clearing the list
 structural = ["new paragraph", "new line", "tab", "all caps"]
 bypass_structural = false
+# End a dictation with "press enter" / "Enter drücken" to paste, then press Enter (off by default)
+press_enter = false
 # When true, spoken symbol keywords bypass voice command processing and are injected literally
 bypass_symbols = false
 # Active symbol keywords (spoken words that insert punctuation)
@@ -271,6 +273,9 @@ With `[voice_commands].enabled = true`, certain spoken phrases are converted bef
 | "all caps [text]" / "alles groß [text]" | `TEXT` |
 | "twenty five" / "fünfundzwanzig" (with `numbers_as_digits`) | `25` |
 | "period", "comma", etc. | `.`, `,`, etc. (configurable via `symbols`) |
+| "[text], press enter" / "[Text], Enter drücken" (with `press_enter`) | pastes `text`, then presses Enter |
+
+The press enter command only fires at the very end of a dictation ("press enter to continue" stays text). Also accepted: "hit enter", "drück Enter", "drücke Enter". Turn it on in the dashboard under Settings → Voice Commands → Press Enter Command.
 
 ---
 

@@ -141,6 +141,21 @@ def test_set_voice_commands_numbers(flask_client):
     assert resp.get_json()["numbers_as_digits"] is True
 
 
+def test_press_enter_off_by_default(flask_client):
+    assert flask_client.get("/api/voice-commands").get_json()["press_enter"] is False
+
+
+def test_set_voice_commands_press_enter(flask_client):
+    resp = flask_client.post(
+        "/api/voice-commands/press-enter",
+        data=json.dumps({"enabled": True}),
+        content_type="application/json",
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["press_enter"] is True
+
+
 def test_set_voice_commands_symbols(flask_client):
     resp = flask_client.post(
         "/api/voice-commands/symbols",

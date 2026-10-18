@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from nexusvox.dictionary import DictionaryEntry
 from nexusvox.models import utc_now
 
 
@@ -328,3 +329,50 @@ def test_save_transcription_translate_defaults(db):
         None,
         None,
     )
+
+
+# --- Dictionary suggestions (learn from edits) ---
+
+
+def test_add_dictionary_suggestions_skips_duplicates_and_known_entries(db):
+    db.add_dictionary_entry("nexus fox", "NexusVox")
+    added = db.add_dictionary_suggestions(
+        [
+            DictionaryEntry(wrong="nexus fox", right="NexusVox"),
+            DictionaryEntry(wrong="Maya", right="Meier"),
+            DictionaryEntry(wrong="maya", right="Meier"),
+        ]
+    )
+
+    assert added == 1
+    assert [(s["wrong"], s["right"]) for s in db.list_dictionary_suggestions()] == [("Maya", "Meier")]
+
+
+def test_accept_dictionary_suggestion_moves_it_into_the_dictionary(db):
+    db.add_dictionary_suggestions([DictionaryEntry(wrong="Maya", right="Meier")])
+    sid = db.list_dictionary_suggestions()[0]["id"]
+
+    entry = db.accept_dictionary_suggestion(sid)
+
+    assert (entry["wrong"], entry["right"]) == ("Maya", "Meier")
+    assert db.list_dictionary_suggestions() == []
+    assert db.accept_dictionary_suggestion(sid) is None
+
+
+def test_delete_dictionary_suggestion(db):
+    db.add_dictionary_suggestions([DictionaryEntry(wrong="Maya", right="Meier")])
+    sid = db.list_dictionary_suggestions()[0]["id"]
+
+    assert db.delete_dictionary_suggestion(sid) is True
+    assert db.delete_dictionary_suggestion(sid) is False
+    assert db.get_dictionary_entries() == []
+
+
+def test_accept_dictionary_suggestion_drops_other_suggestions_for_the_same_phrase(db):
+    db.add_dictionary_suggestions(
+        [DictionaryEntry(wrong="Maya", right="Meier"), DictionaryEntry(wrong="maya", right="Mayer")]
+    )
+    sid = next(s["id"] for s in db.list_dictionary_suggestions() if s["right"] == "Meier")
+
+    assert db.accept_dictionary_suggestion(sid)["right"] == "Meier"
+    assert db.list_dictionary_suggestions() == []

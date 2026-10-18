@@ -198,6 +198,18 @@
         </form>
         <div id="dict-list" class="dict-list"></div>
         <p class="settings-hint">Tip: correcting a recording in the Review tab suggests entries automatically.</p>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Learn From Edits</h3>
+            <p>After a paste, NexusVox reads the text field for a while (30 seconds by default, <code>[learn_from_edits].window_s</code>). Words you correct there show up below as suggestions; nothing is added without your OK. Password fields are never read.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="learn-from-edits-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div id="dict-suggestions" class="dict-list"></div>
       </div>
 
       <div class="settings-card" style="margin-top: 12px;">

@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from .config import DatabaseConfig
 from .dictionary import DictionaryEntry
-from .models import Base, DictionaryEntryRow, FileTranscription, Transcription, utc_now
+from .models import Base, DictionaryEntryRow, DictionarySuggestionRow, FileTranscription, Transcription, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +207,69 @@ class Database:
     def delete_dictionary_entry(self, entry_id: int) -> bool:
         with self._session_factory() as session:
             row = session.get(DictionaryEntryRow, entry_id)
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
+
+    # ---- Dictionary suggestions (learned from edits) ------------------------
+
+    def add_dictionary_suggestions(self, entries: list[DictionaryEntry]) -> int:
+        """Queue suggestions, skipping ones already pending or in the dictionary. Returns how many were added."""
+        added = 0
+        with self._session_factory() as session:
+            for entry in entries:
+                wrong = " ".join(entry.wrong.split())
+                right = entry.right.strip()
+                if not wrong or not right:
+                    continue
+                known = (
+                    session.query(DictionaryEntryRow)
+                    .filter(func.lower(DictionaryEntryRow.wrong) == wrong.lower())
+                    .first()
+                    or session.query(DictionarySuggestionRow)
+                    .filter(
+                        func.lower(DictionarySuggestionRow.wrong) == wrong.lower(),
+                        DictionarySuggestionRow.right == right,
+                    )
+                    .first()
+                )
+                if known is None:
+                    session.add(DictionarySuggestionRow(wrong=wrong, right=right))
+                    added += 1
+            session.commit()
+        return added
+
+    def list_dictionary_suggestions(self) -> list[dict]:
+        """Pending suggestions, newest first."""
+        with self._session_factory() as session:
+            rows = session.query(DictionarySuggestionRow).order_by(DictionarySuggestionRow.id.desc()).all()
+            return [{"id": r.id, "wrong": r.wrong, "right": r.right} for r in rows]
+
+    def accept_dictionary_suggestion(self, suggestion_id: int) -> dict | None:
+        """Turn a suggestion into a dictionary entry. Returns the entry, or None when it is gone.
+
+        Other pending suggestions for the same `wrong` are dropped too: accepting one of
+        them later would silently overwrite the entry just added.
+        """
+        with self._session_factory() as session:
+            row = session.get(DictionarySuggestionRow, suggestion_id)
+            if row is None:
+                return None
+            wrong, right = row.wrong, row.right
+        entry = self.add_dictionary_entry(wrong, right)
+        if entry is not None:
+            with self._session_factory() as session:
+                session.query(DictionarySuggestionRow).filter(
+                    func.lower(DictionarySuggestionRow.wrong) == wrong.lower()
+                ).delete(synchronize_session=False)
+                session.commit()
+        return entry
+
+    def delete_dictionary_suggestion(self, suggestion_id: int) -> bool:
+        with self._session_factory() as session:
+            row = session.get(DictionarySuggestionRow, suggestion_id)
             if row is None:
                 return False
             session.delete(row)

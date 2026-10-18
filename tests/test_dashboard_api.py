@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from nexusvox.dictionary import DictionaryEntry
+
 
 def test_get_settings(flask_client):
     resp = flask_client.get("/api/settings")
@@ -680,3 +682,33 @@ def test_set_voice_commands_bypass_structural(flask_client):
 
     assert resp.status_code == 200
     assert resp.get_json()["bypass_structural"] is True
+
+
+def test_learn_from_edits_setting(flask_client):
+    assert flask_client.get("/api/settings").get_json()["learn_from_edits"] is False
+    resp = flask_client.post(
+        "/api/settings/learn-from-edits",
+        data=json.dumps({"enabled": True}),
+        content_type="application/json",
+    )
+    assert resp.get_json()["learn_from_edits"] is True
+
+
+def test_dictionary_suggestions_accept_and_dismiss(flask_client, db):
+    db.add_dictionary_suggestions(
+        [DictionaryEntry(wrong="nexus fox", right="NexusVox"), DictionaryEntry(wrong="Maya", right="Meier")]
+    )
+    suggestions = flask_client.get("/api/dictionary/suggestions").get_json()["suggestions"]
+    by_wrong = {s["wrong"]: s["id"] for s in suggestions}
+
+    accepted = flask_client.post(f"/api/dictionary/suggestions/{by_wrong['nexus fox']}/accept").get_json()
+    dismissed = flask_client.delete(f"/api/dictionary/suggestions/{by_wrong['Maya']}").get_json()
+
+    assert accepted["ok"] is True and accepted["entry"]["right"] == "NexusVox"
+    assert dismissed["ok"] is True
+    assert flask_client.get("/api/dictionary/suggestions").get_json()["suggestions"] == []
+    assert [e["wrong"] for e in flask_client.get("/api/dictionary").get_json()["entries"]] == ["nexus fox"]
+
+
+def test_accept_missing_dictionary_suggestion(flask_client):
+    assert flask_client.post("/api/dictionary/suggestions/999/accept").get_json()["ok"] is False

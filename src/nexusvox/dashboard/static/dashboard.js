@@ -110,6 +110,7 @@ const languageSelect = document.getElementById("language-select");
 const hotkeyModeSelect = document.getElementById("hotkey-mode-select");
 const micGuardToggle = document.getElementById("mic-guard-toggle");
 const storeAudioToggle = document.getElementById("store-audio-toggle");
+const learnFromEditsToggle = document.getElementById("learn-from-edits-toggle");
 const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
 const hotkeyMods = Array.from(document.querySelectorAll("#hotkey-mods input"));
 const hotkeyKeySelect = document.getElementById("hotkey-key-select");
@@ -270,6 +271,7 @@ async function loadTranslatorStatus() {
 languageSelect.addEventListener("change", () => postSetting("/api/settings/language", { language: languageSelect.value }));
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 storeAudioToggle.addEventListener("change", () => postSetting("/api/settings/store-audio", { enabled: storeAudioToggle.checked }));
+learnFromEditsToggle.addEventListener("change", () => postSetting("/api/settings/learn-from-edits", { enabled: learnFromEditsToggle.checked }));
 hotkeyModeSelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/hotkey-mode", { mode: hotkeyModeSelect.value });
   const s = await resp.json();
@@ -294,8 +296,9 @@ async function loadSettings() {
   renderHotkey(s);
   micGuardToggle.checked = s.mic_guard_enabled;
   storeAudioToggle.checked = s.store_audio;
+  learnFromEditsToggle.checked = s.learn_from_edits;
   loadTranslatorStatus();
-  await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary()]);
+  await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary(), loadDictionarySuggestions()]);
 }
 
 // ── Correction Dictionary ────────────────────────────────────────────
@@ -328,6 +331,30 @@ async function addDictionaryEntry(wrong, right) {
 async function deleteDictionaryEntry(id) {
   await fetch(`/api/dictionary/${id}`, { method: "DELETE" });
   loadDictionary();
+}
+
+async function loadDictionarySuggestions() {
+  const { suggestions } = await fetch("/api/dictionary/suggestions").then((r) => r.json());
+  const box = document.getElementById("dict-suggestions");
+  box.innerHTML = suggestions.length ? "<p class=\"settings-hint\">Learned from your edits:</p>" + suggestions.map((s) => `
+    <div class="dict-row" data-id="${s.id}">
+      <span class="dict-wrong">${escapeHtml(s.wrong)}</span>
+      <span class="dict-arrow">&rarr;</span>
+      <span class="dict-right">${escapeHtml(s.right)}</span>
+      <button class="flagged-play-btn" onclick="acceptDictionarySuggestion(${s.id})">Add</button>
+      <button class="dict-delete" title="Dismiss" onclick="dismissDictionarySuggestion(${s.id})">&#10005;</button>
+    </div>`).join("") : "";
+}
+
+async function acceptDictionarySuggestion(id) {
+  await fetch(`/api/dictionary/suggestions/${id}/accept`, { method: "POST" });
+  loadDictionary();
+  loadDictionarySuggestions();
+}
+
+async function dismissDictionarySuggestion(id) {
+  await fetch(`/api/dictionary/suggestions/${id}`, { method: "DELETE" });
+  loadDictionarySuggestions();
 }
 
 document.getElementById("dict-form").addEventListener("submit", async (e) => {

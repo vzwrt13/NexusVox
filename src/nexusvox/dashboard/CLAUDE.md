@@ -16,6 +16,7 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 - Voice Input card: Hotkey editor (keycap display of the current binding with a `default`/`custom` badge, the default named in the text, modifier checkboxes + key select, a *Reset to default* button (disabled while on the default, `hotkey_default` in `GET /api/settings`) and a *Record* button that captures the next combo pressed in the page via `KeyboardEvent.code`; a modifier-only combo is taken on the first key-up), `POST /api/settings/hotkey` with `{modifiers: [...], key: ""}` (400 with `error` on an unusable binding, canonical modifier order and upper-case key in the reply); Hotkey Mode select (`hold` / `toggle`), `POST /api/settings/hotkey-mode`; the Mute Other Apps While Recording toggle, `POST /api/settings/mic-guard`, and the Store Audio Recordings toggle, `POST /api/settings/store-audio` (`[database].store_audio`). All live: `HotkeyListener` reads the shared `Config` on every key event and `app.py` checks `[mic_guard].enabled` on every hold, no restart and no app bridge needed.
 - Compute Device dropdown (`Auto`/`GPU (CUDA)`/`CPU`): writes `[inference].device` to `config.toml`; requires app restart. On CPU, GPU-only models are filtered out of the model dropdown server-side.
 - Model switcher dropdown: for GPU-backed models, selecting stops the old Docker container, starts the new one, waits for health check, reconnects the transcriber. For in-process Whisper (CPU), just reloads the model — no Docker calls. JS polls `GET /api/models/status` every 2s for spinner/status updates.
+- Correction Dictionary card: add/remove entries; Learn From Edits toggle (`POST /api/settings/learn-from-edits`, `learn_from_edits` in `GET /api/settings`) and the pending suggestions learned from edits after a paste, each with Add (`POST /api/dictionary/suggestions/<id>/accept`) and dismiss (`DELETE /api/dictionary/suggestions/<id>`).
 - Nexus OS Commands card: toggle enable/disable, lists supported actions and registered apps.
 - Voice Commands card: master enable/disable toggle; Numbers as Digits toggle; Press Enter Command toggle (`POST /api/voice-commands/press-enter`); Bypass Structural Commands toggle + structural command chips (`new line`, `new paragraph`, `tab`, `all caps`; `POST /api/voice-commands/structural`); Bypass Symbol Commands toggle + symbol command chips (click to activate/deactivate individual symbols, persisted immediately via `POST /api/voice-commands/symbols`).
 
@@ -63,6 +64,10 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 | GET | `/api/dictionary` | List correction-dictionary entries |
 | POST | `/api/dictionary` | Add or update an entry (`wrong`, `right`) |
 | DELETE | `/api/dictionary/<id>` | Remove an entry |
+| GET | `/api/dictionary/suggestions` | Pending suggestions learned from edits |
+| POST | `/api/dictionary/suggestions/<id>/accept` | Turn a suggestion into an entry |
+| DELETE | `/api/dictionary/suggestions/<id>` | Dismiss a suggestion |
+| POST | `/api/settings/learn-from-edits` | Toggle learning from edits after a paste |
 | GET | `/api/benchmarks` | List benchmark files with summary stats |
 | GET | `/api/benchmarks/compare` | Cross-model comparison with pass/fail |
 | GET | `/api/benchmarks/<filename>` | Full benchmark data (summary + samples) |

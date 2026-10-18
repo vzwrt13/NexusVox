@@ -164,6 +164,15 @@ timeout_s = 8.0
 enabled = false
 watchdog_s = 30.0
 
+[learn_from_edits]
+# After each paste, keep reading the text field you dictated into (UI Automation) for
+# window_s seconds. Words you correct there become dictionary suggestions in the dashboard
+# (Settings > Correction Dictionary), which you accept or dismiss; nothing is added on its
+# own. Password fields are never read, and translated or "press enter" dictations are
+# skipped. Also switchable in the dashboard Settings tab.
+enabled = false
+window_s = 30.0
+
 [remote_mic]
 # Let a phone use NexusVox as its speech recogniser: hold its bubble to dictate, the audio
 # runs through the same pipeline as the hotkey (dictionary, voice commands, translation)

@@ -116,6 +116,12 @@ def _create_app(api: DashboardAPI) -> Flask:
         resp = api.set_polish_key(data.get("key", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
+    @app.route("/api/settings/cleanup-level", methods=["POST"])
+    def set_cleanup_level():
+        data = request.get_json(force=True)
+        resp = api.set_cleanup_level(data.get("level", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
     @app.route("/api/settings/polish-terminals", methods=["POST"])
     def set_polish_in_terminals():
         data = request.get_json(force=True)

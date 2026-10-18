@@ -395,6 +395,29 @@ class LlmConfig:
     keep_alive: str = "10m"
 
 
+CLEANUP_LEVELS = ("off", "light", "medium")
+
+
+@dataclass
+class CleanupConfig:
+    """Tidy every dictation through the [llm] model before it is typed: `light` drops
+    fillers and fixes punctuation, `medium` also grammar. `timeout_s` is short on purpose:
+    a model still loading must not hold the dictation up; it is typed unchanged instead."""
+
+    level: str = "off"
+    timeout_s: float = 3.0
+
+
+def _cleanup_config(data: dict) -> CleanupConfig:
+    """An unknown level is off; a timeout of 0 or less would fail every request at once."""
+    level = str(data.get("level", "off")).strip().lower()
+    timeout_s = float(data.get("timeout_s", CleanupConfig.timeout_s))
+    return CleanupConfig(
+        level=level if level in CLEANUP_LEVELS else "off",
+        timeout_s=timeout_s if timeout_s > 0 else CleanupConfig.timeout_s,
+    )
+
+
 @dataclass
 class PolishConfig:
     """How polish reads the selection. In a terminal it needs Ctrl+C (the terminal does
@@ -478,6 +501,7 @@ class Config:
     learn_from_edits: LearnFromEditsConfig = field(default_factory=LearnFromEditsConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     polish: PolishConfig = field(default_factory=PolishConfig)
+    cleanup: CleanupConfig = field(default_factory=CleanupConfig)
     remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
 
 
@@ -522,6 +546,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     learn_data = data.get("learn_from_edits", {})
     llm_data = data.get("llm", {})
     polish_data = data.get("polish", {})
+    cleanup_data = data.get("cleanup", {})
     remote_mic_data = data.get("remote_mic", {})
 
     # Backward compat: old configs use general.voice_commands_enabled (bool only)
@@ -612,6 +637,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             keep_alive=str(llm_data.get("keep_alive", LlmConfig.keep_alive)),
         ),
         polish=PolishConfig(in_terminals=bool(polish_data.get("in_terminals", False))),
+        cleanup=_cleanup_config(cleanup_data),
         learn_from_edits=LearnFromEditsConfig(
             enabled=learn_data.get("enabled", False),
             window_s=float(learn_data.get("window_s", 30.0)),
@@ -717,6 +743,10 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             "",
             "[polish]",
             f"in_terminals = {'true' if config.polish.in_terminals else 'false'}",
+            "",
+            "[cleanup]",
+            f'level = "{config.cleanup.level}"',
+            f"timeout_s = {config.cleanup.timeout_s}",
             "",
             "[learn_from_edits]",
             f"enabled = {'true' if config.learn_from_edits.enabled else 'false'}",

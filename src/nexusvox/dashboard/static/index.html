@@ -97,6 +97,17 @@
           </div>
           <input type="text" id="llm-model-input" class="dict-input" style="max-width: 220px;">
         </div>
+        <div class="setting-row" style="margin-top: 8px;">
+          <div class="setting-info">
+            <h3>Auto Cleanup</h3>
+            <p>Tidies every dictation through the same model before it is typed. Light: removes fillers ("um", "äh"), false starts and repeated words, fixes punctuation, keeps your wording. Medium: also grammar, slightly more concise. Adds about half a second; while the model is still loading, or when its reply does not look like your text cleaned up, the dictation is typed unchanged. Saved as spoken.</p>
+          </div>
+          <select id="cleanup-level-select" class="select-input">
+            <option value="off">Off</option>
+            <option value="light">Light</option>
+            <option value="medium">Medium</option>
+          </select>
+        </div>
 
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">

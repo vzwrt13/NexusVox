@@ -28,6 +28,7 @@ from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, describe_hotkey
 from .injector import foreground_window, inject_text
 from .lang_detect import detect_language
 from .llm import LlmError
+from .llm import warm_up as llm_warm_up
 from .mic_guard import MicGuard, create_mic_guard
 from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
 from .pipeline import process_text
@@ -709,6 +710,10 @@ class NexusVoxApp:
             await self._loop.run_in_executor(None, self._mic_guard.restore_leftovers)
             if self._config.mic_guard.enabled:
                 await self._loop.run_in_executor(None, self._mic_guard.warm_up)
+
+        if self._config.cleanup.level != "off":
+            # Auto cleanup gives up after [cleanup].timeout_s; a cold model would cost the first dictations.
+            llm_warm_up(self._config.llm)
 
         # For in-process transcribers (Whisper on CPU), eagerly load the model
         # so the first hotkey press doesn't pay the full load + download latency.

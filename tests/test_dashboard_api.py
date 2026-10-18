@@ -694,6 +694,29 @@ def test_learn_from_edits_setting(flask_client):
     assert resp.get_json()["learn_from_edits"] is True
 
 
+def test_cleanup_level_setting(flask_client, monkeypatch):
+    import nexusvox.dashboard.api as api_module
+
+    warmed = []
+    monkeypatch.setattr(api_module, "llm_warm_up", warmed.append)
+    settings = flask_client.get("/api/settings").get_json()
+    assert (settings["cleanup_level"], settings["cleanup_levels"]) == ("off", ["off", "light", "medium"])
+
+    def post(level):
+        return flask_client.post(
+            "/api/settings/cleanup-level", data=json.dumps({"level": level}), content_type="application/json"
+        )
+
+    assert post("light").get_json()["cleanup_level"] == "light"
+    assert len(warmed) == 1  # switching cleanup on loads the model
+    bad = post("heavy")
+    assert bad.status_code == 400 and bad.get_json()["cleanup_level"] == "light"
+    flask_client.post(
+        "/api/settings/llm-model", data=json.dumps({"model": "qwen3.5:4b"}), content_type="application/json"
+    )
+    assert len(warmed) == 2  # a new model is loaded while cleanup is on
+
+
 def test_polish_in_terminals_setting(flask_client):
     assert flask_client.get("/api/settings").get_json()["polish_in_terminals"] is False
     resp = flask_client.post(

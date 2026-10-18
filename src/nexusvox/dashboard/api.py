@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlalchemy.orm import sessionmaker
 
 from ..config import (
+    CLEANUP_LEVELS,
     CUSTOM_PROTOCOLS,
     HOTKEY_KEY_VKS,
     HOTKEY_MODES,
@@ -29,6 +30,7 @@ from ..db import Database
 from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..llm import is_reachable as llm_reachable
+from ..llm import warm_up as llm_warm_up
 from ..os_commands import NEXUS_ACTIONS
 from ..snippets import Snippet, SnippetOption
 from ..translator import is_reachable
@@ -162,6 +164,8 @@ class DashboardAPI:
             "store_audio": self._config.database.store_audio,
             "learn_from_edits": self._config.learn_from_edits.enabled,
             "polish_in_terminals": self._config.polish.in_terminals,
+            "cleanup_level": self._config.cleanup.level,
+            "cleanup_levels": list(CLEANUP_LEVELS),
         }
 
     def get_translator_status(self) -> dict:
@@ -237,6 +241,8 @@ class DashboardAPI:
             return {"error": "A model name is required", **self.get_settings()}
         self._config.llm.model = model
         save_config(self._config)
+        if self._config.cleanup.level != "off":
+            llm_warm_up(self._config.llm)  # cleanup's short timeout would skip dictations while it loads
         return self.get_settings()
 
     def get_llm_status(self) -> dict:
@@ -251,6 +257,16 @@ class DashboardAPI:
         """Checked by the app on every hold, so this is live."""
         self._config.mic_guard.enabled = enabled
         save_config(self._config)
+        return self.get_settings()
+
+    def set_cleanup_level(self, level: str) -> dict:
+        """Read by the pipeline on every dictation, so this is live."""
+        if level not in CLEANUP_LEVELS:
+            return {"error": f"Unsupported cleanup level: {level}", **self.get_settings()}
+        self._config.cleanup.level = level
+        save_config(self._config)
+        if level != "off":
+            llm_warm_up(self._config.llm)  # the first cleaned dictation should not wait for the model
         return self.get_settings()
 
     def set_polish_in_terminals(self, enabled: bool) -> dict:

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from nexusvox.config import Config, VoiceCommandsConfig
+from nexusvox.cleanup import CleanupResult
+from nexusvox.config import CleanupConfig, Config, VoiceCommandsConfig
 from nexusvox.dictionary import DictionaryEntry
 from nexusvox.pipeline import process_text
 from nexusvox.snippets import Snippet
@@ -19,9 +20,21 @@ def no_translation(text, _config):
     return TranslateResult(text)
 
 
-def _run(raw, config=None, dictionary=(), snippets=(), remote=False, translate_fn=no_translation):
+def no_cleanup(text, _config, _llm):
+    return CleanupResult(text)
+
+
+def _run(
+    raw, config=None, dictionary=(), snippets=(), remote=False, translate_fn=no_translation, cleanup_fn=no_cleanup
+):
     return process_text(
-        raw, config or _config(), list(dictionary), list(snippets), remote=remote, translate_fn=translate_fn
+        raw,
+        config or _config(),
+        list(dictionary),
+        list(snippets),
+        remote=remote,
+        translate_fn=translate_fn,
+        cleanup_fn=cleanup_fn,
     )
 
 
@@ -87,3 +100,36 @@ def test_translator_losing_a_placeholder_falls_back_to_the_original():
     result = _run("Hallo meine Signatur", snippets=[SIGNATURE], translate_fn=lossy)
     assert result.typed == "Hallo Viele Grüße\nVincent"
     assert (result.translation.translated, result.translation.error) == (False, "snippet placeholder lost")
+
+
+def test_cleanup_is_typed_and_translated_but_the_spoken_text_is_saved():
+    seen = {}
+
+    def tidy(text, config, _llm):
+        seen["cleanup"] = (text, config.level)
+        return CleanupResult(text.replace("ähm ", ""), cleaned=True, ms=500)
+
+    def to_english(text, _config):
+        seen["translate"] = text
+        return TranslateResult(text.replace("Hallo", "Hello"), translated=True)
+
+    config = _config()
+    config.cleanup = CleanupConfig(level="light")
+    result = _run("ähm Hallo Welt", config=config, cleanup_fn=tidy, translate_fn=to_english)
+    assert seen == {"cleanup": ("ähm Hallo Welt", "light"), "translate": "Hallo Welt"}
+    assert (result.typed, result.saved, result.learnable) == ("Hello Welt", "ähm Hallo Welt", False)
+    assert result.cleanup.cleaned is True
+
+
+def test_cleaned_dictation_is_not_learnable():
+    result = _run("ähm Hallo Welt", cleanup_fn=lambda text, _c, _l: CleanupResult("Hallo Welt", cleaned=True))
+    assert (result.typed, result.saved, result.learnable) == ("Hallo Welt", "ähm Hallo Welt", False)
+
+
+def test_cleanup_sees_snippet_placeholders_and_the_snippet_is_expanded_after():
+    def keep(text, _c, _l):
+        assert "Viele Grüße" not in text  # the stored text is a placeholder here
+        return CleanupResult(text.replace("ähm ", ""), cleaned=True)
+
+    result = _run("ähm Danke meine Signatur", snippets=[SIGNATURE], cleanup_fn=keep)
+    assert result.typed == "Danke Viele Grüße\nVincent"

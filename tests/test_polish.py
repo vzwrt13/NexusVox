@@ -126,3 +126,26 @@ def test_read_selection_copies_from_a_terminal_when_allowed(monkeypatch):
 def test_read_selection_falls_back_to_the_clipboard(monkeypatch):
     copies = _focus(monkeypatch, {"terminal": False, "selection": None})
     assert read_selection(7) == "from Ctrl+C" and copies == [7]
+
+
+def test_warm_up_loads_the_model_in_the_background_and_never_raises(monkeypatch):
+    calls = []
+
+    def fake_complete(config, system, user):
+        calls.append(config.model)
+        raise LlmError("URLError: refused")
+
+    monkeypatch.setattr(llm, "complete", fake_complete)
+    started = []
+    monkeypatch.setattr(llm.threading, "Thread", lambda target, **kw: started.append(target) or _Started(target))
+    llm.warm_up(LlmConfig(model="gemma4:e4b"))
+    started[0]()  # run the thread body here; it must swallow the error
+    assert calls == ["gemma4:e4b"]
+
+
+class _Started:
+    def __init__(self, target):
+        self.target = target
+
+    def start(self):
+        pass

@@ -9,6 +9,7 @@ import nexusvox.config as config_module
 from nexusvox.config import (
     EXAMPLE_CONFIG_PATH,
     AudioConfig,
+    CleanupConfig,
     Config,
     DatabaseConfig,
     HotkeyConfig,
@@ -517,6 +518,16 @@ def test_llm_and_polish_key_roundtrip_and_defaults(tmp_path):
     path.write_text('[llm]\nprotocol = "grpc"\n', encoding="utf-8")
     loaded = load_config(path)
     assert loaded.llm == LlmConfig() and loaded.hotkey.polish_key == ""
+
+
+def test_cleanup_roundtrip_and_unknown_level(tmp_path):
+    path = tmp_path / "config.toml"
+    save_config(Config(cleanup=CleanupConfig(level="medium", timeout_s=4.5)), path)
+    assert load_config(path).cleanup == CleanupConfig(level="medium", timeout_s=4.5)
+    path.write_text('[cleanup]\nlevel = "heavy"\n', encoding="utf-8")
+    assert load_config(path).cleanup == CleanupConfig()
+    path.write_text('[cleanup]\nlevel = "Light"\ntimeout_s = 0\n', encoding="utf-8")
+    assert load_config(path).cleanup == CleanupConfig(level="light", timeout_s=3.0)
 
 
 def test_polish_in_terminals_roundtrip(tmp_path):

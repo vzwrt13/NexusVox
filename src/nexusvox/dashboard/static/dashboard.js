@@ -118,6 +118,7 @@ const pasteKeySelect = document.getElementById("paste-key-select");
 const polishKeySelect = document.getElementById("polish-key-select");
 const polishTerminalsToggle = document.getElementById("polish-terminals-toggle");
 const llmModelInput = document.getElementById("llm-model-input");
+const cleanupLevelSelect = document.getElementById("cleanup-level-select");
 const llmStatus = document.getElementById("llm-status");
 
 async function loadLlmStatus() {
@@ -307,6 +308,12 @@ llmModelInput.addEventListener("change", async () => {
   llmModelInput.value = s.llm_model;
   loadLlmStatus();
 });
+cleanupLevelSelect.addEventListener("change", async () => {
+  const resp = await postSetting("/api/settings/cleanup-level", { level: cleanupLevelSelect.value });
+  const s = await resp.json();
+  if (s.error) alert(s.error);
+  cleanupLevelSelect.value = s.cleanup_level;
+});
 pasteKeySelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/paste-key", { key: pasteKeySelect.value });
   const s = await resp.json();
@@ -338,6 +345,7 @@ async function loadSettings() {
   }
   polishKeySelect.value = s.polish_key;
   llmModelInput.value = s.llm_model;
+  cleanupLevelSelect.value = s.cleanup_level;
   loadLlmStatus();
   micGuardToggle.checked = s.mic_guard_enabled;
   storeAudioToggle.checked = s.store_audio;

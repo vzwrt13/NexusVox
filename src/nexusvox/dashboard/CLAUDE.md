@@ -18,6 +18,7 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 - Model switcher dropdown: for GPU-backed models, selecting stops the old Docker container, starts the new one, waits for health check, reconnects the transcriber. For in-process Whisper (CPU), just reloads the model — no Docker calls. JS polls `GET /api/models/status` every 2s for spinner/status updates.
 - Correction Dictionary card: add/remove entries; Learn From Edits toggle (`POST /api/settings/learn-from-edits`, `learn_from_edits` in `GET /api/settings`) and the pending suggestions learned from edits after a paste, each with Add (`POST /api/dictionary/suggestions/<id>/accept`) and dismiss (`DELETE /api/dictionary/suggestions/<id>`).
 - Snippets card: trigger input, multi-line text and an options box (`name = text` per line), Add/Save (`POST /api/snippets` with `trigger`, `expansion`, `options` as `[{name, text}]` parsed from the text box in `dashboard.js`, `id` set to edit: `Database.update_snippet`, else `add_snippet`, which replaces a snippet with the same trigger), *Fill from GitHub* (`GET /api/snippets/github-repos`, runs `gh repo list`, appends `name = url` lines), per-row Edit and remove (`DELETE /api/snippets/<id>`); a trigger already used by another snippet is rejected, and a snippet needs a text or at least one option.
+- Polish Presets card: name, instruction and a *Default when nothing is said* checkbox, Add/Save (`POST /api/polish-presets` with `name`, `instruction`, `is_default`, `id` set to edit; 400 when the name is taken (any case, Unicode case-folded), has more than 5 words (the spoken matcher scores 5) or a field is blank; making one the default clears the old default), per-row Edit and remove (`DELETE /api/polish-presets/<id>`).
 - Nexus OS Commands card: toggle enable/disable, lists supported actions and registered apps.
 - Voice Commands card: master enable/disable toggle; Numbers as Digits toggle; Press Enter Command toggle (`POST /api/voice-commands/press-enter`); Bypass Structural Commands toggle + structural command chips (`new line`, `new paragraph`, `tab`, `all caps`; `POST /api/voice-commands/structural`); Bypass Symbol Commands toggle + symbol command chips (click to activate/deactivate individual symbols, persisted immediately via `POST /api/voice-commands/symbols`).
 
@@ -76,6 +77,9 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 | POST | `/api/snippets` | Add, or update with `id` (`trigger`, `expansion`, `options` as `[{name, text}]`) |
 | GET | `/api/snippets/github-repos` | The user's GitHub repos as options `[{name, text: url}]` (GitHub CLI) |
 | DELETE | `/api/snippets/<id>` | Remove a snippet |
+| GET | `/api/polish-presets` | List polish presets (sorted by name) |
+| POST | `/api/polish-presets` | Add, or update with `id` (`name`, `instruction`, `is_default`; 400 on a clash or blank field) |
+| DELETE | `/api/polish-presets/<id>` | Remove a polish preset |
 | GET | `/api/dictionary/suggestions` | Pending suggestions learned from edits |
 | POST | `/api/dictionary/suggestions/<id>/accept` | Turn a suggestion into an entry |
 | DELETE | `/api/dictionary/suggestions/<id>` | Dismiss a suggestion |

@@ -352,7 +352,7 @@ async function loadSettings() {
   learnFromEditsToggle.checked = s.learn_from_edits;
   polishTerminalsToggle.checked = s.polish_in_terminals;
   loadTranslatorStatus();
-  await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary(), loadDictionarySuggestions(), loadSnippets()]);
+  await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary(), loadDictionarySuggestions(), loadSnippets(), loadPolishPresets()]);
 }
 
 // ── Correction Dictionary ────────────────────────────────────────────
@@ -482,6 +482,76 @@ document.getElementById("snippet-form").addEventListener("submit", async (e) => 
   if (res.ok) {
     resetSnippetForm();
     loadSnippets();
+  } else {
+    alert(res.error);
+  }
+});
+
+// ── Polish presets ───────────────────────────────────────────────────
+let presetCache = [];
+
+async function loadPolishPresets() {
+  const { presets } = await fetch("/api/polish-presets").then((r) => r.json());
+  presetCache = presets;
+  const list = document.getElementById("preset-list");
+  if (!presets.length) {
+    list.innerHTML = '<p class="nexus-empty">No presets yet.</p>';
+    return;
+  }
+  list.innerHTML = presets.map((p) => `
+    <div class="dict-row" data-id="${p.id}">
+      <span class="dict-wrong">${escapeHtml(p.name)}${p.is_default ? " (default)" : ""}</span>
+      <span class="snippet-text">${escapeHtml(p.instruction)}</span>
+      <button class="flagged-play-btn" onclick="editPolishPreset(${p.id})">Edit</button>
+      <button class="dict-delete" title="Remove" onclick="deletePolishPreset(${p.id})">&#10005;</button>
+    </div>`).join("");
+}
+
+function resetPresetForm() {
+  document.getElementById("preset-id").value = "";
+  document.getElementById("preset-name").value = "";
+  document.getElementById("preset-instruction").value = "";
+  document.getElementById("preset-default").checked = false;
+  document.getElementById("preset-save").textContent = "Add";
+  document.getElementById("preset-cancel").hidden = true;
+}
+
+function editPolishPreset(id) {
+  const p = presetCache.find((x) => x.id === id);
+  if (!p) return;
+  document.getElementById("preset-id").value = p.id;
+  document.getElementById("preset-name").value = p.name;
+  document.getElementById("preset-instruction").value = p.instruction;
+  document.getElementById("preset-default").checked = p.is_default;
+  document.getElementById("preset-save").textContent = "Save";
+  document.getElementById("preset-cancel").hidden = false;
+  document.getElementById("preset-instruction").focus();
+}
+
+async function deletePolishPreset(id) {
+  await fetch(`/api/polish-presets/${id}`, { method: "DELETE" });
+  if (document.getElementById("preset-id").value === String(id)) resetPresetForm();
+  loadPolishPresets();
+}
+
+document.getElementById("preset-cancel").addEventListener("click", resetPresetForm);
+
+document.getElementById("preset-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = document.getElementById("preset-id").value;
+  const res = await fetch("/api/polish-presets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: id ? Number(id) : null,
+      name: document.getElementById("preset-name").value,
+      instruction: document.getElementById("preset-instruction").value,
+      is_default: document.getElementById("preset-default").checked,
+    }),
+  }).then((r) => r.json());
+  if (res.ok) {
+    resetPresetForm();
+    loadPolishPresets();
   } else {
     alert(res.error);
   }

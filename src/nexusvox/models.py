@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Float, Integer, String, Text
+from sqlalchemy import Boolean, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -91,6 +91,18 @@ class SnippetRow(Base):
     expansion: Mapped[str] = mapped_column(Text, nullable=False, default="")
     options: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class PolishPresetRow(Base):
+    """A named polish instruction; saying ``name`` uses ``instruction``. At most one row is the default,
+    used when the polish key is tapped without an instruction."""
+
+    __tablename__ = "polish_presets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class DictionarySuggestionRow(Base):

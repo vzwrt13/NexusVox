@@ -276,6 +276,22 @@
       </div>
 
       <div class="settings-card" style="margin-top: 12px;">
+        <div class="setting-info">
+          <h3>Polish Presets</h3>
+          <p>Instructions you use often, under a short name. Select text, hold the hotkey, tap your polish key and say the name - "prompt engineer", "formal email" - and the stored instruction is used; words after the name are added to it ("formal email, and keep it short"). The default preset applies when you tap the polish key without saying anything. Names in any language; close spellings match.</p>
+        </div>
+        <form id="preset-form" class="dict-form snippet-form">
+          <input type="hidden" id="preset-id">
+          <input type="text" id="preset-name" class="dict-input" placeholder="Name, e.g. prompt engineer" required>
+          <textarea id="preset-instruction" class="dict-input snippet-expansion" rows="3" placeholder="Instruction, e.g. Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." required></textarea>
+          <label class="settings-hint"><input type="checkbox" id="preset-default"> Default when nothing is said</label>
+          <button type="submit" class="flagged-play-btn dict-add-btn" id="preset-save">Add</button>
+          <button type="button" class="flagged-play-btn dict-add-btn" id="preset-cancel" hidden>Cancel</button>
+        </form>
+        <div id="preset-list" class="dict-list"></div>
+      </div>
+
+      <div class="settings-card" style="margin-top: 12px;">
         <div class="setting-row">
           <div class="setting-info">
             <h3>Voice Commands</h3>

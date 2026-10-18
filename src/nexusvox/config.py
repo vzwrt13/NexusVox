@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import threading
 import tomllib
@@ -371,6 +372,18 @@ class MicGuardConfig:
     watchdog_s: float = 30.0
 
 
+@dataclass
+class RemoteMicConfig:
+    """Let a phone use NexusVox as its speech recogniser over a WebSocket: it streams
+    audio, gets the processed text back and inserts it itself. Off by default; it needs a
+    token, and `host` should be a private address (a Tailscale IP). See docs/REMOTE_MIC.md."""
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 47393
+    token: str = ""
+
+
 _DEFAULT_SYMBOLS: list[str] = [
     "slash",
     "backslash",
@@ -417,6 +430,7 @@ class Config:
     os_control: OsControlConfig = field(default_factory=OsControlConfig)
     translator: TranslatorConfig = field(default_factory=TranslatorConfig)
     mic_guard: MicGuardConfig = field(default_factory=MicGuardConfig)
+    remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
@@ -450,6 +464,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     command_key = str(switcher_data.get("command_key", "Y")).upper()
     translator_data = data.get("translator", {})
     mic_guard_data = data.get("mic_guard", {})
+    remote_mic_data = data.get("remote_mic", {})
 
     # Backward compat: old configs use general.voice_commands_enabled (bool only)
     if vc_data is not None:
@@ -526,6 +541,12 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         mic_guard=MicGuardConfig(
             enabled=mic_guard_data.get("enabled", False),
             watchdog_s=float(mic_guard_data.get("watchdog_s", 30.0)),
+        ),
+        remote_mic=RemoteMicConfig(
+            enabled=remote_mic_data.get("enabled", False),
+            host=remote_mic_data.get("host", "127.0.0.1"),
+            port=int(remote_mic_data.get("port", 47393)),
+            token=str(remote_mic_data.get("token", "")),
         ),
     )
 
@@ -607,6 +628,13 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             "[mic_guard]",
             f"enabled = {'true' if config.mic_guard.enabled else 'false'}",
             f"watchdog_s = {config.mic_guard.watchdog_s}",
+            "",
+            "[remote_mic]",
+            f"enabled = {'true' if config.remote_mic.enabled else 'false'}",
+            f'host = "{config.remote_mic.host}"',
+            f"port = {config.remote_mic.port}",
+            # A free-form secret: escape it, a `"` or `\` would break the file.
+            f"token = {json.dumps(config.remote_mic.token)}",
             "",
         ]
         path.write_text("\n".join(lines), encoding="utf-8")

@@ -45,6 +45,19 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+### Geist and Geist Mono (variable fonts)
+
+- Bundled at: `src/nexusvox/dashboard/static/Geist-Variable.woff2` and
+  `src/nexusvox/dashboard/static/GeistMono-Variable.woff2`
+- Homepage: https://vercel.com/font
+- Source: https://github.com/vercel/geist-font (npm package `geist` 1.3.1)
+
+These are verbatim copies of the unmodified variable WOFF2 files, redistributed as part of
+every NexusVox wheel and source distribution so the dashboard works offline. They are licensed
+under the SIL Open Font License, Version 1.1, Copyright (c) 2023 Vercel, in collaboration with
+basement.studio. The full license text ships next to the fonts as
+`src/nexusvox/dashboard/static/Geist-OFL.txt`.
+
 ---
 
 ## Runtime dependencies

@@ -1,16 +1,23 @@
 /* NexusVox Dashboard — Tab switching, Chart.js rendering, settings */
 
 // ── Globals ──────────────────────────────────────────────────────────
+// Aurora Precision tokens, kept in step with the :root variables in style.css.
 const COLORS = {
   accent: "#6c5ce7",
-  accentAlpha: "rgba(108, 92, 231, 0.25)",
+  accentLight: "#a29bfe",
+  accentAlpha: "rgba(162, 155, 254, 0.35)",
   green: "#00d2a0",
   greenAlpha: "rgba(0, 210, 160, 0.15)",
   orange: "#ffa94d",
-  text: "#e4e6f0",
-  dim: "#8b8fa8",
-  grid: "#2e3348",
+  red: "#ff6b6b",
+  text: "#f5f5f7",
+  dim: "#a1a1aa",
+  grid: "rgba(255, 255, 255, 0.08)",
 };
+
+// Chart.js is a global from chart.min.js; Geist is bundled in style.css.
+Chart.defaults.font.family = '"Geist", system-ui, sans-serif';
+Chart.defaults.color = COLORS.dim;
 
 const chartDefaults = {
   responsive: true,
@@ -1020,7 +1027,7 @@ function renderTimeline(d) {
       datasets: [{
         data: d.values,
         borderColor: COLORS.accent,
-        backgroundColor: COLORS.accentAlpha,
+        backgroundColor: "rgba(108, 92, 231, 0.2)",
         fill: true,
         tension: 0.3,
         pointRadius: d.labels.length > 30 ? 0 : 3,
@@ -1044,7 +1051,7 @@ function renderLanguage(d) {
       labels: d.labels,
       datasets: [{
         data: d.values,
-        backgroundColor: [COLORS.accent, COLORS.green, COLORS.orange, "#ff6b6b", "#74b9ff"],
+        backgroundColor: [COLORS.accent, COLORS.green, COLORS.orange, COLORS.red, COLORS.accentLight],
         borderWidth: 0,
       }],
     },
@@ -1838,7 +1845,7 @@ function renderWerDistribution(samples) {
   ];
 
   const counts = buckets.map((b) => samples.filter((s) => s.wer >= b.min && s.wer < b.max).length);
-  const colors = [COLORS.green, COLORS.green, COLORS.accent, COLORS.orange, COLORS.orange, "#ff6b6b"];
+  const colors = [COLORS.green, COLORS.green, COLORS.accent, COLORS.orange, COLORS.orange, COLORS.red];
 
   charts.devWerDist = new Chart(ctx, {
     type: "bar",

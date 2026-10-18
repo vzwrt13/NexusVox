@@ -806,3 +806,15 @@ def test_paste_key_setting(flask_client):
     assert ok.get_json()["paste_key"] == "F8"
     assert off.get_json()["paste_key"] == ""
     assert bad.status_code == 400 and bad.get_json()["paste_key"] == ""
+
+
+def test_paste_key_rejects_keys_the_listener_would_ignore(flask_client):
+    flask_client.post(
+        "/api/settings/hotkey",
+        data=json.dumps({"modifiers": ["ctrl", "alt"], "key": "B"}),
+        content_type="application/json",
+    )
+    clash = flask_client.post("/api/settings/paste-key", data=json.dumps({"key": "B"}), content_type="application/json")
+
+    assert clash.status_code == 400 and "hotkey" in clash.get_json()["error"]
+    assert clash.get_json()["paste_key"] == "V"

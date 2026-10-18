@@ -16,12 +16,12 @@ except Exception:  # Windows-only imports (pynput hook, tray, SendInput) on othe
     pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
 
 
-def _app(*, command: bool, connect_error: Exception | None = None) -> NexusVoxApp:
+def _app(*, command: bool, connect_error: Exception | None = None, paste_last: bool = False) -> NexusVoxApp:
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._transcriber = MagicMock()
     app._transcriber.connect = AsyncMock(side_effect=connect_error)
     app._transcriber.disconnect = AsyncMock()
-    app._hotkey = MagicMock(command=command, active=False)
+    app._hotkey = MagicMock(command=command, paste_last=paste_last, active=False)
     app._tray = MagicMock()
     app._mic_guard = None
     app._send_os_command = MagicMock(return_value="ok")
@@ -98,3 +98,15 @@ def test_paste_last_with_nothing_yet_beeps(monkeypatch):
     monkeypatch.setattr(app_module.threading, "Thread", RunNow)
     asyncio.run(_paste_app("")._paste_last_text())
     assert beeps == ["error"]
+
+
+def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
+    import nexusvox.app as app_module
+
+    pasted = []
+    monkeypatch.setattr(app_module, "inject_text", lambda text, delay: pasted.append(text))
+    app = _app(command=False, paste_last=True)
+    app._last_typed = "Bin gleich da"
+    app._config = MagicMock(injection_delay_ms=0)
+    _run_skipped_cycle(app)
+    assert pasted == ["Bin gleich da"]

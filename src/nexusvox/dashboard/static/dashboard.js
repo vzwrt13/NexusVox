@@ -1164,9 +1164,15 @@ function toggleReviewAudio(card) {
 async function retryReviewTranscription(card, btn) {
   btn.disabled = true;
   btn.textContent = "Transcribing...";
-  const res = await fetch(`/api/review/${card.dataset.id}/retry`, { method: "POST" }).then((r) => r.json());
-  btn.disabled = false;
-  btn.textContent = "\u21BB Retry";
+  let res;
+  try {
+    res = await fetch(`/api/review/${card.dataset.id}/retry`, { method: "POST" }).then((r) => r.json());
+  } catch (err) {
+    res = { ok: false, error: `Retry failed: ${err}` };
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "\u21BB Retry";
+  }
   if (!res.ok) {
     alert(res.error);
     return;

@@ -202,6 +202,12 @@ class DashboardAPI:
         name = normalize_hotkey_key(str(key or ""))
         if name is None:
             return {"error": f"Unknown key: {key}", **self.get_settings()}
+        # The listener would silently ignore these two: the binding's own key is never a
+        # marker, and the os-control command key wins a clash.
+        if name and name == self._config.hotkey.key:
+            return {"error": f"{name} already completes the hotkey", **self.get_settings()}
+        if name and self._config.os_control.enabled and name == self._config.os_control.command_key:
+            return {"error": f"{name} is the os-control command key", **self.get_settings()}
         self._config.hotkey.paste_key = name
         save_config(self._config)
         return self.get_settings()
@@ -345,16 +351,11 @@ class DashboardAPI:
         path = self.get_audio_file_path(tid)
         if path is None:
             return {"ok": False, "error": "No stored audio for this recording - turn on Store Audio Recordings"}
+        if not Path(path).is_file():
+            return {"ok": False, "error": "The stored audio file for this recording is missing"}
         try:
             wav_chunks, _ = convert_to_wav(Path(path).read_bytes(), "recording.wav")
-            result = asyncio.run(
-                transcribe_file(
-                    wav_chunks,
-                    self._config.inference,
-                    language=self._config.language,
-                    auto_detect_language=self._config.auto_language_detection,
-                )
-            )
+            result = self._transcribe_wav_chunks(wav_chunks)
         except Exception as exc:
             logger.error("Retry failed for transcription %d: %s", tid, exc)
             return {"ok": False, "error": f"Transcription failed: {exc}"}
@@ -492,14 +493,7 @@ class DashboardAPI:
             return {"ok": False, "error": f"Audio conversion failed: {exc}"}
 
         try:
-            result = asyncio.run(
-                transcribe_file(
-                    wav_chunks,
-                    self._config.inference,
-                    language=self._config.language,
-                    auto_detect_language=self._config.auto_language_detection,
-                )
-            )
+            result = self._transcribe_wav_chunks(wav_chunks)
         except Exception as exc:
             logger.error("Transcription failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Transcription failed: {exc}"}
@@ -523,6 +517,17 @@ class DashboardAPI:
             "original_filename": record.original_filename,
             "created_at": record.created_at.isoformat() if record.created_at else None,
         }
+
+    def _transcribe_wav_chunks(self, wav_chunks: list[bytes]):
+        """Transcribe WAV chunks with the current model and language settings (blocking)."""
+        return asyncio.run(
+            transcribe_file(
+                wav_chunks,
+                self._config.inference,
+                language=self._config.language,
+                auto_detect_language=self._config.auto_language_detection,
+            )
+        )
 
     def get_file_transcriptions(self, limit: int = 50) -> list[dict]:
         """Return file transcription records."""

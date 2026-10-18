@@ -146,7 +146,7 @@ class HotkeyListener:
             if marker == COMMAND:
                 self._on_command()
 
-    def _handle_marker_key(self, vk: int, marker: str, pressed: bool) -> bool:
+    def _handle_marker_key(self, vk: int, marker: str | None, pressed: bool) -> bool:
         """A marker key: swallowed when it completes the chord during a recording, typed otherwise.
 
         It only counts with every binding modifier down, so Shift+key, AltGr+key and a
@@ -158,7 +158,7 @@ class HotkeyListener:
             return swallowed
         if vk in self._marker_swallowed:
             return True  # auto-repeat
-        if self._active and self._modifiers <= self._pressed_modifiers:
+        if marker is not None and self._active and self._modifiers <= self._pressed_modifiers:
             self._marker_swallowed.add(vk)
             self._mark_recording(marker)
             return True
@@ -175,7 +175,9 @@ class HotkeyListener:
         self._sync_binding()
 
         marker = self._marker_keys().get(vk)
-        if marker is not None:
+        # A swallowed marker stays one until it is released, even if the config dropped it
+        # meanwhile; otherwise its key-up would leak and the stale entry would eat a later press.
+        if marker is not None or vk in self._marker_swallowed:
             return self._handle_marker_key(vk, marker, pressed)
 
         if vk == self._key_vk:

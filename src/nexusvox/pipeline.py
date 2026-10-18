@@ -12,9 +12,9 @@ here is the path of a dictation that gets typed. The steps, in order:
 7. snippet placeholders are expanded again
 
 The result says what to type, what to save (as spoken, before cleanup and translation),
-whether Enter follows the paste, and whether the typed text still equals the
-spoken words - the only case in which learning from the user's edits can
-produce a dictionary entry that will ever match.
+whether Enter follows the paste, and what learning from the user's edits needs: whether
+the typed words are still the spoken ones (not after cleanup or translation), and the
+text the dictionary saw, which a learned entry must match to ever apply.
 """
 
 from __future__ import annotations
@@ -43,7 +43,8 @@ class ProcessedText:
     press_enter: bool  # press Enter after the paste
     cleanup: CleanupResult  # what auto cleanup did
     translation: TranslateResult  # what the translator did (saved with the transcript)
-    learnable: bool  # `typed` is the spoken words after the dictionary, untouched by later steps
+    learnable: bool  # `typed` holds the spoken words (voice commands and snippets aside), not cleaned or translated
+    spoken: str  # the text after the dictionary, snippets as placeholders: a learned entry must match it
 
 
 def _voice_commands(text: str, config: VoiceCommandsConfig) -> str:
@@ -99,11 +100,8 @@ def process_text(
         press_enter=press_enter,
         cleanup=cleaned,
         translation=translation,
-        learnable=(
-            not cleaned.cleaned
-            and not translation.translated
-            and not press_enter
-            and not expansions
-            and processed == corrected
-        ),
+        # The translator passes English through byte for byte (translated=True all the same):
+        # only a dictation whose words it actually changed is not learnable.
+        learnable=not cleaned.cleaned and translation.text == cleaned.text,
+        spoken=marked,
     )

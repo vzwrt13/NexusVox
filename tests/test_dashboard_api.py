@@ -694,6 +694,25 @@ def test_learn_from_edits_setting(flask_client):
     assert resp.get_json()["learn_from_edits"] is True
 
 
+def test_learn_from_edits_status_without_the_app(flask_client):
+    assert flask_client.get("/api/settings/learn-from-edits-status").get_json() == {"counts": {}, "last": None}
+
+
+def test_learn_from_edits_status_from_the_watcher(db, session_factory):
+    from nexusvox.config import Config
+    from nexusvox.dashboard import _create_app
+    from nexusvox.dashboard.api import DashboardAPI
+    from nexusvox.edit_watch import EditWatcher
+
+    watcher = EditWatcher(lambda s: None, lambda: [])
+    watcher.skip("terminal")
+    app = _create_app(DashboardAPI(session_factory, Config(), db=db, get_learn_status=watcher.status))
+    with app.test_client() as client:
+        status = client.get("/api/settings/learn-from-edits-status").get_json()
+    assert status["counts"] == {"terminal": 1}
+    assert status["last"]["message"] == "skipped: terminals are not watched"
+
+
 def test_polish_presets_add_edit_default_and_delete(flask_client):
     def post(**body):
         return flask_client.post("/api/polish-presets", data=json.dumps(body), content_type="application/json")

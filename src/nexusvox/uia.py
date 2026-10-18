@@ -49,6 +49,16 @@ def _window_class(hwnd: int) -> str:
     return buffer.value
 
 
+def foreground_is_terminal() -> bool:
+    """True when the foreground window belongs to a terminal program."""
+    return _window_class(ctypes.windll.user32.GetForegroundWindow()) in _TERMINAL_WINDOWS
+
+
+def is_terminal_element(element) -> bool:
+    """True when a focused UI Automation element is a terminal embedded in another app."""
+    return element.CurrentClassName in _TERMINAL_ELEMENTS
+
+
 def automation():
     """The UI Automation type library and a client created on the calling thread.
 
@@ -65,14 +75,14 @@ def read_focus() -> Focus:
 
     Runs on the calling thread; the caller initialises COM there.
     """
-    if _window_class(ctypes.windll.user32.GetForegroundWindow()) in _TERMINAL_WINDOWS:
+    if foreground_is_terminal():
         return Focus(terminal=True, selection=None)
     try:
         uia, client = automation()
         element = client.GetFocusedElement()
         if element is None:
             return Focus(terminal=False, selection=None)
-        if element.CurrentClassName in _TERMINAL_ELEMENTS:
+        if is_terminal_element(element):
             return Focus(terminal=True, selection=None)
         if element.CurrentIsPassword:
             # Never hand a password to the model, and never Ctrl+C one: as if nothing were selected.

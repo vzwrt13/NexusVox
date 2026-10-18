@@ -8,9 +8,14 @@ two versions are diffed word by word (`dictionary.suggest_entries`). Changed
 words become *pending suggestions* in the database; the user accepts or
 dismisses them in the dashboard, nothing is added to the dictionary on its own.
 
-Password fields are never read. All UI Automation calls run on the watcher's own
-thread, so no COM pointer crosses threads and the hotkey hook is never blocked.
-`extract_edit` and `learn` are pure and tested without UI Automation.
+Password fields and terminals are never read: a terminal's input is an empty
+helper element (xterm.js) or a hard-wrapped screen buffer, so the paste cannot be
+found there. Every paste ends in one outcome (`OUTCOMES`), logged at INFO and
+counted for the dashboard, so "learned nothing" always has a stated reason.
+
+All UI Automation calls run on the watcher's own thread, so no COM pointer
+crosses threads and the hotkey hook is never blocked. `extract_edit` and `learn`
+are pure and tested without UI Automation.
 """
 
 from __future__ import annotations
@@ -18,15 +23,17 @@ from __future__ import annotations
 import difflib
 import logging
 import queue
+import re
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from .dictionary import DictionaryEntry, suggest_entries
+from .dictionary import DictionaryEntry, apply_dictionary, suggest_entries
 from .lang_detect import language_guess
 from .uia import automation as uia_automation
+from .uia import foreground_is_terminal, is_terminal_element
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +58,46 @@ _PASTE_WAIT_S = 2.0
 _UIA_VALUE_PATTERN_ID = 10002
 _UIA_TEXT_PATTERN_ID = 10014
 
+# How a paste ended for learning, and how the log and the dashboard say it.
+OUTCOMES = {
+    "suggested": "suggestions found",
+    "unchanged": "watched, no corrected words",
+    "processed": "skipped: auto cleanup or translation changed the text",
+    "clipboard": "skipped: the paste failed",
+    "terminal": "skipped: terminals are not watched",
+    "password": "skipped: password field",
+    "no_field": "skipped: no focused element",
+    "unreadable": "skipped: the focused element does not expose its text",
+    "too_long": f"skipped: the field holds more than {MAX_FIELD_CHARS:,} characters",
+    "not_found": "skipped: the pasted text did not show up in the field",
+}
+
 
 def _normalize(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _squash(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _find_last(text: str, injected: str) -> tuple[int, int] | None:
+    """Span of the last occurrence of `injected` in `text`, any run of whitespace matching any other.
+
+    Fields re-wrap or re-indent pasted text (soft line breaks, a non-breaking space
+    for a space), so an exact search would miss a paste that is plainly there.
+    """
+    words = injected.split()
+    if not words:
+        return None
+    pattern = re.compile(r"\s+".join(map(re.escape, words)))
+    # Step one character past each hit, not past its end: finditer skips overlapping
+    # occurrences, so "ha ha" in "ha ha ha" would end at the first one, unlike rfind.
+    last, match = None, pattern.search(text)
+    while match:
+        last = match.span()
+        match = pattern.search(text, match.start() + 1)
+    return last
 
 
 def _map_position(pos: int, opcodes: list[tuple[str, int, int, int, int]], *, start: bool) -> int:
@@ -109,26 +153,32 @@ def extract_edit(before: str, injected: str, after: str) -> str | None:
     Returns None when the pasted text is not in `before`, when it was deleted,
     or when it was rewritten beyond `MIN_SIMILARITY`.
     """
-    before, injected, after = _normalize(before), _normalize(injected), _normalize(after)
-    if not injected.strip():
+    before, after = _normalize(before), _normalize(after)
+    span = _find_last(before, injected)
+    if span is None:
         return None
-    start = before.rfind(injected)
-    if start < 0:
-        return None
-    end = start + len(injected)
+    start, end = span
     opcodes = _char_opcodes(before, after, start, end)
     edited = after[_map_position(start, opcodes, start=True) : _map_position(end, opcodes, start=False)]
     if not edited.strip():
         return None
-    if difflib.SequenceMatcher(a=injected, b=edited, autojunk=False).ratio() < MIN_SIMILARITY:
+    if difflib.SequenceMatcher(a=_squash(injected), b=_squash(edited), autojunk=False).ratio() < MIN_SIMILARITY:
         return None
     return edited
 
 
-def learn(before: str, injected: str, after: str, existing: list[DictionaryEntry]) -> list[DictionaryEntry]:
-    """Dictionary suggestions from one watched paste."""
+def learn(
+    before: str, injected: str, after: str, existing: list[DictionaryEntry], spoken: str | None = None
+) -> list[DictionaryEntry]:
+    """Dictionary suggestions from one watched paste.
+
+    `spoken` is the text the dictionary will see again (the transcript after the
+    dictionary, snippets as placeholders). Voice commands and snippets make the paste
+    differ from it, so only an entry that matches `spoken` is kept: one for "25" or
+    for a snippet's stored text would never match a transcript.
+    """
     edited = extract_edit(before, injected, after)
-    if edited is None or edited == _normalize(injected):
+    if edited is None or _squash(edited) == _squash(injected):
         return []
     # Fixing a misheard term keeps most words and touches one or two places; a rewrite does not.
     old_words = injected.split()
@@ -143,6 +193,7 @@ def learn(before: str, injected: str, after: str, existing: list[DictionaryEntry
         if len(e.wrong.split()) <= MAX_SUGGESTION_WORDS
         and len(e.right.split()) <= MAX_SUGGESTION_WORDS
         and not _language_switch(e)
+        and (spoken is None or apply_dictionary(spoken, [e]) != spoken)
     ]
 
 
@@ -161,6 +212,14 @@ def _language_switch(entry: DictionaryEntry) -> bool:
     return "unknown" not in (wrong, right) and wrong != right and max(wrong_conf, right_conf) >= _SURE_LANGUAGE
 
 
+class FieldSkipped(Exception):
+    """The focused element is deliberately not watched; `reason` is a key of `OUTCOMES`."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class TextField(Protocol):
     def read(self) -> str | None:
         """Current text of the field, or None when it can no longer be read."""
@@ -176,11 +235,20 @@ class UiaTextField:
 
     @classmethod
     def focused(cls) -> UiaTextField | None:
-        """The focused element, or None when there is none or it is a password field."""
+        """The focused element, or None when there is none.
+
+        Raises `FieldSkipped` for a password field or a terminal.
+        """
+        if foreground_is_terminal():
+            raise FieldSkipped("terminal")
         uia, automation = uia_automation()
         element = automation.GetFocusedElement()
-        if element is None or element.CurrentIsPassword:
+        if element is None:
             return None
+        if element.CurrentIsPassword:
+            raise FieldSkipped("password")
+        if is_terminal_element(element):
+            raise FieldSkipped("terminal")
         return cls(uia, automation, element)
 
     def read(self) -> str | None:
@@ -202,6 +270,7 @@ class UiaTextField:
 class _Watch:
     injected: str
     window_s: float
+    spoken: str | None
 
 
 class EditWatcher:
@@ -223,12 +292,34 @@ class EditWatcher:
         self._field_factory = field_factory
         self._queue: queue.Queue[_Watch | None] = queue.Queue()
         self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._counts: dict[str, int] = {}
+        self._last: tuple[str, float] | None = None  # outcome, time.time()
 
-    def watch(self, injected: str, window_s: float) -> None:
+    def watch(self, injected: str, window_s: float, spoken: str | None = None) -> None:
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, name="edit-watch", daemon=True)
             self._thread.start()
-        self._queue.put(_Watch(injected, window_s))
+        self._queue.put(_Watch(injected, window_s, spoken))
+
+    def skip(self, outcome: str) -> None:
+        """Record a paste the app does not hand to the watcher (a key of `OUTCOMES`)."""
+        self._record(outcome)
+
+    def status(self) -> dict:
+        """Outcome counts since start and the last outcome, for the dashboard."""
+        with self._lock:
+            last = self._last
+            return {
+                "counts": dict(self._counts),
+                "last": {"outcome": last[0], "message": OUTCOMES[last[0]], "at": last[1]} if last else None,
+            }
+
+    def _record(self, outcome: str) -> None:
+        logger.info("Learn from edits: %s", OUTCOMES[outcome])
+        with self._lock:
+            self._counts[outcome] = self._counts.get(outcome, 0) + 1
+            self._last = (outcome, time.time())
 
     def stop(self) -> None:
         if self._thread is not None:
@@ -255,12 +346,14 @@ class EditWatcher:
         time.sleep(_SETTLE_S)
         try:
             field = self._field_factory()
-            before = self._read_pasted(field, item.injected) if field else None
+            before, skip = self._read_pasted(field, item.injected) if field else (None, "no_field")
+        except FieldSkipped as skipped:
+            field, before, skip = None, None, skipped.reason
         except Exception:
             logger.exception("Learn from edits: reading the focused field failed")
-            field, before = None, None
+            field, before, skip = None, None, "unreadable"
         if field is None or before is None:
-            logger.debug("Learn from edits: pasted text not found in the focused field")
+            self._record(skip)
             return self._queue.get()
         after = before
         deadline = time.monotonic() + item.window_s
@@ -276,28 +369,38 @@ class EditWatcher:
                 break
             if len(current) <= MAX_FIELD_CHARS:
                 after = current
-        self._report(before, item.injected, after)
+        self._report(before, item, after)
         return self._queue.get() if nxt is False else nxt
 
     @staticmethod
-    def _read_pasted(field: TextField, injected: str) -> str | None:
-        """The field text once the paste shows up in it (apps paste asynchronously), or None."""
-        wanted = _normalize(injected)
+    def _read_pasted(field: TextField, injected: str) -> tuple[str | None, str]:
+        """The field text once the paste shows up in it (apps paste asynchronously).
+
+        Returns (text, "") or, when it does not show up, (None, the reason as a key of `OUTCOMES`).
+        """
         deadline = time.monotonic() + _PASTE_WAIT_S
+        reason = "unreadable"
         while True:
             text = field.read()
-            if text is not None and len(text) <= MAX_FIELD_CHARS and wanted in _normalize(text):
-                return text
-            if text is None or time.monotonic() >= deadline:
-                return None
+            if text is None:
+                return None, reason
+            if len(text) > MAX_FIELD_CHARS:
+                reason = "too_long"
+            elif _find_last(_normalize(text), injected) is not None:
+                return text, ""
+            else:
+                reason = "not_found"
+            if time.monotonic() >= deadline:
+                return None, reason
             time.sleep(_POLL_S / 5)
 
-    def _report(self, before: str, injected: str, after: str) -> None:
+    def _report(self, before: str, item: _Watch, after: str) -> None:
         try:
-            suggestions = learn(before, injected, after, self._existing())
+            suggestions = learn(before, item.injected, after, self._existing(), item.spoken)
         except Exception:
             logger.exception("Learn from edits: diff failed")
             return
+        self._record("suggested" if suggestions else "unchanged")
         if suggestions:
             logger.info("Learn from edits: %d suggestion(s)", len(suggestions))
             self._on_suggestions(suggestions)

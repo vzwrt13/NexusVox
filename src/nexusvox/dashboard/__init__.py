@@ -104,6 +104,10 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_learn_from_edits(data.get("enabled", False)))
 
+    @app.route("/api/settings/learn-from-edits-status")
+    def get_learn_status():
+        return jsonify(api.get_learn_status())
+
     @app.route("/api/settings/paste-key", methods=["POST"])
     def set_paste_key():
         data = request.get_json(force=True)
@@ -408,6 +412,7 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None)
             # Build the thread→async bridge for model switching
             on_model_switch = None
             get_switch_status = None
+            get_learn_status = None
             if app is not None:
 
                 def on_model_switch(model_id: str) -> None:
@@ -415,6 +420,7 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None)
                         asyncio.run_coroutine_threadsafe(app.switch_model(model_id), app._loop)
 
                 get_switch_status = app.get_switch_status
+                get_learn_status = app.get_learn_status
 
             # Resolve benchmarks dir relative to the project root (CWD).
             benchmarks_dir = Path.cwd() / "benchmarks"
@@ -425,6 +431,7 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None)
                 db=db,
                 on_model_switch=on_model_switch,
                 get_switch_status=get_switch_status,
+                get_learn_status=get_learn_status,
                 benchmarks_dir=benchmarks_dir,
             )
             flask_app = _create_app(dashboard_api)

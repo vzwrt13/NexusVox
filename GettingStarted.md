@@ -299,7 +299,7 @@ Options are one `name = text` per line under a snippet; *Fill from GitHub* impor
 
 ### Learn From Edits
 
-Turn on Settings → Correction Dictionary → Learn From Edits (or `[learn_from_edits].enabled`). After each paste NexusVox reads the text field for 30 seconds (`window_s`); fix a misheard word there and it shows up below the toggle as a suggestion to add or dismiss - nothing enters the dictionary on its own. Password fields are never read, and terminals expose no readable text, so nothing is learned there.
+Turn on Settings → Correction Dictionary → Learn From Edits (or `[learn_from_edits].enabled`). After each paste NexusVox reads the text field for 30 seconds (`window_s`); fix a misheard word there and it shows up below the toggle as a suggestion to add or dismiss - nothing enters the dictionary on its own. Password fields and terminals are never read (terminals expose no readable text), and nothing is learned from a dictation that auto cleanup or translation changed. The line under the toggle says how the last paste ended, so you can tell "nothing corrected" from "this app cannot be read".
 
 ---
 

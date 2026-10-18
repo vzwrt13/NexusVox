@@ -53,16 +53,25 @@ def test_dictionary_runs_first_and_stays_learnable():
     assert (result.typed, result.learnable) == ("I use NexusVox", True)
 
 
-def test_voice_commands_make_it_unlearnable():
+def test_voice_commands_stay_learnable_against_the_spoken_words():
     result = _run("first new line second")
-    assert (result.typed, result.learnable) == ("first\nsecond", False)
+    assert (result.typed, result.learnable, result.spoken) == ("first\nsecond", True, "first new line second")
+
+
+def test_numbers_as_digits_stay_learnable_against_the_spoken_words():
+    result = _run("ich habe fünfundzwanzig Äpfel", _config(numbers_as_digits=True))
+    assert (result.typed, result.learnable, result.spoken) == (
+        "ich habe 25 Äpfel",
+        True,
+        "ich habe fünfundzwanzig Äpfel",
+    )
 
 
 def test_press_enter_is_split_and_saved_as_marker_when_alone():
     config = _config(press_enter=True)
     sent = _run("Bin gleich da, Enter drücken.", config)
     alone = _run("press enter", config)
-    assert (sent.typed, sent.press_enter, sent.learnable) == ("Bin gleich da", True, False)
+    assert (sent.typed, sent.press_enter, sent.learnable, sent.spoken) == ("Bin gleich da", True, True, "Bin gleich da")
     assert (alone.typed, alone.saved, alone.press_enter) == ("", "[press enter]", True)
 
 
@@ -71,13 +80,14 @@ def test_press_enter_stays_text_for_the_phone():
     assert (result.typed, result.press_enter) == ("Bin gleich da, Enter drücken.", False)
 
 
-def test_snippet_survives_voice_commands_and_is_not_learnable():
+def test_snippet_survives_voice_commands_and_stays_out_of_the_spoken_words():
     result = _run("Danke new line meine Signatur", snippets=[SIGNATURE])
     assert (result.typed, result.saved, result.learnable) == (
         "Danke\nViele Grüße\nVincent",
         "Danke\nViele Grüße\nVincent",
-        False,
+        True,
     )
+    assert result.spoken.startswith("Danke new line ") and "Viele" not in result.spoken
 
 
 def test_translation_is_typed_but_the_spoken_text_is_saved():
@@ -133,3 +143,11 @@ def test_cleanup_sees_snippet_placeholders_and_the_snippet_is_expanded_after():
 
     result = _run("ähm Danke meine Signatur", snippets=[SIGNATURE], cleanup_fn=keep)
     assert result.typed == "Danke Viele Grüße\nVincent"
+
+
+def test_english_passed_through_by_the_translator_stays_learnable():
+    def passthrough(text, _config):
+        return TranslateResult(text, translated=True, source="en")
+
+    result = _run("Hello world", translate_fn=passthrough)
+    assert (result.typed, result.learnable) == ("Hello world", True)

@@ -56,6 +56,7 @@ class DashboardAPI:
         db: Database | None = None,
         on_model_switch: Callable[[str], None] | None = None,
         get_switch_status: Callable[[], dict] | None = None,
+        get_learn_status: Callable[[], dict] | None = None,
         benchmarks_dir: Path | None = None,
     ) -> None:
         self._sf = session_factory
@@ -63,6 +64,7 @@ class DashboardAPI:
         self._db = db
         self._on_model_switch = on_model_switch
         self._get_switch_status = get_switch_status
+        self._get_learn_status = get_learn_status
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
 
     # ---- Models -------------------------------------------------------------
@@ -281,6 +283,12 @@ class DashboardAPI:
         self._config.learn_from_edits.enabled = enabled
         save_config(self._config)
         return self.get_settings()
+
+    def get_learn_status(self) -> dict:
+        """How the pastes since start ended for learning from edits (`EditWatcher.status`)."""
+        if self._get_learn_status is None:
+            return {"counts": {}, "last": None}
+        return self._get_learn_status()
 
     def set_store_audio(self, enabled: bool) -> dict:
         """Checked by the app on every recording, so this is live."""

@@ -221,3 +221,98 @@ def test_quick_tap_of_the_polish_chord_polishes_with_the_default_instruction():
     app._polish_selection = AsyncMock()
     _run_skipped_cycle(app)
     app._polish_selection.assert_awaited_once_with("", None)
+
+
+def _dictation_app(monkeypatch, inject):
+    """An app whose next cycle records "hallo welt" and pastes it through `inject`."""
+    import nexusvox.app as app_module
+    from nexusvox.cleanup import CleanupResult
+    from nexusvox.pipeline import ProcessedText
+    from nexusvox.translator import TranslateResult
+
+    app = _app(command=False)
+    app._config = MagicMock(injection_delay_ms=0)
+    app._config.learn_from_edits.enabled = True
+    app._last_typed = ""
+    app._audio = MagicMock()
+    app._audio.start.side_effect = lambda: app._record_stop_event.set()  # released right away
+    app._stream_audio = AsyncMock(return_value=bytearray())
+    app._transcriber.finish = AsyncMock(return_value=MagicMock(text="hallo welt", confidence=None))
+    app._run_command = AsyncMock(return_value=None)
+    app._db = MagicMock()
+    app._store_audio = MagicMock()
+    app._language_of = MagicMock(return_value="de")
+    app._edit_watcher = MagicMock()
+    processed = ProcessedText(
+        "Hallo Welt",
+        "Hallo Welt",
+        False,
+        CleanupResult("Hallo Welt"),
+        TranslateResult("Hallo Welt"),
+        True,
+        "Hallo Welt",
+    )
+    monkeypatch.setattr(app_module, "process_text", lambda *a, **k: processed)
+    monkeypatch.setattr(app_module, "inject_text", inject)
+    beeps = []
+    monkeypatch.setattr(app_module, "beep_error", lambda: beeps.append("error"))
+    # CI runners have no audio device: a real start/stop beep would raise and end the cycle.
+    monkeypatch.setattr(app_module, "beep_start", lambda: None)
+    monkeypatch.setattr(app_module, "beep_stop", lambda: None)
+    monkeypatch.setattr(app_module, "_play", lambda beep: beep())
+    return app, beeps
+
+
+def _run_cycle(app: NexusVoxApp) -> None:
+    async def cycle():
+        app._record_stop_event = asyncio.Event()
+        await app._transcription_cycle()
+
+    asyncio.run(cycle())
+
+
+def test_dictation_is_pasted_and_watched_for_edits(monkeypatch):
+    pasted = []
+    app, beeps = _dictation_app(monkeypatch, lambda text, delay, enter: pasted.append(text))
+    _run_cycle(app)
+    assert (pasted, beeps) == (["Hallo Welt"], [])
+    app._edit_watcher.watch.assert_called_once_with("Hallo Welt", app._config.learn_from_edits.window_s, "Hallo Welt")
+
+
+def test_dictation_beeps_and_is_kept_when_the_clipboard_is_busy(monkeypatch):
+    from nexusvox.clipboard import ClipboardError
+
+    def busy(text, delay, enter):
+        raise ClipboardError("OpenClipboard failed")
+
+    app, beeps = _dictation_app(monkeypatch, busy)
+    _run_cycle(app)
+    assert beeps == ["error"]
+    assert app._last_typed == "Hallo Welt"  # the paste key pastes it
+    app._db.save_transcription.assert_called_once()
+    app._edit_watcher.watch.assert_not_called()
+    app._edit_watcher.skip.assert_called_once_with("clipboard")
+
+
+def test_paste_last_beeps_when_the_clipboard_is_busy(monkeypatch):
+    import nexusvox.app as app_module
+    from nexusvox.clipboard import ClipboardError
+
+    def busy(text, delay):
+        raise ClipboardError("OpenClipboard failed")
+
+    app, calls = _polish_app(monkeypatch, "unused", "unused")
+    app._last_typed = "Hallo Welt"
+    monkeypatch.setattr(app_module, "inject_text", busy)
+    asyncio.run(app._paste_last_text())
+    assert calls["beeps"] == ["error"]
+
+
+def test_latency_ends_when_the_text_is_in_not_after_the_clipboard_restore(monkeypatch):
+    import time
+
+    # inject_text reports when the text was in place; anything after it (the clipboard
+    # restore) is not latency. A time far in the future shows the reported one is used.
+    app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: time.monotonic() + 60)
+    _run_cycle(app)
+    assert app._db.save_transcription.call_args.kwargs["latency_ms"] >= 60_000

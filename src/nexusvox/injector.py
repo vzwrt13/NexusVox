@@ -40,6 +40,9 @@ VK_RWIN = 0x5C
 # Modifiers that may still be physically held when the transcription arrives
 _MODIFIER_VKS = (VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN)
 
+# Pause between the paste and putting the user's clipboard back (about 300 ms after Ctrl+V)
+_RESTORE_DELAY_S = 0.25
+
 # Window message for paste
 WM_PASTE = 0x0302
 
@@ -260,7 +263,7 @@ def copy_selection(injection_delay_ms: int = 500, timeout_s: float = 1.0) -> str
                 pass
 
 
-def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = False) -> None:
+def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = False) -> float:
     """Inject text at the active cursor position using clipboard paste.
 
     Saves the current clipboard, sets new content, pastes, then restores. Both writes
@@ -269,12 +272,15 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
     sending the Ctrl+V keystroke, giving the OS time to clear stale state.
     With ``press_enter`` an Enter keypress follows the paste; an empty ``text``
     then presses Enter only.
+
+    Returns the `time.monotonic()` at which the text was in the target, before the wait
+    for putting the clipboard back, so the caller's latency is not the restore delay.
     """
     if not text:
         if press_enter:
             _prepare_keyboard(injection_delay_ms)
             _send_enter()
-        return
+        return time.monotonic()
 
     # Save current clipboard
     try:
@@ -282,9 +288,11 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
     except pyperclip.PyperclipException:
         original = None
 
+    clipboard_changed = False
     try:
         # Set transcription text to clipboard
         set_text(text)
+        clipboard_changed = True
         # Small delay to ensure clipboard is set
         time.sleep(0.05)
         _prepare_keyboard(injection_delay_ms)
@@ -299,11 +307,15 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
             # Give the target time to insert the pasted text before Enter submits it.
             time.sleep(0.1)
             _send_enter()
+        pasted_at = time.monotonic()
     finally:
-        # Restore original clipboard
-        if original is not None:
-            time.sleep(0.05)
+        # Restore original clipboard (untouched when set_text failed: nothing to restore)
+        if original is not None and clipboard_changed:
+            # Electron apps and terminals read the clipboard well after Ctrl+V; restoring
+            # sooner made them paste the old clipboard instead of the dictation.
+            time.sleep(_RESTORE_DELAY_S)
             try:
                 set_text(original)
             except ClipboardError:
                 pass
+    return pasted_at

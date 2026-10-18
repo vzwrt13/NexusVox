@@ -39,6 +39,10 @@ from . import benchmarks as bench
 logger = logging.getLogger(__name__)
 
 
+# `[hotkey]` fields that hold a marker key, and how an error message names each.
+_MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
+
+
 class DashboardAPI:
     """Methods callable from JavaScript as ``pywebview.api.<method>(...)``."""
 
@@ -201,23 +205,20 @@ class DashboardAPI:
         return self.get_settings()
 
     def _set_marker_key(self, field: str, key: str) -> dict:
-        """Set `[hotkey].paste_key` or `.polish_key`. Live: the listener reads the config on every key event."""
+        """Set one of `_MARKER_KEY_FIELDS`. Live: the listener reads the config on every key event."""
         name = normalize_hotkey_key(str(key or ""))
         if name is None:
             return {"error": f"Unknown key: {key}", **self.get_settings()}
         # The listener would silently ignore or misread these: the binding's own key is never
         # a marker, the os-control command key wins a clash, and two markers cannot share a key.
         hotkey = self._config.hotkey
-        other = hotkey.polish_key if field == "paste_key" else hotkey.paste_key
         if name and name == hotkey.key:
             return {"error": f"{name} already completes the hotkey", **self.get_settings()}
         if name and self._config.os_control.enabled and name == self._config.os_control.command_key:
             return {"error": f"{name} is the os-control command key", **self.get_settings()}
-        if name and name == other:
-            return {
-                "error": f"{name} is already the {'polish' if field == 'paste_key' else 'paste'} key",
-                **self.get_settings(),
-            }
+        for other, label in _MARKER_KEY_FIELDS.items():
+            if name and other != field and name == getattr(hotkey, other):
+                return {"error": f"{name} is already the {label} key", **self.get_settings()}
         setattr(hotkey, field, name)
         save_config(self._config)
         return self.get_settings()

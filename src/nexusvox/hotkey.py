@@ -52,7 +52,7 @@ class HotkeyListener:
     binding modifier down: the os-control command key (`command_config`, when enabled)
     marks it a command recording, and `[hotkey].paste_key` marks it "paste the last text
     again", and `[hotkey].polish_key` marks it "rewrite the selection by what is said".
-    The first marker pressed wins and stays readable (`command`, `paste_last`, `polish`)
+    The first marker pressed wins and stays readable (`mark`)
     until the next recording starts; the key itself is swallowed so it never types.
     `on_command` fires once when a recording becomes a command.
     """
@@ -94,14 +94,10 @@ class HotkeyListener:
         return self._mark == COMMAND
 
     @property
-    def paste_last(self) -> bool:
-        """True when the current (or just finished) recording should paste the last text instead."""
-        return self._mark == PASTE_LAST
-
-    @property
-    def polish(self) -> bool:
-        """True when the current (or just finished) recording is an instruction for the selected text."""
-        return self._mark == POLISH
+    def mark(self) -> str | None:
+        """What a marker key turned the current (or just finished) recording into:
+        `COMMAND`, `PASTE_LAST`, `POLISH`, or None for a plain dictation."""
+        return self._mark
 
     @property
     def active(self) -> bool:

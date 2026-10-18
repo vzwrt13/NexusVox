@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip("pynput.keyboard", reason="pynput needs a display backend", exc_type=ImportError)
 
 from nexusvox.config import HotkeyConfig, OsControlConfig  # noqa: E402
-from nexusvox.hotkey import HotkeyListener, describe_hotkey  # noqa: E402
+from nexusvox.hotkey import PASTE_LAST, POLISH, HotkeyListener, describe_hotkey  # noqa: E402
 
 LCTRL, RCTRL, LSHIFT, LALT = 0xA2, 0xA3, 0xA0, 0xA4
 VK_A, VK_B, VK_F9 = ord("A"), ord("B"), 0x78
@@ -333,7 +333,7 @@ def test_paste_key_during_hold_marks_paste_last_and_is_swallowed():
     assert hk._handle(VK_V, False) is True
     _release_combo(hk)
     assert events == ["start", "stop"]
-    assert hk.paste_last and not hk.command
+    assert hk.mark == PASTE_LAST
 
 
 def test_paste_key_types_normally_outside_a_recording_and_resets_next_time():
@@ -345,7 +345,7 @@ def test_paste_key_types_normally_outside_a_recording_and_resets_next_time():
     hk._handle(VK_V, False)
     _release_combo(hk)
     _press_combo(hk)
-    assert not hk.paste_last
+    assert hk.mark is None
     _release_combo(hk)
 
 
@@ -355,7 +355,7 @@ def test_first_marker_wins():
     hk._handle(VK_V, True)
     hk._handle(VK_Y, True)
     _release_combo(hk)
-    assert hk.paste_last and not hk.command and "command" not in events
+    assert hk.mark == PASTE_LAST and "command" not in events
 
 
 def test_paste_key_off_or_used_by_the_binding_types_normally():
@@ -368,7 +368,7 @@ def test_paste_key_off_or_used_by_the_binding_types_normally():
     own._handle(LCTRL, True)
     own._handle(LALT, True)
     assert own._handle(VK_V, True) is True  # completes the combo, not a marker
-    assert own_events == ["start"] and not own.paste_last
+    assert own_events == ["start"] and own.mark is None
 
 
 # -- polish key --------------------------------------------------------------------
@@ -383,11 +383,11 @@ def test_polish_key_marks_polish_and_paste_key_still_works():
     assert hk._handle(VK_P, True) is True
     hk._handle(VK_P, False)
     _release_combo(hk)
-    assert hk.polish and not hk.paste_last and events == ["start", "stop"]
+    assert hk.mark == POLISH and events == ["start", "stop"]
     _press_combo(hk)
     assert hk._handle(ord("V"), True) is True
     _release_combo(hk)
-    assert hk.paste_last and not hk.polish
+    assert hk.mark == PASTE_LAST
 
 
 def test_polish_key_off_by_default_types_normally():
@@ -395,4 +395,4 @@ def test_polish_key_off_by_default_types_normally():
     _press_combo(hk)
     assert hk._handle(VK_P, True) is False
     _release_combo(hk)
-    assert not hk.polish
+    assert hk.mark is None

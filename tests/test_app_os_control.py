@@ -12,6 +12,7 @@ import pytest
 
 try:
     from nexusvox.app import NexusVoxApp
+    from nexusvox.hotkey import COMMAND, PASTE_LAST, POLISH
 except Exception:  # Windows-only imports (pynput hook, tray, SendInput) on other platforms
     pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
 
@@ -23,7 +24,8 @@ def _app(
     app._transcriber = MagicMock()
     app._transcriber.connect = AsyncMock(side_effect=connect_error)
     app._transcriber.disconnect = AsyncMock()
-    app._hotkey = MagicMock(command=command, paste_last=paste_last, polish=polish, active=False)
+    mark = COMMAND if command else PASTE_LAST if paste_last else POLISH if polish else None
+    app._hotkey = MagicMock(command=command, mark=mark, active=False)
     app._tray = MagicMock()
     app._mic_guard = None
     app._send_os_command = MagicMock(return_value="ok")

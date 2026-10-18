@@ -49,6 +49,17 @@ def _window_class(hwnd: int) -> str:
     return buffer.value
 
 
+def automation():
+    """The UI Automation type library and a client created on the calling thread.
+
+    Every UI Automation reader starts here; the caller initialises COM on its thread first.
+    """
+    import comtypes.client
+
+    uia = comtypes.client.GetModule("UIAutomationCore.dll")
+    return uia, comtypes.client.CreateObject(uia.CUIAutomation, interface=uia.IUIAutomation)
+
+
 def read_focus() -> Focus:
     """The focused control: a terminal or not, and its selected text if it reports one.
 
@@ -57,11 +68,8 @@ def read_focus() -> Focus:
     if _window_class(ctypes.windll.user32.GetForegroundWindow()) in _TERMINAL_WINDOWS:
         return Focus(terminal=True, selection=None)
     try:
-        import comtypes.client
-
-        uia = comtypes.client.GetModule("UIAutomationCore.dll")
-        automation = comtypes.client.CreateObject(uia.CUIAutomation, interface=uia.IUIAutomation)
-        element = automation.GetFocusedElement()
+        uia, client = automation()
+        element = client.GetFocusedElement()
         if element is None:
             return Focus(terminal=False, selection=None)
         if element.CurrentClassName in _TERMINAL_ELEMENTS:

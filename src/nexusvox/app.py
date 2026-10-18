@@ -23,7 +23,7 @@ from .dashboard import open_dashboard
 from .db import Database
 from .edit_watch import EditWatcher
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
-from .hotkey import HotkeyListener, describe_hotkey
+from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, describe_hotkey
 from .injector import foreground_window, inject_text
 from .lang_detect import detect_language
 from .llm import LlmError
@@ -370,11 +370,11 @@ class NexusVoxApp:
                 logger.info("Hotkey released before recording could start, skipping")
                 await self._transcriber.disconnect()
                 await self._hide_os_control()
-                if self._hotkey.paste_last:
+                if self._hotkey.mark == PASTE_LAST:
                     # A quick tap of the paste chord (or one queued behind a running
                     # cycle) needs no recording: paste the last text all the same.
                     await self._paste_last_text()
-                elif self._hotkey.polish:
+                elif self._hotkey.mark == POLISH:
                     # A quick tap of the polish chord: nothing was said, so the default
                     # instruction; there is no recording to save.
                     await self._polish_selection("", None)
@@ -397,9 +397,7 @@ class NexusVoxApp:
             await self._record_stop_event.wait()
             self._record_stop_event.clear()
             recording_stopped = True
-            is_command = self._hotkey.command and not remote
-            is_paste_last = self._hotkey.paste_last and not remote
-            is_polish = self._hotkey.polish and not remote
+            mark = None if remote else self._hotkey.mark
 
             # Stop audio (sends None sentinel, ending the stream task)
             audio.stop()
@@ -418,7 +416,7 @@ class NexusVoxApp:
             self._tray.set_active(False)
             _play(beep_stop)
 
-            if is_paste_last:
+            if mark == PASTE_LAST:
                 # The paste key was tapped during the hold: drop this recording and paste
                 # the last text again instead of transcribing.
                 await self._transcriber.disconnect()
@@ -432,7 +430,7 @@ class NexusVoxApp:
 
             recording = _Recording(audio_buffer, duration_ms, result.confidence, transcribe_ms)
 
-            if is_command:
+            if mark == COMMAND:
                 # A command recording (command key pressed during the hold) is never
                 # typed: the transcript goes to os-control, which also hides
                 # its widget again when there is nothing to act on.
@@ -447,7 +445,7 @@ class NexusVoxApp:
                 await self._transcriber.disconnect()
                 return
 
-            if is_polish:
+            if mark == POLISH:
                 # The polish key was tapped during the hold: what was said (maybe nothing)
                 # is an instruction for the selected text, not text to type.
                 await self._transcriber.disconnect()

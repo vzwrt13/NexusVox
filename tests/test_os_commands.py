@@ -194,6 +194,7 @@ def test_execute_unknown_app_returns_false(mock_wm):
     mock_wm.open_app.assert_not_called()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="window_manager needs the Win32 API")
 def test_open_target_rejects_plain_text(monkeypatch):
     from nexusvox import window_manager
 

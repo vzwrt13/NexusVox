@@ -40,6 +40,9 @@ VK_RWIN = 0x5C
 # Modifiers that may still be physically held when the transcription arrives
 _MODIFIER_VKS = (VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN)
 
+# Pause between the paste and putting the user's clipboard back (about 300 ms after Ctrl+V)
+_RESTORE_DELAY_S = 0.25
+
 # Window message for paste
 WM_PASTE = 0x0302
 
@@ -302,7 +305,9 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
     finally:
         # Restore original clipboard
         if original is not None:
-            time.sleep(0.05)
+            # Electron apps and terminals read the clipboard well after Ctrl+V; restoring
+            # sooner made them paste the old clipboard instead of the dictation.
+            time.sleep(_RESTORE_DELAY_S)
             try:
                 set_text(original)
             except ClipboardError:

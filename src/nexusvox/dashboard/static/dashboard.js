@@ -285,7 +285,39 @@ async function loadTranslatorStatus() {
 languageSelect.addEventListener("change", () => postSetting("/api/settings/language", { language: languageSelect.value }));
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 storeAudioToggle.addEventListener("change", () => postSetting("/api/settings/store-audio", { enabled: storeAudioToggle.checked }));
-learnFromEditsToggle.addEventListener("change", () => postSetting("/api/settings/learn-from-edits", { enabled: learnFromEditsToggle.checked }));
+learnFromEditsToggle.addEventListener("change", async () => {
+  await postSetting("/api/settings/learn-from-edits", { enabled: learnFromEditsToggle.checked });
+  loadLearnStatus();
+});
+
+const learnStatus = document.getElementById("learn-status");
+
+// Why the last paste did or did not learn, so "no suggestions" never looks like a silent failure.
+async function loadLearnStatus() {
+  let s;
+  try {
+    s = await api("/api/settings/learn-from-edits-status");
+  } catch (err) {
+    learnStatus.textContent = "";
+    return;
+  }
+  const counts = s.counts || {};
+  const watched = (counts.suggested || 0) + (counts.unchanged || 0);
+  const skipped = Object.entries(counts)
+    .filter(([k]) => k !== "suggested" && k !== "unchanged")
+    .sort((a, b) => b[1] - a[1]);
+  const skippedTotal = skipped.reduce((n, [, c]) => n + c, 0);
+  learnStatus.className = "status-line" + (s.last && s.last.outcome === "suggested" ? " ok" : "");
+  if (!s.last) {
+    learnStatus.textContent = learnFromEditsToggle.checked ? "No paste watched since NexusVox started." : "";
+    return;
+  }
+  const time = new Date(s.last.at * 1000).toLocaleTimeString();
+  let text = "Last paste (" + time + "): " + s.last.message + ". Since start: " + watched + " watched, " +
+    (counts.suggested || 0) + " with suggestions, " + skippedTotal + " skipped";
+  if (skippedTotal) text += " (" + skipped.map(([k, c]) => k.replace("_", " ") + " " + c).join(", ") + ")";
+  learnStatus.textContent = text + ".";
+}
 polishTerminalsToggle.addEventListener("change", () => postSetting("/api/settings/polish-terminals", { enabled: polishTerminalsToggle.checked }));
 hotkeyModeSelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/hotkey-mode", { mode: hotkeyModeSelect.value });
@@ -350,6 +382,7 @@ async function loadSettings() {
   micGuardToggle.checked = s.mic_guard_enabled;
   storeAudioToggle.checked = s.store_audio;
   learnFromEditsToggle.checked = s.learn_from_edits;
+  loadLearnStatus();
   polishTerminalsToggle.checked = s.polish_in_terminals;
   loadTranslatorStatus();
   await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary(), loadDictionarySuggestions(), loadSnippets()]);

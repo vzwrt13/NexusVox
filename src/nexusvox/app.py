@@ -233,6 +233,10 @@ class NexusVoxApp:
         logger.info("os-control command %r -> %s", text, reply or "(no reply)")
         return reply
 
+    def get_learn_status(self) -> dict:
+        """How the pastes since start ended for learning from edits, for the dashboard."""
+        return self._edit_watcher.status()
+
     def get_switch_status(self) -> dict:
         """Return the current model-switch status for the dashboard."""
         return {"status": self._switch_status, "error": self._switch_error}
@@ -489,13 +493,27 @@ class NexusVoxApp:
                 # The phone inserts it into its own focused field.
                 self._remote_text = processed.typed
             else:
-                await loop.run_in_executor(
-                    None, inject_text, processed.typed, self._config.injection_delay_ms, processed.press_enter
-                )
+                try:
+                    await loop.run_in_executor(
+                        None, inject_text, processed.typed, self._config.injection_delay_ms, processed.press_enter
+                    )
+                    pasted = True
+                except ClipboardError as exc:
+                    # The transcript is still saved below, and the paste key pastes the text.
+                    logger.warning("Could not paste the dictation (%s); the paste key pastes it", exc)
+                    _play(beep_error)
+                    pasted = False
                 if processed.typed:  # an Enter-only dictation keeps the last text
                     self._last_typed = processed.typed
-                if self._config.learn_from_edits.enabled and processed.learnable:
-                    self._edit_watcher.watch(processed.typed, self._config.learn_from_edits.window_s)
+                if self._config.learn_from_edits.enabled and processed.typed:
+                    if not pasted:
+                        self._edit_watcher.skip("clipboard")
+                    elif not processed.learnable:
+                        self._edit_watcher.skip("processed")
+                    else:
+                        self._edit_watcher.watch(
+                            processed.typed, self._config.learn_from_edits.window_s, processed.spoken
+                        )
             latency_ms = int((time.monotonic() - stop_time) * 1000)
             record = self._db.save_transcription(
                 text=processed.saved,
@@ -554,9 +572,13 @@ class NexusVoxApp:
             _play(beep_error)
             return
         logger.info("Paste last: %s", self._last_typed)
-        await asyncio.get_running_loop().run_in_executor(
-            None, inject_text, self._last_typed, self._config.injection_delay_ms
-        )
+        try:
+            await asyncio.get_running_loop().run_in_executor(
+                None, inject_text, self._last_typed, self._config.injection_delay_ms
+            )
+        except ClipboardError as exc:
+            logger.warning("Paste last: could not paste (%s)", exc)
+            _play(beep_error)
 
     async def _polish_selection(self, instruction: str, recording: _Recording | None) -> None:
         """Rewrite the selected text by *instruction* through the [llm] model and paste it over the selection.

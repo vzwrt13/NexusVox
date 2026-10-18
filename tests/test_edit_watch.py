@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 
 from nexusvox import edit_watch
 from nexusvox.dictionary import DictionaryEntry
-from nexusvox.edit_watch import EditWatcher, extract_edit, learn
+from nexusvox.edit_watch import OUTCOMES, EditWatcher, FieldSkipped, extract_edit, learn
 
 # --- extract_edit ---
 
@@ -208,3 +209,94 @@ def test_learn_skips_a_language_mix_up_the_other_way():
 )
 def test_learn_keeps_same_language_fixes(injected, after, expected):
     assert learn(injected, injected, after, []) == [expected]
+
+
+# --- whitespace, spoken words, outcomes ---
+
+
+def test_extract_edit_finds_a_rewrapped_paste():
+    before = "Notes: I use nexus\n  fox daily"
+    assert extract_edit(before, "I use nexus fox", "Notes: I use NexusVox daily") == "I use NexusVox"
+
+
+def test_learn_from_a_rewrapped_paste():
+    before = "I use nexus\nfox daily"
+    expected = [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+    assert learn(before, "I use nexus fox", "I use NexusVox daily", []) == expected
+
+
+def test_learn_nothing_when_only_the_wrapping_changed():
+    assert learn("I use nexus fox", "I use nexus fox", "I use nexus\nfox", []) == []
+
+
+@pytest.mark.parametrize(
+    ("typed", "after", "spoken"),
+    [
+        ("I have 25 apples", "I have 26 apples", "I have twenty five apples"),
+        ("ich habe 25 Äpfel", "ich habe 26 Äpfel", "ich habe fünfundzwanzig Äpfel"),
+    ],
+)
+def test_learn_drops_a_fix_of_what_voice_commands_typed(typed, after, spoken):
+    assert learn(typed, typed, after, [], spoken) == []
+
+
+@pytest.mark.parametrize(
+    ("typed", "after", "spoken"),
+    [
+        ("Hi\nI use nexus fox", "Hi\nI use NexusVox", "Hi new line I use nexus fox"),
+        ("Hallo\nich nutze nexus fox", "Hallo\nich nutze NexusVox", "Hallo neue Zeile ich nutze nexus fox"),
+    ],
+)
+def test_learn_keeps_a_fix_of_spoken_words_next_to_voice_commands(typed, after, spoken):
+    assert learn(typed, typed, after, [], spoken) == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+
+
+def _outcome(field_factory, injected: str = "I use nexus fox") -> dict:
+    watcher = EditWatcher(lambda s: None, lambda: [], field_factory=field_factory)
+    watcher.watch(injected, 0.05)
+    deadline = time.monotonic() + 2
+    while not watcher.status()["counts"] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    watcher.stop()
+    return watcher.status()
+
+
+@pytest.fixture
+def short_paste_wait(monkeypatch):
+    monkeypatch.setattr(edit_watch, "_PASTE_WAIT_S", 0.05)
+
+
+def test_watcher_states_why_it_skipped_a_terminal():
+    def terminal():
+        raise FieldSkipped("terminal")
+
+    status = _outcome(terminal)
+    assert status["counts"] == {"terminal": 1}
+    assert status["last"]["message"] == OUTCOMES["terminal"]
+
+
+@pytest.mark.usefixtures("short_paste_wait")
+@pytest.mark.parametrize(
+    ("texts", "outcome"),
+    [
+        ([None], "unreadable"),
+        (["something else"], "not_found"),
+        (["x" * (edit_watch.MAX_FIELD_CHARS + 1)], "too_long"),
+        (["I use nexus fox"], "unchanged"),
+        (["I use nexus fox", "I use NexusVox"], "suggested"),
+    ],
+)
+def test_watcher_counts_each_outcome(texts, outcome):
+    field = FakeField(texts)
+    assert _outcome(lambda: field)["counts"] == {outcome: 1}
+
+
+def test_watcher_counts_a_missing_field():
+    assert _outcome(lambda: None)["counts"] == {"no_field": 1}
+
+
+def test_skip_is_counted_without_a_watch():
+    watcher = EditWatcher(lambda s: None, lambda: [])
+    watcher.skip("processed")
+    assert watcher.status()["counts"] == {"processed": 1}
+    assert watcher.status()["last"]["outcome"] == "processed"

@@ -24,7 +24,8 @@ _EXCLUDE_FORMATS = (
     "CanIncludeInClipboardHistory",
     "CanUploadToCloudClipboard",
 )
-_OPEN_ATTEMPTS = 20
+# ~500 ms, as long as pyperclip waited: clipboard managers and Office hold it for a moment.
+_OPEN_ATTEMPTS = 50
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)

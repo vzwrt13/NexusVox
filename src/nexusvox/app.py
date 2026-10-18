@@ -19,6 +19,7 @@ from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker,
 from .dashboard import open_dashboard
 from .db import Database
 from .dictionary import apply_dictionary
+from .edit_watch import EditWatcher
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import HotkeyListener, describe_hotkey
 from .injector import inject_text
@@ -85,6 +86,9 @@ class NexusVoxApp:
             auto_detect_language=config.auto_language_detection,
         )
         self._db = Database(config.database)
+        # Reads the field of the last paste and queues the user's corrections as dictionary
+        # suggestions. `[learn_from_edits].enabled` is checked per paste, so the toggle is live.
+        self._edit_watcher = EditWatcher(self._db.add_dictionary_suggestions, self._db.get_dictionary_entries)
 
         self._hotkey = HotkeyListener(
             config=config.hotkey,
@@ -543,6 +547,10 @@ class NexusVoxApp:
                         self._config.injection_delay_ms,
                         press_enter,
                     )
+                    # A translated paste no longer matches the spoken words the dictionary works
+                    # on, and after "press enter" the text has usually left the field.
+                    if self._config.learn_from_edits.enabled and not translation.translated and not press_enter:
+                        self._edit_watcher.watch(translation.text, self._config.learn_from_edits.window_s)
                 latency_ms = int((time.monotonic() - stop_time) * 1000)
                 language = detect_language(raw_text) if self._config.auto_language_detection else self._config.language
                 record = self._db.save_transcription(
@@ -703,6 +711,7 @@ class NexusVoxApp:
         self._hotkey.stop()
         self._tray.stop()
         self._audio.stop()
+        self._edit_watcher.stop()
         if self._remote_mic is not None:
             await self._remote_mic.close()
         if self._mic_guard is not None:

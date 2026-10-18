@@ -99,6 +99,11 @@ def _create_app(api: DashboardAPI) -> Flask:
         result = api.set_hotkey(modifiers, data.get("key", ""))
         return jsonify(result), (400 if "error" in result else 200)
 
+    @app.route("/api/settings/learn-from-edits", methods=["POST"])
+    def set_learn_from_edits():
+        data = request.get_json(force=True)
+        return jsonify(api.set_learn_from_edits(data.get("enabled", False)))
+
     @app.route("/api/settings/mic-guard", methods=["POST"])
     def set_mic_guard():
         data = request.get_json(force=True)
@@ -257,6 +262,18 @@ def _create_app(api: DashboardAPI) -> Flask:
     @app.route("/api/dictionary/<int:entry_id>", methods=["DELETE"])
     def delete_dictionary_entry(entry_id):
         return jsonify(api.delete_dictionary_entry(entry_id))
+
+    @app.route("/api/dictionary/suggestions")
+    def get_dictionary_suggestions():
+        return jsonify(api.get_dictionary_suggestions())
+
+    @app.route("/api/dictionary/suggestions/<int:suggestion_id>/accept", methods=["POST"])
+    def accept_dictionary_suggestion(suggestion_id):
+        return jsonify(api.accept_dictionary_suggestion(suggestion_id))
+
+    @app.route("/api/dictionary/suggestions/<int:suggestion_id>", methods=["DELETE"])
+    def delete_dictionary_suggestion(suggestion_id):
+        return jsonify(api.delete_dictionary_suggestion(suggestion_id))
 
     @app.route("/api/latency-trend")
     def latency_trend():

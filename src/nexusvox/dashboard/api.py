@@ -149,6 +149,7 @@ class DashboardAPI:
             "hotkey_key_options": list(HOTKEY_KEY_VKS),
             "mic_guard_enabled": self._config.mic_guard.enabled,
             "store_audio": self._config.database.store_audio,
+            "learn_from_edits": self._config.learn_from_edits.enabled,
         }
 
     def get_translator_status(self) -> dict:
@@ -195,6 +196,12 @@ class DashboardAPI:
     def set_mic_guard_enabled(self, enabled: bool) -> dict:
         """Checked by the app on every hold, so this is live."""
         self._config.mic_guard.enabled = enabled
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_learn_from_edits(self, enabled: bool) -> dict:
+        """Checked by the app after every paste, so this is live."""
+        self._config.learn_from_edits.enabled = enabled
         save_config(self._config)
         return self.get_settings()
 
@@ -361,6 +368,22 @@ class DashboardAPI:
         if self._db is None:
             return {"ok": False, "error": "DB not available"}
         return {"ok": self._db.delete_dictionary_entry(entry_id)}
+
+    def get_dictionary_suggestions(self) -> dict:
+        return {"suggestions": self._db.list_dictionary_suggestions() if self._db else []}
+
+    def accept_dictionary_suggestion(self, suggestion_id: int) -> dict:
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
+        entry = self._db.accept_dictionary_suggestion(suggestion_id)
+        if entry is None:
+            return {"ok": False, "error": "Suggestion not found"}
+        return {"ok": True, "entry": entry}
+
+    def delete_dictionary_suggestion(self, suggestion_id: int) -> dict:
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
+        return {"ok": self._db.delete_dictionary_suggestion(suggestion_id)}
 
     def get_latency_trend(self, period: str = "day", start: str | None = None, end: str | None = None) -> dict:
         return analytics.get_latency_over_time(self._sf, period, start=start, end=end)

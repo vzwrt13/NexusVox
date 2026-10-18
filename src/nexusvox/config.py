@@ -373,6 +373,17 @@ class MicGuardConfig:
 
 
 @dataclass
+class LearnFromEditsConfig:
+    """After a paste, read the focused text field through UI Automation for `window_s`
+    seconds and turn the words the user corrects into dictionary suggestions, accepted
+    or dismissed in the dashboard. Off by default: it reads another app's text field
+    (never a password field)."""
+
+    enabled: bool = False
+    window_s: float = 30.0
+
+
+@dataclass
 class RemoteMicConfig:
     """Let a phone use NexusVox as its speech recogniser over a WebSocket: it streams
     audio, gets the processed text back and inserts it itself. Off by default; it needs a
@@ -432,6 +443,7 @@ class Config:
     os_control: OsControlConfig = field(default_factory=OsControlConfig)
     translator: TranslatorConfig = field(default_factory=TranslatorConfig)
     mic_guard: MicGuardConfig = field(default_factory=MicGuardConfig)
+    learn_from_edits: LearnFromEditsConfig = field(default_factory=LearnFromEditsConfig)
     remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
 
 
@@ -466,6 +478,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     command_key = str(switcher_data.get("command_key", "Y")).upper()
     translator_data = data.get("translator", {})
     mic_guard_data = data.get("mic_guard", {})
+    learn_data = data.get("learn_from_edits", {})
     remote_mic_data = data.get("remote_mic", {})
 
     # Backward compat: old configs use general.voice_commands_enabled (bool only)
@@ -544,6 +557,10 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         mic_guard=MicGuardConfig(
             enabled=mic_guard_data.get("enabled", False),
             watchdog_s=float(mic_guard_data.get("watchdog_s", 30.0)),
+        ),
+        learn_from_edits=LearnFromEditsConfig(
+            enabled=learn_data.get("enabled", False),
+            window_s=float(learn_data.get("window_s", 30.0)),
         ),
         remote_mic=RemoteMicConfig(
             enabled=remote_mic_data.get("enabled", False),
@@ -632,6 +649,10 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             "[mic_guard]",
             f"enabled = {'true' if config.mic_guard.enabled else 'false'}",
             f"watchdog_s = {config.mic_guard.watchdog_s}",
+            "",
+            "[learn_from_edits]",
+            f"enabled = {'true' if config.learn_from_edits.enabled else 'false'}",
+            f"window_s = {config.learn_from_edits.window_s}",
             "",
             "[remote_mic]",
             f"enabled = {'true' if config.remote_mic.enabled else 'false'}",

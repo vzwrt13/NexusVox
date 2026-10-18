@@ -13,6 +13,7 @@ from nexusvox.config import (
     DatabaseConfig,
     HotkeyConfig,
     InferenceConfig,
+    LearnFromEditsConfig,
     OSCommandsConfig,
     VoiceCommandsConfig,
     load_config,
@@ -475,3 +476,19 @@ def test_voice_commands_structural_defaults_when_missing(tmp_path):
 
     assert loaded.voice_commands.structural == ["new paragraph", "new line", "tab", "all caps"]
     assert loaded.voice_commands.bypass_structural is False
+
+
+def test_learn_from_edits_roundtrip(tmp_path):
+    path = tmp_path / "config.toml"
+    save_config(Config(learn_from_edits=LearnFromEditsConfig(enabled=True, window_s=12.5)), path)
+
+    loaded = load_config(path).learn_from_edits
+    assert (loaded.enabled, loaded.window_s) == (True, 12.5)
+
+
+def test_learn_from_edits_off_when_missing(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[general]\n", encoding="utf-8")
+
+    loaded = load_config(path).learn_from_edits
+    assert (loaded.enabled, loaded.window_s) == (False, 30.0)

@@ -75,3 +75,14 @@ class DictionaryEntryRow(Base):
     wrong: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
     right: Mapped[str] = mapped_column(String(500), nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class DictionarySuggestionRow(Base):
+    """A pending dictionary entry learned from a correction after a paste, awaiting the user's OK."""
+
+    __tablename__ = "dictionary_suggestions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    wrong: Mapped[str] = mapped_column(String(500), nullable=False)
+    right: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)

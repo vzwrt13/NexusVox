@@ -209,6 +209,9 @@ class HotkeyConfig:
     # Pressed during a recording with every modifier down: the recording is dropped and
     # the last pasted text is pasted again (Ctrl+Shift+Alt+V). Empty turns it off.
     paste_key: str = "V"
+    # Pressed during a recording with every modifier down: the selected text is rewritten by
+    # the spoken instruction through the [llm] model (Ctrl+Shift+Alt+P). Empty: off.
+    polish_key: str = ""
 
 
 HOTKEY_MODES = ("hold", "toggle")
@@ -375,6 +378,23 @@ class MicGuardConfig:
     watchdog_s: float = 30.0
 
 
+LLM_PROTOCOLS = ("ollama", "openai")
+
+
+@dataclass
+class LlmConfig:
+    """The language model server polish talks to. Not part of NexusVox: Ollama (default)
+    or any OpenAI-compatible server. `keep_alive` (Ollama only) is how long the model
+    stays loaded after a request; shorter frees the VRAM sooner, longer avoids reloads."""
+
+    url: str = "http://127.0.0.1:11434"
+    protocol: str = "ollama"
+    model: str = "gemma4:e4b"
+    api_key: str = ""
+    timeout_s: float = 60.0
+    keep_alive: str = "10m"
+
+
 @dataclass
 class LearnFromEditsConfig:
     """After a paste, read the focused text field through UI Automation for `window_s`
@@ -447,6 +467,7 @@ class Config:
     translator: TranslatorConfig = field(default_factory=TranslatorConfig)
     mic_guard: MicGuardConfig = field(default_factory=MicGuardConfig)
     learn_from_edits: LearnFromEditsConfig = field(default_factory=LearnFromEditsConfig)
+    llm: LlmConfig = field(default_factory=LlmConfig)
     remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
 
 
@@ -482,6 +503,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     translator_data = data.get("translator", {})
     mic_guard_data = data.get("mic_guard", {})
     learn_data = data.get("learn_from_edits", {})
+    llm_data = data.get("llm", {})
     remote_mic_data = data.get("remote_mic", {})
 
     # Backward compat: old configs use general.voice_commands_enabled (bool only)
@@ -511,6 +533,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             key=normalize_hotkey_key(hotkey_key) or "",
             mode=hotkey_mode if hotkey_mode in HOTKEY_MODES else "hold",
             paste_key=normalize_hotkey_key(str(hotkey_data.get("paste_key", "V"))) or "",
+            polish_key=normalize_hotkey_key(str(hotkey_data.get("polish_key", ""))) or "",
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
@@ -562,6 +585,14 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             enabled=mic_guard_data.get("enabled", False),
             watchdog_s=float(mic_guard_data.get("watchdog_s", 30.0)),
         ),
+        llm=LlmConfig(
+            url=str(llm_data.get("url", LlmConfig.url)),
+            protocol=llm_data.get("protocol") if llm_data.get("protocol") in LLM_PROTOCOLS else "ollama",
+            model=str(llm_data.get("model", LlmConfig.model)),
+            api_key=str(llm_data.get("api_key", "")),
+            timeout_s=float(llm_data.get("timeout_s", LlmConfig.timeout_s)),
+            keep_alive=str(llm_data.get("keep_alive", LlmConfig.keep_alive)),
+        ),
         learn_from_edits=LearnFromEditsConfig(
             enabled=learn_data.get("enabled", False),
             window_s=float(learn_data.get("window_s", 30.0)),
@@ -594,6 +625,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f'key = "{config.hotkey.key}"',
             f'mode = "{config.hotkey.mode}"',
             f'paste_key = "{config.hotkey.paste_key}"',
+            f'polish_key = "{config.hotkey.polish_key}"',
             "",
             "[audio]",
             f"sample_rate = {config.audio.sample_rate}",
@@ -654,6 +686,15 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             "[mic_guard]",
             f"enabled = {'true' if config.mic_guard.enabled else 'false'}",
             f"watchdog_s = {config.mic_guard.watchdog_s}",
+            "",
+            "[llm]",
+            f"url = {json.dumps(config.llm.url)}",
+            f'protocol = "{config.llm.protocol}"',
+            f"model = {json.dumps(config.llm.model)}",
+            # A free-form secret: escape it, a `"` or `\` would break the file.
+            f"api_key = {json.dumps(config.llm.api_key)}",
+            f"timeout_s = {config.llm.timeout_s}",
+            f"keep_alive = {json.dumps(config.llm.keep_alive)}",
             "",
             "[learn_from_edits]",
             f"enabled = {'true' if config.learn_from_edits.enabled else 'false'}",

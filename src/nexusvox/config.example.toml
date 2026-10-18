@@ -24,6 +24,12 @@ mode = "hold"
 # NexusVox pasted last is pasted once more. Same key names as `key`; empty turns it off.
 # Also editable in the dashboard Settings tab.
 paste_key = "V"
+# Polish the selected text: select text, start a recording with the hotkey, tap this key
+# while every modifier is down (e.g. "P" -> Ctrl+Shift+Alt+P) and say what to do ("make it
+# shorter", "mach es formeller") - or nothing for a general polish. The selection is
+# rewritten by the [llm] model and pasted over itself (Ctrl+Z in the app undoes it).
+# Empty (default) turns it off. Also editable in the dashboard Settings tab.
+polish_key = ""
 
 [audio]
 # Sample rate in Hz (must match model expectation)
@@ -168,6 +174,24 @@ timeout_s = 8.0
 # Also switchable in the dashboard Settings tab.
 enabled = false
 watchdog_s = 30.0
+
+[llm]
+# The language model server polish uses. NexusVox does not ship a model: run Ollama
+# (https://ollama.com, then `ollama pull gemma4:e4b`) or any OpenAI-compatible server.
+# protocol: "ollama" (url without /v1; turns a reasoning model's thinking off) or
+# "openai" (url up to /v1, e.g. http://127.0.0.1:1234/v1 for LM Studio).
+# If the server is down or fails, the selection stays as it was (error beep).
+url = "http://127.0.0.1:11434"
+protocol = "ollama"
+# gemma4:e4b: ~4.6 GB VRAM, ~0.5 s per polish on an RTX 5070 Ti, keeps tone and language.
+# Mind the VRAM the speech model needs; bigger models (e.g. gemma4:12b, ~8 GB) polish better.
+model = "gemma4:e4b"
+# Sent as a Bearer token when set (cloud or protected servers). Leave empty for local ones.
+api_key = ""
+timeout_s = 60.0
+# Ollama only: how long the model stays loaded after a request. Shorter frees the VRAM
+# sooner (the speech model needs its share); the first request after unloading takes 10-50 s.
+keep_alive = "10m"
 
 [learn_from_edits]
 # After each paste, keep reading the text field you dictated into (UI Automation) for

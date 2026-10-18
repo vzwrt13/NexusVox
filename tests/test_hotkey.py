@@ -369,3 +369,30 @@ def test_paste_key_off_or_used_by_the_binding_types_normally():
     own._handle(LALT, True)
     assert own._handle(VK_V, True) is True  # completes the combo, not a marker
     assert own_events == ["start"] and not own.paste_last
+
+
+# -- polish key --------------------------------------------------------------------
+
+VK_P = ord("P")
+
+
+def test_polish_key_marks_polish_and_paste_key_still_works():
+    hk, events, config = _listener("hold")
+    config.polish_key = "P"
+    _press_combo(hk)
+    assert hk._handle(VK_P, True) is True
+    hk._handle(VK_P, False)
+    _release_combo(hk)
+    assert hk.polish and not hk.paste_last and events == ["start", "stop"]
+    _press_combo(hk)
+    assert hk._handle(ord("V"), True) is True
+    _release_combo(hk)
+    assert hk.paste_last and not hk.polish
+
+
+def test_polish_key_off_by_default_types_normally():
+    hk, _, _ = _listener("hold")
+    _press_combo(hk)
+    assert hk._handle(VK_P, True) is False
+    _release_combo(hk)
+    assert not hk.polish

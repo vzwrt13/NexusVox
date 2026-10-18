@@ -12,6 +12,7 @@ from .config import COMMAND_KEY_VKS, HOTKEY_KEY_VKS, HotkeyConfig, OsControlConf
 # What a marker key pressed during a recording turns that recording into.
 COMMAND = "command"
 PASTE_LAST = "paste_last"
+POLISH = "polish"
 
 # Win32 virtual-key codes of the modifiers, left and right variants included: the
 # low-level hook reports the side-specific code, GetAsyncKeyState wants the generic one.
@@ -50,7 +51,8 @@ class HotkeyListener:
     Marker keys turn a recording into something else when pressed during it with every
     binding modifier down: the os-control command key (`command_config`, when enabled)
     marks it a command recording, and `[hotkey].paste_key` marks it "paste the last text
-    again". The first marker pressed wins and stays readable (`command`, `paste_last`)
+    again", and `[hotkey].polish_key` marks it "rewrite the selection by what is said".
+    The first marker pressed wins and stays readable (`command`, `paste_last`, `polish`)
     until the next recording starts; the key itself is swallowed so it never types.
     `on_command` fires once when a recording becomes a command.
     """
@@ -97,6 +99,11 @@ class HotkeyListener:
         return self._mark == PASTE_LAST
 
     @property
+    def polish(self) -> bool:
+        """True when the current (or just finished) recording is an instruction for the selected text."""
+        return self._mark == POLISH
+
+    @property
     def active(self) -> bool:
         """True between the activate and deactivate callbacks (recording is intended)."""
         return self._active
@@ -131,9 +138,9 @@ class HotkeyListener:
     def _marker_keys(self) -> dict[int, str]:
         """Virtual-key code -> marker, from the live config. The command key wins a clash."""
         markers: dict[int, str] = {}
-        paste_vk = HOTKEY_KEY_VKS.get(self._config.paste_key) if self._config.paste_key else None
-        if paste_vk is not None:
-            markers[paste_vk] = PASTE_LAST
+        for name, marker in ((self._config.paste_key, PASTE_LAST), (self._config.polish_key, POLISH)):
+            if name in HOTKEY_KEY_VKS:
+                markers[HOTKEY_KEY_VKS[name]] = marker
         cfg = self._command_config
         if cfg is not None and cfg.enabled and self._on_command is not None and cfg.command_key in COMMAND_KEY_VKS:
             markers[COMMAND_KEY_VKS[cfg.command_key]] = COMMAND

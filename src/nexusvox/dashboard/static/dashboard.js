@@ -115,6 +115,17 @@ const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
 const hotkeyMods = Array.from(document.querySelectorAll("#hotkey-mods input"));
 const hotkeyKeySelect = document.getElementById("hotkey-key-select");
 const pasteKeySelect = document.getElementById("paste-key-select");
+const polishKeySelect = document.getElementById("polish-key-select");
+const llmModelInput = document.getElementById("llm-model-input");
+const llmStatus = document.getElementById("llm-status");
+
+async function loadLlmStatus() {
+  const s = await api("/api/settings/llm-status");
+  llmStatus.className = "status-line " + (s.reachable ? "ok" : "down");
+  llmStatus.textContent = s.reachable
+    ? `● Model server reachable at ${s.url} (model ${s.model})`
+    : `○ No model server at ${s.url} — polish plays the error beep`;
+}
 const hotkeyRecordBtn = document.getElementById("hotkey-record-btn");
 const hotkeyStatus = document.getElementById("hotkey-status");
 const hotkeyResetBtn = document.getElementById("hotkey-reset-btn");
@@ -281,9 +292,24 @@ hotkeyModeSelect.addEventListener("change", async () => {
 });
 for (const cb of hotkeyMods) cb.addEventListener("change", saveHotkey);
 hotkeyKeySelect.addEventListener("change", saveHotkey);
+polishKeySelect.addEventListener("change", async () => {
+  const resp = await postSetting("/api/settings/polish-key", { key: polishKeySelect.value });
+  const s = await resp.json();
+  if (s.error) alert(s.error);
+  polishKeySelect.value = s.polish_key;
+});
+llmModelInput.addEventListener("change", async () => {
+  const resp = await postSetting("/api/settings/llm-model", { model: llmModelInput.value });
+  const s = await resp.json();
+  if (s.error) alert(s.error);
+  llmModelInput.value = s.llm_model;
+  loadLlmStatus();
+});
 pasteKeySelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/paste-key", { key: pasteKeySelect.value });
-  pasteKeySelect.value = (await resp.json()).paste_key;
+  const s = await resp.json();
+  if (s.error) alert(s.error);
+  pasteKeySelect.value = s.paste_key;
 });
 hotkeyRecordBtn.addEventListener("click", startHotkeyRecording);
 hotkeyResetBtn.addEventListener("click", () => {
@@ -304,6 +330,13 @@ async function loadSettings() {
     for (const k of s.hotkey_key_options || []) pasteKeySelect.append(new Option(k.replace("_", " "), k));
   }
   pasteKeySelect.value = s.paste_key;
+  if (!polishKeySelect.options.length) {
+    polishKeySelect.append(new Option("Off", ""));
+    for (const k of s.hotkey_key_options || []) polishKeySelect.append(new Option(k.replace("_", " "), k));
+  }
+  polishKeySelect.value = s.polish_key;
+  llmModelInput.value = s.llm_model;
+  loadLlmStatus();
   micGuardToggle.checked = s.mic_guard_enabled;
   storeAudioToggle.checked = s.store_audio;
   learnFromEditsToggle.checked = s.learn_from_edits;

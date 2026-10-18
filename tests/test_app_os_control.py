@@ -85,17 +85,10 @@ def test_paste_last_pastes_the_last_typed_text(monkeypatch):
 def test_paste_last_with_nothing_yet_beeps(monkeypatch):
     import nexusvox.app as app_module
 
-    class RunNow:  # threading.Thread stand-in that runs the target at once
-        def __init__(self, target, daemon=None):
-            self._target = target
-
-        def start(self):
-            self._target()
-
     beeps = []
     monkeypatch.setattr(app_module, "inject_text", lambda *_a: pytest.fail("nothing to paste"))
     monkeypatch.setattr(app_module, "beep_error", lambda: beeps.append("error"))
-    monkeypatch.setattr(app_module.threading, "Thread", RunNow)
+    monkeypatch.setattr(app_module, "_play", lambda beep: beep())
     asyncio.run(_paste_app("")._paste_last_text())
     assert beeps == ["error"]
 
@@ -110,3 +103,51 @@ def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
     app._config = MagicMock(injection_delay_ms=0)
     _run_skipped_cycle(app)
     assert pasted == ["Bin gleich da"]
+
+
+# -- polish ----------------------------------------------------------------------
+
+
+def _polish_app(monkeypatch, selection: str, rewritten: str | Exception):
+    import nexusvox.app as app_module
+
+    app = NexusVoxApp.__new__(NexusVoxApp)
+    app._config = MagicMock(injection_delay_ms=0)
+    app._last_typed = ""
+    app._save_command = MagicMock()
+    calls = {"pasted": [], "beeps": []}
+
+    def fake_polish(sel, instruction, cfg):
+        if isinstance(rewritten, Exception):
+            raise rewritten
+        return rewritten
+
+    monkeypatch.setattr(app_module, "copy_selection", lambda delay: selection)
+    monkeypatch.setattr(app_module, "polish", fake_polish)
+    monkeypatch.setattr(app_module, "inject_text", lambda text, delay: calls["pasted"].append(text))
+    monkeypatch.setattr(app_module, "beep_error", lambda: calls["beeps"].append("error"))
+    monkeypatch.setattr(app_module, "_play", lambda beep: beep())
+    return app, calls
+
+
+def test_polish_pastes_the_rewritten_selection(monkeypatch):
+    app, calls = _polish_app(monkeypatch, "hi leute", "Sehr geehrte Damen und Herren")
+    asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
+    assert calls == {"pasted": ["Sehr geehrte Damen und Herren"], "beeps": []}
+    assert app._last_typed == "Sehr geehrte Damen und Herren"
+    assert app._save_command.call_args.args[1] == "[polish] mach es formeller"
+
+
+def test_polish_without_a_selection_beeps(monkeypatch):
+    app, calls = _polish_app(monkeypatch, "", "unused")
+    asyncio.run(app._polish_selection("", MagicMock()))
+    assert calls == {"pasted": [], "beeps": ["error"]}
+
+
+def test_polish_with_the_model_down_keeps_the_selection(monkeypatch):
+    from nexusvox.llm import LlmError
+
+    app, calls = _polish_app(monkeypatch, "hi leute", LlmError("refused"))
+    asyncio.run(app._polish_selection("", MagicMock()))
+    assert calls == {"pasted": [], "beeps": ["error"]}
+    app._save_command.assert_not_called()

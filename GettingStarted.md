@@ -259,6 +259,8 @@ A system tray icon also appears, where you can toggle the language or quit the a
 
 To paste the last text again, hold `Ctrl + Shift + Alt`, tap `V`, let go: the recording is dropped and the text NexusVox pasted last is pasted once more (key in Settings → Voice Input, `[hotkey].paste_key`; empty turns it off).
 
+To rewrite selected text by voice, pick a *Polish Selected Text Key* in Settings → Voice Input (e.g. `P`), install [Ollama](https://ollama.com) and run `ollama pull gemma4:e4b`. Then select text in any app, hold `Ctrl + Shift + Alt`, tap `P`, say what to do ("make it shorter", "mach es formeller", "translate to English") or nothing, and let go: the selection is replaced by the rewritten text (Ctrl+Z undoes it). The model shares the GPU with the speech model - the dashboard shows whether the model server answers. Other servers (LM Studio, llama.cpp, vLLM, a cloud API) work through `[llm]` with `protocol = "openai"`.
+
 Prefer not to keep the keys down? Switch **Hotkey Mode** to *Toggle* in the dashboard's Settings tab (or `mode = "toggle"` in `config.toml`): press `Ctrl + Shift + Alt` once to start, press it again to stop. The change takes effect immediately.
 
 > NexusVox uses the clipboard to inject text (Ctrl+V). Your previous clipboard content is saved and restored after each injection.

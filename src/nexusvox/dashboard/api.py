@@ -28,6 +28,7 @@ from ..config import (
 from ..db import Database
 from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
+from ..llm import is_reachable as llm_reachable
 from ..os_commands import NEXUS_ACTIONS
 from ..snippets import Snippet, SnippetOption
 from ..translator import is_reachable
@@ -148,6 +149,8 @@ class DashboardAPI:
             "hotkey_modifiers": list(self._config.hotkey.modifiers),
             "hotkey_key": self._config.hotkey.key,
             "paste_key": self._config.hotkey.paste_key,
+            "polish_key": self._config.hotkey.polish_key,
+            "llm_model": self._config.llm.model,
             "hotkey_default": {"modifiers": list(HotkeyConfig().modifiers), "key": HotkeyConfig().key},
             "hotkey_modifier_options": list(HOTKEY_MODIFIERS),
             "hotkey_key_options": list(HOTKEY_KEY_VKS),
@@ -197,20 +200,50 @@ class DashboardAPI:
         save_config(self._config)
         return self.get_settings()
 
-    def set_paste_key(self, key: str) -> dict:
-        """The listener reads the shared config on every key event, so this is live."""
+    def _set_marker_key(self, field: str, key: str) -> dict:
+        """Set `[hotkey].paste_key` or `.polish_key`. Live: the listener reads the config on every key event."""
         name = normalize_hotkey_key(str(key or ""))
         if name is None:
             return {"error": f"Unknown key: {key}", **self.get_settings()}
-        # The listener would silently ignore these two: the binding's own key is never a
-        # marker, and the os-control command key wins a clash.
-        if name and name == self._config.hotkey.key:
+        # The listener would silently ignore or misread these: the binding's own key is never
+        # a marker, the os-control command key wins a clash, and two markers cannot share a key.
+        hotkey = self._config.hotkey
+        other = hotkey.polish_key if field == "paste_key" else hotkey.paste_key
+        if name and name == hotkey.key:
             return {"error": f"{name} already completes the hotkey", **self.get_settings()}
         if name and self._config.os_control.enabled and name == self._config.os_control.command_key:
             return {"error": f"{name} is the os-control command key", **self.get_settings()}
-        self._config.hotkey.paste_key = name
+        if name and name == other:
+            return {
+                "error": f"{name} is already the {'polish' if field == 'paste_key' else 'paste'} key",
+                **self.get_settings(),
+            }
+        setattr(hotkey, field, name)
         save_config(self._config)
         return self.get_settings()
+
+    def set_paste_key(self, key: str) -> dict:
+        return self._set_marker_key("paste_key", key)
+
+    def set_polish_key(self, key: str) -> dict:
+        return self._set_marker_key("polish_key", key)
+
+    def set_llm_model(self, model: str) -> dict:
+        """The model name polish asks the [llm] server for (e.g. "qwen3.5:9b"). Read per request, so live."""
+        model = str(model or "").strip()
+        if not model:
+            return {"error": "A model name is required", **self.get_settings()}
+        self._config.llm.model = model
+        save_config(self._config)
+        return self.get_settings()
+
+    def get_llm_status(self) -> dict:
+        """Whether the [llm] server answers - probed live, like the translator."""
+        return {
+            "url": self._config.llm.url,
+            "model": self._config.llm.model,
+            "reachable": llm_reachable(self._config.llm),
+        }
 
     def set_mic_guard_enabled(self, enabled: bool) -> dict:
         """Checked by the app on every hold, so this is live."""

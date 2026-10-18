@@ -9,6 +9,8 @@ from ctypes import wintypes
 
 import pyperclip
 
+from .clipboard import ClipboardError, set_text
+
 logger = logging.getLogger(__name__)
 
 user32 = ctypes.windll.user32
@@ -236,7 +238,7 @@ def copy_selection(injection_delay_ms: int = 500, timeout_s: float = 1.0) -> str
     except pyperclip.PyperclipException:
         original = None
     try:
-        pyperclip.copy("")
+        set_text("")
         _prepare_keyboard(injection_delay_ms)
         if not _send_ctrl_chord(VK_C, SCAN_C, "C"):
             return ""
@@ -253,15 +255,16 @@ def copy_selection(injection_delay_ms: int = 500, timeout_s: float = 1.0) -> str
     finally:
         if original is not None:
             try:
-                pyperclip.copy(original)
-            except pyperclip.PyperclipException:
+                set_text(original)
+            except ClipboardError:
                 pass
 
 
 def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = False) -> None:
     """Inject text at the active cursor position using clipboard paste.
 
-    Saves the current clipboard, sets new content, pastes, then restores.
+    Saves the current clipboard, sets new content, pastes, then restores. Both writes
+    stay out of the Windows clipboard history (`clipboard.set_text`).
     ``injection_delay_ms`` is the pause between releasing modifier keys and
     sending the Ctrl+V keystroke, giving the OS time to clear stale state.
     With ``press_enter`` an Enter keypress follows the paste; an empty ``text``
@@ -281,7 +284,7 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
 
     try:
         # Set transcription text to clipboard
-        pyperclip.copy(text)
+        set_text(text)
         # Small delay to ensure clipboard is set
         time.sleep(0.05)
         _prepare_keyboard(injection_delay_ms)
@@ -301,6 +304,6 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
         if original is not None:
             time.sleep(0.05)
             try:
-                pyperclip.copy(original)
-            except pyperclip.PyperclipException:
+                set_text(original)
+            except ClipboardError:
                 pass

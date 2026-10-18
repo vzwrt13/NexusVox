@@ -88,6 +88,7 @@ class RemoteMicServer:
         self._owner: ServerConnection | None = None
         self._streaming = False
         self._closed = False
+        self._pending: set[asyncio.Future[None]] = set()
 
     async def run(self) -> None:
         """Bind and serve until `close()`. A bind failure (say, Tailscale not up yet) is
@@ -130,7 +131,11 @@ class RemoteMicServer:
         owner, self._owner = self._owner, None
         self._streaming = False
         if owner is not None:
-            asyncio.ensure_future(self._send(owner, {"type": "done", "text": text}))
+            # Keep a reference: the loop holds tasks weakly, and an unreferenced send
+            # can be garbage-collected before `done` reaches the phone.
+            task = asyncio.ensure_future(self._send(owner, {"type": "done", "text": text}))
+            self._pending.add(task)
+            task.add_done_callback(self._pending.discard)
 
     def _check_request(self, connection: ServerConnection, request: Request) -> Response | None:
         if request.path.split("?", 1)[0] != PATH:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import threading
 import tomllib
@@ -632,7 +633,8 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"enabled = {'true' if config.remote_mic.enabled else 'false'}",
             f'host = "{config.remote_mic.host}"',
             f"port = {config.remote_mic.port}",
-            f'token = "{config.remote_mic.token}"',
+            # A free-form secret: escape it, a `"` or `\` would break the file.
+            f"token = {json.dumps(config.remote_mic.token)}",
             "",
         ]
         path.write_text("\n".join(lines), encoding="utf-8")

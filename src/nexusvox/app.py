@@ -135,6 +135,10 @@ class NexusVoxApp:
     def _on_hotkey_activate(self) -> None:
         """Called from hotkey thread when push-to-talk starts."""
         if self._remote_recording:
+            # A phone is recording. Drop this press's intent, so its release (or, in
+            # toggle mode, the next press) does not queue a stale stop that would skip
+            # the next dictation, and the phone is not refused as busy meanwhile.
+            self._hotkey.cancel()
             return
         if self._mic_guard is not None and self._config.mic_guard.enabled:
             self._mic_guard.hold_async()
@@ -331,8 +335,10 @@ class NexusVoxApp:
             await self._transcriber.connect()
 
             # Clear any stop event that arrived while we were connecting.
-            # If the user already released the keys, skip this cycle.
-            if self._record_stop_event.is_set():
+            # If the user already released the keys, skip this cycle. A phone recording
+            # is not skipped: its audio was buffered while we connected, and the stop
+            # event stays set so the wait below returns at once.
+            if not remote and self._record_stop_event.is_set():
                 self._record_stop_event.clear()
                 logger.info("Hotkey released before recording could start, skipping")
                 await self._transcriber.disconnect()
@@ -561,7 +567,9 @@ class NexusVoxApp:
                 # mode would treat the next press as "stop" (and keep the mic guard
                 # muted); hold mode would queue a stale stop that skips the next cycle.
                 self._hotkey.cancel()
-            await self._hide_os_control()
+            if not remote:
+                # `_hotkey.command` may still describe the last hotkey recording.
+                await self._hide_os_control()
             await self._transcriber.disconnect()
         finally:
             # Key-up already queued a release; this covers a cycle that died mid-hold.
@@ -662,6 +670,9 @@ class NexusVoxApp:
                 self._cycle_running = False
                 if self._remote_recording:
                     self._remote_recording = False
+                    # A cycle that failed after the phone's stop leaves it set; the next
+                    # hotkey cycle would take it as a release and skip itself.
+                    self._record_stop_event.clear()
                     if self._remote_mic is not None:
                         self._remote_mic.finished(self._remote_text)
 

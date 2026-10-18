@@ -51,7 +51,7 @@ Phone to server:
 | --- | --- |
 | `{"type": "start"}` | Begin a recording |
 | binary frames | Audio: 16 kHz, mono, PCM16 little-endian, any frame size (100 ms is a good choice) |
-| `{"type": "stop"}` | End the recording and type its text |
+| `{"type": "stop"}` | End the recording and get its text back in `done` |
 | `{"type": "cancel"}` | End the recording and drop it, nothing is transcribed |
 
 Audio is only accepted between an accepted `start` and its `stop` or `cancel`; frames

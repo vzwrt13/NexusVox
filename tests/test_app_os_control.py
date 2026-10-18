@@ -306,3 +306,13 @@ def test_paste_last_beeps_when_the_clipboard_is_busy(monkeypatch):
     monkeypatch.setattr(app_module, "inject_text", busy)
     asyncio.run(app._paste_last_text())
     assert calls["beeps"] == ["error"]
+
+
+def test_latency_ends_when_the_text_is_in_not_after_the_clipboard_restore(monkeypatch):
+    import time
+
+    # inject_text reports when the text was in place; anything after it (the clipboard
+    # restore) is not latency. A time far in the future shows the reported one is used.
+    app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: time.monotonic() + 60)
+    _run_cycle(app)
+    assert app._db.save_transcription.call_args.kwargs["latency_ms"] >= 60_000

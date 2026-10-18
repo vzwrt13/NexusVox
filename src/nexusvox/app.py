@@ -490,12 +490,13 @@ class NexusVoxApp:
                     remote=remote,
                 ),
             )
+            done_at = None  # when the text was in place; the clipboard restore after it is not latency
             if remote:
                 # The phone inserts it into its own focused field.
                 self._remote_text = processed.typed
             else:
                 try:
-                    await loop.run_in_executor(
+                    done_at = await loop.run_in_executor(
                         None, inject_text, processed.typed, self._config.injection_delay_ms, processed.press_enter
                     )
                     pasted = True
@@ -515,7 +516,7 @@ class NexusVoxApp:
                         self._edit_watcher.watch(
                             processed.typed, self._config.learn_from_edits.window_s, processed.spoken
                         )
-            latency_ms = int((time.monotonic() - stop_time) * 1000)
+            latency_ms = int(((done_at or time.monotonic()) - stop_time) * 1000)
             record = self._db.save_transcription(
                 text=processed.saved,
                 language=self._language_of(raw_text),

@@ -291,6 +291,13 @@ learnFromEditsToggle.addEventListener("change", async () => {
 });
 
 const learnStatus = document.getElementById("learn-status");
+let lastSuggestedCount = null;
+
+// Dictations happen while the dashboard stays open: refresh the status line every few
+// seconds, but only while the Settings tab is shown and the page is visible.
+setInterval(() => {
+  if (!document.hidden && document.getElementById("tab-settings").classList.contains("active")) loadLearnStatus();
+}, 3000);
 
 // Why the last paste did or did not learn, so "no suggestions" never looks like a silent failure.
 async function loadLearnStatus() {
@@ -302,6 +309,9 @@ async function loadLearnStatus() {
     return;
   }
   const counts = s.counts || {};
+  // A watch that just ended with suggestions: show them without a reload.
+  if (lastSuggestedCount !== null && (counts.suggested || 0) > lastSuggestedCount) loadDictionarySuggestions();
+  lastSuggestedCount = counts.suggested || 0;
   const watched = (counts.suggested || 0) + (counts.unchanged || 0);
   const skipped = Object.entries(counts)
     .filter(([k]) => k !== "suggested" && k !== "unchanged")

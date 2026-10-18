@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from .dictionary import DictionaryEntry, suggest_entries
+from .lang_detect import language_guess
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,8 @@ MIN_SIMILARITY = 0.5
 MIN_WORDS_KEPT = 0.5
 # More changed places than this is rewording, not fixing misheard terms.
 MAX_CHANGES = 2
+# lingua confidence above which one side of a correction counts as clearly in its language.
+_SURE_LANGUAGE = 0.9
 # Longer replacements are rephrasing, not misheard terms.
 MAX_SUGGESTION_WORDS = 4
 # Settle time before the first read, so the paste has landed in the field.
@@ -136,8 +139,25 @@ def learn(before: str, injected: str, after: str, existing: list[DictionaryEntry
     return [
         e
         for e in suggest_entries(_normalize(injected), edited, existing)
-        if len(e.wrong.split()) <= MAX_SUGGESTION_WORDS and len(e.right.split()) <= MAX_SUGGESTION_WORDS
+        if len(e.wrong.split()) <= MAX_SUGGESTION_WORDS
+        and len(e.right.split()) <= MAX_SUGGESTION_WORDS
+        and not _language_switch(e)
     ]
+
+
+def _language_switch(entry: DictionaryEntry) -> bool:
+    """True when the model heard the wrong language ("jetzt aber" -> "it's our"), not a wrong word.
+
+    Such an entry would rewrite every genuine English "it's our" into German. Only
+    phrases of two words or more are judged; single words and names are too short
+    for a language guess. Short phrases rarely get a confident guess on both sides
+    ("it's our" is only 0.62 English), so the two sides leaning to different
+    languages with one of them sure is enough.
+    """
+    if len(entry.wrong.split()) < 2 or len(entry.right.split()) < 2:
+        return False
+    (wrong, wrong_conf), (right, right_conf) = language_guess(entry.wrong), language_guess(entry.right)
+    return "unknown" not in (wrong, right) and wrong != right and max(wrong_conf, right_conf) >= _SURE_LANGUAGE
 
 
 class TextField(Protocol):

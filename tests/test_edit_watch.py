@@ -186,3 +186,25 @@ def test_watcher_survives_a_failing_field():
     assert done.wait(2)
     watcher.stop()
     assert got == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+
+
+def test_learn_skips_a_language_mix_up():
+    # Spoken German "jetzt aber", transcribed as English: a dictionary entry would rewrite real English.
+    assert learn("Okay, it's our test.", "Okay, it's our test.", "Okay, jetzt aber Test.", []) == []
+
+
+def test_learn_skips_a_language_mix_up_the_other_way():
+    assert learn("Ich mache das mein Weg", "Ich mache das mein Weg", "Ich mache das my way", []) == []
+
+
+@pytest.mark.parametrize(
+    ("injected", "after", "expected"),
+    [
+        ("Wir treffen Herrn Maya", "Wir treffen Herrn Meier", DictionaryEntry(wrong="Maya", right="Meier")),
+        ("I use nexus fox daily", "I use NexusVox daily", DictionaryEntry(wrong="nexus fox", right="NexusVox")),
+        ("Morgen ist das Meeting", "Morgen ist das Treffen", DictionaryEntry(wrong="Meeting", right="Treffen")),
+        ("Open cloud code now", "Open Claude Code now", DictionaryEntry(wrong="cloud code", right="Claude Code")),
+    ],
+)
+def test_learn_keeps_same_language_fixes(injected, after, expected):
+    assert learn(injected, injected, after, []) == [expected]

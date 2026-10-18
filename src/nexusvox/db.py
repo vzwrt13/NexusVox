@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy import create_engine, func, text
@@ -9,7 +10,16 @@ from sqlalchemy.orm import sessionmaker
 
 from .config import DatabaseConfig
 from .dictionary import DictionaryEntry
-from .models import Base, DictionaryEntryRow, DictionarySuggestionRow, FileTranscription, Transcription, utc_now
+from .models import (
+    Base,
+    DictionaryEntryRow,
+    DictionarySuggestionRow,
+    FileTranscription,
+    SnippetRow,
+    Transcription,
+    utc_now,
+)
+from .snippets import Snippet, SnippetOption
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +45,7 @@ class Database:
             "ALTER TABLE transcriptions ADD COLUMN translate_error VARCHAR(200)",
             "ALTER TABLE transcriptions ADD COLUMN transcribe_ms INTEGER",
             "ALTER TABLE transcriptions ADD COLUMN latency_ms INTEGER",
+            "ALTER TABLE snippets ADD COLUMN options TEXT",
         ]
         with self._engine.connect() as conn:
             for sql in migrations:
@@ -270,6 +281,89 @@ class Database:
     def delete_dictionary_suggestion(self, suggestion_id: int) -> bool:
         with self._session_factory() as session:
             row = session.get(DictionarySuggestionRow, suggestion_id)
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
+
+    # ---- Snippets -----------------------------------------------------------
+
+    @staticmethod
+    def _snippet(row: SnippetRow) -> Snippet:
+        options = tuple(SnippetOption(name, text) for name, text in json.loads(row.options)) if row.options else ()
+        return Snippet(trigger=row.trigger, expansion=row.expansion, options=options)
+
+    @classmethod
+    def _snippet_dict(cls, row: SnippetRow) -> dict:
+        snippet = cls._snippet(row)
+        return {
+            "id": row.id,
+            "trigger": snippet.trigger,
+            "expansion": snippet.expansion,
+            "options": [o._asdict() for o in snippet.options],
+        }
+
+    @staticmethod
+    def _clean_snippet(snippet: Snippet) -> tuple[str, str | None] | None:
+        """(normalised trigger, options JSON), or None when the snippet has no trigger or nothing to insert."""
+        trigger = " ".join(snippet.trigger.split())
+        if not trigger or not (snippet.expansion.strip() or snippet.options):
+            return None
+        options = json.dumps([list(o) for o in snippet.options], ensure_ascii=False) if snippet.options else None
+        return trigger, options
+
+    def list_snippets(self) -> list[dict]:
+        """All snippets, sorted by trigger, as plain dicts (``options`` as ``{name, text}`` dicts)."""
+        with self._session_factory() as session:
+            rows = session.query(SnippetRow).order_by(func.lower(SnippetRow.trigger)).all()
+            return [self._snippet_dict(r) for r in rows]
+
+    def get_snippets(self) -> list[Snippet]:
+        """Snippets ready for ``mark_snippets``."""
+        with self._session_factory() as session:
+            return [self._snippet(r) for r in session.query(SnippetRow).all()]
+
+    def add_snippet(self, snippet: Snippet) -> dict | None:
+        """Insert a snippet, or replace the one with the same trigger (any case), like ``add_dictionary_entry``.
+
+        Returns the snippet, or None when it has no trigger or nothing to insert.
+        """
+        cleaned = self._clean_snippet(snippet)
+        if cleaned is None:
+            return None
+        trigger, options = cleaned
+        with self._session_factory() as session:
+            row = session.query(SnippetRow).filter(func.lower(SnippetRow.trigger) == trigger.lower()).first()
+            if row is None:
+                row = SnippetRow()
+                session.add(row)
+            row.trigger, row.expansion, row.options = trigger, snippet.expansion, options
+            session.commit()
+            return self._snippet_dict(row)
+
+    def update_snippet(self, snippet_id: int, snippet: Snippet) -> dict | None:
+        """Change the snippet with ``snippet_id``.
+
+        Returns the snippet, or None when it does not exist, has no trigger or nothing
+        to insert, or its new trigger already belongs to another snippet.
+        """
+        cleaned = self._clean_snippet(snippet)
+        if cleaned is None:
+            return None
+        trigger, options = cleaned
+        with self._session_factory() as session:
+            row = session.get(SnippetRow, snippet_id)
+            clash = session.query(SnippetRow).filter(func.lower(SnippetRow.trigger) == trigger.lower()).first()
+            if row is None or (clash is not None and clash.id != row.id):
+                return None
+            row.trigger, row.expansion, row.options = trigger, snippet.expansion, options
+            session.commit()
+            return self._snippet_dict(row)
+
+    def delete_snippet(self, snippet_id: int) -> bool:
+        with self._session_factory() as session:
+            row = session.get(SnippetRow, snippet_id)
             if row is None:
                 return False
             session.delete(row)

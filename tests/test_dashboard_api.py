@@ -712,3 +712,57 @@ def test_dictionary_suggestions_accept_and_dismiss(flask_client, db):
 
 def test_accept_missing_dictionary_suggestion(flask_client):
     assert flask_client.post("/api/dictionary/suggestions/999/accept").get_json()["ok"] is False
+
+
+def test_snippets_crud(flask_client):
+    created = flask_client.post(
+        "/api/snippets",
+        data=json.dumps({"trigger": "meine Adresse", "expansion": "Hauptstraße 1\n12345 Berlin"}),
+        content_type="application/json",
+    ).get_json()
+    assert created["ok"] is True
+    sid = created["snippet"]["id"]
+
+    updated = flask_client.post(
+        "/api/snippets",
+        data=json.dumps({"id": sid, "trigger": "meine Adresse", "expansion": "Nebenstraße 2"}),
+        content_type="application/json",
+    ).get_json()
+    assert updated["snippet"]["expansion"] == "Nebenstraße 2"
+    assert [s["trigger"] for s in flask_client.get("/api/snippets").get_json()["snippets"]] == ["meine Adresse"]
+
+    assert flask_client.delete(f"/api/snippets/{sid}").get_json()["ok"] is True
+    assert flask_client.get("/api/snippets").get_json()["snippets"] == []
+
+
+def test_snippet_without_text_is_rejected(flask_client):
+    resp = flask_client.post(
+        "/api/snippets", data=json.dumps({"trigger": "my address", "expansion": ""}), content_type="application/json"
+    ).get_json()
+    assert resp["ok"] is False
+
+
+def test_snippet_options_list(flask_client):
+    resp = flask_client.post(
+        "/api/snippets",
+        data=json.dumps(
+            {
+                "trigger": "open remote repo",
+                "expansion": "",
+                "options": [{"name": "NexusVox", "text": "https://a"}, {"name": " ", "text": "dropped"}, "junk"],
+            }
+        ),
+        content_type="application/json",
+    ).get_json()
+    assert resp["snippet"]["options"] == [{"name": "NexusVox", "text": "https://a"}]
+
+
+def test_github_repos_reports_a_missing_cli(flask_client, monkeypatch):
+    import subprocess
+
+    def missing(*_a, **_k):
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    resp = flask_client.get("/api/snippets/github-repos").get_json()
+    assert resp["ok"] is False and "GitHub CLI" in resp["error"]

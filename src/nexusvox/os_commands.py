@@ -31,6 +31,11 @@ _NEXUS_FLAG_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Spoken verbs for "nexus open <snippet>", English and German.
+_OPEN_VERB = r"(?:open|öffne|öffnen|öffnet)\b"
+_OPEN_VERB_PREFIX = re.compile(r"^\s*" + _OPEN_VERB + r"[\s,:]*", re.IGNORECASE)
+_NEXUS_OPEN_PATTERN = re.compile(r"^\s*nexus\b[\s,:]*" + _OPEN_VERB + r"[\s,:]*(.+?)\s*$", re.IGNORECASE | re.DOTALL)
+
 
 @dataclass
 class NexusCommand:
@@ -52,6 +57,20 @@ def parse_nexus_command(text: str) -> NexusCommand | None:
     action = " ".join(m.group(1).lower().split())
     app_name = m.group(2).lower().strip()
     return NexusCommand(action=action, app_name=app_name)
+
+
+def parse_nexus_open(text: str) -> str | None:
+    """What follows "nexus open" / "nexus öffne" (comma or colon allowed), or None.
+
+    "Nexus, öffne remote repo NexusVox." -> "remote repo NexusVox."
+    """
+    m = _NEXUS_OPEN_PATTERN.match(text)
+    return m.group(1) if m else None
+
+
+def strip_open_verb(phrase: str) -> str:
+    """*phrase* without a leading open verb: a snippet trigger "open remote repo" is opened as "remote repo"."""
+    return _OPEN_VERB_PREFIX.sub("", phrase, count=1)
 
 
 def execute_nexus_command(command: NexusCommand, config: OSCommandsConfig) -> bool:

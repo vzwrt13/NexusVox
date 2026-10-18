@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from nexusvox.dictionary import DictionaryEntry
 from nexusvox.models import utc_now
+from nexusvox.snippets import Snippet, SnippetOption
 
 
 def test_utc_now_is_naive_utc():
@@ -376,3 +377,58 @@ def test_accept_dictionary_suggestion_drops_other_suggestions_for_the_same_phras
 
     assert db.accept_dictionary_suggestion(sid)["right"] == "Meier"
     assert db.list_dictionary_suggestions() == []
+
+
+# --- Snippets ---
+
+
+def test_add_and_list_snippets(db):
+    db.add_snippet(Snippet("my address", "Main Street 1\nSpringfield"))
+    db.add_snippet(Snippet("  meine   Signatur ", "Viele Grüße"))
+
+    assert [(s["trigger"], s["expansion"]) for s in db.list_snippets()] == [
+        ("meine Signatur", "Viele Grüße"),
+        ("my address", "Main Street 1\nSpringfield"),
+    ]
+    assert {s.trigger for s in db.get_snippets()} == {"my address", "meine Signatur"}
+
+
+def test_add_snippet_same_trigger_replaces(db):
+    db.add_snippet(Snippet("my address", "old"))
+    db.add_snippet(Snippet("My Address", "new"))
+
+    assert [(s["trigger"], s["expansion"]) for s in db.list_snippets()] == [("My Address", "new")]
+
+
+def test_update_snippet_and_trigger_clash(db):
+    first = db.add_snippet(Snippet("one", "1"))
+    db.add_snippet(Snippet("two", "2"))
+
+    assert db.update_snippet(first["id"], Snippet("uno", "1!"))["trigger"] == "uno"
+    assert db.update_snippet(first["id"], Snippet("two", "clash")) is None
+    assert db.update_snippet(999, Snippet("x", "y")) is None
+
+
+def test_snippet_needs_a_trigger_and_something_to_insert(db):
+    assert db.add_snippet(Snippet(" ", "text")) is None
+    assert db.add_snippet(Snippet("trigger", "  ")) is None
+    assert db.add_snippet(Snippet("open remote repo", "", (SnippetOption("a", "b"),))) is not None
+
+
+def test_delete_snippet(db):
+    sid = db.add_snippet(Snippet("one", "1"))["id"]
+
+    assert db.delete_snippet(sid) is True
+    assert db.delete_snippet(sid) is False
+    assert db.list_snippets() == []
+
+
+def test_snippet_options_roundtrip(db):
+    options = (SnippetOption("NexusVox", "https://a"), SnippetOption("sprechblase", "https://b"))
+    db.add_snippet(Snippet("open remote repo", "", options))
+
+    assert db.list_snippets()[0]["options"] == [
+        {"name": "NexusVox", "text": "https://a"},
+        {"name": "sprechblase", "text": "https://b"},
+    ]
+    assert db.get_snippets()[0].options == options

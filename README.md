@@ -31,6 +31,7 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 - **CPU fallback** — six Whisper variants run in-process with no Docker and no GPU, for machines that have no other option
 - **Nine transcription models** — pick per recording in the dashboard
 - **Voice commands** — spoken formatting shortcuts (new line, new paragraph, tab, all caps, punctuation symbols), and an opt-in "press enter" / "Enter drücken" at the end of a dictation that sends a chat message
+- **Snippets** — your own spoken shortcuts: say a trigger phrase ("my address", "meine Signatur") anywhere in a dictation and your stored text is inserted exactly as saved, line breaks included. Create and edit them in Settings → Snippets; none ship with NexusVox. A snippet can hold a list of options, e.g. "open remote repo" with one line per repository (*Fill from GitHub* imports them): "open remote repo nexus vox" inserts the best-matching URL, and "nexus open remote repo nexus vox" / "nexus öffne …" opens it in your browser instead
 - **Learn from edits** — fix a misheard word right in the app you dictated into, and NexusVox suggests a correction-dictionary entry for it; you accept or dismiss it in Settings → Correction Dictionary. It reads the text field through UI Automation for 30 seconds after a paste (`window_s`), never password fields. Terminals expose no readable text, so nothing is learned there. Off by default, `[learn_from_edits]` in `config.toml`
 - **Nexus OS commands** — window management via voice ("nexus open chrome", "nexus minimize")
 - **Assistant forward** — "nexus assistant <anything>" hands the sentence to a local voice assistant over a TCP port instead of typing it (off by default, `[assistant]` in `config.toml`); if nothing answers, the text is typed as usual. The assistant is a separate program you provide — see [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md)
@@ -171,6 +172,8 @@ Open `http://localhost:47392` while NexusVox is running:
 - [GettingStarted.md](GettingStarted.md) — full setup guide
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, lint, tests, PR conventions
 - [docs/TESTING.md](docs/TESTING.md) — running the test suite
+- [docs/architecture.html](docs/architecture.html) — interactive component diagram: inputs, transcription backends, storage, dashboard and the local services NexusVox talks to (download and open in a browser)
+- [docs/text-pipeline.html](docs/text-pipeline.html) — interactive diagram of one dictation: which commands end the cycle early, the text pipeline in order, injection and learn from edits
 - [docs/TRANSLATOR.md](docs/TRANSLATOR.md) — the external translator server behind *Translate to English*
 - [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md) — the external program behind *Command recordings* and the *Assistant forward*
 - [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md) — pointing NexusVox at your own transcription server, and the two protocols it must speak

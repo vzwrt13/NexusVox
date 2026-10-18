@@ -277,6 +277,22 @@ With `[voice_commands].enabled = true`, certain spoken phrases are converted bef
 
 The press enter command only fires at the very end of a dictation ("press enter to continue" stays text). Also accepted: "hit enter", "drück Enter", "drücke Enter". Turn it on in the dashboard under Settings → Voice Commands → Press Enter Command.
 
+### Snippets
+
+Your own spoken shortcuts, created in the dashboard under Settings → Snippets (none ship with NexusVox). Say the trigger anywhere in a dictation and the stored text is inserted exactly as saved, line breaks included:
+
+| Trigger | Say | Result |
+|---|---|---|
+| `meine Signatur` | "Danke dir. Meine Signatur" | `Danke dir. Viele Grüße …` (your stored text) |
+| `open remote repo` with options | "open remote repo nexus vox" | the URL of the best-matching option |
+| `open remote repo` with options | "nexus open remote repo nexus vox" / "nexus öffne …" | opens that URL in your browser (new tab) |
+
+Options are one `name = text` per line under a snippet; *Fill from GitHub* imports your repositories via the GitHub CLI (`gh`). The best-matching name wins - spaces, dashes and small mishearings do not matter. "nexus open" only opens URLs and existing paths, and does not need Nexus OS Commands turned on.
+
+### Learn From Edits
+
+Turn on Settings → Correction Dictionary → Learn From Edits (or `[learn_from_edits].enabled`). After each paste NexusVox reads the text field for 30 seconds (`window_s`); fix a misheard word there and it shows up below the toggle as a suggestion to add or dismiss - nothing enters the dictionary on its own. Password fields are never read, and terminals expose no readable text, so nothing is learned there.
+
 ---
 
 ## Troubleshooting
@@ -314,7 +330,9 @@ NexusVox/
     ├── audio.py                # Microphone capture (16kHz PCM16)
     ├── config.py               # Configuration loader
     ├── db.py                   # Database session management
+    ├── dictionary.py           # Correction dictionary matching and suggestions
     ├── docker_ctl.py           # Docker Compose profile control (start/stop/health-check)
+    ├── edit_watch.py           # Learn from edits: UI Automation field watcher
     ├── feedback.py             # Audio beep feedback
     ├── file_transcribe.py      # Audio file upload conversion and transcription
     ├── hotkey.py               # Global push-to-talk hotkey listener
@@ -322,6 +340,7 @@ NexusVox/
     ├── lang_detect.py          # Language detection
     ├── models.py               # SQLAlchemy models
     ├── os_commands.py          # Nexus OS command parsing and dispatch
+    ├── snippets.py             # Snippet triggers, options and "nexus open"
     ├── transcriber.py          # Transcriber ABC, factory, and model implementations
     ├── tray.py                 # System tray icon & menu
     ├── voice_commands.py       # Voice command text formatting substitutions

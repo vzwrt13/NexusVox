@@ -77,6 +77,22 @@ class DictionaryEntryRow(Base):
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
 
 
+class SnippetRow(Base):
+    """A user-defined snippet: the spoken ``trigger`` expands into ``expansion`` (any length).
+
+    ``options`` is a JSON list of ``[name, text]`` pairs; when set, the words after the
+    trigger pick the best-matching option and ``expansion`` is only the fallback.
+    """
+
+    __tablename__ = "snippets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trigger: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    expansion: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    options: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
 class DictionarySuggestionRow(Base):
     """A pending dictionary entry learned from a correction after a paste, awaiting the user's OK."""
 

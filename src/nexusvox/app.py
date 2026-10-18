@@ -33,6 +33,7 @@ from .mic_guard import MicGuard, create_mic_guard
 from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
 from .pipeline import process_text
 from .polish import polish, read_selection
+from .polish_presets import resolve_instruction
 from .remote_mic import RemoteAudioSource, RemoteMicServer
 from .snippets import Snippet, resolve_open_target
 from .transcriber import create_transcriber
@@ -600,6 +601,10 @@ class NexusVoxApp:
             logger.info("Polish: nothing selected")
             _play(beep_error)
             return
+        spoken = instruction
+        instruction, preset = resolve_instruction(spoken, self._db.get_polish_presets())
+        if preset:
+            logger.info("Polish: preset %r", preset)
         window = foreground_window()
         try:
             rewritten = await loop.run_in_executor(None, polish, selection, instruction, self._config.llm)
@@ -619,7 +624,7 @@ class NexusVoxApp:
                 logger.warning("Polish: could not paste the reply (%s); the paste key pastes it", exc)
                 _play(beep_error)
         if recording is not None:
-            self._save_command(recording, f"[polish] {instruction or 'default'}", instruction or selection)
+            self._save_command(recording, f"[polish] {preset or spoken or 'default'}", spoken or selection)
 
     def _flag_last_transcription(self) -> None:
         """ "nexus flag" - always available, flags the most recent transcription for review."""

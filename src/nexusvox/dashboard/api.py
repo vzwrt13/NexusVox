@@ -32,6 +32,7 @@ from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_w
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
 from ..os_commands import NEXUS_ACTIONS
+from ..polish_presets import PolishPreset
 from ..snippets import Snippet, SnippetOption
 from ..translator import is_reachable
 from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
@@ -490,6 +491,25 @@ class DashboardAPI:
         if saved is None:
             return {"ok": False, "error": "A trigger and a text or option are required, and it must be unique"}
         return {"ok": True, "snippet": saved}
+
+    # ---- Polish presets ----------------------------------------------------
+
+    def get_polish_presets(self) -> dict:
+        return {"presets": self._db.list_polish_presets() if self._db else []}
+
+    def save_polish_preset(self, name: str, instruction: str, is_default: bool, preset_id: int | None) -> dict:
+        """Add a preset, or change the one with ``preset_id``. Read on every polish, so this is live."""
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
+        saved = self._db.save_polish_preset(preset_id, PolishPreset(str(name), str(instruction), bool(is_default)))
+        if saved is None:
+            return {"ok": False, "error": "A unique name of up to 5 words and an instruction are required"}
+        return {"ok": True, "preset": saved}
+
+    def delete_polish_preset(self, preset_id: int) -> dict:
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
+        return {"ok": self._db.delete_polish_preset(preset_id)}
 
     def get_github_repos(self) -> dict:
         """The user's GitHub repositories as snippet options (``{name, text}`` with the URL), via the GitHub CLI."""

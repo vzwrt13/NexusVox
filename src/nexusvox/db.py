@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import unicodedata
 
 from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import sessionmaker
@@ -15,10 +16,12 @@ from .models import (
     DictionaryEntryRow,
     DictionarySuggestionRow,
     FileTranscription,
+    PolishPresetRow,
     SnippetRow,
     Transcription,
     utc_now,
 )
+from .polish_presets import MAX_PRESET_NAME_WORDS, PolishPreset
 from .snippets import Snippet, SnippetOption
 
 logger = logging.getLogger(__name__)
@@ -364,6 +367,59 @@ class Database:
     def delete_snippet(self, snippet_id: int) -> bool:
         with self._session_factory() as session:
             row = session.get(SnippetRow, snippet_id)
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
+
+    # ---- Polish presets -----------------------------------------------------
+
+    @staticmethod
+    def _preset_dict(row: PolishPresetRow) -> dict:
+        return {"id": row.id, "name": row.name, "instruction": row.instruction, "is_default": row.is_default}
+
+    def list_polish_presets(self) -> list[dict]:
+        """All presets, sorted by name, as plain dicts."""
+        with self._session_factory() as session:
+            rows = session.query(PolishPresetRow).all()
+            # Sorted in Python: SQLite's lower() folds ASCII only, and a decomposed key puts "über" with the u's.
+            rows.sort(key=lambda r: unicodedata.normalize("NFKD", r.name.casefold()))
+            return [self._preset_dict(r) for r in rows]
+
+    def get_polish_presets(self) -> list[PolishPreset]:
+        """Presets ready for ``polish_presets.resolve_instruction``."""
+        with self._session_factory() as session:
+            return [PolishPreset(r.name, r.instruction, r.is_default) for r in session.query(PolishPresetRow).all()]
+
+    def save_polish_preset(self, preset_id: int | None, preset: PolishPreset) -> dict | None:
+        """Add a preset (``preset_id`` None) or change one. Making it the default clears the old default.
+
+        Returns the preset, or None when the name or instruction is blank, the name has more words
+        than a spoken name can match (`MAX_PRESET_NAME_WORDS`), the name belongs to another preset
+        (any case), or ``preset_id`` does not exist.
+        """
+        name, instruction = " ".join(preset.name.split()), preset.instruction.strip()
+        if not name or not instruction or len(name.split()) > MAX_PRESET_NAME_WORDS:
+            return None
+        with self._session_factory() as session:
+            # Compared in Python: SQLite's lower() folds ASCII only, so "ÜBER" and "über" would both be saved.
+            key = name.casefold()
+            clash = next((r for r in session.query(PolishPresetRow).all() if r.name.casefold() == key), None)
+            row = PolishPresetRow() if preset_id is None else session.get(PolishPresetRow, preset_id)
+            if row is None or (clash is not None and clash.id != row.id):
+                return None
+            if preset.is_default:
+                session.query(PolishPresetRow).update({PolishPresetRow.is_default: False})
+            row.name, row.instruction, row.is_default = name, instruction, preset.is_default
+            if preset_id is None:
+                session.add(row)
+            session.commit()
+            return self._preset_dict(row)
+
+    def delete_polish_preset(self, preset_id: int) -> bool:
+        with self._session_factory() as session:
+            row = session.get(PolishPresetRow, preset_id)
             if row is None:
                 return False
             session.delete(row)

@@ -325,6 +325,22 @@ def _create_app(api: DashboardAPI) -> Flask:
     def delete_snippet(snippet_id):
         return jsonify(api.delete_snippet(snippet_id))
 
+    @app.route("/api/polish-presets")
+    def get_polish_presets():
+        return jsonify(api.get_polish_presets())
+
+    @app.route("/api/polish-presets", methods=["POST"])
+    def save_polish_preset():
+        data = request.get_json(force=True)
+        resp = api.save_polish_preset(
+            data.get("name", ""), data.get("instruction", ""), data.get("is_default", False), data.get("id")
+        )
+        return jsonify(resp), (200 if resp.get("ok") else 400)
+
+    @app.route("/api/polish-presets/<int:preset_id>", methods=["DELETE"])
+    def delete_polish_preset(preset_id):
+        return jsonify(api.delete_polish_preset(preset_id))
+
     @app.route("/api/dictionary/suggestions")
     def get_dictionary_suggestions():
         return jsonify(api.get_dictionary_suggestions())

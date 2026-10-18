@@ -33,7 +33,7 @@ from .os_commands import strip_open_verb
 # One Unicode private-use character per expansion; voice commands and the dictionary ignore them.
 _PLACEHOLDER_BASE = 0xE000
 # How many words after a trigger may form an option name.
-_MAX_NAME_WORDS = 5
+MAX_NAME_WORDS = 5
 # Minimum similarity between the spoken name and an option name.
 MIN_OPTION_SCORE = 0.75
 
@@ -69,13 +69,13 @@ def _trigger_pattern(trigger: str) -> re.Pattern[str]:
 def best_option(spoken: str, options: tuple[SnippetOption, ...]) -> tuple[str, int] | None:
     """The option text for the leading words of *spoken*, and how many characters they span.
 
-    Tries the first 1 to `_MAX_NAME_WORDS` words against every option name and
+    Tries the first 1 to `MAX_NAME_WORDS` words against every option name and
     keeps the best score at or above `MIN_OPTION_SCORE`; on a tie the longer
     span wins, so "nexus vox site" picks `nexusvox-site` over `NexusVox`.
     """
     words = list(_WORD_RE.finditer(spoken))
     best: tuple[float, int, str] | None = None
-    for count in range(1, min(len(words), _MAX_NAME_WORDS) + 1):
+    for count in range(1, min(len(words), MAX_NAME_WORDS) + 1):
         span_end = words[count - 1].end()
         heard = _squash(spoken[:span_end])
         for option in options:

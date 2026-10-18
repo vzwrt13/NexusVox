@@ -12,25 +12,26 @@ spaces, dashes and case do not count and small mishearings are tolerated. When
 no option is close enough, the plain expansion is used, or the trigger stays
 text if there is none.
 
-Expansions must reach the cursor exactly as stored, so the pipeline works in two
-steps: `mark_snippets` swaps each match for a private-use placeholder character
-before voice commands and translation run, and `expand_snippets` puts the stored
-text back in right before injection. A translator that drops a placeholder gets
-its result discarded by the caller (`placeholders_intact`).
+Expansions must reach the cursor exactly as stored, so the text pipeline works
+in two steps: `mark_snippets` swaps each match for a private-use placeholder
+character before voice commands and translation run, and `expand_snippets`
+puts the stored text back in right before injection.
 
-`resolve_open_target` serves "nexus open <snippet>": the whole phrase must be one
-snippet match, and its text is what gets opened.
+`resolve_open_target` serves "nexus open <snippet>" (the grammar lives in
+`os_commands`): the spoken phrase must be exactly one snippet match.
 """
 
 from __future__ import annotations
 
 import difflib
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import NamedTuple
+
+from .os_commands import strip_open_verb
 
 # One Unicode private-use character per expansion; voice commands and the dictionary ignore them.
 _PLACEHOLDER_BASE = 0xE000
-_MAX_PLACEHOLDERS = 0x1900
 # How many words after a trigger may form an option name.
 _MAX_NAME_WORDS = 5
 # Minimum similarity between the spoken name and an option name.
@@ -40,11 +41,16 @@ _WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)*")
 _TRAILING_MARK_RE = re.compile(r"[.!?]+\s*$")
 
 
+class SnippetOption(NamedTuple):
+    name: str
+    text: str
+
+
 @dataclass(frozen=True)
 class Snippet:
     trigger: str
     expansion: str = ""
-    options: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    options: tuple[SnippetOption, ...] = ()
 
 
 def _normalize(phrase: str) -> str:
@@ -60,22 +66,22 @@ def _trigger_pattern(trigger: str) -> re.Pattern[str]:
     return re.compile(r"(?<!\w)" + r"\s+".join(re.escape(w) for w in trigger.split()) + r"(?!\w)", re.IGNORECASE)
 
 
-def best_option(spoken: str, options: tuple[tuple[str, str], ...]) -> tuple[str, int] | None:
+def best_option(spoken: str, options: tuple[SnippetOption, ...]) -> tuple[str, int] | None:
     """The option text for the leading words of *spoken*, and how many characters they span.
 
     Tries the first 1 to `_MAX_NAME_WORDS` words against every option name and
     keeps the best score at or above `MIN_OPTION_SCORE`; on a tie the longer
-    span wins, so "nexus vox" beats "nexus".
+    span wins, so "nexus vox site" picks `nexusvox-site` over `NexusVox`.
     """
     words = list(_WORD_RE.finditer(spoken))
     best: tuple[float, int, str] | None = None
     for count in range(1, min(len(words), _MAX_NAME_WORDS) + 1):
         span_end = words[count - 1].end()
         heard = _squash(spoken[:span_end])
-        for name, text in options:
-            score = difflib.SequenceMatcher(a=heard, b=_squash(name), autojunk=False).ratio()
+        for option in options:
+            score = difflib.SequenceMatcher(a=heard, b=_squash(option.name), autojunk=False).ratio()
             if score >= MIN_OPTION_SCORE and (best is None or (score, span_end) > best[:2]):
-                best = (score, span_end, text)
+                best = (score, span_end, option.text)
     return (best[2], best[1]) if best else None
 
 
@@ -108,16 +114,12 @@ def mark_snippets(text: str, snippets: list[Snippet]) -> tuple[str, list[str]]:
     ("My address." -> the address, without a trailing period).
     """
     expansions: list[str] = []
-    if not text or not snippets:
-        return text, expansions
     for snippet in sorted(snippets, key=lambda s: len(_normalize(s.trigger)), reverse=True):
         if not _normalize(snippet.trigger):
             continue
         out: list[str] = []
         pos = 0
         for start, end, replacement in _matches(text, snippet):
-            if len(expansions) >= _MAX_PLACEHOLDERS:
-                break
             expansions.append(replacement)
             out.append(text[pos:start])
             out.append(chr(_PLACEHOLDER_BASE + len(expansions) - 1))
@@ -127,43 +129,18 @@ def mark_snippets(text: str, snippets: list[Snippet]) -> tuple[str, list[str]]:
     return text, expansions
 
 
-def resolve_open_target(phrase: str, snippets: list[Snippet]) -> str | None:
-    """The text of the one snippet match that makes up all of *phrase*, or None."""
-    marked, expansions = mark_snippets(phrase.strip(), snippets)
+def resolve_open_target(spoken: str, snippets: list[Snippet]) -> str | None:
+    """The text "nexus open <spoken>" should open, or None.
+
+    *spoken* is what follows the open verb. Each trigger is compared without its
+    own leading open verb, so the trigger "open remote repo" answers both
+    "nexus open remote repo …" and "nexus öffne remote repo …".
+    """
+    bare = [Snippet(strip_open_verb(s.trigger), s.expansion, s.options) for s in snippets]
+    marked, expansions = mark_snippets(spoken.strip(), bare)
     if len(expansions) == 1 and marked.strip(" .,!?") == chr(_PLACEHOLDER_BASE):
         return expansions[0].strip()
     return None
-
-
-# Spoken verbs for "nexus open <snippet>", English and German.
-_OPEN_VERBS = ("open", "öffne", "öffnen", "öffnet")
-_OPEN_VERB_RE = re.compile(r"^(?:" + "|".join(_OPEN_VERBS) + r")\b[\s,:]*", re.IGNORECASE)
-_NEXUS_RE = re.compile(r"^\s*nexus\b[\s,:]*(.+?)\s*$", re.IGNORECASE | re.DOTALL)
-
-
-def resolve_nexus_open(text: str, snippets: list[Snippet]) -> str | None:
-    """What "nexus open <snippet>" / "nexus öffne <snippet>" should open, or None.
-
-    The verb may be part of the trigger ("open remote repo") or said on its own
-    in either language ("nexus öffne remote repo nexusvox" with the trigger
-    "open remote repo"); a trigger's own leading verb is ignored in that case.
-    """
-    m = _NEXUS_RE.match(text)
-    if m is None or not snippets:
-        return None
-    rest = m.group(1)
-    verb = _OPEN_VERB_RE.match(rest)
-    if verb is None:
-        return None
-    target = resolve_open_target(rest, snippets)
-    if target is not None:
-        return target
-    bare = [
-        Snippet(_OPEN_VERB_RE.sub("", _normalize(s.trigger)), s.expansion, s.options)
-        for s in snippets
-        if _OPEN_VERB_RE.sub("", _normalize(s.trigger))
-    ]
-    return resolve_open_target(rest[verb.end() :], bare)
 
 
 def placeholders_intact(text: str, expansions: list[str]) -> bool:
@@ -176,13 +153,3 @@ def expand_snippets(text: str, expansions: list[str]) -> str:
     for i, expansion in enumerate(expansions):
         text = text.replace(chr(_PLACEHOLDER_BASE + i), expansion)
     return text
-
-
-def parse_options(lines: str) -> tuple[tuple[str, str], ...]:
-    """Options from the dashboard's text box: one ``name = text`` per line, blank lines ignored."""
-    options: list[tuple[str, str]] = []
-    for line in lines.splitlines():
-        name, sep, text = line.partition("=")
-        if sep and name.strip() and text.strip():
-            options.append((_normalize(name), text.strip()))
-    return tuple(options)

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from nexusvox.os_commands import parse_nexus_open
 from nexusvox.snippets import (
     Snippet,
+    SnippetOption,
     expand_snippets,
     mark_snippets,
-    parse_options,
     placeholders_intact,
-    resolve_nexus_open,
+    resolve_open_target,
 )
 from nexusvox.voice_commands import process_voice_commands
 
@@ -77,10 +78,10 @@ def test_placeholders_intact():
 # --- Options ---
 
 REPOS = (
-    ("NexusVox", "https://github.com/vzwrt13/NexusVox"),
-    ("nexusvox-site", "https://github.com/vzwrt13/nexusvox-site"),
-    ("personal-tooling", "https://github.com/vzwrt13/personal-tooling"),
-    ("sprechblase", "https://github.com/vzwrt13/sprechblase"),
+    SnippetOption("NexusVox", "https://github.com/vzwrt13/NexusVox"),
+    SnippetOption("nexusvox-site", "https://github.com/vzwrt13/nexusvox-site"),
+    SnippetOption("personal-tooling", "https://github.com/vzwrt13/personal-tooling"),
+    SnippetOption("sprechblase", "https://github.com/vzwrt13/sprechblase"),
 )
 REPO_SNIPPET = Snippet("open remote repo", "", REPOS)
 
@@ -104,19 +105,17 @@ def test_option_without_match_keeps_the_text():
 
 
 def test_option_without_match_uses_the_fallback_text():
-    snippet = Snippet("meine Adresse", "Hauptstraße 1", (("Büro", "Office 7"),))
+    snippet = Snippet("meine Adresse", "Hauptstraße 1", (SnippetOption("Büro", "Office 7"),))
     assert _run("meine Adresse Büro", [snippet]) == "Office 7"
     assert _run("meine Adresse.", [snippet]) == "Hauptstraße 1"
 
 
-def test_parse_options():
-    assert parse_options("NexusVox = https://a\n\n bad line \nname=  x = y \n = empty") == (
-        ("NexusVox", "https://a"),
-        ("name", "x = y"),
-    )
-
-
 # --- nexus open ---
+
+
+def resolve_nexus_open(spoken, snippets):
+    target = parse_nexus_open(spoken)
+    return None if target is None else resolve_open_target(target, snippets)
 
 
 @pytest.mark.parametrize(

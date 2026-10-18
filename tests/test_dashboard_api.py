@@ -742,15 +742,19 @@ def test_snippet_without_text_is_rejected(flask_client):
     assert resp["ok"] is False
 
 
-def test_snippet_options_from_text_box(flask_client):
+def test_snippet_options_list(flask_client):
     resp = flask_client.post(
         "/api/snippets",
         data=json.dumps(
-            {"trigger": "open remote repo", "expansion": "", "options": "NexusVox = https://a\nx = https://b"}
+            {
+                "trigger": "open remote repo",
+                "expansion": "",
+                "options": [{"name": "NexusVox", "text": "https://a"}, {"name": " ", "text": "dropped"}, "junk"],
+            }
         ),
         content_type="application/json",
     ).get_json()
-    assert resp["snippet"]["options"] == [["NexusVox", "https://a"], ["x", "https://b"]]
+    assert resp["snippet"]["options"] == [{"name": "NexusVox", "text": "https://a"}]
 
 
 def test_github_repos_reports_a_missing_cli(flask_client, monkeypatch):

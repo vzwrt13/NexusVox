@@ -336,6 +336,20 @@ async function deleteDictionaryEntry(id) {
 // ── Snippets ─────────────────────────────────────────────────────────
 let snippetCache = [];
 
+// The options box holds one `name = text` per line; the API takes [{name, text}].
+function parseSnippetOptions(lines) {
+  return lines.split("\n").flatMap((line) => {
+    const i = line.indexOf("=");
+    const name = line.slice(0, i).trim();
+    const text = line.slice(i + 1).trim();
+    return i > 0 && name && text ? [{ name, text }] : [];
+  });
+}
+
+function formatSnippetOptions(options) {
+  return options.map((o) => `${o.name} = ${o.text}`).join("\n");
+}
+
 async function loadSnippets() {
   const { snippets } = await fetch("/api/snippets").then((r) => r.json());
   snippetCache = snippets;
@@ -348,7 +362,7 @@ async function loadSnippets() {
     <div class="dict-row" data-id="${s.id}">
       <span class="dict-right">${escapeHtml(s.trigger)}</span>
       <span class="dict-arrow">&rarr;</span>
-      <span class="snippet-text">${escapeHtml(s.options.length ? `${s.options.length} options: ${s.options.map((o) => o[0]).join(", ")}` : s.expansion)}</span>
+      <span class="snippet-text">${escapeHtml(s.options.length ? `${s.options.length} options: ${s.options.map((o) => o.name).join(", ")}` : s.expansion)}</span>
       <button class="flagged-play-btn" onclick="editSnippet(${s.id})">Edit</button>
       <button class="dict-delete" title="Remove" onclick="deleteSnippet(${s.id})">&#10005;</button>
     </div>`).join("");
@@ -369,7 +383,7 @@ function editSnippet(id) {
   document.getElementById("snippet-id").value = s.id;
   document.getElementById("snippet-trigger").value = s.trigger;
   document.getElementById("snippet-expansion").value = s.expansion;
-  document.getElementById("snippet-options").value = s.options.map((o) => `${o[0]} = ${o[1]}`).join("\n");
+  document.getElementById("snippet-options").value = formatSnippetOptions(s.options);
   document.getElementById("snippet-save").textContent = "Save";
   document.getElementById("snippet-cancel").hidden = false;
   document.getElementById("snippet-expansion").focus();
@@ -394,7 +408,8 @@ document.getElementById("snippet-github").addEventListener("click", async (e) =>
     return;
   }
   const box = document.getElementById("snippet-options");
-  box.value = box.value.trim() ? `${box.value.trim()}\n${res.options}` : res.options;
+  const lines = formatSnippetOptions(res.options);
+  box.value = box.value.trim() ? `${box.value.trim()}\n${lines}` : lines;
 });
 
 document.getElementById("snippet-form").addEventListener("submit", async (e) => {
@@ -407,7 +422,7 @@ document.getElementById("snippet-form").addEventListener("submit", async (e) => 
       id: id ? Number(id) : null,
       trigger: document.getElementById("snippet-trigger").value,
       expansion: document.getElementById("snippet-expansion").value,
-      options: document.getElementById("snippet-options").value,
+      options: parseSnippetOptions(document.getElementById("snippet-options").value),
     }),
   }).then((r) => r.json());
   if (res.ok) {

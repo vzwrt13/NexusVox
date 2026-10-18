@@ -19,7 +19,7 @@ from .models import (
     Transcription,
     utc_now,
 )
-from .snippets import Snippet
+from .snippets import Snippet, SnippetOption
 
 logger = logging.getLogger(__name__)
 
@@ -290,12 +290,31 @@ class Database:
     # ---- Snippets -----------------------------------------------------------
 
     @staticmethod
-    def _snippet_dict(row: SnippetRow) -> dict:
-        options = [list(o) for o in json.loads(row.options)] if row.options else []
-        return {"id": row.id, "trigger": row.trigger, "expansion": row.expansion, "options": options}
+    def _snippet(row: SnippetRow) -> Snippet:
+        options = tuple(SnippetOption(name, text) for name, text in json.loads(row.options)) if row.options else ()
+        return Snippet(trigger=row.trigger, expansion=row.expansion, options=options)
+
+    @classmethod
+    def _snippet_dict(cls, row: SnippetRow) -> dict:
+        snippet = cls._snippet(row)
+        return {
+            "id": row.id,
+            "trigger": snippet.trigger,
+            "expansion": snippet.expansion,
+            "options": [o._asdict() for o in snippet.options],
+        }
+
+    @staticmethod
+    def _clean_snippet(snippet: Snippet) -> tuple[str, str | None] | None:
+        """(normalised trigger, options JSON), or None when the snippet has no trigger or nothing to insert."""
+        trigger = " ".join(snippet.trigger.split())
+        if not trigger or not (snippet.expansion.strip() or snippet.options):
+            return None
+        options = json.dumps([list(o) for o in snippet.options], ensure_ascii=False) if snippet.options else None
+        return trigger, options
 
     def list_snippets(self) -> list[dict]:
-        """All snippets, sorted by trigger, as plain dicts (``options`` as ``[name, text]`` lists)."""
+        """All snippets, sorted by trigger, as plain dicts (``options`` as ``{name, text}`` dicts)."""
         with self._session_factory() as session:
             rows = session.query(SnippetRow).order_by(func.lower(SnippetRow.trigger)).all()
             return [self._snippet_dict(r) for r in rows]
@@ -303,45 +322,42 @@ class Database:
     def get_snippets(self) -> list[Snippet]:
         """Snippets ready for ``mark_snippets``."""
         with self._session_factory() as session:
-            return [
-                Snippet(
-                    trigger=r.trigger,
-                    expansion=r.expansion,
-                    options=tuple((n, t) for n, t in json.loads(r.options)) if r.options else (),
-                )
-                for r in session.query(SnippetRow).all()
-            ]
+            return [self._snippet(r) for r in session.query(SnippetRow).all()]
 
-    def save_snippet(
-        self,
-        trigger: str,
-        expansion: str,
-        snippet_id: int | None = None,
-        options: tuple[tuple[str, str], ...] = (),
-    ) -> dict | None:
-        """Insert, or update the snippet with ``snippet_id`` (or with the same trigger).
+    def add_snippet(self, snippet: Snippet) -> dict | None:
+        """Insert a snippet, or replace the one with the same trigger (any case), like ``add_dictionary_entry``.
 
-        Returns the snippet, or None when the trigger is blank, there is neither a text
-        nor an option, or the trigger already belongs to another snippet.
+        Returns the snippet, or None when it has no trigger or nothing to insert.
         """
-        trigger = " ".join(trigger.split())
-        if not trigger or not (expansion.strip() or options):
+        cleaned = self._clean_snippet(snippet)
+        if cleaned is None:
             return None
-        options_json = json.dumps([list(o) for o in options], ensure_ascii=False) if options else None
+        trigger, options = cleaned
         with self._session_factory() as session:
-            same = session.query(SnippetRow).filter(func.lower(SnippetRow.trigger) == trigger.lower()).first()
-            row = session.get(SnippetRow, snippet_id) if snippet_id is not None else same
-            if snippet_id is not None and row is None:
-                return None
-            if same is not None and row is not None and same.id != row.id:
-                return None
+            row = session.query(SnippetRow).filter(func.lower(SnippetRow.trigger) == trigger.lower()).first()
             if row is None:
-                row = SnippetRow(trigger=trigger, expansion=expansion, options=options_json)
+                row = SnippetRow()
                 session.add(row)
-            else:
-                row.trigger = trigger
-                row.expansion = expansion
-                row.options = options_json
+            row.trigger, row.expansion, row.options = trigger, snippet.expansion, options
+            session.commit()
+            return self._snippet_dict(row)
+
+    def update_snippet(self, snippet_id: int, snippet: Snippet) -> dict | None:
+        """Change the snippet with ``snippet_id``.
+
+        Returns the snippet, or None when it does not exist, has no trigger or nothing
+        to insert, or its new trigger already belongs to another snippet.
+        """
+        cleaned = self._clean_snippet(snippet)
+        if cleaned is None:
+            return None
+        trigger, options = cleaned
+        with self._session_factory() as session:
+            row = session.get(SnippetRow, snippet_id)
+            clash = session.query(SnippetRow).filter(func.lower(SnippetRow.trigger) == trigger.lower()).first()
+            if row is None or (clash is not None and clash.id != row.id):
+                return None
+            row.trigger, row.expansion, row.options = trigger, snippet.expansion, options
             session.commit()
             return self._snippet_dict(row)
 

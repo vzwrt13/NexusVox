@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
+import functools
 import logging
 import os
 import threading
 import time
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -19,20 +20,29 @@ from .audio import AudioCapture
 from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker, resolve_device, save_config
 from .dashboard import open_dashboard
 from .db import Database
-from .dictionary import apply_dictionary
 from .edit_watch import EditWatcher
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import HotkeyListener, describe_hotkey
 from .injector import inject_text
 from .lang_detect import detect_language
 from .mic_guard import MicGuard, create_mic_guard
-from .os_commands import execute_nexus_command, parse_nexus_command
+from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
+from .pipeline import process_text
 from .remote_mic import RemoteAudioSource, RemoteMicServer
-from .snippets import expand_snippets, mark_snippets, placeholders_intact, resolve_nexus_open
+from .snippets import Snippet, resolve_open_target
 from .transcriber import create_transcriber
-from .translator import TranslateResult, translate
 from .tray import SystemTray
-from .voice_commands import process_voice_commands, split_press_enter
+
+
+@dataclass(frozen=True)
+class _Recording:
+    """One finished recording, as saved with whatever it turned into."""
+
+    audio: bytearray
+    duration_ms: int
+    confidence: float | None
+    transcribe_ms: int
+
 
 _CPU_FALLBACK_MODEL = "whisper-large-v3-turbo"
 
@@ -392,6 +402,8 @@ class NexusVoxApp:
             transcribe_ms = int((time.monotonic() - stop_time) * 1000)
             logger.info("Transcript received after %dms", transcribe_ms)
 
+            recording = _Recording(audio_buffer, duration_ms, result.confidence, transcribe_ms)
+
             if is_command:
                 # A command recording (command key pressed during the hold) is never
                 # typed: the transcript goes to os-control, which also hides
@@ -403,227 +415,66 @@ class NexusVoxApp:
                 if reply is None or reply.startswith("error:"):
                     threading.Thread(target=beep_error, daemon=True).start()
                 if command_text:
-                    language = (
-                        detect_language(command_text) if self._config.auto_language_detection else self._config.language
-                    )
-                    record = self._db.save_transcription(
-                        text=f"[os-control] {command_text}",
-                        language=language,
-                        duration_ms=duration_ms,
-                        confidence=result.confidence,
-                        model=self._transcriber.model,
-                        transcribe_ms=transcribe_ms,
-                    )
-                    self._store_audio(audio_buffer, record.id)
+                    self._save_command(recording, f"[os-control] {command_text}", command_text)
                 await self._transcriber.disconnect()
                 return
 
-            if result.text.strip():
-                raw_text = result.text.strip()
-                loop = asyncio.get_event_loop()
-
-                # Check for nexus commands before any text processing
-                # A phone recording only wants its text back, never a PC action.
-                nexus_cmd = None if remote else parse_nexus_command(raw_text)
-
-                if nexus_cmd is not None and nexus_cmd.action == "flag":
-                    # "nexus flag" — always available, flags most recent transcription
-                    last_tid = self._db.get_last_transcription_id()
-                    if last_tid is not None:
-                        self._db.flag_transcription(last_tid)
-                        logger.info("Nexus flag: flagged transcription id=%d", last_tid)
-                        threading.Thread(target=beep_flag, daemon=True).start()
-                    else:
-                        logger.info("Nexus flag: no transcription to flag")
-                    await self._transcriber.disconnect()
-                    return
-
-                # "nexus open <snippet>" / "nexus öffne <snippet>" opens the snippet's URL or path
-                # instead of typing it. The user's own snippet is the opt-in, so this does not
-                # need [os_commands].enabled.
-                open_target = None if remote else resolve_nexus_open(raw_text, self._db.get_snippets())
-                if open_target is not None:
-                    from . import window_manager
-
-                    try:
-                        opened = await loop.run_in_executor(None, window_manager.open_target, open_target)
-                    except OSError:
-                        logger.exception("Opening %r failed", open_target)
-                        opened = False
-                    if not opened:
-                        threading.Thread(target=beep_error, daemon=True).start()
-                    record = self._db.save_transcription(
-                        text=f"[nexus] open {open_target}",
-                        language=detect_language(raw_text)
-                        if self._config.auto_language_detection
-                        else self._config.language,
-                        duration_ms=duration_ms,
-                        confidence=result.confidence,
-                        model=self._transcriber.model,
-                        transcribe_ms=transcribe_ms,
-                    )
-                    self._store_audio(audio_buffer, record.id)
-                    await self._transcriber.disconnect()
-                    return
-
-                assistant_text = (
-                    parse_assistant_command(raw_text) if self._config.assistant.enabled and not remote else None
-                )
-                if assistant_text is not None:
-                    # "nexus assistant <text>" — hand the sentence to the voice assistant.
-                    # If nothing answers on its port, fall through and type it as usual.
-                    try:
-                        reply = await loop.run_in_executor(
-                            None,
-                            send_to_assistant,
-                            assistant_text,
-                            self._config.assistant,
-                        )
-                    except OSError as exc:
-                        logger.warning("Assistant not reachable (%s); typing the text instead", exc)
-                        threading.Thread(target=beep_error, daemon=True).start()
-                    else:
-                        if reply.startswith("error:"):
-                            logger.warning("Assistant refused the command: %s", reply)
-                            threading.Thread(target=beep_error, daemon=True).start()
-                        language = (
-                            detect_language(raw_text) if self._config.auto_language_detection else self._config.language
-                        )
-                        record = self._db.save_transcription(
-                            text=f"[assistant] {assistant_text}",
-                            language=language,
-                            duration_ms=duration_ms,
-                            confidence=result.confidence,
-                            model=self._transcriber.model,
-                            transcribe_ms=transcribe_ms,
-                        )
-                        self._store_audio(audio_buffer, record.id)
-                        await self._transcriber.disconnect()
-                        return
-
-                if nexus_cmd is not None and self._config.os_commands.enabled:
-                    # Window management nexus commands — only when os_commands enabled
-                    await loop.run_in_executor(
-                        None,
-                        execute_nexus_command,
-                        nexus_cmd,
-                        self._config.os_commands,
-                    )
-                    language = (
-                        detect_language(raw_text) if self._config.auto_language_detection else self._config.language
-                    )
-                    record = self._db.save_transcription(
-                        text=f"[nexus] {nexus_cmd.action} {nexus_cmd.app_name}",
-                        language=language,
-                        duration_ms=duration_ms,
-                        confidence=result.confidence,
-                        model=self._transcriber.model,
-                        transcribe_ms=transcribe_ms,
-                    )
-                    logger.info("Nexus command: %s %s", nexus_cmd.action, nexus_cmd.app_name)
-                    self._store_audio(audio_buffer, record.id)
-                    await self._transcriber.disconnect()
-                    return
-
-                # Correction dictionary: fix terms the model keeps mishearing
-                corrected_text = apply_dictionary(raw_text, self._db.get_dictionary_entries())
-                if corrected_text != raw_text:
-                    logger.info("Dictionary applied: %r -> %r", raw_text, corrected_text)
-
-                # A trailing "press enter" is not typed; Enter follows the paste. The phone
-                # inserts the text itself, so a remote recording keeps the phrase as text.
-                press_enter = False
-                if self._config.voice_commands.enabled and self._config.voice_commands.press_enter and not remote:
-                    corrected_text, press_enter = split_press_enter(corrected_text)
-
-                # Snippets: triggers become placeholders here, so voice commands and the
-                # translator never touch the stored expansion; it goes back in before injection.
-                corrected_text, snippet_texts = mark_snippets(corrected_text, self._db.get_snippets())
-                if snippet_texts:
-                    logger.info("Snippets matched: %d", len(snippet_texts))
-
-                # Apply voice commands (new line, tab, all caps, symbols, etc.)
-                if self._config.voice_commands.enabled:
-                    active_symbols = (
-                        frozenset()
-                        if self._config.voice_commands.bypass_symbols
-                        else frozenset(self._config.voice_commands.symbols)
-                    )
-                    active_structural = (
-                        frozenset()
-                        if self._config.voice_commands.bypass_structural
-                        else frozenset(self._config.voice_commands.structural)
-                    )
-                    processed_text = process_voice_commands(
-                        corrected_text,
-                        active_symbols,
-                        self._config.voice_commands.numbers_as_digits,
-                        active_structural,
-                    )
-                else:
-                    processed_text = corrected_text
-
-                # Translate into English for injection only; the transcript below is
-                # saved as spoken. Blocking HTTP, so off the loop like the injection.
-                translation = await loop.run_in_executor(
-                    None,
-                    translate,
-                    processed_text,
-                    self._config.translator,
-                )
-                if translation.translated and not placeholders_intact(translation.text, snippet_texts):
-                    logger.warning("Translator dropped a snippet placeholder; injecting the original text")
-                    translation = TranslateResult(processed_text, error="snippet placeholder lost")
-                translation = dataclasses.replace(translation, text=expand_snippets(translation.text, snippet_texts))
-                processed_text = expand_snippets(processed_text, snippet_texts)
-
-                if remote:
-                    # The phone inserts it into its own focused field.
-                    self._remote_text = translation.text
-                else:
-                    await loop.run_in_executor(
-                        None,
-                        inject_text,
-                        translation.text,
-                        self._config.injection_delay_ms,
-                        press_enter,
-                    )
-                    # A translated paste no longer matches the spoken words the dictionary works
-                    # on, and after "press enter" the text has usually left the field. Voice
-                    # commands (digits, symbols, all caps) also rewrite the words, and an entry
-                    # learned from that text would never match the raw transcript it runs on;
-                    # neither would one learned from a snippet's stored text.
-                    if (
-                        self._config.learn_from_edits.enabled
-                        and not translation.translated
-                        and not press_enter
-                        and not snippet_texts
-                        and processed_text == corrected_text
-                    ):
-                        self._edit_watcher.watch(translation.text, self._config.learn_from_edits.window_s)
-                latency_ms = int((time.monotonic() - stop_time) * 1000)
-                language = detect_language(raw_text) if self._config.auto_language_detection else self._config.language
-                record = self._db.save_transcription(
-                    # A dictation that was only "press enter" leaves no text to save.
-                    text="[press enter]" if press_enter and not processed_text else processed_text,
-                    language=language,
-                    duration_ms=duration_ms,
-                    confidence=result.confidence,
-                    model=self._transcriber.model,
-                    translated=translation.translated,
-                    translate_source=translation.source,
-                    translate_ms=translation.ms,
-                    translate_error=translation.error,
-                    transcribe_ms=transcribe_ms,
-                    latency_ms=latency_ms,
-                )
-                logger.info(
-                    "%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, translation.text
-                )
-
-                self._store_audio(audio_buffer, record.id)
-            else:
+            raw_text = result.text.strip()
+            if not raw_text:
                 logger.info("Empty transcription, nothing to inject")
+                return
+            loop = asyncio.get_running_loop()
+            snippets = self._db.get_snippets()
+
+            # A phone recording only wants its text back, never a PC action.
+            if not remote:
+                nexus_cmd = parse_nexus_command(raw_text)
+                if nexus_cmd is not None and nexus_cmd.action == "flag":
+                    self._flag_last_transcription()
+                    await self._transcriber.disconnect()
+                    return
+                label = await self._run_command(raw_text, nexus_cmd, snippets)
+                if label is not None:
+                    self._save_command(recording, label, raw_text)
+                    await self._transcriber.disconnect()
+                    return
+
+            processed = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    process_text,
+                    raw_text,
+                    self._config,
+                    self._db.get_dictionary_entries(),
+                    snippets,
+                    remote=remote,
+                ),
+            )
+            if remote:
+                # The phone inserts it into its own focused field.
+                self._remote_text = processed.typed
+            else:
+                await loop.run_in_executor(
+                    None, inject_text, processed.typed, self._config.injection_delay_ms, processed.press_enter
+                )
+                if self._config.learn_from_edits.enabled and processed.learnable:
+                    self._edit_watcher.watch(processed.typed, self._config.learn_from_edits.window_s)
+            latency_ms = int((time.monotonic() - stop_time) * 1000)
+            record = self._db.save_transcription(
+                text=processed.saved,
+                language=self._language_of(raw_text),
+                duration_ms=duration_ms,
+                confidence=result.confidence,
+                model=self._transcriber.model,
+                translated=processed.translation.translated,
+                translate_source=processed.translation.source,
+                translate_ms=processed.translation.ms,
+                translate_error=processed.translation.error,
+                transcribe_ms=transcribe_ms,
+                latency_ms=latency_ms,
+            )
+            logger.info("%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, processed.typed)
+            self._store_audio(audio_buffer, record.id)
 
         except Exception:
             logger.exception("Transcription cycle failed")
@@ -643,6 +494,72 @@ class NexusVoxApp:
             # next dictation (pressed during transcription), and its hold must stand.
             if self._mic_guard is not None and not self._hotkey.active:
                 self._mic_guard.release_async()
+
+    def _language_of(self, spoken: str) -> str:
+        return detect_language(spoken) if self._config.auto_language_detection else self._config.language
+
+    def _save_command(self, recording: _Recording, label: str, spoken: str) -> None:
+        """Save a dictation that ran a command instead of being typed, as ``label``."""
+        record = self._db.save_transcription(
+            text=label,
+            language=self._language_of(spoken),
+            duration_ms=recording.duration_ms,
+            confidence=recording.confidence,
+            model=self._transcriber.model,
+            transcribe_ms=recording.transcribe_ms,
+        )
+        self._store_audio(recording.audio, record.id)
+
+    def _flag_last_transcription(self) -> None:
+        """ "nexus flag" - always available, flags the most recent transcription for review."""
+        last_tid = self._db.get_last_transcription_id()
+        if last_tid is None:
+            logger.info("Nexus flag: no transcription to flag")
+            return
+        self._db.flag_transcription(last_tid)
+        logger.info("Nexus flag: flagged transcription id=%d", last_tid)
+        threading.Thread(target=beep_flag, daemon=True).start()
+
+    async def _run_command(self, raw_text: str, nexus_cmd: NexusCommand | None, snippets: list[Snippet]) -> str | None:
+        """Run the command *raw_text* is, if any. Returns the label to save it under, or None to type it.
+
+        Checked in order: "nexus open <snippet>" (always available - the user's own
+        snippet is the opt-in), "nexus assistant <text>" (when enabled; falls through
+        to typing if nothing answers), nexus window commands (when enabled).
+        """
+        loop = asyncio.get_running_loop()
+        spoken_target = parse_nexus_open(raw_text)
+        target = resolve_open_target(spoken_target, snippets) if spoken_target is not None else None
+        if target is not None:
+            from . import window_manager
+
+            try:
+                opened = await loop.run_in_executor(None, window_manager.open_target, target)
+            except OSError:
+                logger.exception("Opening %r failed", target)
+                opened = False
+            if not opened:
+                threading.Thread(target=beep_error, daemon=True).start()
+            return f"[nexus] open {target}"
+
+        assistant_text = parse_assistant_command(raw_text) if self._config.assistant.enabled else None
+        if assistant_text is not None:
+            try:
+                reply = await loop.run_in_executor(None, send_to_assistant, assistant_text, self._config.assistant)
+            except OSError as exc:
+                logger.warning("Assistant not reachable (%s); typing the text instead", exc)
+                threading.Thread(target=beep_error, daemon=True).start()
+            else:
+                if reply.startswith("error:"):
+                    logger.warning("Assistant refused the command: %s", reply)
+                    threading.Thread(target=beep_error, daemon=True).start()
+                return f"[assistant] {assistant_text}"
+
+        if nexus_cmd is not None and self._config.os_commands.enabled:
+            await loop.run_in_executor(None, execute_nexus_command, nexus_cmd, self._config.os_commands)
+            logger.info("Nexus command: %s %s", nexus_cmd.action, nexus_cmd.app_name)
+            return f"[nexus] {nexus_cmd.action} {nexus_cmd.app_name}"
+        return None
 
     async def _stream_audio(self, audio: AudioCapture | RemoteAudioSource) -> bytearray:
         """Stream audio chunks from the mic or the phone to the transcription server, returning the full buffer."""

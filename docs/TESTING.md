@@ -84,6 +84,7 @@ tests/
 ├── test_os_commands.py            # Nexus OS command parsing and dispatch
 ├── test_edit_watch.py             # Learn from edits: span mapping, suggestions, watcher thread
 ├── test_snippets.py               # Snippet triggers, options best match, "nexus open"
+├── test_pipeline.py               # Text pipeline: typed vs saved text, press enter, snippets, translation, learnable
 └── test_voice_commands.py         # Voice command text formatting substitutions
 ```
 
@@ -103,6 +104,7 @@ tests/
 | `test_os_commands.py` | `os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
 | `test_edit_watch.py` | `edit_watch.py` | Locating the pasted span, ignoring text typed around it, rejecting rewrites and language mix-ups (English and German), watcher thread with fake fields |
 | `test_snippets.py` | `snippets.py` | Trigger matching (English and German), longest trigger first, placeholders surviving voice commands, option best match, "nexus open" / "nexus öffne" resolution |
+| `test_pipeline.py` | `pipeline.py` | Order of dictionary, press enter, snippets, voice commands and translation; typed vs saved text; translator losing a placeholder; when an edit can be learned |
 | `test_voice_commands.py` | `voice_commands.py` | New line/paragraph/tab/all-caps substitutions (English and German), structural category toggles, German number words, comma interactions, passthrough |
 
 ### What we DON'T test (and why)

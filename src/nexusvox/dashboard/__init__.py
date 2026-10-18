@@ -272,7 +272,7 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(
             api.save_snippet(
-                data.get("trigger", ""), data.get("expansion", ""), data.get("id"), data.get("options", "")
+                data.get("trigger", ""), data.get("expansion", ""), data.get("id"), data.get("options") or []
             )
         )
 

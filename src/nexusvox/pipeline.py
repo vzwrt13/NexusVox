@@ -100,6 +100,8 @@ def process_text(
         press_enter=press_enter,
         cleanup=cleaned,
         translation=translation,
-        learnable=not cleaned.cleaned and not translation.translated,
+        # The translator passes English through byte for byte (translated=True all the same):
+        # only a dictation whose words it actually changed is not learnable.
+        learnable=not cleaned.cleaned and translation.text == cleaned.text,
         spoken=marked,
     )

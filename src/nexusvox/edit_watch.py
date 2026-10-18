@@ -90,8 +90,14 @@ def _find_last(text: str, injected: str) -> tuple[int, int] | None:
     words = injected.split()
     if not words:
         return None
-    matches = list(re.finditer(r"\s+".join(map(re.escape, words)), text))
-    return matches[-1].span() if matches else None
+    pattern = re.compile(r"\s+".join(map(re.escape, words)))
+    # Step one character past each hit, not past its end: finditer skips overlapping
+    # occurrences, so "ha ha" in "ha ha ha" would end at the first one, unlike rfind.
+    last, match = None, pattern.search(text)
+    while match:
+        last = match.span()
+        match = pattern.search(text, match.start() + 1)
+    return last
 
 
 def _map_position(pos: int, opcodes: list[tuple[str, int, int, int, int]], *, start: bool) -> int:

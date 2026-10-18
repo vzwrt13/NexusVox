@@ -285,9 +285,11 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
     except pyperclip.PyperclipException:
         original = None
 
+    clipboard_changed = False
     try:
         # Set transcription text to clipboard
         set_text(text)
+        clipboard_changed = True
         # Small delay to ensure clipboard is set
         time.sleep(0.05)
         _prepare_keyboard(injection_delay_ms)
@@ -303,8 +305,8 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
             time.sleep(0.1)
             _send_enter()
     finally:
-        # Restore original clipboard
-        if original is not None:
+        # Restore original clipboard (untouched when set_text failed: nothing to restore)
+        if original is not None and clipboard_changed:
             # Electron apps and terminals read the clipboard well after Ctrl+V; restoring
             # sooner made them paste the old clipboard instead of the dictation.
             time.sleep(_RESTORE_DELAY_S)

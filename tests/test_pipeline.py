@@ -143,3 +143,11 @@ def test_cleanup_sees_snippet_placeholders_and_the_snippet_is_expanded_after():
 
     result = _run("ähm Danke meine Signatur", snippets=[SIGNATURE], cleanup_fn=keep)
     assert result.typed == "Danke Viele Grüße\nVincent"
+
+
+def test_english_passed_through_by_the_translator_stays_learnable():
+    def passthrough(text, _config):
+        return TranslateResult(text, translated=True, source="en")
+
+    result = _run("Hello world", translate_fn=passthrough)
+    assert (result.typed, result.learnable) == ("Hello world", True)

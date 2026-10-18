@@ -300,3 +300,8 @@ def test_skip_is_counted_without_a_watch():
     watcher.skip("processed")
     assert watcher.status()["counts"] == {"processed": 1}
     assert watcher.status()["last"]["outcome"] == "processed"
+
+
+def test_extract_edit_finds_the_last_of_overlapping_occurrences():
+    # finditer would stop at the first "ha ha"; the paste is the one at the end.
+    assert extract_edit("ha ha ha", "ha ha", "ha ha hu") == "ha hu"

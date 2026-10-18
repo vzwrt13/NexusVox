@@ -61,19 +61,21 @@ def polish(selection: str, instruction: str, config: LlmConfig) -> str:
     return selection[:start] + rewritten + selection[start + len(core) :]
 
 
-def read_selection(injection_delay_ms: int) -> str:
-    """The selected text in the focused app, "" when there is none or the focus is a terminal.
+def read_selection(injection_delay_ms: int, in_terminals: bool = False) -> str:
+    """The selected text in the focused app, "" when there is none or the focus is a
+    terminal and *in_terminals* is off.
 
     Asks the control through UI Automation first, which sends no key and leaves the
-    clipboard alone. Only a control that does not report its selection gets Ctrl+C - and
-    never a terminal, where Ctrl+C would interrupt the running program.
+    clipboard alone. Only a control that does not report its selection gets Ctrl+C - a
+    terminal only with *in_terminals*, because there Ctrl+C without a selection
+    interrupts the running program.
     """
     from .injector import copy_selection  # Win32 at import; polish itself stays importable anywhere
 
     _ensure_com()
     focus = read_focus()
-    if focus.terminal:
-        logger.info("Polish: the focus is a terminal, not sending Ctrl+C")
+    if focus.terminal and not in_terminals:
+        logger.info("Polish: the focus is a terminal, not sending Ctrl+C ([polish].in_terminals is off)")
         return ""
     if focus.selection is not None:
         return focus.selection

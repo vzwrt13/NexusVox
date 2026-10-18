@@ -126,7 +126,7 @@ def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows
             raise rewritten
         return rewritten
 
-    monkeypatch.setattr(app_module, "read_selection", lambda delay: selection)
+    monkeypatch.setattr(app_module, "read_selection", lambda delay, in_terminals: selection)
     focus = iter(windows)
     monkeypatch.setattr(app_module, "foreground_window", lambda: next(focus))
     monkeypatch.setattr(app_module, "polish", fake_polish)

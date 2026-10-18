@@ -396,6 +396,15 @@ class LlmConfig:
 
 
 @dataclass
+class PolishConfig:
+    """How polish reads the selection. In a terminal it needs Ctrl+C (the terminal does
+    not report its selection), which interrupts the running program when nothing is
+    selected, so terminals are skipped unless `in_terminals` is set."""
+
+    in_terminals: bool = False
+
+
+@dataclass
 class LearnFromEditsConfig:
     """After a paste, read the focused text field through UI Automation for `window_s`
     seconds and turn the words the user corrects into dictionary suggestions, accepted
@@ -468,6 +477,7 @@ class Config:
     mic_guard: MicGuardConfig = field(default_factory=MicGuardConfig)
     learn_from_edits: LearnFromEditsConfig = field(default_factory=LearnFromEditsConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
+    polish: PolishConfig = field(default_factory=PolishConfig)
     remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
 
 
@@ -511,6 +521,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     mic_guard_data = data.get("mic_guard", {})
     learn_data = data.get("learn_from_edits", {})
     llm_data = data.get("llm", {})
+    polish_data = data.get("polish", {})
     remote_mic_data = data.get("remote_mic", {})
 
     # Backward compat: old configs use general.voice_commands_enabled (bool only)
@@ -600,6 +611,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             timeout_s=float(llm_data.get("timeout_s", LlmConfig.timeout_s)),
             keep_alive=str(llm_data.get("keep_alive", LlmConfig.keep_alive)),
         ),
+        polish=PolishConfig(in_terminals=bool(polish_data.get("in_terminals", False))),
         learn_from_edits=LearnFromEditsConfig(
             enabled=learn_data.get("enabled", False),
             window_s=float(learn_data.get("window_s", 30.0)),
@@ -702,6 +714,9 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"api_key = {json.dumps(config.llm.api_key)}",
             f"timeout_s = {config.llm.timeout_s}",
             f"keep_alive = {json.dumps(config.llm.keep_alive)}",
+            "",
+            "[polish]",
+            f"in_terminals = {'true' if config.polish.in_terminals else 'false'}",
             "",
             "[learn_from_edits]",
             f"enabled = {'true' if config.learn_from_edits.enabled else 'false'}",

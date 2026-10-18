@@ -118,6 +118,11 @@ def test_read_selection_never_sends_ctrl_c_to_a_terminal(monkeypatch):
     assert read_selection(0) == "" and copies == []
 
 
+def test_read_selection_copies_from_a_terminal_when_allowed(monkeypatch):
+    copies = _focus(monkeypatch, {"terminal": True, "selection": None})
+    assert read_selection(3, in_terminals=True) == "from Ctrl+C" and copies == [3]
+
+
 def test_read_selection_falls_back_to_the_clipboard(monkeypatch):
     copies = _focus(monkeypatch, {"terminal": False, "selection": None})
     assert read_selection(7) == "from Ctrl+C" and copies == [7]

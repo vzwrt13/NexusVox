@@ -116,6 +116,11 @@ def _create_app(api: DashboardAPI) -> Flask:
         resp = api.set_polish_key(data.get("key", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
+    @app.route("/api/settings/polish-terminals", methods=["POST"])
+    def set_polish_in_terminals():
+        data = request.get_json(force=True)
+        return jsonify(api.set_polish_in_terminals(bool(data.get("enabled", False))))
+
     @app.route("/api/settings/llm-model", methods=["POST"])
     def set_llm_model():
         data = request.get_json(force=True)

@@ -564,7 +564,9 @@ class NexusVoxApp:
         worked, nothing is pasted (error beep); the paste key still pastes the reply.
         """
         loop = asyncio.get_running_loop()
-        selection = await loop.run_in_executor(None, read_selection, self._config.injection_delay_ms)
+        selection = await loop.run_in_executor(
+            None, read_selection, self._config.injection_delay_ms, self._config.polish.in_terminals
+        )
         if not selection.strip():
             logger.info("Polish: nothing selected")
             _play(beep_error)

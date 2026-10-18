@@ -193,6 +193,14 @@ timeout_s = 60.0
 # sooner (the speech model needs its share); the first request after unloading takes 10-50 s.
 keep_alive = "10m"
 
+[polish]
+# Polish in terminals too (Windows Terminal, console, Git Bash, VS Code/Orca terminals).
+# A terminal does not report its selection, so polish copies it with Ctrl+C - which
+# interrupts the running program when nothing is selected - and the rewritten text is
+# pasted at the prompt, not over the selection. Off: polish plays the error beep there.
+# Also switchable in the dashboard Settings tab.
+in_terminals = false
+
 [learn_from_edits]
 # After each paste, keep reading the text field you dictated into (UI Automation) for
 # window_s seconds. Words you correct there become dictionary suggestions in the dashboard

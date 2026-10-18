@@ -694,6 +694,16 @@ def test_learn_from_edits_setting(flask_client):
     assert resp.get_json()["learn_from_edits"] is True
 
 
+def test_polish_in_terminals_setting(flask_client):
+    assert flask_client.get("/api/settings").get_json()["polish_in_terminals"] is False
+    resp = flask_client.post(
+        "/api/settings/polish-terminals",
+        data=json.dumps({"enabled": True}),
+        content_type="application/json",
+    )
+    assert resp.get_json()["polish_in_terminals"] is True
+
+
 def test_dictionary_suggestions_accept_and_dismiss(flask_client, db):
     db.add_dictionary_suggestions(
         [DictionaryEntry(wrong="nexus fox", right="NexusVox"), DictionaryEntry(wrong="Maya", right="Meier")]

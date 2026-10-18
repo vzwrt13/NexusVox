@@ -161,6 +161,7 @@ class DashboardAPI:
             "mic_guard_enabled": self._config.mic_guard.enabled,
             "store_audio": self._config.database.store_audio,
             "learn_from_edits": self._config.learn_from_edits.enabled,
+            "polish_in_terminals": self._config.polish.in_terminals,
         }
 
     def get_translator_status(self) -> dict:
@@ -249,6 +250,12 @@ class DashboardAPI:
     def set_mic_guard_enabled(self, enabled: bool) -> dict:
         """Checked by the app on every hold, so this is live."""
         self._config.mic_guard.enabled = enabled
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_polish_in_terminals(self, enabled: bool) -> dict:
+        """Read by the app on every polish, so this is live."""
+        self._config.polish.in_terminals = enabled
         save_config(self._config)
         return self.get_settings()
 

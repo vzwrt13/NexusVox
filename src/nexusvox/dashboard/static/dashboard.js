@@ -116,6 +116,7 @@ const hotkeyMods = Array.from(document.querySelectorAll("#hotkey-mods input"));
 const hotkeyKeySelect = document.getElementById("hotkey-key-select");
 const pasteKeySelect = document.getElementById("paste-key-select");
 const polishKeySelect = document.getElementById("polish-key-select");
+const polishTerminalsToggle = document.getElementById("polish-terminals-toggle");
 const llmModelInput = document.getElementById("llm-model-input");
 const llmStatus = document.getElementById("llm-status");
 
@@ -284,6 +285,7 @@ languageSelect.addEventListener("change", () => postSetting("/api/settings/langu
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 storeAudioToggle.addEventListener("change", () => postSetting("/api/settings/store-audio", { enabled: storeAudioToggle.checked }));
 learnFromEditsToggle.addEventListener("change", () => postSetting("/api/settings/learn-from-edits", { enabled: learnFromEditsToggle.checked }));
+polishTerminalsToggle.addEventListener("change", () => postSetting("/api/settings/polish-terminals", { enabled: polishTerminalsToggle.checked }));
 hotkeyModeSelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/hotkey-mode", { mode: hotkeyModeSelect.value });
   const s = await resp.json();
@@ -340,6 +342,7 @@ async function loadSettings() {
   micGuardToggle.checked = s.mic_guard_enabled;
   storeAudioToggle.checked = s.store_audio;
   learnFromEditsToggle.checked = s.learn_from_edits;
+  polishTerminalsToggle.checked = s.polish_in_terminals;
   loadTranslatorStatus();
   await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary(), loadDictionarySuggestions(), loadSnippets()]);
 }

@@ -16,6 +16,7 @@ from nexusvox.config import (
     LearnFromEditsConfig,
     LlmConfig,
     OSCommandsConfig,
+    PolishConfig,
     VoiceCommandsConfig,
     load_config,
     resolve_compute_type,
@@ -516,6 +517,14 @@ def test_llm_and_polish_key_roundtrip_and_defaults(tmp_path):
     path.write_text('[llm]\nprotocol = "grpc"\n', encoding="utf-8")
     loaded = load_config(path)
     assert loaded.llm == LlmConfig() and loaded.hotkey.polish_key == ""
+
+
+def test_polish_in_terminals_roundtrip(tmp_path):
+    path = tmp_path / "config.toml"
+    save_config(Config(polish=PolishConfig(in_terminals=True)), path)
+    assert load_config(path).polish.in_terminals is True
+    path.write_text("[general]\n", encoding="utf-8")
+    assert load_config(path).polish.in_terminals is False
 
 
 def test_polish_key_equal_to_the_paste_key_is_dropped(tmp_path):

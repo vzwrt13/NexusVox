@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from nexusvox.voice_commands import process_voice_commands
+import pytest
+
+from nexusvox.voice_commands import process_voice_commands, split_press_enter
 
 # --- New line ---
 
@@ -391,3 +393,42 @@ def test_numbers_de_adjacent_numbers_are_not_summed():
 
 def test_numbers_de_do_not_span_a_new_line():
     assert process_voice_commands("zwei new line drei", numbers_as_digits=True) == "2\n3"
+
+
+# ---------------------------------------------------------------------------
+# Press enter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Hello world, press enter.", "Hello world"),
+        ("Done. Press Enter.", "Done."),
+        ("Ship it hit enter!", "Ship it"),
+        ("Hallo Welt, Enter drücken.", "Hallo Welt"),
+        ("Bin gleich da drück Enter", "Bin gleich da"),
+        ("Okay, drücke Enter", "Okay"),
+        ("press  enter", ""),
+        ("Enter drücken.", ""),
+        ("Send it, press enter,", "Send it"),
+        ("Okay - hit enter…", "Okay"),
+        ("Schick es „Enter drücken“", "Schick es"),
+    ],
+)
+def test_split_press_enter_trailing_phrase(text, expected):
+    assert split_press_enter(text) == (expected, True)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "press enter to continue",
+        "Drück Enter und warte",
+        "depress enter",
+        "just press",
+        "",
+    ],
+)
+def test_split_press_enter_leaves_other_text(text):
+    assert split_press_enter(text) == (text, False)

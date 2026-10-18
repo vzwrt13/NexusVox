@@ -21,10 +21,12 @@ VK_SHIFT = 0x10
 VK_MENU = 0x12  # Alt
 VK_LWIN = 0x5B
 VK_V = 0x56
+VK_RETURN = 0x0D
 
 # Hardware scan codes — required for apps that ignore virtual-key-only input
 SCAN_CONTROL = 0x1D
 SCAN_V = 0x2F
+SCAN_RETURN = 0x1C
 SCAN_SHIFT = 0x2A
 SCAN_ALT = 0x38
 SCAN_LWIN = 0x5B
@@ -186,13 +188,47 @@ def _paste_via_message() -> bool:
     return bool(result)
 
 
-def inject_text(text: str, injection_delay_ms: int = 500) -> None:
+def _send_enter() -> bool:
+    """Simulate an Enter keypress via SendInput. Returns True if both events were injected."""
+    inputs = [
+        _make_key_input(VK_RETURN, SCAN_RETURN),
+        _make_key_input(VK_RETURN, SCAN_RETURN, KEYEVENTF_KEYUP),
+    ]
+    array = (INPUT * len(inputs))(*inputs)
+    sent = user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
+    logger.info("SendInput Enter: sent %d/%d events", sent, len(inputs))
+    if sent == 0:
+        logger.error("SendInput returned 0 for Enter — blocked by UIPI (target runs elevated?)")
+    return sent == len(inputs)
+
+
+def _prepare_keyboard(injection_delay_ms: int) -> None:
+    """Wait until the user lets go of the hotkey, clear stale modifier state, then pause.
+
+    The hotkey fires on the first modifier going up; without this a synthetic
+    keystroke would be combined with the still-held modifiers (Ctrl+V turning
+    into Ctrl+Shift+Alt+V, Enter into Ctrl+Enter).
+    """
+    _wait_for_physical_release()
+    _release_all_modifiers()
+    time.sleep(injection_delay_ms / 1000)
+
+
+def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = False) -> None:
     """Inject text at the active cursor position using clipboard paste.
 
     Saves the current clipboard, sets new content, pastes, then restores.
     ``injection_delay_ms`` is the pause between releasing modifier keys and
     sending the Ctrl+V keystroke, giving the OS time to clear stale state.
+    With ``press_enter`` an Enter keypress follows the paste; an empty ``text``
+    then presses Enter only.
     """
+    if not text:
+        if press_enter:
+            _prepare_keyboard(injection_delay_ms)
+            _send_enter()
+        return
+
     # Save current clipboard
     try:
         original = pyperclip.paste()
@@ -204,12 +240,7 @@ def inject_text(text: str, injection_delay_ms: int = 500) -> None:
         pyperclip.copy(text)
         # Small delay to ensure clipboard is set
         time.sleep(0.05)
-        # The hotkey fires on the first modifier going up; wait until the user
-        # has let go of all of them, then clear any stale state synthetically
-        # so Ctrl+V is not turned into Ctrl+Shift+Alt+V.
-        _wait_for_physical_release()
-        _release_all_modifiers()
-        time.sleep(injection_delay_ms / 1000)
+        _prepare_keyboard(injection_delay_ms)
         # Try SendInput Ctrl+V first (works for browsers and most apps),
         # fall back to WM_PASTE (works for native Win32 controls like Notepad)
         if not _send_ctrl_v():
@@ -217,6 +248,10 @@ def inject_text(text: str, injection_delay_ms: int = 500) -> None:
             _paste_via_message()
         # Wait for paste to complete
         time.sleep(0.05)
+        if press_enter:
+            # Give the target time to insert the pasted text before Enter submits it.
+            time.sleep(0.1)
+            _send_enter()
     finally:
         # Restore original clipboard
         if original is not None:

@@ -221,6 +221,7 @@ class DashboardAPI:
             "bypass_structural": self._config.voice_commands.bypass_structural,
             "structural": self._config.voice_commands.structural,
             "all_structural": ALL_STRUCTURAL_INFO,
+            "press_enter": self._config.voice_commands.press_enter,
         }
 
     def set_voice_commands_enabled(self, enabled: bool) -> dict:
@@ -230,6 +231,11 @@ class DashboardAPI:
 
     def set_voice_commands_numbers(self, enabled: bool) -> dict:
         self._config.voice_commands.numbers_as_digits = enabled
+        save_config(self._config)
+        return self.get_voice_commands()
+
+    def set_voice_commands_press_enter(self, enabled: bool) -> dict:
+        self._config.voice_commands.press_enter = enabled
         save_config(self._config)
         return self.get_voice_commands()
 

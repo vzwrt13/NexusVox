@@ -134,6 +134,11 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_voice_commands_numbers(data.get("enabled", False)))
 
+    @app.route("/api/voice-commands/press-enter", methods=["POST"])
+    def set_voice_commands_press_enter():
+        data = request.get_json(force=True)
+        return jsonify(api.set_voice_commands_press_enter(data.get("enabled", False)))
+
     @app.route("/api/voice-commands/symbols", methods=["POST"])
     def set_voice_commands_symbols():
         data = request.get_json(force=True)

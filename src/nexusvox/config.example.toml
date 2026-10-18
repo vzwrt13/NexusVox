@@ -94,6 +94,10 @@ bypass_structural = false
 # Structural commands to recognise (German: neue Zeile, neuer Absatz, Tabulator, alles groß).
 # Remove entries to type those words literally.
 structural = ["new paragraph", "new line", "tab", "all caps"]
+# When true, ending a dictation with "press enter" / "hit enter" (German: "Enter drücken",
+# "drück Enter") pastes the text without the phrase, then presses Enter - e.g. to send a chat
+# message. Saying only the phrase presses Enter alone. Disabled by default.
+press_enter = false
 # Symbol commands to recognise. Remove entries that conflict with your natural speech patterns.
 #
 # Safe defaults (rarely appear as plain words in dictation):

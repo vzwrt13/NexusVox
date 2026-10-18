@@ -439,6 +439,16 @@ vcNumbersToggle.addEventListener("change", async () => {
   });
 });
 
+const vcPressEnterToggle = document.getElementById("voice-press-enter-toggle");
+
+vcPressEnterToggle.addEventListener("change", async () => {
+  await fetch("/api/voice-commands/press-enter", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: vcPressEnterToggle.checked }),
+  });
+});
+
 vcBypassSymbolsToggle.addEventListener("change", async () => {
   await fetch("/api/voice-commands/bypass-symbols", {
     method: "POST",
@@ -461,6 +471,7 @@ async function loadVoiceCommands() {
   const data = await fetch("/api/voice-commands").then((r) => r.json());
   vcToggle.checked = data.enabled;
   vcNumbersToggle.checked = data.numbers_as_digits;
+  vcPressEnterToggle.checked = data.press_enter;
   vcBypassSymbolsToggle.checked = data.bypass_symbols;
   vcBypassStructuralToggle.checked = data.bypass_structural;
   renderSymbolGrid(data.all_symbols, data.symbols);

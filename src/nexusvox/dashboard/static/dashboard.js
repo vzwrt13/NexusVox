@@ -1,23 +1,38 @@
 /* NexusVox Dashboard — Tab switching, Chart.js rendering, settings */
 
 // ── Globals ──────────────────────────────────────────────────────────
-// Aurora Precision tokens, kept in step with the :root variables in style.css.
+// Chart colors come from the :root variables in style.css, so the stylesheet is the single source
+// of the theme. The fallbacks only matter when the stylesheet failed to load.
+const rootStyle = getComputedStyle(document.documentElement);
+function cssVar(name, fallback) {
+  return rootStyle.getPropertyValue(name).trim() || fallback;
+}
+
 const COLORS = {
-  accent: "#6c5ce7",
-  accentLight: "#a29bfe",
-  accentAlpha: "rgba(162, 155, 254, 0.35)",
-  green: "#00d2a0",
-  greenAlpha: "rgba(0, 210, 160, 0.15)",
-  orange: "#ffa94d",
-  red: "#ff6b6b",
-  text: "#f5f5f7",
-  dim: "#a1a1aa",
-  grid: "rgba(255, 255, 255, 0.08)",
+  accent: cssVar("--accent", "#6c5ce7"),
+  accentLight: cssVar("--accent-light", "#a29bfe"),
+  accentSoft: cssVar("--accent-soft", "rgba(162, 155, 254, 0.35)"),
+  accentFill: cssVar("--accent-fill", "rgba(108, 92, 231, 0.2)"),
+  green: cssVar("--green", "#00d2a0"),
+  greenFill: cssVar("--green-fill", "rgba(0, 210, 160, 0.15)"),
+  orange: cssVar("--orange", "#ffa94d"),
+  red: cssVar("--red", "#ff6b6b"),
+  text: cssVar("--text", "#f5f5f7"),
+  dim: cssVar("--text-dim", "#a1a1aa"),
+  grid: cssVar("--border", "rgba(255, 255, 255, 0.08)"),
 };
 
-// Chart.js is a global from chart.min.js; Geist is bundled in style.css.
-Chart.defaults.font.family = '"Geist", system-ui, sans-serif';
-Chart.defaults.color = COLORS.dim;
+// "#rrggbb" plus an alpha -> rgba(), for colors that vary per data point (the heatmap).
+function withAlpha(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+// Chart.js is a global from chart.min.js; without it only the charts break, not the rest of the page.
+if (window.Chart) {
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  Chart.defaults.color = COLORS.dim;
+}
 
 const chartDefaults = {
   responsive: true,
@@ -93,9 +108,9 @@ function restoreTabFromHash() {
 window.addEventListener("hashchange", restoreTabFromHash);
 
 // ── Period Selector ──────────────────────────────────────────────────
-document.querySelectorAll(".period-btn").forEach((btn) => {
+document.querySelectorAll(".period-btn[data-period]").forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".period-btn").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".period-btn[data-period]").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
     currentPeriod = btn.dataset.period;
     loadTimeline();
@@ -1027,7 +1042,7 @@ function renderTimeline(d) {
       datasets: [{
         data: d.values,
         borderColor: COLORS.accent,
-        backgroundColor: "rgba(108, 92, 231, 0.2)",
+        backgroundColor: COLORS.accentFill,
         fill: true,
         tension: 0.3,
         pointRadius: d.labels.length > 30 ? 0 : 3,
@@ -1076,7 +1091,7 @@ function renderHours(d) {
         data: d.values,
         backgroundColor: d.values.map((v) => {
           const max = Math.max(...d.values);
-          return v === max ? COLORS.accent : COLORS.accentAlpha;
+          return v === max ? COLORS.accent : COLORS.accentSoft;
         }),
         borderRadius: 4,
       }],
@@ -1127,8 +1142,8 @@ function renderHeatmap(d) {
     d.grid[di].forEach((val) => {
       const intensity = val / maxVal;
       const bg = intensity === 0
-        ? "rgba(108, 92, 231, 0.05)"
-        : `rgba(108, 92, 231, ${0.15 + intensity * 0.75})`;
+        ? withAlpha(COLORS.accent, 0.05)
+        : withAlpha(COLORS.accent, 0.15 + intensity * 0.75);
       html += '<td style="background:' + bg + '">' + (val || "") + "</td>";
     });
     html += "</tr>";
@@ -1153,7 +1168,7 @@ function renderLatency(d) {
           label: "Transcribe",
           data: d.transcribe_ms,
           borderColor: COLORS.green,
-          backgroundColor: COLORS.greenAlpha,
+          backgroundColor: COLORS.greenFill,
           fill: true,
           tension: 0.3,
           pointRadius,

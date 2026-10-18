@@ -30,6 +30,9 @@
   --accent: #6c5ce7;
   --accent-light: #a29bfe;
   --accent-glow: rgba(108, 92, 231, 0.18);
+  --accent-soft: rgba(162, 155, 254, 0.35);
+  --accent-fill: rgba(108, 92, 231, 0.2);
+  --green-fill: rgba(0, 210, 160, 0.15);
   --green: #00d2a0;
   --red: #ff6b6b;
   --orange: #ffa94d;
@@ -139,20 +142,12 @@ body::before {
   height: 600px;
   background: radial-gradient(closest-side, rgba(108, 92, 231, 0.22), rgba(108, 92, 231, 0));
   pointer-events: none;
+  z-index: -1;
 }
 
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
-@media (max-width: 800px) {
-  body { flex-direction: column; align-items: stretch; }
-  header { flex: none; width: auto; align-self: auto; gap: 16px; padding: 16px; border-right: none; border-bottom: 1px solid var(--border); }
-  .tabs { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
-  .tab { width: auto; padding: 9px 12px; }
-  main { padding: 24px 16px 40px; }
-  .charts-grid { grid-template-columns: 1fr; }
-  .chart-card.wide { grid-column: auto; }
-}
 
 /* Settings */
 .settings-card {
@@ -366,7 +361,7 @@ body::before {
 .refresh-btn:hover { color: var(--text); border-color: var(--border-strong); }
 
 /* Charts grid */
-.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.charts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 
 .chart-card {
   background: var(--surface);
@@ -1009,4 +1004,26 @@ canvas { width: 100% !important; max-height: 260px; }
   background: var(--surface3);
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+/* Narrow windows: the sidebar stacks above the content. Last in the file so it wins over the base rules. */
+@media (max-width: 800px) {
+  body { flex-direction: column; align-items: stretch; }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    flex: none;
+    width: auto;
+    align-self: auto;
+    gap: 16px;
+    padding: 16px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .tabs { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .tab { width: auto; padding: 9px 12px; }
+  main { padding: 24px 16px 40px; }
+  .charts-grid { grid-template-columns: minmax(0, 1fr); }
+  .chart-card.wide { grid-column: auto; }
 }

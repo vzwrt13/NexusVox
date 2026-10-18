@@ -76,7 +76,8 @@ def is_reachable(config: LlmConfig) -> bool:
     """Whether anything answers at the server address (any HTTP status counts), probed briefly."""
     try:
         urllib.request.urlopen(config.url, timeout=_PROBE_TIMEOUT_S).close()
-    except urllib.error.HTTPError:
+    except urllib.error.HTTPError as exc:
+        exc.close()
         return True
     except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError):
         return False

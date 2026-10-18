@@ -16,12 +16,14 @@ except Exception:  # Windows-only imports (pynput hook, tray, SendInput) on othe
     pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
 
 
-def _app(*, command: bool, connect_error: Exception | None = None, paste_last: bool = False) -> NexusVoxApp:
+def _app(
+    *, command: bool, connect_error: Exception | None = None, paste_last: bool = False, polish: bool = False
+) -> NexusVoxApp:
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._transcriber = MagicMock()
     app._transcriber.connect = AsyncMock(side_effect=connect_error)
     app._transcriber.disconnect = AsyncMock()
-    app._hotkey = MagicMock(command=command, paste_last=paste_last, active=False)
+    app._hotkey = MagicMock(command=command, paste_last=paste_last, polish=polish, active=False)
     app._tray = MagicMock()
     app._mic_guard = None
     app._send_os_command = MagicMock(return_value="ok")
@@ -108,7 +110,7 @@ def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
 # -- polish ----------------------------------------------------------------------
 
 
-def _polish_app(monkeypatch, selection: str, rewritten: str | Exception):
+def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows=(1, 1)):
     import nexusvox.app as app_module
 
     app = NexusVoxApp.__new__(NexusVoxApp)
@@ -122,7 +124,9 @@ def _polish_app(monkeypatch, selection: str, rewritten: str | Exception):
             raise rewritten
         return rewritten
 
-    monkeypatch.setattr(app_module, "copy_selection", lambda delay: selection)
+    monkeypatch.setattr(app_module, "read_selection", lambda delay: selection)
+    focus = iter(windows)
+    monkeypatch.setattr(app_module, "foreground_window", lambda: next(focus))
     monkeypatch.setattr(app_module, "polish", fake_polish)
     monkeypatch.setattr(app_module, "inject_text", lambda text, delay: calls["pasted"].append(text))
     monkeypatch.setattr(app_module, "beep_error", lambda: calls["beeps"].append("error"))
@@ -151,3 +155,17 @@ def test_polish_with_the_model_down_keeps_the_selection(monkeypatch):
     asyncio.run(app._polish_selection("", MagicMock()))
     assert calls == {"pasted": [], "beeps": ["error"]}
     app._save_command.assert_not_called()
+
+
+def test_polish_does_not_paste_when_the_focus_moved(monkeypatch):
+    app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen", windows=(1, 2))
+    asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
+    assert calls == {"pasted": [], "beeps": ["error"]}
+    assert app._last_typed == "Hallo zusammen"  # the paste key still pastes it
+
+
+def test_quick_tap_of_the_polish_chord_polishes_with_the_default_instruction():
+    app = _app(command=False, polish=True)
+    app._polish_selection = AsyncMock()
+    _run_skipped_cycle(app)
+    app._polish_selection.assert_awaited_once_with("", None)

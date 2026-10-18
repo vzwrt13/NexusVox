@@ -24,13 +24,13 @@ from .db import Database
 from .edit_watch import EditWatcher
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import HotkeyListener, describe_hotkey
-from .injector import copy_selection, inject_text
+from .injector import foreground_window, inject_text
 from .lang_detect import detect_language
 from .llm import LlmError
 from .mic_guard import MicGuard, create_mic_guard
 from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
 from .pipeline import process_text
-from .polish import polish
+from .polish import polish, read_selection
 from .remote_mic import RemoteAudioSource, RemoteMicServer
 from .snippets import Snippet, resolve_open_target
 from .transcriber import create_transcriber
@@ -374,6 +374,10 @@ class NexusVoxApp:
                     # A quick tap of the paste chord (or one queued behind a running
                     # cycle) needs no recording: paste the last text all the same.
                     await self._paste_last_text()
+                elif self._hotkey.polish:
+                    # A quick tap of the polish chord: nothing was said, so the default
+                    # instruction; there is no recording to save.
+                    await self._polish_selection("", None)
                 return
 
             # Now we are ready — start recording
@@ -554,28 +558,35 @@ class NexusVoxApp:
             None, inject_text, self._last_typed, self._config.injection_delay_ms
         )
 
-    async def _polish_selection(self, instruction: str, recording: _Recording) -> None:
+    async def _polish_selection(self, instruction: str, recording: _Recording | None) -> None:
         """Rewrite the selected text by *instruction* through the [llm] model and paste it over the selection.
 
         Nothing selected, or the model unreachable or failing: the error beep, and the
-        selection stays as it was.
+        selection stays as it was. When the focus moved to another window while the model
+        worked, nothing is pasted (error beep); the paste key still pastes the reply.
         """
         loop = asyncio.get_running_loop()
-        selection = await loop.run_in_executor(None, copy_selection, self._config.injection_delay_ms)
+        selection = await loop.run_in_executor(None, read_selection, self._config.injection_delay_ms)
         if not selection.strip():
             logger.info("Polish: nothing selected")
             _play(beep_error)
             return
+        window = foreground_window()
         try:
             rewritten = await loop.run_in_executor(None, polish, selection, instruction, self._config.llm)
         except LlmError as exc:
             logger.warning("Polish: model at %s failed (%s); the selection stays as it was", self._config.llm.url, exc)
             _play(beep_error)
             return
-        # The selection is still selected, so pasting replaces it; Ctrl+Z in the app undoes it.
-        await loop.run_in_executor(None, inject_text, rewritten, 0)
         self._last_typed = rewritten
-        self._save_command(recording, f"[polish] {instruction or 'default'}", instruction or selection)
+        if foreground_window() != window:
+            logger.info("Polish: the focus moved to another window, not pasting (the paste key pastes it)")
+            _play(beep_error)
+        else:
+            # The selection is still selected, so pasting replaces it; Ctrl+Z in the app undoes it.
+            await loop.run_in_executor(None, inject_text, rewritten, 0)
+        if recording is not None:
+            self._save_command(recording, f"[polish] {instruction or 'default'}", instruction or selection)
 
     def _flag_last_transcription(self) -> None:
         """ "nexus flag" - always available, flags the most recent transcription for review."""

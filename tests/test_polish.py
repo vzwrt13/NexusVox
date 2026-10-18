@@ -11,7 +11,7 @@ import pytest
 from nexusvox import llm
 from nexusvox.config import LlmConfig
 from nexusvox.llm import LlmError, complete
-from nexusvox.polish import DEFAULT_INSTRUCTION, build_user_message, clean_reply, polish
+from nexusvox.polish import DEFAULT_INSTRUCTION, build_user_message, clean_reply, polish, read_selection
 
 
 class FakeServer:
@@ -82,3 +82,42 @@ def test_polish_sends_selection_and_instruction(monkeypatch):
     assert polish("hi leute", "mach es formeller", LlmConfig()) == "Sehr geehrte Damen und Herren"
     user = server.requests[0][1]["messages"][1]["content"]
     assert "mach es formeller" in user and user.endswith("hi leute")
+
+
+# --- reading the selection ---
+
+
+def _focus(monkeypatch, focus, clipboard="from Ctrl+C"):
+    import sys
+    import types
+
+    import nexusvox.polish as polish_module
+    from nexusvox.uia import Focus
+
+    copies = []
+    fake_injector = types.ModuleType("nexusvox.injector")
+    fake_injector.copy_selection = lambda delay: copies.append(delay) or clipboard
+    monkeypatch.setitem(sys.modules, "nexusvox.injector", fake_injector)
+    monkeypatch.setattr(polish_module, "_ensure_com", lambda: None)
+    monkeypatch.setattr(polish_module, "read_focus", lambda: Focus(**focus))
+    return copies
+
+
+def test_read_selection_asks_the_control_first(monkeypatch):
+    copies = _focus(monkeypatch, {"terminal": False, "selection": "markierter Text"})
+    assert read_selection(0) == "markierter Text" and copies == []
+
+
+def test_read_selection_trusts_an_empty_reported_selection(monkeypatch):
+    copies = _focus(monkeypatch, {"terminal": False, "selection": ""})
+    assert read_selection(0) == "" and copies == []
+
+
+def test_read_selection_never_sends_ctrl_c_to_a_terminal(monkeypatch):
+    copies = _focus(monkeypatch, {"terminal": True, "selection": None})
+    assert read_selection(0) == "" and copies == []
+
+
+def test_read_selection_falls_back_to_the_clipboard(monkeypatch):
+    copies = _focus(monkeypatch, {"terminal": False, "selection": None})
+    assert read_selection(7) == "from Ctrl+C" and copies == [7]

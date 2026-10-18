@@ -471,6 +471,13 @@ class Config:
     remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
 
 
+def _polish_key(hotkey_data: dict) -> str:
+    """`[hotkey].polish_key`, dropped when it is unknown or the same as the paste key (edited by hand)."""
+    polish = normalize_hotkey_key(str(hotkey_data.get("polish_key", ""))) or ""
+    paste = normalize_hotkey_key(str(hotkey_data.get("paste_key", "V"))) or ""
+    return "" if polish and polish == paste else polish
+
+
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     """Load configuration from a TOML file. Creates from example if missing."""
     if not path.exists():
@@ -533,7 +540,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             key=normalize_hotkey_key(hotkey_key) or "",
             mode=hotkey_mode if hotkey_mode in HOTKEY_MODES else "hold",
             paste_key=normalize_hotkey_key(str(hotkey_data.get("paste_key", "V"))) or "",
-            polish_key=normalize_hotkey_key(str(hotkey_data.get("polish_key", ""))) or "",
+            polish_key=_polish_key(hotkey_data),
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),

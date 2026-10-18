@@ -220,6 +220,11 @@ def _prepare_keyboard(injection_delay_ms: int) -> None:
     time.sleep(injection_delay_ms / 1000)
 
 
+def foreground_window() -> int:
+    """The handle of the window that has the keyboard focus now (0 when none)."""
+    return user32.GetForegroundWindow() or 0
+
+
 def copy_selection(injection_delay_ms: int = 500, timeout_s: float = 1.0) -> str:
     """The text selected in the focused app, copied with Ctrl+C; "" when nothing is selected.
 

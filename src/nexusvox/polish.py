@@ -9,10 +9,13 @@ are versioned and tested with the code.
 
 from __future__ import annotations
 
+import logging
 import re
 
 from .config import LlmConfig
-from .llm import complete
+from .llm import LlmError, complete
+from .mic_guard import _ensure_com
+from .uia import read_focus
 
 # Never "polish" in a prompt: small models read it as the language and translate to Polish.
 DEFAULT_INSTRUCTION = (
@@ -29,7 +32,11 @@ SYSTEM_PROMPT = (
     "Reply with the rewritten text only."
 )
 
+logger = logging.getLogger(__name__)
+
 _FENCE_RE = re.compile(r"^```[\w-]*\n(.*)\n```$", re.DOTALL)
+# A reasoning model behind protocol = "openai" has no `think: false` and may put its thinking first.
+_THINK_RE = re.compile(r"^<think>.*?</think>", re.DOTALL)
 
 
 def build_user_message(selection: str, instruction: str) -> str:
@@ -37,12 +44,37 @@ def build_user_message(selection: str, instruction: str) -> str:
 
 
 def clean_reply(reply: str) -> str:
-    """Strip a code fence the model wrapped around its answer despite being told not to."""
-    reply = reply.strip()
+    """Strip a leading thinking block and a code fence the model wrapped around its answer."""
+    reply = _THINK_RE.sub("", reply.strip()).strip()
     m = _FENCE_RE.match(reply)
     return m.group(1).strip() if m else reply
 
 
 def polish(selection: str, instruction: str, config: LlmConfig) -> str:
-    """The selection rewritten by the instruction. Raises `llm.LlmError`."""
-    return clean_reply(complete(config, SYSTEM_PROMPT, build_user_message(selection, instruction)))
+    """The selection rewritten by the instruction, with the selection's own leading and
+    trailing whitespace kept (a selected line's newline must survive). Raises `llm.LlmError`."""
+    rewritten = clean_reply(complete(config, SYSTEM_PROMPT, build_user_message(selection, instruction)))
+    if not rewritten:
+        raise LlmError("the model returned no text")
+    core = selection.strip()
+    start = selection.find(core)
+    return selection[:start] + rewritten + selection[start + len(core) :]
+
+
+def read_selection(injection_delay_ms: int) -> str:
+    """The selected text in the focused app, "" when there is none or the focus is a terminal.
+
+    Asks the control through UI Automation first, which sends no key and leaves the
+    clipboard alone. Only a control that does not report its selection gets Ctrl+C - and
+    never a terminal, where Ctrl+C would interrupt the running program.
+    """
+    from .injector import copy_selection  # Win32 at import; polish itself stays importable anywhere
+
+    _ensure_com()
+    focus = read_focus()
+    if focus.terminal:
+        logger.info("Polish: the focus is a terminal, not sending Ctrl+C")
+        return ""
+    if focus.selection is not None:
+        return focus.selection
+    return copy_selection(injection_delay_ms)

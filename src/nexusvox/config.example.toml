@@ -159,3 +159,16 @@ timeout_s = 8.0
 # Also switchable in the dashboard Settings tab.
 enabled = false
 watchdog_s = 30.0
+
+[remote_mic]
+# Let a phone use NexusVox as its speech recogniser: hold its bubble to dictate, the audio
+# runs through the same pipeline as the hotkey (dictionary, voice commands, translation)
+# and the text goes back to the phone, which inserts it there. Nothing is typed on this
+# PC. The phone streams 16 kHz PCM16 over a WebSocket to host:port and must send the
+# token as "Authorization: Bearer <token>". Set a long random token and bind host to a private address such as this PC's
+# Tailscale IP, not 0.0.0.0. Off, or with an empty token, nothing listens.
+# Contract for phone apps: docs/REMOTE_MIC.md.
+enabled = false
+host = "127.0.0.1"
+port = 47393
+token = ""

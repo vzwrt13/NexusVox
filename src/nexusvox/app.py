@@ -25,6 +25,7 @@ from .injector import inject_text
 from .lang_detect import detect_language
 from .mic_guard import MicGuard, create_mic_guard
 from .os_commands import execute_nexus_command, parse_nexus_command
+from .remote_mic import RemoteAudioSource, RemoteMicServer
 from .transcriber import create_transcriber
 from .translator import translate
 from .tray import SystemTray
@@ -116,12 +117,25 @@ class NexusVoxApp:
         self._record_start_event: asyncio.Event | None = None
         self._record_stop_event: asyncio.Event | None = None
 
+        # A phone recording in place of the microphone ([remote_mic]). The server is
+        # built in `_run`, on the loop it serves from. `_remote_recording` is set from the
+        # phone's start until the cycle is over; the hotkey is ignored meanwhile. The text
+        # goes back to the phone (`_remote_text`) instead of being typed here.
+        self._remote_audio = RemoteAudioSource()
+        self._remote_mic: RemoteMicServer | None = None
+        self._remote_recording = False
+        self._remote_cancelled = False
+        self._remote_text = ""
+        self._cycle_running = False
+
         # Model switch state
         self._switch_status: str = "idle"
         self._switch_error: str | None = None
 
     def _on_hotkey_activate(self) -> None:
         """Called from hotkey thread when push-to-talk starts."""
+        if self._remote_recording:
+            return
         if self._mic_guard is not None and self._config.mic_guard.enabled:
             self._mic_guard.hold_async()
         if self._loop is not None and self._record_start_event is not None:
@@ -129,10 +143,33 @@ class NexusVoxApp:
 
     def _on_hotkey_deactivate(self) -> None:
         """Called from hotkey thread when push-to-talk ends."""
+        if self._remote_recording:
+            return
         if self._mic_guard is not None:
             self._mic_guard.release_async()
         if self._loop is not None and self._record_stop_event is not None:
             self._loop.call_soon_threadsafe(self._record_stop_event.set)
+
+    def _on_remote_start(self) -> bool:
+        """Called on the loop when a phone starts a recording. False while busy: a cycle
+        is running or queued, or the hotkey is held."""
+        if self._cycle_running or self._hotkey.active or self._record_start_event.is_set():
+            return False
+        self._remote_recording = True
+        self._remote_cancelled = False
+        self._remote_text = ""
+        self._record_stop_event.clear()
+        self._record_start_event.set()
+        return True
+
+    def _on_remote_stop(self) -> None:
+        """Called on the loop when the phone stops (or drops) its recording."""
+        self._record_stop_event.set()
+
+    def _on_remote_cancel(self) -> None:
+        """Called on the loop when the phone drops its recording without wanting text."""
+        self._remote_cancelled = True
+        self._record_stop_event.set()
 
     def _on_hotkey_command(self) -> None:
         """Called from the hotkey thread when the command key marks this recording.
@@ -281,8 +318,12 @@ class NexusVoxApp:
             wf.writeframes(self._normalize_pcm(pcm_buffer))
         return f"{self._config.database.audio_dir}/{filename}"
 
-    async def _transcription_cycle(self) -> None:
-        """Run one full transcription cycle: connect, record, transcribe, inject."""
+    async def _transcription_cycle(self, remote: bool = False) -> None:
+        """Run one full transcription cycle: connect, record, transcribe, inject.
+
+        `remote` records from the phone ([remote_mic]) instead of the microphone; it is
+        never a command recording and leaves the hotkey state alone.
+        """
         recording_stopped = False
         try:
             # Connect to inference server BEFORE signalling readiness so the
@@ -305,24 +346,31 @@ class NexusVoxApp:
             start_time = time.monotonic()
 
             # Start audio capture
-            self._audio.start()
+            audio = self._remote_audio if remote else self._audio
+            audio.start()
 
             # Stream audio chunks until recording stops
-            stream_task = asyncio.create_task(self._stream_audio())
+            stream_task = asyncio.create_task(self._stream_audio(audio))
 
             # Wait for hotkey release
             await self._record_stop_event.wait()
             self._record_stop_event.clear()
             recording_stopped = True
-            is_command = self._hotkey.command
+            is_command = self._hotkey.command and not remote
 
             # Stop audio (sends None sentinel, ending the stream task)
-            self._audio.stop()
+            audio.stop()
             audio_buffer = await stream_task
 
             stop_time = time.monotonic()
             duration_ms = int((stop_time - start_time) * 1000)
             logger.info("Recording stopped (duration=%dms)", duration_ms)
+
+            if remote and self._remote_cancelled:
+                logger.info("Remote recording cancelled, nothing to transcribe")
+                self._tray.set_active(False)
+                await self._transcriber.disconnect()
+                return
 
             self._tray.set_active(False)
             threading.Thread(target=beep_stop, daemon=True).start()
@@ -363,7 +411,8 @@ class NexusVoxApp:
                 loop = asyncio.get_event_loop()
 
                 # Check for nexus commands before any text processing
-                nexus_cmd = parse_nexus_command(raw_text)
+                # A phone recording only wants its text back, never a PC action.
+                nexus_cmd = None if remote else parse_nexus_command(raw_text)
 
                 if nexus_cmd is not None and nexus_cmd.action == "flag":
                     # "nexus flag" — always available, flags most recent transcription
@@ -377,7 +426,9 @@ class NexusVoxApp:
                     await self._transcriber.disconnect()
                     return
 
-                assistant_text = parse_assistant_command(raw_text) if self._config.assistant.enabled else None
+                assistant_text = (
+                    parse_assistant_command(raw_text) if self._config.assistant.enabled and not remote else None
+                )
                 if assistant_text is not None:
                     # "nexus assistant <text>" — hand the sentence to the voice assistant.
                     # If nothing answers on its port, fall through and type it as usual.
@@ -469,13 +520,16 @@ class NexusVoxApp:
                     self._config.translator,
                 )
 
-                delay = self._config.injection_delay_ms
-                await loop.run_in_executor(
-                    None,
-                    inject_text,
-                    translation.text,
-                    delay,
-                )
+                if remote:
+                    # The phone inserts it into its own focused field.
+                    self._remote_text = translation.text
+                else:
+                    await loop.run_in_executor(
+                        None,
+                        inject_text,
+                        translation.text,
+                        self._config.injection_delay_ms,
+                    )
                 latency_ms = int((time.monotonic() - stop_time) * 1000)
                 language = detect_language(raw_text) if self._config.auto_language_detection else self._config.language
                 record = self._db.save_transcription(
@@ -491,7 +545,9 @@ class NexusVoxApp:
                     transcribe_ms=transcribe_ms,
                     latency_ms=latency_ms,
                 )
-                logger.info("Injected after %dms: %s", latency_ms, translation.text)
+                logger.info(
+                    "%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, translation.text
+                )
 
                 self._store_audio(audio_buffer, record.id)
             else:
@@ -500,7 +556,7 @@ class NexusVoxApp:
         except Exception:
             logger.exception("Transcription cycle failed")
             self._tray.set_active(False)
-            if not recording_stopped:
+            if not recording_stopped and not remote:
                 # The recording this intent belonged to is gone. Without this, toggle
                 # mode would treat the next press as "stop" (and keep the mic guard
                 # muted); hold mode would queue a stale stop that skips the next cycle.
@@ -514,12 +570,12 @@ class NexusVoxApp:
             if self._mic_guard is not None and not self._hotkey.active:
                 self._mic_guard.release_async()
 
-    async def _stream_audio(self) -> bytearray:
-        """Stream audio chunks from microphone to the transcription server, returning the full buffer."""
+    async def _stream_audio(self, audio: AudioCapture | RemoteAudioSource) -> bytearray:
+        """Stream audio chunks from the mic or the phone to the transcription server, returning the full buffer."""
         buffer = bytearray()
         count = 0
         try:
-            async for chunk in self._audio.chunks():
+            async for chunk in audio.chunks():
                 await self._transcriber.send_audio_chunk(chunk)
                 buffer.extend(chunk)
                 count += 1
@@ -581,6 +637,16 @@ class NexusVoxApp:
         if not self._transcriber.needs_docker and not MODEL_REGISTRY[self._config.inference.model].get("custom"):
             asyncio.create_task(self._preload_transcriber())
 
+        if self._config.remote_mic.enabled:
+            self._remote_mic = RemoteMicServer(
+                self._config.remote_mic,
+                self._remote_audio,
+                self._on_remote_start,
+                self._on_remote_stop,
+                self._on_remote_cancel,
+            )
+            asyncio.create_task(self._remote_mic.run())
+
         # Main loop: wait for hotkey press, run transcription cycle
         while self._running:
             await self._record_start_event.wait()
@@ -589,7 +655,15 @@ class NexusVoxApp:
             if not self._running:
                 break
 
-            await self._transcription_cycle()
+            self._cycle_running = True
+            try:
+                await self._transcription_cycle(remote=self._remote_recording)
+            finally:
+                self._cycle_running = False
+                if self._remote_recording:
+                    self._remote_recording = False
+                    if self._remote_mic is not None:
+                        self._remote_mic.finished(self._remote_text)
 
         # Cleanup
         await self._shutdown()
@@ -610,6 +684,8 @@ class NexusVoxApp:
         self._hotkey.stop()
         self._tray.stop()
         self._audio.stop()
+        if self._remote_mic is not None:
+            await self._remote_mic.close()
         if self._mic_guard is not None:
             self._mic_guard.release()
         await self._transcriber.disconnect()

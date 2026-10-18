@@ -114,6 +114,7 @@ const learnFromEditsToggle = document.getElementById("learn-from-edits-toggle");
 const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
 const hotkeyMods = Array.from(document.querySelectorAll("#hotkey-mods input"));
 const hotkeyKeySelect = document.getElementById("hotkey-key-select");
+const pasteKeySelect = document.getElementById("paste-key-select");
 const hotkeyRecordBtn = document.getElementById("hotkey-record-btn");
 const hotkeyStatus = document.getElementById("hotkey-status");
 const hotkeyResetBtn = document.getElementById("hotkey-reset-btn");
@@ -280,6 +281,10 @@ hotkeyModeSelect.addEventListener("change", async () => {
 });
 for (const cb of hotkeyMods) cb.addEventListener("change", saveHotkey);
 hotkeyKeySelect.addEventListener("change", saveHotkey);
+pasteKeySelect.addEventListener("change", async () => {
+  const resp = await postSetting("/api/settings/paste-key", { key: pasteKeySelect.value });
+  pasteKeySelect.value = (await resp.json()).paste_key;
+});
 hotkeyRecordBtn.addEventListener("click", startHotkeyRecording);
 hotkeyResetBtn.addEventListener("click", () => {
   for (const cb of hotkeyMods) cb.checked = hotkeyDefault.modifiers.includes(cb.value);
@@ -294,6 +299,11 @@ async function loadSettings() {
   languageSelect.value = s.language;
   hotkeyModeSelect.value = s.hotkey_mode;
   renderHotkey(s);
+  if (!pasteKeySelect.options.length) {
+    pasteKeySelect.append(new Option("Off", ""));
+    for (const k of s.hotkey_key_options || []) pasteKeySelect.append(new Option(k.replace("_", " "), k));
+  }
+  pasteKeySelect.value = s.paste_key;
   micGuardToggle.checked = s.mic_guard_enabled;
   storeAudioToggle.checked = s.store_audio;
   learnFromEditsToggle.checked = s.learn_from_edits;
@@ -1151,6 +1161,27 @@ function toggleReviewAudio(card) {
   audio.play().catch(reset);
 }
 
+async function retryReviewTranscription(card, btn) {
+  btn.disabled = true;
+  btn.textContent = "Transcribing...";
+  let res;
+  try {
+    res = await fetch(`/api/review/${card.dataset.id}/retry`, { method: "POST" }).then((r) => r.json());
+  } catch (err) {
+    res = { ok: false, error: `Retry failed: ${err}` };
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "\u21BB Retry";
+  }
+  if (!res.ok) {
+    alert(res.error);
+    return;
+  }
+  // The new transcript goes into the correction box; submitting it is the user's call.
+  markReviewWrong(card);
+  card.querySelector(".review-correction").value = res.text;
+}
+
 function markReviewWrong(card) {
   const cb = card.querySelector(".review-correct-cb");
   cb.checked = false;
@@ -1230,6 +1261,8 @@ async function loadMoreReviewTranscriptions() {
       </div>
       <div class="flagged-original"><strong>Original:</strong> ${escapeHtml(item.text)}</div>
       <button class="flagged-play-btn" onclick="toggleReviewAudio(this.closest('.flagged-card'))">&#9654; Play</button>
+      <button class="flagged-play-btn review-retry-btn" title="Transcribe the stored audio again with the current model"
+        onclick="retryReviewTranscription(this.closest('.flagged-card'), this)">&#8635; Retry</button>
       <div class="review-checkbox-row">
         <label class="review-label">
           <input type="checkbox" class="review-correct-cb" ${defaultCorrect ? "checked" : ""}

@@ -143,6 +143,9 @@ class NexusVoxApp:
         self._remote_cancelled = False
         self._remote_text = ""
         self._cycle_running = False
+        # What the last dictation pasted, for the paste key. In memory only: the saved
+        # transcript is the spoken text, which differs once it was translated.
+        self._last_typed = ""
 
         # Model switch state
         self._switch_status: str = "idle"
@@ -359,6 +362,10 @@ class NexusVoxApp:
                 logger.info("Hotkey released before recording could start, skipping")
                 await self._transcriber.disconnect()
                 await self._hide_os_control()
+                if self._hotkey.paste_last:
+                    # A quick tap of the paste chord (or one queued behind a running
+                    # cycle) needs no recording: paste the last text all the same.
+                    await self._paste_last_text()
                 return
 
             # Now we are ready — start recording
@@ -379,6 +386,7 @@ class NexusVoxApp:
             self._record_stop_event.clear()
             recording_stopped = True
             is_command = self._hotkey.command and not remote
+            is_paste_last = self._hotkey.paste_last and not remote
 
             # Stop audio (sends None sentinel, ending the stream task)
             audio.stop()
@@ -396,6 +404,13 @@ class NexusVoxApp:
 
             self._tray.set_active(False)
             threading.Thread(target=beep_stop, daemon=True).start()
+
+            if is_paste_last:
+                # The paste key was tapped during the hold: drop this recording and paste
+                # the last text again instead of transcribing.
+                await self._transcriber.disconnect()
+                await self._paste_last_text()
+                return
 
             # Finalize transcription
             result = await self._transcriber.finish()
@@ -457,6 +472,8 @@ class NexusVoxApp:
                 await loop.run_in_executor(
                     None, inject_text, processed.typed, self._config.injection_delay_ms, processed.press_enter
                 )
+                if processed.typed:  # an Enter-only dictation keeps the last text
+                    self._last_typed = processed.typed
                 if self._config.learn_from_edits.enabled and processed.learnable:
                     self._edit_watcher.watch(processed.typed, self._config.learn_from_edits.window_s)
             latency_ms = int((time.monotonic() - stop_time) * 1000)
@@ -509,6 +526,17 @@ class NexusVoxApp:
             transcribe_ms=recording.transcribe_ms,
         )
         self._store_audio(recording.audio, record.id)
+
+    async def _paste_last_text(self) -> None:
+        """Paste what the last dictation pasted, once more; the error beep when there is none yet."""
+        if not self._last_typed:
+            logger.info("Paste last: nothing pasted yet in this session")
+            threading.Thread(target=beep_error, daemon=True).start()
+            return
+        logger.info("Paste last: %s", self._last_typed)
+        await asyncio.get_running_loop().run_in_executor(
+            None, inject_text, self._last_typed, self._config.injection_delay_ms
+        )
 
     def _flag_last_transcription(self) -> None:
         """ "nexus flag" - always available, flags the most recent transcription for review."""

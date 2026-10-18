@@ -19,6 +19,11 @@ key = ""
 # "toggle": press once to start recording, press again to stop
 # Also switchable in the dashboard Settings tab.
 mode = "hold"
+# Paste the last text again: start a recording with the hotkey, tap this key while every
+# modifier is still down (Ctrl+Shift+Alt+V), let go. Nothing is transcribed; the text
+# NexusVox pasted last is pasted once more. Same key names as `key`; empty turns it off.
+# Also editable in the dashboard Settings tab.
+paste_key = "V"
 
 [audio]
 # Sample rate in Hz (must match model expectation)

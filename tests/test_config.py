@@ -492,3 +492,14 @@ def test_learn_from_edits_off_when_missing(tmp_path):
 
     loaded = load_config(path).learn_from_edits
     assert (loaded.enabled, loaded.window_s) == (False, 30.0)
+
+
+def test_paste_key_roundtrip_and_default(tmp_path):
+    path = tmp_path / "config.toml"
+    save_config(Config(hotkey=HotkeyConfig(paste_key="F8")), path)
+    assert load_config(path).hotkey.paste_key == "F8"
+
+    path.write_text('[hotkey]\nmode = "hold"\n', encoding="utf-8")
+    assert load_config(path).hotkey.paste_key == "V"
+    path.write_text('[hotkey]\npaste_key = "nope"\n', encoding="utf-8")
+    assert load_config(path).hotkey.paste_key == ""

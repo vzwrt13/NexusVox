@@ -9,6 +9,10 @@ from pynput import keyboard
 
 from .config import COMMAND_KEY_VKS, HOTKEY_KEY_VKS, HotkeyConfig, OsControlConfig
 
+# What a marker key pressed during a recording turns that recording into.
+COMMAND = "command"
+PASTE_LAST = "paste_last"
+
 # Win32 virtual-key codes of the modifiers, left and right variants included: the
 # low-level hook reports the side-specific code, GetAsyncKeyState wants the generic one.
 _MODIFIER_VKS: dict[str, tuple[int, ...]] = {
@@ -43,10 +47,12 @@ class HotkeyListener:
     - "toggle": each complete press flips between active and inactive; releasing
       the keys changes nothing
 
-    With `command_config` enabled, its command key pressed during a recording - or while
-    the binding's modifiers are on their way down - marks that recording as a command:
-    `on_command` fires once, `command` stays True until the next recording starts, and
-    the key itself is swallowed so it never types.
+    Marker keys turn a recording into something else when pressed during it with every
+    binding modifier down: the os-control command key (`command_config`, when enabled)
+    marks it a command recording, and `[hotkey].paste_key` marks it "paste the last text
+    again". The first marker pressed wins and stays readable (`command`, `paste_last`)
+    until the next recording starts; the key itself is swallowed so it never types.
+    `on_command` fires once when a recording becomes a command.
     """
 
     def __init__(
@@ -62,8 +68,8 @@ class HotkeyListener:
         self._on_deactivate = on_deactivate
         self._command_config = command_config
         self._on_command = on_command
-        self._command = False  # this recording is a command
-        self._command_swallowed = False  # command key is held since a swallowed key-down
+        self._mark: str | None = None  # what a marker key turned this recording into
+        self._marker_swallowed: set[int] = set()  # marker keys held since a swallowed key-down
 
         self._binding: tuple[tuple[str, ...], str] | None = None
         self._modifiers: frozenset[str] = frozenset()
@@ -83,7 +89,12 @@ class HotkeyListener:
     @property
     def command(self) -> bool:
         """True when the current (or just finished) recording was marked as a command."""
-        return self._command
+        return self._mark == COMMAND
+
+    @property
+    def paste_last(self) -> bool:
+        """True when the current (or just finished) recording should paste the last text instead."""
+        return self._mark == PASTE_LAST
 
     @property
     def active(self) -> bool:
@@ -114,34 +125,42 @@ class HotkeyListener:
                 self._on_deactivate()
         else:
             self._active = True
-            self._command = False
+            self._mark = None
             self._on_activate()
 
-    def _command_vk(self) -> int | None:
+    def _marker_keys(self) -> dict[int, str]:
+        """Virtual-key code -> marker, from the live config. The command key wins a clash."""
+        markers: dict[int, str] = {}
+        paste_vk = HOTKEY_KEY_VKS.get(self._config.paste_key) if self._config.paste_key else None
+        if paste_vk is not None:
+            markers[paste_vk] = PASTE_LAST
         cfg = self._command_config
-        if cfg is None or not cfg.enabled or self._on_command is None:
-            return None
-        return COMMAND_KEY_VKS.get(cfg.command_key)
+        if cfg is not None and cfg.enabled and self._on_command is not None and cfg.command_key in COMMAND_KEY_VKS:
+            markers[COMMAND_KEY_VKS[cfg.command_key]] = COMMAND
+        markers.pop(self._key_vk, None)  # the binding's own key is never a marker
+        return markers
 
-    def _mark_command(self) -> None:
-        if not self._command:
-            self._command = True
-            self._on_command()
+    def _mark_recording(self, marker: str) -> None:
+        if self._mark is None:
+            self._mark = marker
+            if marker == COMMAND:
+                self._on_command()
 
-    def _handle_command_key(self, pressed: bool) -> bool:
-        """The command key: swallowed when it completes the chord during a recording, typed otherwise.
+    def _handle_marker_key(self, vk: int, marker: str | None, pressed: bool) -> bool:
+        """A marker key: swallowed when it completes the chord during a recording, typed otherwise.
 
         It only counts with every binding modifier down, so Shift+key, AltGr+key and a
         bare key typed while a toggle recording runs still reach the application.
         """
         if not pressed:
-            swallowed, self._command_swallowed = self._command_swallowed, False
+            swallowed = vk in self._marker_swallowed
+            self._marker_swallowed.discard(vk)
             return swallowed
-        if self._command_swallowed:
+        if vk in self._marker_swallowed:
             return True  # auto-repeat
-        if self._active and self._modifiers <= self._pressed_modifiers:
-            self._command_swallowed = True
-            self._mark_command()
+        if marker is not None and self._active and self._modifiers <= self._pressed_modifiers:
+            self._marker_swallowed.add(vk)
+            self._mark_recording(marker)
             return True
         return False
 
@@ -155,8 +174,11 @@ class HotkeyListener:
         """Feed one key event. Returns True if the event must be swallowed."""
         self._sync_binding()
 
-        if vk == self._command_vk() and vk != self._key_vk:
-            return self._handle_command_key(pressed)
+        marker = self._marker_keys().get(vk)
+        # A swallowed marker stays one until it is released, even if the config dropped it
+        # meanwhile; otherwise its key-up would leak and the stale entry would eat a later press.
+        if marker is not None or vk in self._marker_swallowed:
+            return self._handle_marker_key(vk, marker, pressed)
 
         if vk == self._key_vk:
             if pressed:

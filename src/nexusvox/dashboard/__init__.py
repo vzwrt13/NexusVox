@@ -104,6 +104,12 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_learn_from_edits(data.get("enabled", False)))
 
+    @app.route("/api/settings/paste-key", methods=["POST"])
+    def set_paste_key():
+        data = request.get_json(force=True)
+        resp = api.set_paste_key(data.get("key", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
     @app.route("/api/settings/mic-guard", methods=["POST"])
     def set_mic_guard():
         data = request.get_json(force=True)
@@ -242,6 +248,10 @@ def _create_app(api: DashboardAPI) -> Flask:
     def review_transcriptions():
         before_id = request.args.get("before_id", type=int)
         return jsonify(api.get_unreviewed_transcriptions(before_id=before_id))
+
+    @app.route("/api/review/<int:tid>/retry", methods=["POST"])
+    def retry_transcription(tid):
+        return jsonify(api.retry_transcription(tid))
 
     @app.route("/api/review/<int:tid>", methods=["POST"])
     def submit_review(tid):

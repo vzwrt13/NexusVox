@@ -82,6 +82,8 @@ tests/
 ├── test_docker_ctl.py             # Docker profile start/stop and health checks
 ├── test_file_transcribe.py        # Audio file upload conversion and transcription
 ├── test_os_commands.py            # Nexus OS command parsing and dispatch
+├── test_hotkey.py                 # Hotkey modes, bindings, swallowing, command and paste marker keys
+├── test_app_os_control.py         # Transcription cycle: os-control hide on skipped/failed cycles, paste last
 ├── test_edit_watch.py             # Learn from edits: span mapping, suggestions, watcher thread
 ├── test_snippets.py               # Snippet triggers, options best match, "nexus open"
 ├── test_pipeline.py               # Text pipeline: typed vs saved text, press enter, snippets, translation, learnable
@@ -102,6 +104,8 @@ tests/
 | `test_docker_ctl.py` | `docker_ctl.py` | Docker profile start/stop, health-check waiting |
 | `test_file_transcribe.py` | `file_transcribe.py` | Extension detection, WAV passthrough, audio conversion, chunking |
 | `test_os_commands.py` | `os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
+| `test_hotkey.py` | `hotkey.py` | Hold/toggle modes, key bindings and swallowing, the command key and the paste key (first marker wins, typed normally outside a recording) |
+| `test_app_os_control.py` | `app.py` | The cycle's control flow with mocked collaborators: `::hide` after a skipped or failed command recording, pasting the last text |
 | `test_edit_watch.py` | `edit_watch.py` | Locating the pasted span, ignoring text typed around it, rejecting rewrites and language mix-ups (English and German), watcher thread with fake fields |
 | `test_snippets.py` | `snippets.py` | Trigger matching (English and German), longest trigger first, placeholders surviving voice commands, option best match, "nexus open" / "nexus öffne" resolution |
 | `test_pipeline.py` | `pipeline.py` | Order of dictionary, press enter, snippets, voice commands and translation; typed vs saved text; translator losing a placeholder; when an edit can be learned |

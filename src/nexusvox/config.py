@@ -206,6 +206,9 @@ class HotkeyConfig:
     # "hold": record while the modifiers are held (push-to-talk).
     # "toggle": press once to start recording, press again to stop.
     mode: str = "hold"
+    # Pressed during a recording with every modifier down: the recording is dropped and
+    # the last pasted text is pasted again (Ctrl+Shift+Alt+V). Empty turns it off.
+    paste_key: str = "V"
 
 
 HOTKEY_MODES = ("hold", "toggle")
@@ -507,6 +510,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             modifiers=hotkey_modifiers,
             key=normalize_hotkey_key(hotkey_key) or "",
             mode=hotkey_mode if hotkey_mode in HOTKEY_MODES else "hold",
+            paste_key=normalize_hotkey_key(str(hotkey_data.get("paste_key", "V"))) or "",
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
@@ -589,6 +593,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             "modifiers = [{}]".format(", ".join(f'"{m}"' for m in config.hotkey.modifiers)),
             f'key = "{config.hotkey.key}"',
             f'mode = "{config.hotkey.mode}"',
+            f'paste_key = "{config.hotkey.paste_key}"',
             "",
             "[audio]",
             f"sample_rate = {config.audio.sample_rate}",

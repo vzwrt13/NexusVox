@@ -318,3 +318,54 @@ def test_oem_102_still_works_as_command_key():
     hk._handle(VK_OEM_102, False)
     _release_combo(hk)
     assert events == ["start", "command", "stop"]
+
+
+# -- paste key ---------------------------------------------------------------------
+
+VK_V = ord("V")
+
+
+def test_paste_key_during_hold_marks_paste_last_and_is_swallowed():
+    hk, events = _command_listener()
+    _press_combo(hk)
+    assert hk._handle(VK_V, True) is True
+    assert hk._handle(VK_V, True) is True  # auto-repeat
+    assert hk._handle(VK_V, False) is True
+    _release_combo(hk)
+    assert events == ["start", "stop"]
+    assert hk.paste_last and not hk.command
+
+
+def test_paste_key_types_normally_outside_a_recording_and_resets_next_time():
+    hk, _ = _command_listener()
+    assert hk._handle(VK_V, True) is False
+    assert hk._handle(VK_V, False) is False
+    _press_combo(hk)
+    hk._handle(VK_V, True)
+    hk._handle(VK_V, False)
+    _release_combo(hk)
+    _press_combo(hk)
+    assert not hk.paste_last
+    _release_combo(hk)
+
+
+def test_first_marker_wins():
+    hk, events = _command_listener()
+    _press_combo(hk)
+    hk._handle(VK_V, True)
+    hk._handle(VK_Y, True)
+    _release_combo(hk)
+    assert hk.paste_last and not hk.command and "command" not in events
+
+
+def test_paste_key_off_or_used_by_the_binding_types_normally():
+    hk, _, config = _listener("hold")
+    config.paste_key = ""
+    _press_combo(hk)
+    assert hk._handle(VK_V, True) is False
+    _release_combo(hk)
+    own, own_events, _ = _listener("hold", key="V")
+    own._handle(LCTRL, True)
+    own._handle(LALT, True)
+    assert own._handle(VK_V, True) is True  # completes the combo, not a marker
+    assert own_events == ["start"] and not own.paste_last

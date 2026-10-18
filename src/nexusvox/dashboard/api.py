@@ -147,6 +147,7 @@ class DashboardAPI:
             "hotkey_mode": self._config.hotkey.mode,
             "hotkey_modifiers": list(self._config.hotkey.modifiers),
             "hotkey_key": self._config.hotkey.key,
+            "paste_key": self._config.hotkey.paste_key,
             "hotkey_default": {"modifiers": list(HotkeyConfig().modifiers), "key": HotkeyConfig().key},
             "hotkey_modifier_options": list(HOTKEY_MODIFIERS),
             "hotkey_key_options": list(HOTKEY_KEY_VKS),
@@ -193,6 +194,15 @@ class DashboardAPI:
         # Keep the canonical order so the config file and the hint read the same everywhere.
         self._config.hotkey.modifiers = [m for m in HOTKEY_MODIFIERS if m in modifiers]
         self._config.hotkey.key = normalize_hotkey_key(key) or ""
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_paste_key(self, key: str) -> dict:
+        """The listener reads the shared config on every key event, so this is live."""
+        name = normalize_hotkey_key(str(key or ""))
+        if name is None:
+            return {"error": f"Unknown key: {key}", **self.get_settings()}
+        self._config.hotkey.paste_key = name
         save_config(self._config)
         return self.get_settings()
 
@@ -329,6 +339,26 @@ class DashboardAPI:
                 db_dir = Path(self._config.database.path).resolve().parent
                 return str(db_dir / row.audio_path)
         return None
+
+    def retry_transcription(self, tid: int) -> dict:
+        """Transcribe a recording's stored WAV again with the current model. Saves nothing."""
+        path = self.get_audio_file_path(tid)
+        if path is None:
+            return {"ok": False, "error": "No stored audio for this recording - turn on Store Audio Recordings"}
+        try:
+            wav_chunks, _ = convert_to_wav(Path(path).read_bytes(), "recording.wav")
+            result = asyncio.run(
+                transcribe_file(
+                    wav_chunks,
+                    self._config.inference,
+                    language=self._config.language,
+                    auto_detect_language=self._config.auto_language_detection,
+                )
+            )
+        except Exception as exc:
+            logger.error("Retry failed for transcription %d: %s", tid, exc)
+            return {"ok": False, "error": f"Transcription failed: {exc}"}
+        return {"ok": True, "text": result.text, "model": self._config.inference.model}
 
     def update_correction(self, tid: int, corrected_text: str) -> dict:
         if self._db is None:

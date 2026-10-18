@@ -143,6 +143,9 @@ class NexusVoxApp:
         self._remote_cancelled = False
         self._remote_text = ""
         self._cycle_running = False
+        # What the last dictation pasted, for the paste key. In memory only: the saved
+        # transcript is the spoken text, which differs once it was translated.
+        self._last_typed = ""
 
         # Model switch state
         self._switch_status: str = "idle"
@@ -397,6 +400,13 @@ class NexusVoxApp:
             self._tray.set_active(False)
             threading.Thread(target=beep_stop, daemon=True).start()
 
+            if self._hotkey.paste_last and not remote:
+                # The paste key was tapped during the hold: drop this recording and paste
+                # the last text again instead of transcribing.
+                await self._transcriber.disconnect()
+                await self._paste_last_text()
+                return
+
             # Finalize transcription
             result = await self._transcriber.finish()
             transcribe_ms = int((time.monotonic() - stop_time) * 1000)
@@ -457,6 +467,7 @@ class NexusVoxApp:
                 await loop.run_in_executor(
                     None, inject_text, processed.typed, self._config.injection_delay_ms, processed.press_enter
                 )
+                self._last_typed = processed.typed
                 if self._config.learn_from_edits.enabled and processed.learnable:
                     self._edit_watcher.watch(processed.typed, self._config.learn_from_edits.window_s)
             latency_ms = int((time.monotonic() - stop_time) * 1000)
@@ -509,6 +520,17 @@ class NexusVoxApp:
             transcribe_ms=recording.transcribe_ms,
         )
         self._store_audio(recording.audio, record.id)
+
+    async def _paste_last_text(self) -> None:
+        """Paste what the last dictation pasted, once more; the error beep when there is none yet."""
+        if not self._last_typed:
+            logger.info("Paste last: nothing pasted yet in this session")
+            threading.Thread(target=beep_error, daemon=True).start()
+            return
+        logger.info("Paste last: %s", self._last_typed)
+        await asyncio.get_running_loop().run_in_executor(
+            None, inject_text, self._last_typed, self._config.injection_delay_ms
+        )
 
     def _flag_last_transcription(self) -> None:
         """ "nexus flag" - always available, flags the most recent transcription for review."""

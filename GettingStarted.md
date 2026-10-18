@@ -257,6 +257,8 @@ A system tray icon also appears, where you can toggle the language or quit the a
 3. **Release** any of the modifier keys — recording stops (second beep)
 4. The transcribed text is automatically pasted at your cursor position
 
+To paste the last text again, hold `Ctrl + Shift + Alt`, tap `V`, let go: the recording is dropped and the text NexusVox pasted last is pasted once more (key in Settings → Voice Input, `[hotkey].paste_key`; empty turns it off).
+
 Prefer not to keep the keys down? Switch **Hotkey Mode** to *Toggle* in the dashboard's Settings tab (or `mode = "toggle"` in `config.toml`): press `Ctrl + Shift + Alt` once to start, press it again to stop. The change takes effect immediately.
 
 > NexusVox uses the clipboard to inject text (Ctrl+V). Your previous clipboard content is saved and restored after each injection.

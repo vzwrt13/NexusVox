@@ -766,3 +766,43 @@ def test_github_repos_reports_a_missing_cli(flask_client, monkeypatch):
     monkeypatch.setattr(subprocess, "run", missing)
     resp = flask_client.get("/api/snippets/github-repos").get_json()
     assert resp["ok"] is False and "GitHub CLI" in resp["error"]
+
+
+def test_retry_transcribes_the_stored_audio_again(flask_client, db, sample_wav_bytes, tmp_path, monkeypatch):
+    from nexusvox.dashboard.api import DashboardAPI
+    from nexusvox.transcriber import TranscriptionResult
+
+    wav = tmp_path / "1.wav"
+    wav.write_bytes(sample_wav_bytes)
+    record = db.save_transcription("nexus fox", "en", 500, audio_path=str(wav))
+    monkeypatch.setattr(DashboardAPI, "get_audio_file_path", lambda self, tid: str(wav))
+    result = TranscriptionResult()
+    result.finalize(text="NexusVox")
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", lambda wav, cfg, **kwargs: result)
+    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
+
+    data = flask_client.post(f"/api/review/{record.id}/retry").get_json()
+
+    assert data["ok"] is True and data["text"] == "NexusVox"
+    assert db.get_transcription_text(record.id) == "nexus fox"  # nothing saved
+
+
+def test_retry_without_stored_audio_says_why(flask_client, db):
+    record = db.save_transcription("no audio", "en", 500)
+
+    data = flask_client.post(f"/api/review/{record.id}/retry").get_json()
+
+    assert data["ok"] is False and "Store Audio Recordings" in data["error"]
+
+
+def test_paste_key_setting(flask_client):
+    assert flask_client.get("/api/settings").get_json()["paste_key"] == "V"
+    ok = flask_client.post("/api/settings/paste-key", data=json.dumps({"key": "f8"}), content_type="application/json")
+    off = flask_client.post("/api/settings/paste-key", data=json.dumps({"key": ""}), content_type="application/json")
+    bad = flask_client.post(
+        "/api/settings/paste-key", data=json.dumps({"key": "nope"}), content_type="application/json"
+    )
+
+    assert ok.get_json()["paste_key"] == "F8"
+    assert off.get_json()["paste_key"] == ""
+    assert bad.status_code == 400 and bad.get_json()["paste_key"] == ""

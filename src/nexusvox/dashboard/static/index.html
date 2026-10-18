@@ -213,6 +213,24 @@
       </div>
 
       <div class="settings-card" style="margin-top: 12px;">
+        <div class="setting-info">
+          <h3>Snippets</h3>
+          <p>Say a trigger phrase anywhere in a dictation and it is replaced by your stored text - an address, a signature, a link, a template. The text is inserted exactly as stored, line breaks included. Pick triggers you would not say by accident, in any language.</p>
+          <p>Options turn one trigger into a choice: with <code>open remote repo</code> and options like <code>NexusVox = https://github.com/...</code>, saying "open remote repo nexus vox" inserts that URL - the best-matching name wins, spaces and small mishearings do not matter. Say <code>nexus open ...</code> / <code>nexus öffne ...</code> in front to open the URL in your browser instead of typing it.</p>
+        </div>
+        <form id="snippet-form" class="dict-form snippet-form">
+          <input type="hidden" id="snippet-id">
+          <input type="text" id="snippet-trigger" class="dict-input" placeholder="Trigger, e.g. my address / meine Adresse" required>
+          <textarea id="snippet-expansion" class="dict-input snippet-expansion" rows="3" placeholder="Text to insert (optional with options: used when no option matches)"></textarea>
+          <textarea id="snippet-options" class="dict-input snippet-expansion" rows="3" placeholder="Options, one per line: name = text"></textarea>
+          <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-github">Fill from GitHub</button>
+          <button type="submit" class="flagged-play-btn dict-add-btn" id="snippet-save">Add</button>
+          <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-cancel" hidden>Cancel</button>
+        </form>
+        <div id="snippet-list" class="dict-list"></div>
+      </div>
+
+      <div class="settings-card" style="margin-top: 12px;">
         <div class="setting-row">
           <div class="setting-info">
             <h3>Voice Commands</h3>

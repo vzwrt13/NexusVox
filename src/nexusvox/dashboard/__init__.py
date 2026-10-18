@@ -263,6 +263,27 @@ def _create_app(api: DashboardAPI) -> Flask:
     def delete_dictionary_entry(entry_id):
         return jsonify(api.delete_dictionary_entry(entry_id))
 
+    @app.route("/api/snippets")
+    def get_snippets():
+        return jsonify(api.get_snippets())
+
+    @app.route("/api/snippets", methods=["POST"])
+    def save_snippet():
+        data = request.get_json(force=True)
+        return jsonify(
+            api.save_snippet(
+                data.get("trigger", ""), data.get("expansion", ""), data.get("id"), data.get("options", "")
+            )
+        )
+
+    @app.route("/api/snippets/github-repos")
+    def get_github_repos():
+        return jsonify(api.get_github_repos())
+
+    @app.route("/api/snippets/<int:snippet_id>", methods=["DELETE"])
+    def delete_snippet(snippet_id):
+        return jsonify(api.delete_snippet(snippet_id))
+
     @app.route("/api/dictionary/suggestions")
     def get_dictionary_suggestions():
         return jsonify(api.get_dictionary_suggestions())

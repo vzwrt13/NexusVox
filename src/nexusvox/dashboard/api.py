@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -27,6 +29,7 @@ from ..db import Database
 from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..os_commands import NEXUS_ACTIONS
+from ..snippets import parse_options
 from ..translator import is_reachable
 from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
 from . import analytics
@@ -368,6 +371,43 @@ class DashboardAPI:
         if self._db is None:
             return {"ok": False, "error": "DB not available"}
         return {"ok": self._db.delete_dictionary_entry(entry_id)}
+
+    # ---- Snippets ----------------------------------------------------------
+
+    def get_snippets(self) -> dict:
+        return {"snippets": self._db.list_snippets() if self._db else []}
+
+    def save_snippet(self, trigger: str, expansion: str, snippet_id: int | None = None, options: str = "") -> dict:
+        """``options`` is the dashboard's text box: one ``name = text`` per line."""
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
+        snippet = self._db.save_snippet(trigger, expansion, snippet_id, parse_options(options))
+        if snippet is None:
+            return {"ok": False, "error": "A trigger and a text or option are required, and it must be unique"}
+        return {"ok": True, "snippet": snippet}
+
+    def get_github_repos(self) -> dict:
+        """The user's GitHub repositories as ``name = url`` lines, via the GitHub CLI."""
+        try:
+            proc = subprocess.run(
+                ["gh", "repo", "list", "--json", "name,url", "--limit", "200"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {"ok": False, "error": f"GitHub CLI not available: {exc}"}
+        if proc.returncode != 0:
+            return {"ok": False, "error": (proc.stderr.strip() or "gh repo list failed")[:300]}
+        repos = sorted(json.loads(proc.stdout or "[]"), key=lambda r: r["name"].lower())
+        return {"ok": True, "options": "\n".join(f"{r['name']} = {r['url']}" for r in repos)}
+
+    def delete_snippet(self, snippet_id: int) -> dict:
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
+        return {"ok": self._db.delete_snippet(snippet_id)}
 
     def get_dictionary_suggestions(self) -> dict:
         return {"suggestions": self._db.list_dictionary_suggestions() if self._db else []}

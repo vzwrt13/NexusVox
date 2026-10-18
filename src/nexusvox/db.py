@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy import create_engine, func, text
@@ -9,7 +10,16 @@ from sqlalchemy.orm import sessionmaker
 
 from .config import DatabaseConfig
 from .dictionary import DictionaryEntry
-from .models import Base, DictionaryEntryRow, DictionarySuggestionRow, FileTranscription, Transcription, utc_now
+from .models import (
+    Base,
+    DictionaryEntryRow,
+    DictionarySuggestionRow,
+    FileTranscription,
+    SnippetRow,
+    Transcription,
+    utc_now,
+)
+from .snippets import Snippet
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +45,7 @@ class Database:
             "ALTER TABLE transcriptions ADD COLUMN translate_error VARCHAR(200)",
             "ALTER TABLE transcriptions ADD COLUMN transcribe_ms INTEGER",
             "ALTER TABLE transcriptions ADD COLUMN latency_ms INTEGER",
+            "ALTER TABLE snippets ADD COLUMN options TEXT",
         ]
         with self._engine.connect() as conn:
             for sql in migrations:
@@ -270,6 +281,73 @@ class Database:
     def delete_dictionary_suggestion(self, suggestion_id: int) -> bool:
         with self._session_factory() as session:
             row = session.get(DictionarySuggestionRow, suggestion_id)
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True
+
+    # ---- Snippets -----------------------------------------------------------
+
+    @staticmethod
+    def _snippet_dict(row: SnippetRow) -> dict:
+        options = [list(o) for o in json.loads(row.options)] if row.options else []
+        return {"id": row.id, "trigger": row.trigger, "expansion": row.expansion, "options": options}
+
+    def list_snippets(self) -> list[dict]:
+        """All snippets, sorted by trigger, as plain dicts (``options`` as ``[name, text]`` lists)."""
+        with self._session_factory() as session:
+            rows = session.query(SnippetRow).order_by(func.lower(SnippetRow.trigger)).all()
+            return [self._snippet_dict(r) for r in rows]
+
+    def get_snippets(self) -> list[Snippet]:
+        """Snippets ready for ``mark_snippets``."""
+        with self._session_factory() as session:
+            return [
+                Snippet(
+                    trigger=r.trigger,
+                    expansion=r.expansion,
+                    options=tuple((n, t) for n, t in json.loads(r.options)) if r.options else (),
+                )
+                for r in session.query(SnippetRow).all()
+            ]
+
+    def save_snippet(
+        self,
+        trigger: str,
+        expansion: str,
+        snippet_id: int | None = None,
+        options: tuple[tuple[str, str], ...] = (),
+    ) -> dict | None:
+        """Insert, or update the snippet with ``snippet_id`` (or with the same trigger).
+
+        Returns the snippet, or None when the trigger is blank, there is neither a text
+        nor an option, or the trigger already belongs to another snippet.
+        """
+        trigger = " ".join(trigger.split())
+        if not trigger or not (expansion.strip() or options):
+            return None
+        options_json = json.dumps([list(o) for o in options], ensure_ascii=False) if options else None
+        with self._session_factory() as session:
+            same = session.query(SnippetRow).filter(func.lower(SnippetRow.trigger) == trigger.lower()).first()
+            row = session.get(SnippetRow, snippet_id) if snippet_id is not None else same
+            if snippet_id is not None and row is None:
+                return None
+            if same is not None and row is not None and same.id != row.id:
+                return None
+            if row is None:
+                row = SnippetRow(trigger=trigger, expansion=expansion, options=options_json)
+                session.add(row)
+            else:
+                row.trigger = trigger
+                row.expansion = expansion
+                row.options = options_json
+            session.commit()
+            return self._snippet_dict(row)
+
+    def delete_snippet(self, snippet_id: int) -> bool:
+        with self._session_factory() as session:
+            row = session.get(SnippetRow, snippet_id)
             if row is None:
                 return False
             session.delete(row)

@@ -376,3 +376,58 @@ def test_accept_dictionary_suggestion_drops_other_suggestions_for_the_same_phras
 
     assert db.accept_dictionary_suggestion(sid)["right"] == "Meier"
     assert db.list_dictionary_suggestions() == []
+
+
+# --- Snippets ---
+
+
+def test_save_and_list_snippets(db):
+    db.save_snippet("my address", "Main Street 1\nSpringfield")
+    db.save_snippet("  meine   Signatur ", "Viele Grüße")
+
+    assert [(s["trigger"], s["expansion"]) for s in db.list_snippets()] == [
+        ("meine Signatur", "Viele Grüße"),
+        ("my address", "Main Street 1\nSpringfield"),
+    ]
+    assert {s.trigger for s in db.get_snippets()} == {"my address", "meine Signatur"}
+
+
+def test_save_snippet_same_trigger_updates(db):
+    db.save_snippet("my address", "old")
+    db.save_snippet("My Address", "new")
+
+    assert [(s["trigger"], s["expansion"]) for s in db.list_snippets()] == [("My Address", "new")]
+
+
+def test_save_snippet_by_id_and_trigger_clash(db):
+    first = db.save_snippet("one", "1")
+    db.save_snippet("two", "2")
+
+    assert db.save_snippet("uno", "1!", first["id"])["trigger"] == "uno"
+    assert db.save_snippet("two", "clash", first["id"]) is None
+    assert db.save_snippet("x", "y", 999) is None
+
+
+def test_save_snippet_requires_both_fields(db):
+    assert db.save_snippet(" ", "text") is None
+    assert db.save_snippet("trigger", "  ") is None
+
+
+def test_delete_snippet(db):
+    sid = db.save_snippet("one", "1")["id"]
+
+    assert db.delete_snippet(sid) is True
+    assert db.delete_snippet(sid) is False
+    assert db.list_snippets() == []
+
+
+def test_snippet_options_roundtrip(db):
+    db.save_snippet("open remote repo", "", options=(("NexusVox", "https://a"), ("sprechblase", "https://b")))
+
+    assert db.list_snippets()[0]["options"] == [["NexusVox", "https://a"], ["sprechblase", "https://b"]]
+    assert db.get_snippets()[0].options == (("NexusVox", "https://a"), ("sprechblase", "https://b"))
+
+
+def test_snippet_with_options_needs_no_text_but_needs_something(db):
+    assert db.save_snippet("open remote repo", "", options=(("a", "b"),)) is not None
+    assert db.save_snippet("nothing", "") is None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import os
 import threading
@@ -27,8 +28,9 @@ from .lang_detect import detect_language
 from .mic_guard import MicGuard, create_mic_guard
 from .os_commands import execute_nexus_command, parse_nexus_command
 from .remote_mic import RemoteAudioSource, RemoteMicServer
+from .snippets import expand_snippets, mark_snippets, placeholders_intact, resolve_nexus_open
 from .transcriber import create_transcriber
-from .translator import translate
+from .translator import TranslateResult, translate
 from .tray import SystemTray
 from .voice_commands import process_voice_commands, split_press_enter
 
@@ -436,6 +438,34 @@ class NexusVoxApp:
                     await self._transcriber.disconnect()
                     return
 
+                # "nexus open <snippet>" / "nexus öffne <snippet>" opens the snippet's URL or path
+                # instead of typing it. The user's own snippet is the opt-in, so this does not
+                # need [os_commands].enabled.
+                open_target = None if remote else resolve_nexus_open(raw_text, self._db.get_snippets())
+                if open_target is not None:
+                    from . import window_manager
+
+                    try:
+                        opened = await loop.run_in_executor(None, window_manager.open_target, open_target)
+                    except OSError:
+                        logger.exception("Opening %r failed", open_target)
+                        opened = False
+                    if not opened:
+                        threading.Thread(target=beep_error, daemon=True).start()
+                    record = self._db.save_transcription(
+                        text=f"[nexus] open {open_target}",
+                        language=detect_language(raw_text)
+                        if self._config.auto_language_detection
+                        else self._config.language,
+                        duration_ms=duration_ms,
+                        confidence=result.confidence,
+                        model=self._transcriber.model,
+                        transcribe_ms=transcribe_ms,
+                    )
+                    self._store_audio(audio_buffer, record.id)
+                    await self._transcriber.disconnect()
+                    return
+
                 assistant_text = (
                     parse_assistant_command(raw_text) if self._config.assistant.enabled and not remote else None
                 )
@@ -506,6 +536,12 @@ class NexusVoxApp:
                 if self._config.voice_commands.enabled and self._config.voice_commands.press_enter and not remote:
                     corrected_text, press_enter = split_press_enter(corrected_text)
 
+                # Snippets: triggers become placeholders here, so voice commands and the
+                # translator never touch the stored expansion; it goes back in before injection.
+                corrected_text, snippet_texts = mark_snippets(corrected_text, self._db.get_snippets())
+                if snippet_texts:
+                    logger.info("Snippets matched: %d", len(snippet_texts))
+
                 # Apply voice commands (new line, tab, all caps, symbols, etc.)
                 if self._config.voice_commands.enabled:
                     active_symbols = (
@@ -535,6 +571,11 @@ class NexusVoxApp:
                     processed_text,
                     self._config.translator,
                 )
+                if translation.translated and not placeholders_intact(translation.text, snippet_texts):
+                    logger.warning("Translator dropped a snippet placeholder; injecting the original text")
+                    translation = TranslateResult(processed_text, error="snippet placeholder lost")
+                translation = dataclasses.replace(translation, text=expand_snippets(translation.text, snippet_texts))
+                processed_text = expand_snippets(processed_text, snippet_texts)
 
                 if remote:
                     # The phone inserts it into its own focused field.
@@ -550,11 +591,13 @@ class NexusVoxApp:
                     # A translated paste no longer matches the spoken words the dictionary works
                     # on, and after "press enter" the text has usually left the field. Voice
                     # commands (digits, symbols, all caps) also rewrite the words, and an entry
-                    # learned from that text would never match the raw transcript it runs on.
+                    # learned from that text would never match the raw transcript it runs on;
+                    # neither would one learned from a snippet's stored text.
                     if (
                         self._config.learn_from_edits.enabled
                         and not translation.translated
                         and not press_enter
+                        and not snippet_texts
                         and processed_text == corrected_text
                     ):
                         self._edit_watcher.watch(translation.text, self._config.learn_from_edits.window_s)

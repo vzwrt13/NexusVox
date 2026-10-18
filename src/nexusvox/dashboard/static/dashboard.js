@@ -298,7 +298,7 @@ async function loadSettings() {
   storeAudioToggle.checked = s.store_audio;
   learnFromEditsToggle.checked = s.learn_from_edits;
   loadTranslatorStatus();
-  await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary(), loadDictionarySuggestions()]);
+  await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary(), loadDictionarySuggestions(), loadSnippets()]);
 }
 
 // ── Correction Dictionary ────────────────────────────────────────────
@@ -332,6 +332,91 @@ async function deleteDictionaryEntry(id) {
   await fetch(`/api/dictionary/${id}`, { method: "DELETE" });
   loadDictionary();
 }
+
+// ── Snippets ─────────────────────────────────────────────────────────
+let snippetCache = [];
+
+async function loadSnippets() {
+  const { snippets } = await fetch("/api/snippets").then((r) => r.json());
+  snippetCache = snippets;
+  const list = document.getElementById("snippet-list");
+  if (!snippets.length) {
+    list.innerHTML = '<p class="nexus-empty">No snippets yet.</p>';
+    return;
+  }
+  list.innerHTML = snippets.map((s) => `
+    <div class="dict-row" data-id="${s.id}">
+      <span class="dict-right">${escapeHtml(s.trigger)}</span>
+      <span class="dict-arrow">&rarr;</span>
+      <span class="snippet-text">${escapeHtml(s.options.length ? `${s.options.length} options: ${s.options.map((o) => o[0]).join(", ")}` : s.expansion)}</span>
+      <button class="flagged-play-btn" onclick="editSnippet(${s.id})">Edit</button>
+      <button class="dict-delete" title="Remove" onclick="deleteSnippet(${s.id})">&#10005;</button>
+    </div>`).join("");
+}
+
+function resetSnippetForm() {
+  document.getElementById("snippet-id").value = "";
+  document.getElementById("snippet-trigger").value = "";
+  document.getElementById("snippet-expansion").value = "";
+  document.getElementById("snippet-options").value = "";
+  document.getElementById("snippet-save").textContent = "Add";
+  document.getElementById("snippet-cancel").hidden = true;
+}
+
+function editSnippet(id) {
+  const s = snippetCache.find((x) => x.id === id);
+  if (!s) return;
+  document.getElementById("snippet-id").value = s.id;
+  document.getElementById("snippet-trigger").value = s.trigger;
+  document.getElementById("snippet-expansion").value = s.expansion;
+  document.getElementById("snippet-options").value = s.options.map((o) => `${o[0]} = ${o[1]}`).join("\n");
+  document.getElementById("snippet-save").textContent = "Save";
+  document.getElementById("snippet-cancel").hidden = false;
+  document.getElementById("snippet-expansion").focus();
+}
+
+async function deleteSnippet(id) {
+  await fetch(`/api/snippets/${id}`, { method: "DELETE" });
+  loadSnippets();
+}
+
+document.getElementById("snippet-cancel").addEventListener("click", resetSnippetForm);
+
+document.getElementById("snippet-github").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = "Loading...";
+  const res = await fetch("/api/snippets/github-repos").then((r) => r.json());
+  btn.disabled = false;
+  btn.textContent = "Fill from GitHub";
+  if (!res.ok) {
+    alert(res.error);
+    return;
+  }
+  const box = document.getElementById("snippet-options");
+  box.value = box.value.trim() ? `${box.value.trim()}\n${res.options}` : res.options;
+});
+
+document.getElementById("snippet-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = document.getElementById("snippet-id").value;
+  const res = await fetch("/api/snippets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: id ? Number(id) : null,
+      trigger: document.getElementById("snippet-trigger").value,
+      expansion: document.getElementById("snippet-expansion").value,
+      options: document.getElementById("snippet-options").value,
+    }),
+  }).then((r) => r.json());
+  if (res.ok) {
+    resetSnippetForm();
+    loadSnippets();
+  } else {
+    alert(res.error);
+  }
+});
 
 async function loadDictionarySuggestions() {
   const { suggestions } = await fetch("/api/dictionary/suggestions").then((r) => r.json());

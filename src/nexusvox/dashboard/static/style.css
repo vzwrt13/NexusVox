@@ -660,6 +660,9 @@ canvas { width: 100% !important; max-height: 260px; }
 .dict-arrow { color: var(--text-dim); }
 .dict-add-btn { margin-bottom: 0; }
 .dict-list { display: flex; flex-direction: column; gap: 6px; }
+.snippet-form { align-items: flex-start; }
+.snippet-expansion { flex: 2 1 260px; resize: vertical; font-family: inherit; }
+.snippet-text { flex: 1; white-space: pre-wrap; color: var(--text-dim); max-height: 4.5em; overflow: hidden; }
 .dict-row {
   display: flex;
   align-items: center;

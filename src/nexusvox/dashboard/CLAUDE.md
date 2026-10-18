@@ -17,6 +17,7 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 - Compute Device dropdown (`Auto`/`GPU (CUDA)`/`CPU`): writes `[inference].device` to `config.toml`; requires app restart. On CPU, GPU-only models are filtered out of the model dropdown server-side.
 - Model switcher dropdown: for GPU-backed models, selecting stops the old Docker container, starts the new one, waits for health check, reconnects the transcriber. For in-process Whisper (CPU), just reloads the model — no Docker calls. JS polls `GET /api/models/status` every 2s for spinner/status updates.
 - Correction Dictionary card: add/remove entries; Learn From Edits toggle (`POST /api/settings/learn-from-edits`, `learn_from_edits` in `GET /api/settings`) and the pending suggestions learned from edits after a paste, each with Add (`POST /api/dictionary/suggestions/<id>/accept`) and dismiss (`DELETE /api/dictionary/suggestions/<id>`).
+- Snippets card: trigger input, multi-line text and an options box (`name = text` per line), Add/Save (`POST /api/snippets` with `trigger`, `expansion`, `options` text, `id` set to edit), *Fill from GitHub* (`GET /api/snippets/github-repos`, runs `gh repo list`, appends `name = url` lines), per-row Edit and remove (`DELETE /api/snippets/<id>`); a trigger already used by another snippet is rejected, and a snippet needs a text or at least one option.
 - Nexus OS Commands card: toggle enable/disable, lists supported actions and registered apps.
 - Voice Commands card: master enable/disable toggle; Numbers as Digits toggle; Press Enter Command toggle (`POST /api/voice-commands/press-enter`); Bypass Structural Commands toggle + structural command chips (`new line`, `new paragraph`, `tab`, `all caps`; `POST /api/voice-commands/structural`); Bypass Symbol Commands toggle + symbol command chips (click to activate/deactivate individual symbols, persisted immediately via `POST /api/voice-commands/symbols`).
 
@@ -64,6 +65,10 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 | GET | `/api/dictionary` | List correction-dictionary entries |
 | POST | `/api/dictionary` | Add or update an entry (`wrong`, `right`) |
 | DELETE | `/api/dictionary/<id>` | Remove an entry |
+| GET | `/api/snippets` | List snippets (sorted by trigger) |
+| POST | `/api/snippets` | Add, or update with `id` (`trigger`, `expansion`, `options` as `name = text` lines) |
+| GET | `/api/snippets/github-repos` | The user's GitHub repos as `name = url` lines (GitHub CLI) |
+| DELETE | `/api/snippets/<id>` | Remove a snippet |
 | GET | `/api/dictionary/suggestions` | Pending suggestions learned from edits |
 | POST | `/api/dictionary/suggestions/<id>/accept` | Turn a suggestion into an entry |
 | DELETE | `/api/dictionary/suggestions/<id>` | Dismiss a suggestion |

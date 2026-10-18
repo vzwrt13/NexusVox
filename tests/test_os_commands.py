@@ -186,3 +186,14 @@ def test_execute_unknown_app_returns_false(mock_wm):
     cmd = NexusCommand(action="open", app_name="unknown")
     assert execute_nexus_command(cmd, config) is False
     mock_wm.open_app.assert_not_called()
+
+
+def test_open_target_rejects_plain_text(monkeypatch):
+    from nexusvox import window_manager
+
+    opened = []
+    monkeypatch.setattr(window_manager.os, "startfile", opened.append, raising=False)
+
+    assert window_manager.open_target("Hauptstraße 1, Berlin") is False
+    assert window_manager.open_target("https://github.com/vzwrt13/NexusVox") is True
+    assert opened == ["https://github.com/vzwrt13/NexusVox"]

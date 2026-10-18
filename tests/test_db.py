@@ -366,3 +366,13 @@ def test_delete_dictionary_suggestion(db):
     assert db.delete_dictionary_suggestion(sid) is True
     assert db.delete_dictionary_suggestion(sid) is False
     assert db.get_dictionary_entries() == []
+
+
+def test_accept_dictionary_suggestion_drops_other_suggestions_for_the_same_phrase(db):
+    db.add_dictionary_suggestions(
+        [DictionaryEntry(wrong="Maya", right="Meier"), DictionaryEntry(wrong="maya", right="Mayer")]
+    )
+    sid = next(s["id"] for s in db.list_dictionary_suggestions() if s["right"] == "Meier")
+
+    assert db.accept_dictionary_suggestion(sid)["right"] == "Meier"
+    assert db.list_dictionary_suggestions() == []

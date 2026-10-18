@@ -548,8 +548,15 @@ class NexusVoxApp:
                         press_enter,
                     )
                     # A translated paste no longer matches the spoken words the dictionary works
-                    # on, and after "press enter" the text has usually left the field.
-                    if self._config.learn_from_edits.enabled and not translation.translated and not press_enter:
+                    # on, and after "press enter" the text has usually left the field. Voice
+                    # commands (digits, symbols, all caps) also rewrite the words, and an entry
+                    # learned from that text would never match the raw transcript it runs on.
+                    if (
+                        self._config.learn_from_edits.enabled
+                        and not translation.translated
+                        and not press_enter
+                        and processed_text == corrected_text
+                    ):
                         self._edit_watcher.watch(translation.text, self._config.learn_from_edits.window_s)
                 latency_ms = int((time.monotonic() - stop_time) * 1000)
                 language = detect_language(raw_text) if self._config.auto_language_detection else self._config.language

@@ -248,15 +248,24 @@ class Database:
             return [{"id": r.id, "wrong": r.wrong, "right": r.right} for r in rows]
 
     def accept_dictionary_suggestion(self, suggestion_id: int) -> dict | None:
-        """Turn a suggestion into a dictionary entry. Returns the entry, or None when it is gone."""
+        """Turn a suggestion into a dictionary entry. Returns the entry, or None when it is gone.
+
+        Other pending suggestions for the same `wrong` are dropped too: accepting one of
+        them later would silently overwrite the entry just added.
+        """
         with self._session_factory() as session:
             row = session.get(DictionarySuggestionRow, suggestion_id)
             if row is None:
                 return None
             wrong, right = row.wrong, row.right
-            session.delete(row)
-            session.commit()
-        return self.add_dictionary_entry(wrong, right)
+        entry = self.add_dictionary_entry(wrong, right)
+        if entry is not None:
+            with self._session_factory() as session:
+                session.query(DictionarySuggestionRow).filter(
+                    func.lower(DictionarySuggestionRow.wrong) == wrong.lower()
+                ).delete(synchronize_session=False)
+                session.commit()
+        return entry
 
     def delete_dictionary_suggestion(self, suggestion_id: int) -> bool:
         with self._session_factory() as session:

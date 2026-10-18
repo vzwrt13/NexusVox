@@ -56,6 +56,13 @@ def test_extract_edit_none_when_rewritten():
     assert extract_edit(before, before, "Completely different sentence here") is None
 
 
+def test_extract_edit_in_a_long_field():
+    filler = "lorem ipsum dolor sit amet " * 700
+    before = filler + "I use nexus fox daily" + filler
+    after = filler + "I use NexusVox daily" + filler
+    assert extract_edit(before, "I use nexus fox daily", after) == "I use NexusVox daily"
+
+
 # --- learn ---
 
 
@@ -148,6 +155,34 @@ def test_watcher_next_watch_ends_the_running_one():
     watcher = EditWatcher(on_suggestions, lambda: [], field_factory=lambda: next(fields))
     watcher.watch("I use nexus fox", 60)
     threading.Timer(0.1, watcher.watch, args=("next dictation", 60)).start()
+    assert done.wait(2)
+    watcher.stop()
+    assert got == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+
+
+def test_watcher_survives_a_failing_field():
+    class BrokenField:
+        def __init__(self):
+            self.calls = 0
+
+        def read(self):
+            self.calls += 1
+            if self.calls > 1:
+                raise RuntimeError("gone")
+            return "I use nexus fox"
+
+    fields = iter([BrokenField(), FakeField(["I use nexus fox", "I use NexusVox"])])
+    got: list[DictionaryEntry] = []
+    done = threading.Event()
+
+    def on_suggestions(s):
+        got.extend(s)
+        done.set()
+
+    watcher = EditWatcher(on_suggestions, lambda: [], field_factory=lambda: next(fields))
+    watcher.watch("I use nexus fox", 5)
+    # Queued only after the first field has failed, so the failure is what ends that watch.
+    threading.Timer(0.2, watcher.watch, args=("I use nexus fox", 0.1)).start()
     assert done.wait(2)
     watcher.stop()
     assert got == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]

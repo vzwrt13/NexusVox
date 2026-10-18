@@ -70,6 +70,34 @@ def _map_position(pos: int, opcodes: list[tuple[str, int, int, int, int]], *, st
     return opcodes[-1][4] if opcodes else 0
 
 
+def _char_opcodes(a: str, b: str, span_start: int, span_end: int) -> list[tuple[str, int, int, int, int]]:
+    """Character diff opcodes of `a` -> `b`, diffing only the part between the common prefix and suffix.
+
+    A field of up to `MAX_FIELD_CHARS` usually changes in one small place; a full
+    `SequenceMatcher` over both texts would spend seconds on the unchanged rest.
+    The trim stops at `a[span_start:span_end]`, so the span is always diffed as a
+    whole and keeps the alignment a full diff would give it.
+    """
+    limit = min(span_start, len(b))
+    prefix = 0
+    while prefix < limit and a[prefix] == b[prefix]:
+        prefix += 1
+    limit = min(len(a) - span_end, len(b) - prefix)
+    suffix = 0
+    while suffix < limit and a[len(a) - 1 - suffix] == b[len(b) - 1 - suffix]:
+        suffix += 1
+    a_end, b_end = len(a) - suffix, len(b) - suffix
+    opcodes: list[tuple[str, int, int, int, int]] = []
+    if prefix:
+        opcodes.append(("equal", 0, prefix, 0, prefix))
+    middle = difflib.SequenceMatcher(a=a[prefix:a_end], b=b[prefix:b_end], autojunk=False).get_opcodes()
+    for tag, i1, i2, j1, j2 in middle:
+        opcodes.append((tag, i1 + prefix, i2 + prefix, j1 + prefix, j2 + prefix))
+    if suffix:
+        opcodes.append(("equal", a_end, len(a), b_end, len(b)))
+    return opcodes
+
+
 def extract_edit(before: str, injected: str, after: str) -> str | None:
     """The user's version of `injected`, or None when it cannot be told apart.
 
@@ -84,7 +112,7 @@ def extract_edit(before: str, injected: str, after: str) -> str | None:
     if start < 0:
         return None
     end = start + len(injected)
-    opcodes = difflib.SequenceMatcher(a=before, b=after, autojunk=False).get_opcodes()
+    opcodes = _char_opcodes(before, after, start, end)
     edited = after[_map_position(start, opcodes, start=True) : _map_position(end, opcodes, start=False)]
     if not edited.strip():
         return None
@@ -120,7 +148,8 @@ class TextField(Protocol):
 class UiaTextField:
     """The element that had keyboard focus when it was created, read through UI Automation."""
 
-    def __init__(self, automation, element) -> None:
+    def __init__(self, uia, automation, element) -> None:
+        self._uia = uia
         self._automation = automation
         self._element = element
 
@@ -134,12 +163,10 @@ class UiaTextField:
         element = automation.GetFocusedElement()
         if element is None or element.CurrentIsPassword:
             return None
-        return cls(automation, element)
+        return cls(uia, automation, element)
 
     def read(self) -> str | None:
-        import comtypes.client
-
-        uia = comtypes.client.GetModule("UIAutomationCore.dll")
+        uia = self._uia
         try:
             pattern = self._element.GetCurrentPattern(_UIA_VALUE_PATTERN_ID)
             if pattern:
@@ -191,14 +218,19 @@ class EditWatcher:
 
     def _run(self) -> None:
         try:
-            import comtypes
+            from .mic_guard import _ensure_com
 
-            comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
+            _ensure_com()
         except Exception:
             logger.debug("Learn from edits: COM init skipped", exc_info=True)
         item = self._queue.get()
         while item is not None:
-            item = self._watch_one(item)
+            try:
+                item = self._watch_one(item)
+            except Exception:
+                # A dead worker would leave every later watch() queued forever.
+                logger.exception("Learn from edits: watch failed")
+                item = self._queue.get()
 
     def _watch_one(self, item: _Watch) -> _Watch | None:
         """Watch one paste; returns the next queued item (or None to stop)."""

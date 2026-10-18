@@ -112,16 +112,18 @@ def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
 # -- polish ----------------------------------------------------------------------
 
 
-def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows=(1, 1)):
+def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows=(1, 1), presets=()):
     import nexusvox.app as app_module
 
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._config = MagicMock(injection_delay_ms=0)
     app._last_typed = ""
     app._save_command = MagicMock()
+    app._db = MagicMock(get_polish_presets=MagicMock(return_value=list(presets)))
     calls = {"pasted": [], "beeps": []}
 
     def fake_polish(sel, instruction, cfg):
+        calls["instruction"] = instruction
         if isinstance(rewritten, Exception):
             raise rewritten
         return rewritten
@@ -139,9 +141,28 @@ def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows
 def test_polish_pastes_the_rewritten_selection(monkeypatch):
     app, calls = _polish_app(monkeypatch, "hi leute", "Sehr geehrte Damen und Herren")
     asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
-    assert calls == {"pasted": ["Sehr geehrte Damen und Herren"], "beeps": []}
+    assert (calls["pasted"], calls["beeps"]) == (["Sehr geehrte Damen und Herren"], [])
     assert app._last_typed == "Sehr geehrte Damen und Herren"
     assert app._save_command.call_args.args[1] == "[polish] mach es formeller"
+
+
+def test_polish_uses_a_spoken_preset_and_saves_its_name(monkeypatch):
+    from nexusvox.polish_presets import PolishPreset
+
+    preset = PolishPreset("formelle Mail", "Schreib das als formelle E-Mail.")
+    app, calls = _polish_app(monkeypatch, "hi leute", "Sehr geehrte Damen und Herren", presets=[preset])
+    asyncio.run(app._polish_selection("Formelle Mail", MagicMock()))
+    assert calls["instruction"] == "Schreib das als formelle E-Mail."
+    assert app._save_command.call_args.args[1:] == ("[polish] formelle Mail", "Formelle Mail")
+
+
+def test_polish_without_an_instruction_uses_the_default_preset(monkeypatch):
+    from nexusvox.polish_presets import PolishPreset
+
+    preset = PolishPreset("kürzer", "Mach den Text kürzer.", is_default=True)
+    app, calls = _polish_app(monkeypatch, "hi leute", "hi", presets=[preset])
+    asyncio.run(app._polish_selection("", None))
+    assert calls["instruction"] == "Mach den Text kürzer."
 
 
 def test_polish_without_a_selection_beeps(monkeypatch):
@@ -155,14 +176,14 @@ def test_polish_with_the_model_down_keeps_the_selection(monkeypatch):
 
     app, calls = _polish_app(monkeypatch, "hi leute", LlmError("refused"))
     asyncio.run(app._polish_selection("", MagicMock()))
-    assert calls == {"pasted": [], "beeps": ["error"]}
+    assert (calls["pasted"], calls["beeps"]) == ([], ["error"])
     app._save_command.assert_not_called()
 
 
 def test_polish_does_not_paste_when_the_focus_moved(monkeypatch):
     app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen", windows=(1, 2))
     asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
-    assert calls == {"pasted": [], "beeps": ["error"]}
+    assert (calls["pasted"], calls["beeps"]) == ([], ["error"])
     assert app._last_typed == "Hallo zusammen"  # the paste key still pastes it
 
 

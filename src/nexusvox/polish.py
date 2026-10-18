@@ -1,10 +1,11 @@
 """Polish: rewrite the selected text by a spoken instruction.
 
 The user selects text, holds the hotkey, taps `[hotkey].polish_key` and says what
-to do ("make it shorter", "mach es formeller") or nothing. The instruction - or,
-when nothing was said, the default polish instruction - goes to the language model
-with the selection; the reply replaces the selection. The prompts live here so they
-are versioned and tested with the code.
+to do ("make it shorter", "mach es formeller"), the name of one of their presets, or
+nothing. The instruction - a preset's, or when nothing was said the default preset's
+or the default polish instruction - goes to the language model with the selection;
+the reply replaces the selection. The prompts live here so they are versioned and
+tested with the code.
 """
 
 from __future__ import annotations

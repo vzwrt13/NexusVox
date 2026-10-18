@@ -694,6 +694,23 @@ def test_learn_from_edits_setting(flask_client):
     assert resp.get_json()["learn_from_edits"] is True
 
 
+def test_polish_presets_add_edit_default_and_delete(flask_client):
+    def post(**body):
+        return flask_client.post("/api/polish-presets", data=json.dumps(body), content_type="application/json")
+
+    assert flask_client.get("/api/polish-presets").get_json() == {"presets": []}
+    first = post(name="prompt engineer", instruction="Rewrite it as a prompt.", is_default=True).get_json()["preset"]
+    second = post(name="kürzer", instruction="Mach es kürzer.", is_default=True).get_json()["preset"]
+    presets = flask_client.get("/api/polish-presets").get_json()["presets"]
+    assert [(p["name"], p["is_default"]) for p in presets] == [("kürzer", True), ("prompt engineer", False)]
+
+    clash = post(name="Kürzer", instruction="other")
+    assert clash.status_code == 400 and "unique" in clash.get_json()["error"]
+    edited = post(id=first["id"], name="prompt engineer", instruction="New.", is_default=False).get_json()
+    assert edited["preset"]["instruction"] == "New."
+    assert flask_client.delete(f"/api/polish-presets/{second['id']}").get_json() == {"ok": True}
+
+
 def test_cleanup_level_setting(flask_client, monkeypatch):
     import nexusvox.dashboard.api as api_module
 

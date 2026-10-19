@@ -571,6 +571,15 @@ canvas { width: 100% !important; max-height: 260px; }
   margin-bottom: 12px;
 }
 
+.upload-note {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--orange);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+
 .upload-history-heading {
   font-size: 14px;
   font-weight: 500;

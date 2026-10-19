@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import unicodedata
-from dataclasses import asdict
+from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import sessionmaker
@@ -24,7 +24,9 @@ from .models import (
 )
 from .polish_presets import MAX_PRESET_NAME_WORDS, PolishPreset
 from .snippets import Snippet, SnippetOption
-from .transcriber import Word
+
+if TYPE_CHECKING:
+    from .transcriber import Word
 
 logger = logging.getLogger(__name__)
 
@@ -451,7 +453,7 @@ class Database:
                 created_at=utc_now(),
                 model=model,
                 confidence=confidence,
-                words=json.dumps([asdict(w) for w in words]) if words else None,
+                words=json.dumps([{"word": w.word, "start": w.start, "end": w.end} for w in words]) if words else None,
             )
             session.add(record)
             session.commit()

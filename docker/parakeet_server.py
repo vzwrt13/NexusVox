@@ -34,7 +34,7 @@ async def transcribe(
     timestamp_granularities: list[str] = Form(default=[], alias="timestamp_granularities[]"),
 ) -> dict:
     # Word timestamps only on the OpenAI-style request (verbose_json + word granularity);
-    # every other request gets the plain {"text": ...} reply and skips the extra decoding.
+    # every other request gets the plain {"text": ...} reply.
     want_words = response_format == "verbose_json" and "word" in timestamp_granularities
     audio_bytes = await file.read()
 
@@ -53,7 +53,8 @@ async def transcribe(
             data = librosa.resample(data, orig_sr=sr, target_sr=16000)
             sf.write(tmp_path, data, 16000)
 
-        result = globals()["model"].transcribe([tmp_path], timestamps=want_words)
+        # Any non-None `timestamps` makes NeMo rebuild its decoding strategy, so dictation passes None.
+        result = globals()["model"].transcribe([tmp_path], timestamps=True if want_words else None)
         text = result[0].text if hasattr(result[0], "text") else str(result[0])
         words = _words(result[0]) if want_words else None
     finally:
@@ -65,6 +66,17 @@ async def transcribe(
 
 
 def _words(hypothesis) -> list[dict]:
-    """Per-word {word, start, end} (seconds) from a NeMo hypothesis, OpenAI verbose_json style."""
-    timestamp = getattr(hypothesis, "timestamp", None) or {}
-    return [{"word": w["word"], "start": float(w["start"]), "end": float(w["end"])} for w in timestamp.get("word", [])]
+    """Per-word {word, start, end} (seconds) from a NeMo hypothesis, OpenAI verbose_json style.
+
+    An entry without usable timing is skipped, so a NeMo version with another shape costs the
+    word list, never the transcript.
+    """
+    timestamp = getattr(hypothesis, "timestamp", None)
+    entries = timestamp.get("word") if isinstance(timestamp, dict) else None
+    words = []
+    for entry in entries or []:
+        try:
+            words.append({"word": entry["word"], "start": float(entry["start"]), "end": float(entry["end"])})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return words

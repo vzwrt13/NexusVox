@@ -103,6 +103,9 @@ class BaseTranscriber(ABC):
 
     model: str
     needs_docker: bool = True
+    # True when the engine can report per-word timing; `word_timestamps` then asks for it.
+    supports_word_timestamps: bool = False
+    word_timestamps: bool = False
 
     @abstractmethod
     async def connect(self) -> None: ...
@@ -271,15 +274,14 @@ class OpenAIHttpTranscriber(BaseTranscriber):
         result = await finish()
     """
 
+    supports_word_timestamps = True
+
     def __init__(self, config: InferenceConfig) -> None:
         self._server_url = config.server_url
         self._audio_buffer = bytearray()
         self._sample_rate = 16_000
         self.model = MODEL_REGISTRY[config.model]["hf_name"]
         self._connected = False
-        # Set by file uploads only: asks the server for per-word timestamps. Dictation leaves
-        # it off, so its request (and the server's work) stays exactly as it was.
-        self.word_timestamps = False
 
     async def connect(self) -> None:
         """Reset audio buffer for a new transcription cycle."""

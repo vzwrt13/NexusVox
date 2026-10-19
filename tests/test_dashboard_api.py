@@ -856,6 +856,65 @@ def test_retry_transcribes_the_stored_audio_again(flask_client, db, sample_wav_b
     assert db.get_transcription_text(record.id) == "nexus fox"  # nothing saved
 
 
+def test_retry_does_not_ask_for_words_and_reports_an_incomplete_run(
+    flask_client, db, sample_wav_bytes, tmp_path, monkeypatch
+):
+    from nexusvox.dashboard.api import DashboardAPI
+    from nexusvox.transcriber import TranscriptionResult
+
+    wav = tmp_path / "1.wav"
+    wav.write_bytes(sample_wav_bytes)
+    record = db.save_transcription("nexus fox", "en", 500, audio_path=str(wav))
+    monkeypatch.setattr(DashboardAPI, "get_audio_file_path", lambda self, tid: str(wav))
+    result = TranscriptionResult()
+    result.finalize(text="NexusVox")
+    result.notes = ["Chunk 1 of 1 timed out; its text may be incomplete or missing."]
+    seen: dict = {}
+
+    def fake_transcribe(wav_chunks, cfg, **kwargs):
+        seen.update(kwargs)
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
+
+    data = flask_client.post(f"/api/review/{record.id}/retry").get_json()
+
+    assert seen["word_timestamps"] is False
+    assert data["ok"] is False and "timed out" in data["error"]
+
+
+def test_upload_asks_for_words_stores_them_and_returns_notes(flask_client, db, sample_wav_bytes, monkeypatch):
+    import io
+    import json
+
+    from nexusvox.transcriber import TranscriptionResult, Word
+
+    result = TranscriptionResult()
+    result.finalize(text="hello world")
+    result.words = [Word("hello", 0.1, 0.4), Word("world", 0.5, 0.9)]
+    result.notes = ["Chunk 2 of 2 came back without word timestamps."]
+    seen: dict = {}
+
+    def fake_transcribe(wav_chunks, cfg, **kwargs):
+        seen.update(kwargs)
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
+
+    data = flask_client.post(
+        "/api/file-transcribe",
+        data={"file": (io.BytesIO(sample_wav_bytes), "test.wav")},
+        content_type="multipart/form-data",
+    ).get_json()
+
+    assert seen["word_timestamps"] is True
+    assert data["ok"] is True and data["notes"] == result.notes
+    stored = db.get_file_transcriptions(limit=1)[0]
+    assert [w["word"] for w in json.loads(stored.words)] == ["hello", "world"]
+
+
 def test_retry_without_stored_audio_says_why(flask_client, db):
     record = db.save_transcription("no audio", "en", 500)
 

@@ -149,3 +149,69 @@ class _Started:
 
     def start(self):
         pass
+
+
+def test_background_requests_wait_for_a_live_request(monkeypatch):
+    import threading
+    import time
+
+    release_live = threading.Event()
+    live_started = threading.Event()
+    order: list[str] = []
+
+    def urlopen(request, timeout=None):
+        who = json.loads(request.data)["messages"][1]["content"]
+        order.append(f"start {who}")
+        if who == "live":
+            live_started.set()
+            release_live.wait(5)
+        order.append(f"end {who}")
+        return io.BytesIO(json.dumps({"message": {"content": "ok"}}).encode())
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", urlopen)
+
+    def background_request():
+        with llm.background():
+            complete(LlmConfig(), "system", "background")
+
+    live = threading.Thread(target=lambda: complete(LlmConfig(), "system", "live"))
+    live.start()
+    assert live_started.wait(5)
+    bg = threading.Thread(target=background_request)
+    bg.start()
+    time.sleep(0.2)
+    assert order == ["start live"]  # the background request has not been sent
+    release_live.set()
+    live.join(5)
+    bg.join(5)
+
+    assert order == ["start live", "end live", "start background", "end background"]
+
+
+def test_background_request_goes_ahead_after_the_wait_limit(monkeypatch):
+    import threading
+
+    release_live = threading.Event()
+    live_started = threading.Event()
+    sent: list[str] = []
+
+    def urlopen(request, timeout=None):
+        who = json.loads(request.data)["messages"][1]["content"]
+        sent.append(who)
+        if who == "live":
+            live_started.set()
+            release_live.wait(5)
+        return io.BytesIO(json.dumps({"message": {"content": "ok"}}).encode())
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(llm, "BACKGROUND_WAIT_S", 0.1)
+    live = threading.Thread(target=lambda: complete(LlmConfig(), "system", "live"))
+    live.start()
+    assert live_started.wait(5)
+
+    with llm.background():
+        complete(LlmConfig(), "system", "background")
+
+    release_live.set()
+    live.join(5)
+    assert sent == ["live", "background"]

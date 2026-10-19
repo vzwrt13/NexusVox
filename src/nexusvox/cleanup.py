@@ -114,9 +114,12 @@ def plausible(original: str, cleaned: str, level: str) -> bool:
     return difflib.SequenceMatcher(None, before, after, autojunk=False).ratio() >= _MIN_SIMILARITY[level]
 
 
-def cleanup(text: str, config: CleanupConfig, llm: LlmConfig) -> CleanupResult:
-    """*text* cleaned up at `config.level`, or *text* itself. Blocking HTTP; never raises."""
-    if config.level not in PROMPTS or len(_words(text)) < MIN_WORDS:
+def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = MIN_WORDS) -> CleanupResult:
+    """*text* cleaned up at `config.level`, or *text* itself. Blocking HTTP; never raises.
+
+    A *text* of fewer than *min_words* words is returned as it is, without asking the model.
+    """
+    if config.level not in PROMPTS or len(_words(text)) < min_words:
         return CleanupResult(text)
     started = time.monotonic()
     try:

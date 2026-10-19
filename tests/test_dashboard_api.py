@@ -1187,7 +1187,10 @@ def test_upload_with_cleanup_stores_the_cleaned_text_beside_the_original(
     import json
 
     _fake_transcription(monkeypatch, "Speaker 1: well um hello there.\n\nSpeaker 2: um hi.")
-    monkeypatch.setattr("nexusvox.cleanup.complete", lambda config, system, user: "Well, hello there.")
+    monkeypatch.setattr(
+        "nexusvox.cleanup.complete",
+        lambda config, system, user: "Well, hello there." if "hello" in user else "Hi.",
+    )
 
     job = upload_file(flask_client, sample_wav_bytes, cleanup="light")
 
@@ -1195,7 +1198,7 @@ def test_upload_with_cleanup_stores_the_cleaned_text_beside_the_original(
     assert job["state"] == "done", job["error"]
     stored = db.get_file_transcriptions(limit=1)[0]
     assert stored.text == "Speaker 1: well um hello there.\n\nSpeaker 2: um hi."  # the transcript is untouched
-    assert stored.cleaned_text.startswith("Speaker 1: Well, hello there.")
+    assert stored.cleaned_text == "Speaker 1: Well, hello there.\n\nSpeaker 2: Hi."
     assert stored.cleanup_level == "light"
     assert json.loads(stored.words) == [{"word": "well", "start": 0.1, "end": 0.4}]
     assert data["text"] == stored.text and data["cleaned_text"] == stored.cleaned_text

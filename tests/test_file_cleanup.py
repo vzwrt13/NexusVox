@@ -5,7 +5,14 @@ from __future__ import annotations
 import pytest
 
 from nexusvox.config import LlmConfig
-from nexusvox.file_cleanup import MAX_CONSECUTIVE_FAILURES, clean_transcript, split_paragraphs, split_pieces
+from nexusvox.file_cleanup import (
+    MAX_CONSECUTIVE_FAILURES,
+    _sentence_spans,
+    _split,
+    clean_transcript,
+    split_paragraphs,
+    split_pieces,
+)
 from nexusvox.llm import LlmError
 
 LLM = LlmConfig(timeout_s=42.0)
@@ -171,3 +178,99 @@ def test_an_unknown_level_or_empty_text_calls_no_model(monkeypatch):
     assert clean_transcript("Some words in here.", "off", LLM).text == "Some words in here."
     assert clean_transcript("", "light", LLM).text == ""
     assert calls == []
+
+
+# ---- text is kept as it was ----------------------------------------------------
+
+
+def test_text_without_any_change_comes_back_untouched(monkeypatch):
+    _fake_model(monkeypatch, lambda text: text)
+    text = "Speaker 1:   Hello  there.\nSecond line.\n\n\nSpeaker 2: Fine.  \n"
+
+    assert clean_transcript(text, "light", LLM).text == text
+
+
+def test_a_dead_model_leaves_the_text_exactly_as_it_was(monkeypatch):
+    def reply(text):
+        raise LlmError("connection refused")
+
+    _fake_model(monkeypatch, reply)
+    text = "First sentence of the talk.\nSecond line of it.   Third one here."
+
+    assert clean_transcript(text, "light", LLM).text == text
+
+
+def test_whitespace_between_pieces_and_blocks_survives_a_change(monkeypatch):
+    _fake_model(monkeypatch, lambda text: text.replace("um ", ""))
+    text = "Speaker 1: Well um this is it.\nAnd more text.\n\n\nSpeaker 2: Fine by me."
+
+    result = clean_transcript(text, "light", LLM)
+
+    assert result.text == "Speaker 1: Well this is it.\nAnd more text.\n\n\nSpeaker 2: Fine by me."
+
+
+def test_pieces_keep_the_whitespace_between_them():
+    pieces, seps = _split("One two three.  Four five six.\nSeven eight nine.", 6)
+
+    assert pieces == ["One two three.  Four five six.", "Seven eight nine."] and seps == ["\n"]
+
+
+# ---- the give-up rule and short turns -------------------------------------------
+
+
+def test_short_turns_between_failures_do_not_reset_the_give_up_rule(monkeypatch):
+    def reply(text):
+        raise LlmError("hung")
+
+    calls = _fake_model(monkeypatch, reply)
+    turns = []
+    for i in range(10):
+        turns += [f"Speaker 1: a long turn number {i} of the talk.", "Speaker 2: Yes please."]
+    text = "\n\n".join(turns)
+
+    result = clean_transcript(text, "light", LLM)
+
+    assert len(calls) == MAX_CONSECUTIVE_FAILURES and result.text == text
+
+
+def test_a_short_turn_with_a_filler_is_cleaned(monkeypatch):
+    _fake_model(monkeypatch, lambda text: text.replace("um ", "").capitalize())
+
+    result = clean_transcript("Speaker 1: Hello everyone here today.\n\nSpeaker 2: um hi.", "light", LLM)
+
+    assert result.text == "Speaker 1: Hello everyone here today.\n\nSpeaker 2: Hi."
+
+
+def test_a_one_word_turn_is_not_sent(monkeypatch):
+    calls = _fake_model(monkeypatch, lambda text: text)
+
+    clean_transcript("Speaker 2: Yes.", "light", LLM)
+
+    assert calls == []
+
+
+# ---- cutting without breaking sentences -----------------------------------------
+
+
+def test_a_long_sentence_is_cut_after_a_comma_when_there_is_one():
+    words = [f"w{i}" for i in range(30)]
+    words[17] += ","
+    text = " ".join(words) + "."
+
+    pieces = split_pieces(text, max_words=20)
+
+    assert len(pieces) == 2 and pieces[0].endswith("w17,") and " ".join(pieces) == text
+
+
+@pytest.mark.parametrize(
+    ("text", "second"),
+    [
+        ("Ask Dr. Smith about the plan today. It is ready.", "It is ready."),
+        ("Bring things, z. B. paper and pens today. It is ready.", "It is ready."),
+        ("Das gilt bzw. galt für alle Gäste heute. Es ist fertig.", "Es ist fertig."),
+    ],
+)
+def test_a_sentence_does_not_end_at_an_abbreviation(text, second):
+    spans = _sentence_spans(text)
+
+    assert [text[a:b] for a, b in spans][1] == second and len(spans) == 2

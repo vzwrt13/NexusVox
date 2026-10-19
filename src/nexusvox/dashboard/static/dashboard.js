@@ -1586,9 +1586,11 @@ uploadZone.addEventListener("drop", (e) => {
 
 const cleanupToggle = document.getElementById("upload-cleanup-toggle");
 const cleanupLevel = document.getElementById("upload-cleanup-level");
-cleanupToggle.addEventListener("change", () => {
+function syncCleanupLevel() {
   cleanupLevel.disabled = !cleanupToggle.checked;
-});
+}
+cleanupToggle.addEventListener("change", syncCleanupLevel);
+syncCleanupLevel(); // a reload can restore a checked toggle without a change event
 
 const diarizeToggle = document.getElementById("upload-diarize-toggle");
 const diarizeHint = document.getElementById("upload-diarize-hint");

@@ -649,11 +649,11 @@ class DashboardAPI:
 
         notes = list(result.notes)
         cleaned_text = None
-        if cleanup_level in CLEANUP_LEVELS and cleanup_level != "off" and result.text:
+        if cleanup_level and result.text:
             try:
                 cleaned = clean_transcript(result.text, cleanup_level, self._config.llm, progress)
             except Exception as exc:  # clean_transcript reports model failures itself; this is a bug
-                logger.error("Cleaning up the transcript of %s failed: %s", filename, exc)
+                logger.exception("Cleaning up the transcript of %s failed: %s", filename, exc)
                 notes.append("Text cleanup failed; the transcript is saved as transcribed.")
             else:
                 if cleaned.note:

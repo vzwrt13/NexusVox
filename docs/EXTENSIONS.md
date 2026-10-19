@@ -108,4 +108,47 @@ is affected. The link points at `GET /api/file-transcriptions/<id>/export/<targe
 
 ## Listing what is loaded
 
-`GET /api/extensions` returns `{api_version, extensions, panels, exports}` for the dashboard.
+`GET /api/extensions` returns `{api_version, extensions, panels, exports, upload_actions}` for the dashboard.
+
+## Availability and upload actions
+
+`ExportTarget.available` and the `upload_actions` hook are additions, not breaking changes: the API version
+stays at 1 and extensions that do not use them behave as before. A NexusVox release that predates them ignores the extra field and never calls the hook.
+and hook are simply ignored or rejected, so guard with the `nexusvox` version if you must support older ones.
+
+### Marking an export unavailable
+
+`ExportTarget` takes an optional `available(transcription_id) -> bool | str | None`. `True` or `None` offers
+the link as usual; `False` (or any other falsy answer such as `0`) shows it greyed out and not clickable; a
+string does the same and becomes the tooltip (e.g. `"No summary yet"`). The answers come with the upload list (`exports_unavailable`, a
+`{target id: reason}` object per upload in `GET /api/file-transcriptions`), not one request per link, so keep
+the check cheap: it runs once per listed upload (up to 50) for each target that has one. A check that raises leaves the link on, so the export itself reports the problem.
+
+```python
+ExportTarget(
+    "summary",
+    "Summary (Markdown)",
+    ".md",
+    "text/markdown",
+    self._export,
+    available=lambda tid: True if self._has_summary(tid) else "No summary yet",
+)
+```
+
+### Hook 4: upload actions
+
+```python
+def upload_actions(self) -> list[UploadAction]:
+    return [UploadAction("summarise", "Summarise", endpoint="/api/ext/my-tab/summarise/{id}")]
+```
+
+Each action adds a button to the result card of every stored upload in the Upload tab.
+
+| `UploadAction` field | Meaning |
+|----------------------|---------|
+| `id` | Same rules as a panel id; unique across all extensions |
+| `label` | The button's text |
+| `endpoint` | An absolute path on this server (no scheme, host or backslash), e.g. a route of your panel's blueprint. The button `POST`s to it, every `{id}` replaced by the upload id. It answers JSON: `error` (or `"ok": false`) is shown as an error, `note` or `message` as a note. The list reloads afterwards, so a newly possible export becomes available |
+| `panel` | Instead of `endpoint`: the id of one of the same extension's own panels (any other id drops the action). Its script, loaded on the first click, calls `NexusVoxExt.registerUploadAction("<action id>", (upload, button) => ...)`; `upload` is the upload as listed by `GET /api/file-transcriptions` |
+
+Set exactly one of `endpoint` and `panel`; anything else drops the action.

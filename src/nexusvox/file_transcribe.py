@@ -7,6 +7,7 @@ import io
 import logging
 import threading
 import wave
+from collections.abc import Callable
 
 from .config import MODEL_REGISTRY, InferenceConfig
 from .diarization import diarization_timeout, format_transcript, label_words, speaker_detection_models
@@ -73,6 +74,7 @@ async def transcribe_file(
     auto_detect_language: bool = False,
     word_timestamps: bool = False,
     diarize: bool = False,
+    on_progress: Callable[..., None] | None = None,
 ) -> TranscriptionResult:
     """Transcribe WAV chunks via the shared transcriber factory and join results.
 
@@ -81,6 +83,9 @@ async def transcribe_file(
     that support it also detect speakers once over the whole file; the text then becomes
     "Speaker 1: ..." paragraphs and each word carries its speaker. When speaker detection is not
     possible or fails, the plain transcript comes back with a note saying why.
+
+    `on_progress(stage, current, total)` is called as the work moves on: `"transcribing"` as chunk
+    `current` of `total` starts, `"diarizing"` when only speaker detection is left.
 
     Dispatches through `create_transcriber` so CPU users (in-process Whisper)
     and GPU users (Docker-backed HTTP/WS) share one code path.
@@ -110,6 +115,8 @@ async def transcribe_file(
     try:
         for i, wav_bytes in enumerate(wav_chunks):
             logger.info("Transcribing chunk %d/%d", i + 1, len(wav_chunks))
+            if on_progress:
+                on_progress("transcribing", i + 1, len(wav_chunks))
             with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
                 pcm_data = wf.readframes(wf.getnframes())
 
@@ -133,6 +140,8 @@ async def transcribe_file(
         if diarize and not wants_speakers:
             notes.append(_unavailable_note(entry))
         elif speakers is not None and text:
+            if on_progress and not speakers.done():
+                on_progress("diarizing")
             turns, problem = await speakers
             if not words_complete:
                 # Labelled paragraphs are built from the words; a word without timing would vanish.

@@ -7,6 +7,33 @@ import json
 from nexusvox.dictionary import DictionaryEntry
 
 
+def upload_file(client, wav_bytes, name="test.wav", **form):
+    """POST a file to /api/file-transcribe, wait for its job to end and return the job's final status."""
+    import io
+    import time
+
+    resp = client.post(
+        "/api/file-transcribe",
+        data={"file": (io.BytesIO(wav_bytes), name), **form},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 202, resp.get_json()
+    job_id = resp.get_json()["job_id"]
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        job = client.get(f"/api/file-transcribe/{job_id}").get_json()
+        if job["state"] != "running":
+            return job
+        time.sleep(0.01)
+    raise AssertionError("file job did not end")
+
+
+def run_coro(coro):
+    import asyncio
+
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
 def test_get_settings(flask_client):
     resp = flask_client.get("/api/settings")
 
@@ -468,19 +495,174 @@ def test_file_transcribe_success(flask_client, sample_wav_bytes, monkeypatch):
         lambda coro: mock_result,
     )
 
+    job = upload_file(flask_client, sample_wav_bytes)
+
+    assert job["state"] == "done" and job["percent"] == 1.0, job["error"]
+    data = job["result"]
+    assert data["ok"] is True
+    assert data["text"] == "transcribed text"
+    assert data["original_filename"] == "test.wav"
+
+
+def test_file_transcribe_rejects_an_unsupported_format_at_once(flask_client):
     import io
 
     resp = flask_client.post(
         "/api/file-transcribe",
-        data={"file": (io.BytesIO(sample_wav_bytes), "test.wav")},
+        data={"file": (io.BytesIO(b"x"), "notes.txt")},
         content_type="multipart/form-data",
     )
 
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data["ok"] is True
-    assert data["text"] == "transcribed text"
-    assert data["original_filename"] == "test.wav"
+    assert resp.status_code == 400 and "Unsupported format" in resp.get_json()["error"]
+    assert flask_client.get("/api/file-transcribe/current").get_json() == {"job": None}
+
+
+def test_file_job_moves_through_its_stages_to_done(flask_client, sample_wav_bytes, monkeypatch):
+    import io
+    import threading
+    import time
+
+    from nexusvox.transcriber import TranscriptionResult
+
+    reached = threading.Event()
+    release = threading.Event()
+    result = TranscriptionResult()
+    result.finalize(text="long file")
+
+    async def fake_transcribe(wav_chunks, cfg, *, on_progress=None, **kwargs):
+        on_progress("transcribing", 2, 5)
+        reached.set()
+        assert release.wait(5)
+        on_progress("diarizing")
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", run_coro)
+
+    resp = flask_client.post(
+        "/api/file-transcribe",
+        data={"file": (io.BytesIO(sample_wav_bytes), "long.wav")},
+        content_type="multipart/form-data",
+    )
+    job_id = resp.get_json()["job_id"]
+    assert reached.wait(5)
+
+    running = flask_client.get(f"/api/file-transcribe/{job_id}").get_json()
+    assert running["state"] == "running" and running["stage"] == "transcribing"
+    assert (running["current"], running["total"]) == (2, 5)
+    assert running["message"] == "Transcribing chunk 2 of 5"
+    assert 0.1 < running["percent"] < 0.9 and running["result"] is None
+    # A page reopened now finds the same job.
+    assert flask_client.get("/api/file-transcribe/current").get_json()["job"]["job_id"] == job_id
+
+    release.set()
+    deadline = time.monotonic() + 5
+    while flask_client.get(f"/api/file-transcribe/{job_id}").get_json()["state"] == "running":
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+
+    done = flask_client.get(f"/api/file-transcribe/{job_id}").get_json()
+    assert done["state"] == "done" and done["result"]["text"] == "long file"
+
+
+def test_file_job_reports_a_transcription_error(flask_client, db, sample_wav_bytes, monkeypatch):
+    def broken(wav_chunks, cfg, **kwargs):
+        raise RuntimeError("server went away")
+
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", broken)
+
+    job = upload_file(flask_client, sample_wav_bytes)
+
+    assert job["state"] == "error" and job["result"] is None
+    assert job["error"] == "Transcription failed: server went away"
+    assert job["message"] == job["error"]
+    assert db.get_file_transcriptions(limit=1) == []
+
+
+def test_file_job_reports_a_conversion_error(flask_client):
+    job = upload_file(flask_client, b"this is not audio", "broken.mp3")
+
+    assert job["state"] == "error" and job["error"].startswith("Audio conversion failed")
+
+
+def test_file_job_ends_as_an_error_when_saving_crashes(flask_client, db, sample_wav_bytes, monkeypatch):
+    from nexusvox.transcriber import TranscriptionResult
+
+    result = TranscriptionResult()
+    result.finalize(text="x")
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", lambda wav, cfg, **kwargs: result)
+    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
+
+    def crash(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(db, "save_file_transcription", crash)
+
+    job = upload_file(flask_client, sample_wav_bytes)
+
+    assert job["state"] == "error" and "disk full" in job["error"]
+
+
+def test_second_upload_is_refused_while_one_runs(flask_client, sample_wav_bytes, monkeypatch):
+    import io
+    import threading
+
+    from nexusvox.transcriber import TranscriptionResult
+
+    release = threading.Event()
+    result = TranscriptionResult()
+    result.finalize(text="x")
+
+    async def slow(wav_chunks, cfg, **kwargs):
+        assert release.wait(5)
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", slow)
+    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", run_coro)
+
+    def post():
+        return flask_client.post(
+            "/api/file-transcribe",
+            data={"file": (io.BytesIO(sample_wav_bytes), "a.wav")},
+            content_type="multipart/form-data",
+        )
+
+    first = post()
+    second = post()
+    release.set()
+
+    assert first.status_code == 202
+    assert second.status_code == 409 and "still being transcribed" in second.get_json()["error"]
+
+
+def test_unknown_file_job_is_a_404(flask_client):
+    assert flask_client.get("/api/file-transcribe/nope").status_code == 404
+
+
+def test_a_job_that_ended_while_away_is_reported_once(flask_client, sample_wav_bytes, monkeypatch):
+    import io
+    import time
+
+    def broken(wav_chunks, cfg, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", broken)
+
+    flask_client.post(
+        "/api/file-transcribe",
+        data={"file": (io.BytesIO(sample_wav_bytes), "a.wav")},
+        content_type="multipart/form-data",
+    )
+    deadline = time.monotonic() + 5
+    job = None
+    while time.monotonic() < deadline:
+        job = flask_client.get("/api/file-transcribe/current").get_json()["job"]
+        if job and job["state"] != "running":
+            break
+        time.sleep(0.01)
+
+    assert job["state"] == "error" and job["error"] == "Transcription failed: boom"
+    assert flask_client.get("/api/file-transcribe/current").get_json() == {"job": None}
 
 
 def test_file_transcriptions_list_endpoint(flask_client, db):
@@ -891,7 +1073,6 @@ def test_retry_does_not_ask_for_words_and_reports_an_incomplete_run(
 
 
 def test_upload_asks_for_words_stores_them_and_returns_notes(flask_client, db, sample_wav_bytes, monkeypatch):
-    import io
     import json
 
     from nexusvox.transcriber import TranscriptionResult, Word
@@ -909,11 +1090,7 @@ def test_upload_asks_for_words_stores_them_and_returns_notes(flask_client, db, s
     monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
     monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
 
-    data = flask_client.post(
-        "/api/file-transcribe",
-        data={"file": (io.BytesIO(sample_wav_bytes), "test.wav")},
-        content_type="multipart/form-data",
-    ).get_json()
+    data = upload_file(flask_client, sample_wav_bytes)["result"]
 
     assert seen["word_timestamps"] is True
     assert seen["diarize"] is False
@@ -974,7 +1151,6 @@ def test_polish_key_and_model_settings(flask_client, monkeypatch):
 
 
 def test_upload_with_diarize_passes_the_flag_and_stores_speakers(flask_client, db, sample_wav_bytes, monkeypatch):
-    import io
     import json
 
     from nexusvox.transcriber import TranscriptionResult, Word
@@ -991,11 +1167,7 @@ def test_upload_with_diarize_passes_the_flag_and_stores_speakers(flask_client, d
     monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
     monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
 
-    data = flask_client.post(
-        "/api/file-transcribe",
-        data={"file": (io.BytesIO(sample_wav_bytes), "meeting.wav"), "diarize": "1"},
-        content_type="multipart/form-data",
-    ).get_json()
+    data = upload_file(flask_client, sample_wav_bytes, "meeting.wav", diarize="1")["result"]
 
     assert seen["diarize"] is True
     assert data["ok"] is True and data["text"] == "Speaker 1: hello\n\nSpeaker 2: world"

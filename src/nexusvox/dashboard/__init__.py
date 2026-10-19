@@ -375,9 +375,21 @@ def _create_app(api: DashboardAPI) -> Flask:
             return jsonify({"ok": False, "error": "No filename"}), 400
         file_bytes = f.read()
         diarize = request.form.get("diarize", "").lower() in ("1", "true", "on", "yes")
-        result = api.upload_and_transcribe(file_bytes, f.filename, diarize=diarize)
-        status = 200 if result.get("ok") else 400
-        return jsonify(result), status
+        result = api.start_file_transcription(file_bytes, f.filename, diarize=diarize)
+        if result.get("ok"):
+            return jsonify(result), 202
+        return jsonify(result), 409 if result.get("busy") else 400
+
+    @app.route("/api/file-transcribe/current")
+    def file_transcribe_current():
+        return jsonify({"job": api.get_current_file_job()})
+
+    @app.route("/api/file-transcribe/<job_id>")
+    def file_transcribe_status(job_id):
+        job = api.get_file_job(job_id)
+        if job is None:
+            return jsonify({"ok": False, "error": "Unknown job"}), 404
+        return jsonify(job)
 
     @app.route("/api/file-transcriptions")
     def file_transcriptions():

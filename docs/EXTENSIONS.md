@@ -19,13 +19,13 @@ The entry point names an `Extension` subclass, an instance, or a function that t
 returns one. NexusVox loads every extension once, when the app starts, and logs each one it loads.
 
 ```python
-from nexusvox.extensions import API_VERSION, Extension
+from nexusvox.extensions import Extension
 
 
 class MyExtension(Extension):
     name = "my-extension"  # required, unique, shown in logs and results
     version = "1.0.0"
-    api_version = API_VERSION  # the extension API this package was written against
+    api_version = 1  # the extension API this package was written against: a literal, see Versioning
 ```
 
 **A broken extension never stops NexusVox.** One that cannot be imported, has no `name`, reuses a taken
@@ -37,7 +37,9 @@ is logged and skipped (a hook failure only skips that call).
 `nexusvox.extensions.API_VERSION` is an integer. It is bumped when a change breaks existing extensions
 (a hook renamed, a field removed or retyped); adding a hook, an optional field or a keyword with a default
 keeps it. NexusVox loads an extension only when its `api_version` equals the core's, so an extension built
-for another version is skipped with a log line instead of misbehaving.
+for another version is skipped with a log line instead of misbehaving. Every extension must set
+`api_version` itself, as a literal (`api_version = 1`, not `API_VERSION`): there is no default, and an extension
+that does not declare one is skipped.
 
 ## Hook 1: after a file upload was transcribed
 
@@ -75,7 +77,7 @@ def dashboard_panels(self) -> list[DashboardPanel]:
 |------------------------|---------|
 | `id` | Lower-case letters, digits, `-` and `_`; unique across all extensions (a taken id is skipped) |
 | `title` | The tab's label |
-| `static_dir` | Folder served at `/ext/<id>/` |
+| `static_dir` | Absolute path of an existing folder, served at `/ext/<id>/` (use `Path(__file__).parent / "static"`; a relative or missing one drops the panel) |
 | `script` | File in `static_dir` the browser loads when the tab is first opened (default `panel.js`) |
 | `blueprint` | Optional Flask `Blueprint`, mounted at `/api/ext/<id>/`: the tab's backend |
 
@@ -101,7 +103,7 @@ def export_targets(self) -> list[ExportTarget]:
 
 Each target adds a download link to every stored upload in the Upload tab. `export(transcript)` receives a
 `FileTranscript` and returns `bytes` or `str`; the file is named after the uploaded file plus `extension`.
-`id` follows the same rules as a panel id. A failing export answers with a 500 and its message; nothing else
+`id` follows the same rules as a panel id; `extension` must be a file name suffix such as `.docx` or `.tar.gz` (no slash, no spaces) and `mimetype` a media type, or the target is dropped. The link downloads through the page, so a failing export shows its message in the Upload tab instead of saving an error file. A failing export answers with a 500 and its message; nothing else
 is affected. The link points at `GET /api/file-transcriptions/<id>/export/<target id>`.
 
 ## Listing what is loaded

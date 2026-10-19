@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 import webbrowser
 from pathlib import Path
@@ -30,8 +31,8 @@ _lock = threading.Lock()
 
 def _attachment(filename: str) -> str:
     """A Content-Disposition value for a download; non-ASCII names go in the RFC 5987 form."""
-    ascii_name = filename.encode("ascii", "replace").decode().replace("?", "_").replace('"', "_")
-    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
+    ascii_name = re.sub(r'[^\x20-\x7e]|["\\]', "_", filename)
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
 def _create_app(api: DashboardAPI) -> Flask:

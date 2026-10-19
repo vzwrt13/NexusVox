@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +26,13 @@ from nexusvox.extensions import (
 from nexusvox.transcriber import TranscriptionResult, Word
 
 
-class DummyExtension(Extension):
+class V1Extension(Extension):
+    """What a well-formed extension looks like: it states the API version it was written for."""
+
+    api_version = API_VERSION
+
+
+class DummyExtension(V1Extension):
     """Records what it is handed and offers one panel and one export target."""
 
     name = "dummy"
@@ -122,13 +130,13 @@ def test_the_entry_point_group_is_nexusvox_extensions():
 
 
 def test_load_accepts_a_class_an_instance_and_a_factory(tmp_path):
-    class A(Extension):
+    class A(V1Extension):
         name = "a"
 
-    class B(Extension):
+    class B(V1Extension):
         name = "b"
 
-    class C(Extension):
+    class C(V1Extension):
         name = "c"
 
     reg = ExtensionRegistry()
@@ -138,7 +146,7 @@ def test_load_accepts_a_class_an_instance_and_a_factory(tmp_path):
 
 
 def test_load_asks_the_installed_entry_points_of_the_group(monkeypatch):
-    class A(Extension):
+    class A(V1Extension):
         name = "a"
 
     asked = []
@@ -156,10 +164,10 @@ def test_load_asks_the_installed_entry_points_of_the_group(monkeypatch):
 
 
 def test_a_failing_extension_is_logged_and_skipped(caplog):
-    class Good(Extension):
+    class Good(V1Extension):
         name = "good"
 
-    class Exploding(Extension):
+    class Exploding(V1Extension):
         name = "exploding"
 
         def __init__(self):
@@ -192,7 +200,7 @@ def test_a_failed_entry_point_lookup_loads_nothing(monkeypatch, caplog):
 
 
 def test_an_extension_for_another_api_version_is_skipped(caplog):
-    class Future(Extension):
+    class Future(V1Extension):
         name = "future"
         api_version = API_VERSION + 1
 
@@ -204,13 +212,13 @@ def test_an_extension_for_another_api_version_is_skipped(caplog):
 
 
 def test_an_extension_without_a_name_or_with_a_taken_name_is_skipped():
-    class Nameless(Extension):
+    class Nameless(V1Extension):
         pass
 
-    class First(Extension):
+    class First(V1Extension):
         name = "same"
 
-    class Second(Extension):
+    class Second(V1Extension):
         name = "same"
 
     reg = ExtensionRegistry()
@@ -222,7 +230,7 @@ def test_an_extension_without_a_name_or_with_a_taken_name_is_skipped():
 
 
 def test_a_failing_registration_hook_skips_the_extension():
-    class Bad(Extension):
+    class Bad(V1Extension):
         name = "bad"
 
         def dashboard_panels(self):
@@ -235,7 +243,7 @@ def test_a_failing_registration_hook_skips_the_extension():
 
 
 def test_malformed_and_duplicate_panel_and_target_ids_are_dropped(tmp_path):
-    class Messy(Extension):
+    class Messy(V1Extension):
         name = "messy"
 
         def dashboard_panels(self):
@@ -257,13 +265,13 @@ def test_malformed_and_duplicate_panel_and_target_ids_are_dropped(tmp_path):
 
 
 def test_a_panel_id_taken_by_an_earlier_extension_is_dropped(tmp_path):
-    class One(Extension):
+    class One(V1Extension):
         name = "one"
 
         def dashboard_panels(self):
             return [DashboardPanel("shared", "One", tmp_path)]
 
-    class Two(Extension):
+    class Two(V1Extension):
         name = "two"
 
         def dashboard_panels(self):
@@ -300,31 +308,31 @@ def test_the_hook_results_and_notes_are_collected_per_extension(registry, dummy)
 
 
 def test_a_failing_or_malformed_hook_becomes_a_note_and_the_others_still_run():
-    class Raises(Extension):
+    class Raises(V1Extension):
         name = "raises"
 
         def on_file_transcribed(self, transcript):
             raise RuntimeError("kaput")
 
-    class WrongType(Extension):
+    class WrongType(V1Extension):
         name = "wrongtype"
 
         def on_file_transcribed(self, transcript):
             return ["not", "a", "dict"]
 
-    class NotJson(Extension):
+    class NotJson(V1Extension):
         name = "notjson"
 
         def on_file_transcribed(self, transcript):
             return {"x": object()}
 
-    class Fine(Extension):
+    class Fine(V1Extension):
         name = "fine"
 
         def on_file_transcribed(self, transcript):
             return {"ok": True}
 
-    class Silent(Extension):
+    class Silent(V1Extension):
         name = "silent"
 
     reg = ExtensionRegistry()
@@ -357,7 +365,7 @@ def test_an_upload_runs_the_hook_on_the_stored_transcription(ext_client, db, dum
 
 
 def test_a_hook_that_raises_never_fails_the_upload(db, session_factory, sample_wav_bytes, monkeypatch):
-    class Exploding(Extension):
+    class Exploding(V1Extension):
         name = "exploding"
 
         def on_file_transcribed(self, transcript):
@@ -427,7 +435,7 @@ def test_a_clashing_blueprint_does_not_take_the_dashboard_down(db, session_facto
         bp.add_url_rule("/x", "x", lambda: "x")
         return bp
 
-    class Clash(Extension):
+    class Clash(V1Extension):
         name = "clash"
 
         def dashboard_panels(self):
@@ -480,7 +488,7 @@ def test_an_export_target_that_raises_gives_a_500_with_a_message(db, session_fac
     def explode(transcript):
         raise RuntimeError("template missing")
 
-    class Broken(Extension):
+    class Broken(V1Extension):
         name = "broken"
 
         def export_targets(self):
@@ -501,7 +509,8 @@ def test_an_export_target_that_raises_gives_a_500_with_a_message(db, session_fac
 def test_an_installed_distribution_is_discovered_through_importlib_metadata(tmp_path, monkeypatch):
     """The real lookup, with a throw-away distribution on sys.path instead of a fake entry point."""
     (tmp_path / "fake_ext_pkg.py").write_text(
-        "from nexusvox.extensions import Extension\n\nclass Installed(Extension):\n    name = 'installed'\n",
+        "from nexusvox.extensions import Extension\n\n\n"
+        "class Installed(Extension):\n    api_version = 1\n    name = 'installed'\n",
         encoding="utf-8",
     )
     dist = tmp_path / "fake_ext_pkg-1.0.dist-info"
@@ -517,3 +526,139 @@ def test_an_installed_distribution_is_discovered_through_importlib_metadata(tmp_
     reg.load()
 
     assert [e.name for e in reg.extensions] == ["installed"]
+
+
+# ---- Review fixes -------------------------------------------------------------
+
+
+def test_an_extension_that_does_not_declare_its_api_version_is_skipped(caplog):
+    class Undeclared(Extension):
+        name = "undeclared"
+
+    assert Extension.api_version is None
+    assert ExtensionRegistry().add(Undeclared) is False
+    assert "undeclared" in caplog.text
+
+
+def test_an_extension_instance_with_call_is_registered_not_called():
+    class Callable_(V1Extension):
+        name = "callable"
+
+        def __call__(self):
+            return None
+
+    reg = ExtensionRegistry()
+
+    assert reg.add(Callable_()) is True
+    assert [e.name for e in reg.extensions] == ["callable"]
+
+
+def test_a_hook_result_the_json_provider_cannot_sort_becomes_a_note():
+    class MixedKeys(V1Extension):
+        name = "mixed"
+
+        def on_file_transcribed(self, transcript):
+            return {1: "a", "note": "x"}
+
+    reg = ExtensionRegistry()
+    reg.add(MixedKeys)
+
+    results, notes = reg.file_transcribed(FileTranscript(1, "t", "en", 1, "a.wav"))
+
+    assert results == {}
+    assert len(notes) == 1 and notes[0].startswith("Extension mixed failed")
+
+
+def test_a_relative_or_missing_static_dir_drops_the_panel(tmp_path):
+    class Folders(V1Extension):
+        name = "folders"
+
+        def dashboard_panels(self):
+            return [
+                DashboardPanel("relative", "Relative", Path("static")),
+                DashboardPanel("missing", "Missing", tmp_path / "nope"),
+                DashboardPanel("fine", "Fine", tmp_path),
+            ]
+
+    reg = ExtensionRegistry()
+    reg.add(Folders)
+
+    assert [p.id for p in reg.panels()] == ["fine"]
+
+
+def test_an_export_target_with_an_unusable_suffix_or_type_is_dropped():
+    def target(id_, extension=".csv", mimetype="text/csv"):
+        return ExportTarget(id_, "Label", extension, mimetype, lambda t: "")
+
+    class Suffixes(V1Extension):
+        name = "suffixes"
+
+        def export_targets(self):
+            return [
+                target("slash", ".tar/gz"),
+                target("newline", ".csv\r\nX-Evil: 1"),
+                target("nodot", "csv"),
+                target("badtype", mimetype="text/csv\r\nX: 1"),
+                target("good", ".tar.gz", "application/gzip"),
+            ]
+
+    reg = ExtensionRegistry()
+    reg.add(Suffixes)
+
+    assert [t.id for t in reg.export_targets()] == ["good"]
+
+
+def test_an_extension_asking_for_the_registry_while_it_loads_does_not_deadlock(monkeypatch):
+    registry = ExtensionRegistry()
+    monkeypatch.setattr(ext, "_default", registry)
+    monkeypatch.setattr(ext, "_default_loaded", False)
+    seen = []
+
+    class Nosy(V1Extension):
+        name = "nosy"
+
+        def __init__(self):
+            seen.append(ext.load_extensions())  # the same thread: a reentrant lock lets it through
+
+    monkeypatch.setattr(ext, "entry_points", lambda **kw: [fake_entry_point("nosy", Nosy)])
+    done = []
+    thread = threading.Thread(target=lambda: done.append(ext.load_extensions()), daemon=True)
+    thread.start()
+    thread.join(5)
+
+    assert done == [registry] and seen == [registry]
+    assert [e.name for e in registry.extensions] == ["nosy"]
+
+
+def test_a_failure_after_the_save_does_not_fail_the_upload(db, session_factory, sample_wav_bytes, monkeypatch):
+    class Fine(V1Extension):
+        name = "fine"
+
+    reg = ExtensionRegistry()
+    reg.add(Fine)
+    api = DashboardAPI(session_factory, Config(), db=db, extensions=reg)
+    app = _create_app(api)
+    stub_transcription(monkeypatch)
+
+    def broken(record):
+        raise ValueError("odd row")
+
+    monkeypatch.setattr("nexusvox.dashboard.api.file_transcript_from_record", broken)
+
+    with app.test_client() as client:
+        job = upload(client, sample_wav_bytes)
+
+    assert job["state"] == "done", job["error"]
+    assert job["result"]["extensions"] == {}
+    assert any("odd row" in n for n in job["result"]["notes"])
+    assert len(db.get_file_transcriptions()) == 1
+
+
+def test_a_download_name_with_control_characters_and_slashes_stays_a_valid_header(ext_client, db):
+    record = db.save_file_transcription("x", "en", 1, "a\r\nb/c.wav")
+
+    resp = ext_client.get(f"/api/file-transcriptions/{record.id}/export/dummy-csv")
+
+    assert resp.status_code == 200
+    disposition = resp.headers["Content-Disposition"]
+    assert "\r" not in disposition and "\n" not in disposition

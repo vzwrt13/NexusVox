@@ -153,6 +153,10 @@ async function loadExtensions() {
   } catch (err) {
     console.error("Failed to load extensions:", err);
   }
+  // The Upload history may have been drawn before the export targets were known.
+  if (extensionExports.length && document.getElementById("tab-upload").classList.contains("active")) {
+    loadFileTranscriptions();
+  }
 }
 
 // The panel's script is fetched when its tab is first opened and renders into the tab once.
@@ -1850,6 +1854,32 @@ setInterval(() => {
   if (uploadTabShown()) resumeUploadJob();
 }, UPLOAD_WATCH_MS);
 
+// An export is fetched, not followed as a link, so a failing one shows its message instead of
+// saving the error reply as a file.
+async function downloadExport(url) {
+  uploadErrorEl.style.display = "none";
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      showUploadError(body.error || `Export failed (${res.status})`);
+      return;
+    }
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/);
+    const plain = disposition.match(/filename="([^"]*)"/);
+    const name = encoded ? decodeURIComponent(encoded[1]) : plain ? plain[1] : "export";
+    const blobUrl = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    showUploadError(`Export failed: ${err.message}`);
+  }
+}
+
 async function loadFileTranscriptions() {
   const data = await fetch("/api/file-transcriptions").then((r) => r.json());
   const container = document.getElementById("upload-list");
@@ -1867,12 +1897,19 @@ async function loadFileTranscriptions() {
         <span class="upload-model">${escapeHtml(item.model || "")}</span>
         <span class="upload-duration">${formatDuration(item.duration_ms)}</span>
         ${item.cleaned_text ? `<button type="button" class="upload-view-switch" data-index="${index}">Show original</button>` : ""}
-        ${extensionExports.map((t) => `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}" download>${escapeHtml(t.label)}</a>`).join("")}
+        ${extensionExports.map((t) => `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}">${escapeHtml(t.label)}</a>`).join("")}
       </div>
       <div class="upload-filename">${escapeHtml(item.original_filename)}</div>
       <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>
     </div>
   `).join("");
+
+  container.querySelectorAll(".upload-export").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      downloadExport(link.href);
+    });
+  });
 
   // A cleaned upload opens on the cleaned text; the button flips it to the transcript as transcribed.
   container.querySelectorAll(".upload-view-switch").forEach((button) => {

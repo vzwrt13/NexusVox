@@ -101,8 +101,9 @@ class NexusVoxApp:
         )
         apply_startup_fallback(config.inference, self._device)
 
-        # Optional extension packages (entry points); a broken one is logged and skipped.
-        load_extensions()
+        # Optional extension packages (entry points); a broken one is logged and skipped. In the background,
+        # so a heavy package never delays the hotkey; the dashboard waits for it when it needs the registry.
+        threading.Thread(target=load_extensions, name="load-extensions", daemon=True).start()
 
         # Components
         self._audio = AudioCapture(config.audio)

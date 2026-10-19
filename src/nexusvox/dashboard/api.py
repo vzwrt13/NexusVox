@@ -682,8 +682,13 @@ class DashboardAPI:
             logger.error("Saving the transcription of %s failed: %s", filename, exc)
             return {"ok": False, "error": f"Saving the transcript failed: {exc}"}
 
-        extension_results, extension_notes = self.extensions.file_transcribed(file_transcript_from_record(record))
-        notes.extend(extension_notes)
+        extension_results: dict = {}
+        try:
+            extension_results, extension_notes = self.extensions.file_transcribed(file_transcript_from_record(record))
+            notes.extend(extension_notes)
+        except Exception as exc:  # the transcript is stored; extensions are an extra
+            logger.exception("Extensions could not process the transcription of %s: %s", filename, exc)
+            notes.append(f"Extensions could not process this transcript: {exc}")
 
         return {
             "ok": True,

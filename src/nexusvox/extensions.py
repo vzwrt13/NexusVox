@@ -37,6 +37,8 @@ API_VERSION = 1
 ENTRY_POINT_GROUP = "nexusvox.extensions"
 
 _ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
+_SUFFIX_PATTERN = re.compile(r"\.[A-Za-z0-9][A-Za-z0-9._-]*")
+_MIMETYPE_PATTERN = re.compile(r"[\w.+-]+/[\w.+-]+(; ?charset=[\w-]+)?")
 
 
 @dataclass(frozen=True)
@@ -116,7 +118,9 @@ class Extension:
 
     name: str = ""  # required: shown in logs and results, must be unique
     version: str = ""
-    api_version: int = API_VERSION  # the API version this extension was written for
+    # Required, and deliberately without a default: a literal such as `api_version = 1`, the API this extension
+    # was written for. A default of API_VERSION would be inherited as the new value after a bump.
+    api_version: int | None = None
 
     def on_file_transcribed(self, transcript: FileTranscript) -> dict[str, Any] | None:
         """Post-process a file upload that was transcribed and stored.
@@ -138,6 +142,31 @@ class Extension:
 
 def _valid_id(value: object) -> bool:
     return isinstance(value, str) and _ID_PATTERN.fullmatch(value) is not None
+
+
+def _problem_with_panel(panel: DashboardPanel) -> str:
+    """Why a panel cannot be served, or an empty string."""
+    if not isinstance(panel.title, str) or not panel.title:
+        return "it has no title"
+    folder = Path(panel.static_dir)
+    if not folder.is_absolute():
+        return f"static_dir {str(folder)!r} is not absolute (use Path(__file__).parent / ...)"
+    if not folder.is_dir():
+        return f"static_dir {str(folder)!r} is not a folder"
+    return ""
+
+
+def _problem_with_target(target: ExportTarget) -> str:
+    """Why an export target cannot be offered, or an empty string."""
+    if not isinstance(target.label, str) or not target.label:
+        return "it has no label"
+    if not isinstance(target.extension, str) or _SUFFIX_PATTERN.fullmatch(target.extension) is None:
+        return f"extension {target.extension!r} is not a file name suffix such as '.docx'"
+    if not isinstance(target.mimetype, str) or _MIMETYPE_PATTERN.fullmatch(target.mimetype) is None:
+        return f"mimetype {target.mimetype!r} is not a media type such as 'text/csv'"
+    if not callable(target.export):
+        return "export is not callable"
+    return ""
 
 
 @dataclass
@@ -171,7 +200,7 @@ class ExtensionRegistry:
     def add(self, loaded: object, *, source: str = "") -> bool:
         """Register an extension (class, instance or factory); False, with a log line, when it is unusable."""
         try:
-            extension = loaded() if callable(loaded) else loaded
+            extension = loaded if isinstance(loaded, Extension) else loaded() if callable(loaded) else loaded
             if not isinstance(extension, Extension):
                 logger.error("Extension %r is not a nexusvox.extensions.Extension; skipped", source or loaded)
                 return False
@@ -181,7 +210,8 @@ class ExtensionRegistry:
                 return False
             if extension.api_version != API_VERSION:
                 logger.error(
-                    "Extension %r targets extension API %s, this NexusVox provides %s; skipped",
+                    "Extension %r targets extension API %s (None: it declares none), this NexusVox provides %s; "
+                    "skipped",
                     label,
                     extension.api_version,
                     API_VERSION,
@@ -190,8 +220,12 @@ class ExtensionRegistry:
             if any(e.name == extension.name for e in self.extensions):
                 logger.error("Extension name %r is already taken; skipped", label)
                 return False
-            panels = self._claim(extension.dashboard_panels(), self._panels, DashboardPanel, label, "panel")
-            targets = self._claim(extension.export_targets(), self._targets, ExportTarget, label, "export target")
+            panels = self._claim(
+                extension.dashboard_panels(), self._panels, DashboardPanel, label, "panel", _problem_with_panel
+            )
+            targets = self._claim(
+                extension.export_targets(), self._targets, ExportTarget, label, "export target", _problem_with_target
+            )
         except Exception:
             logger.exception("Extension %r failed while registering and is skipped", source or loaded)
             return False
@@ -202,12 +236,14 @@ class ExtensionRegistry:
         return True
 
     @staticmethod
-    def _claim(items: list, taken: dict, kind: type, extension: str, what: str) -> list:
+    def _claim(items: list, taken: dict, kind: type, extension: str, what: str, problem: Callable) -> list:
         """The items of an extension that are well formed and whose id is free; the others are logged."""
         claimed: list = []
         for item in items:
             if not isinstance(item, kind) or not _valid_id(item.id):
                 logger.error("Extension %r offers a malformed %s %r; skipped", extension, what, item)
+            elif reason := problem(item):
+                logger.error("Extension %r: %s %r is skipped: %s", extension, what, item.id, reason)
             elif item.id in taken or any(c.id == item.id for c in claimed):
                 logger.error("Extension %r: %s id %r is already taken; skipped", extension, what, item.id)
             else:
@@ -230,7 +266,7 @@ class ExtensionRegistry:
                     continue
                 if not isinstance(result, dict):
                     raise TypeError(f"expected a dict, got {type(result).__name__}")
-                json.dumps(result)
+                json.dumps(result, sort_keys=True)  # what jsonify does: mixed key types would fail every poll
             except Exception as exc:
                 logger.exception("Extension %s failed on file transcription %s", extension.name, transcript.id)
                 notes.append(f"Extension {extension.name} failed: {exc}")
@@ -271,14 +307,14 @@ class ExtensionRegistry:
 
 _default = ExtensionRegistry()
 _default_loaded = False
-_default_lock = threading.Lock()
+_default_lock = threading.RLock()
 
 
 def load_extensions() -> ExtensionRegistry:
     """The process-wide registry, filled from the installed entry points on the first call."""
     global _default_loaded
-    with _default_lock:
+    with _default_lock:  # reentrant: an extension calling this while it loads gets the registry as filled so far
         if not _default_loaded:
-            _default.load()
             _default_loaded = True
+            _default.load()
     return _default

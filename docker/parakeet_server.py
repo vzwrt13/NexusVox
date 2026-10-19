@@ -67,7 +67,4 @@ async def transcribe(
 def _words(hypothesis) -> list[dict]:
     """Per-word {word, start, end} (seconds) from a NeMo hypothesis, OpenAI verbose_json style."""
     timestamp = getattr(hypothesis, "timestamp", None) or {}
-    return [
-        {"word": w["word"], "start": float(w["start"]), "end": float(w["end"])}
-        for w in timestamp.get("word", [])
-    ]
+    return [{"word": w["word"], "start": float(w["start"]), "end": float(w["end"])} for w in timestamp.get("word", [])]

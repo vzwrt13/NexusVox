@@ -112,8 +112,8 @@ class ExportTarget:
     extension: str  # file name suffix with the dot, e.g. `.docx`
     mimetype: str
     export: Callable[[FileTranscript], bytes | str]
-    # Optional, per upload: True/None offers the link; any other falsy answer (False, 0, ...) greys it out; a string greys it out with that text
-    # as the tooltip. Called while the Upload list is built, so keep it cheap.
+    # Optional, per upload: True/None offers the link; any other falsy answer (False, 0, ...) greys it out;
+    # a string greys it out with that text as the tooltip. Called while the Upload list is built, so keep it cheap.
     available: Callable[[int], bool | str | None] | None = None
 
 

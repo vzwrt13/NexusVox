@@ -125,8 +125,14 @@ tooltip (e.g. `"No summary yet"`). The answers come with the upload list (`expor
 the check cheap. A check that raises leaves the link on, so the export itself reports the problem.
 
 ```python
-ExportTarget("summary", "Summary (Markdown)", ".md", "text/markdown", self._export,
-             available=lambda tid: True if self._has_summary(tid) else "No summary yet")
+ExportTarget(
+    "summary",
+    "Summary (Markdown)",
+    ".md",
+    "text/markdown",
+    self._export,
+    available=lambda tid: True if self._has_summary(tid) else "No summary yet",
+)
 ```
 
 ### Hook 4: upload actions

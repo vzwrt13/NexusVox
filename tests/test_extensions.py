@@ -22,6 +22,7 @@ from nexusvox.extensions import (
     Extension,
     ExtensionRegistry,
     FileTranscript,
+    UploadAction,
 )
 from nexusvox.transcriber import TranscriptionResult, Word
 
@@ -400,6 +401,7 @@ def test_without_extensions_an_upload_adds_nothing_but_an_empty_extensions_dict(
         "extensions": [],
         "panels": [],
         "exports": [],
+        "upload_actions": [],
     }
 
 
@@ -662,3 +664,93 @@ def test_a_download_name_with_control_characters_and_slashes_stays_a_valid_heade
     assert resp.status_code == 200
     disposition = resp.headers["Content-Disposition"]
     assert "\r" not in disposition and "\n" not in disposition
+
+
+# ---- API version 2: export availability and upload actions -----------------------
+
+
+def test_an_extension_written_for_api_version_1_still_loads():
+    class Old(Extension):
+        name = "old"
+        api_version = 1
+
+        def export_targets(self):
+            return [ExportTarget("old-txt", "Old TXT", ".txt", "text/plain", lambda t: t.text)]
+
+    reg = ExtensionRegistry()
+
+    assert reg.add(Old) is True
+    assert reg.unavailable_exports(1) == {}
+    assert [t.id for t in reg.export_targets()] == ["old-txt"]
+
+
+def _gated_registry(answer):
+    class Gated(V1Extension):
+        name = "gated"
+
+        def export_targets(self):
+            return [ExportTarget("gated-md", "Summary", ".md", "text/markdown", lambda t: "x", answer)]
+
+    reg = ExtensionRegistry()
+    assert reg.add(Gated)
+    return reg
+
+
+def test_unavailable_exports_carry_their_reason():
+    assert _gated_registry(lambda tid: "No summary yet").unavailable_exports(1) == {"gated-md": "No summary yet"}
+    assert _gated_registry(lambda tid: False).unavailable_exports(1) == {"gated-md": "Not available"}
+    assert _gated_registry(lambda tid: True).unavailable_exports(1) == {}
+
+
+def test_a_failing_availability_check_still_offers_the_export():
+    def boom(tid):
+        raise RuntimeError("db gone")
+
+    assert _gated_registry(boom).unavailable_exports(1) == {}
+
+
+def test_the_upload_list_marks_unavailable_exports(db, session_factory):
+    reg = _gated_registry(lambda tid: "No summary yet" if tid == 1 else True)
+    first = db.save_file_transcription("one", "en", 1000, "a.wav")
+    second = db.save_file_transcription("two", "en", 1000, "b.wav")
+    api = DashboardAPI(session_factory, Config(), db=db, extensions=reg)
+    app = _create_app(api)
+
+    rows = {r["id"]: r for r in app.test_client().get("/api/file-transcriptions").get_json()}
+
+    assert rows[first.id]["exports_unavailable"] == {"gated-md": "No summary yet"}
+    assert rows[second.id]["exports_unavailable"] == {}
+
+
+class ActionExtension(V1Extension):
+    name = "actions"
+
+    def upload_actions(self):
+        return [
+            UploadAction("summarise", "Summarise", endpoint="/api/ext/x/summarise/{id}"),
+            UploadAction("scripted", "Scripted", panel="x"),
+            UploadAction("both", "Both", endpoint="/api/x", panel="x"),
+            UploadAction("elsewhere", "Elsewhere", endpoint="https://example.com/{id}"),
+        ]
+
+
+def test_upload_actions_are_listed_and_malformed_ones_dropped():
+    reg = ExtensionRegistry()
+    assert reg.add(ActionExtension)
+
+    assert [a.id for a in reg.upload_actions()] == ["summarise", "scripted"]
+    assert reg.describe()["upload_actions"] == [
+        {"id": "summarise", "label": "Summarise", "endpoint": "/api/ext/x/summarise/{id}", "panel": ""},
+        {"id": "scripted", "label": "Scripted", "endpoint": "", "panel": "x"},
+    ]
+
+
+def test_the_dashboard_lists_upload_actions(db, session_factory):
+    reg = ExtensionRegistry()
+    reg.add(ActionExtension)
+    app = _create_app(DashboardAPI(session_factory, Config(), db=db, extensions=reg))
+
+    info = app.test_client().get("/api/extensions").get_json()
+
+    assert info["api_version"] == API_VERSION == 2
+    assert [a["id"] for a in info["upload_actions"]] == ["summarise", "scripted"]

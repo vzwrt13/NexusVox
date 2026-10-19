@@ -629,6 +629,26 @@ canvas { width: 100% !important; max-height: 260px; }
   text-decoration: none;
 }
 .upload-export:hover { text-decoration: underline; }
+/* An export the extension reports as unavailable for this upload: greyed out, the tooltip says why. */
+.upload-export.disabled {
+  color: var(--text-muted, #888);
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+.upload-export.disabled:hover { text-decoration: none; }
+
+/* Buttons added by an extension's upload actions. */
+.upload-action {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent-light);
+  cursor: pointer;
+}
+.upload-action:hover { text-decoration: underline; }
+.upload-action:disabled { opacity: 0.5; cursor: progress; }
 
 .upload-filename {
   font-size: 13px;

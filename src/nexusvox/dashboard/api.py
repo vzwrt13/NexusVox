@@ -752,6 +752,7 @@ class DashboardAPI:
                 "original_filename": r.original_filename,
                 "confidence": r.confidence,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
+                "exports_unavailable": self.extensions.unavailable_exports(r.id),
             }
             for r in rows
         ]

@@ -6,8 +6,8 @@ An installed package registers an `Extension` under the `nexusvox.extensions` en
     my_extension = "my_package:MyExtension"
 
 The entry point may name an `Extension` subclass, an instance, or a zero-argument function returning one.
-NexusVox loads every extension once at start. An extension that cannot be imported, targets another
-`API_VERSION`, is built wrongly or raises in a hook is logged and skipped; it never stops the app.
+NexusVox loads every extension once at start. An extension that cannot be imported, targets an
+unsupported API version, is built wrongly or raises in a hook is logged and skipped; it never stops the app.
 With no extension installed nothing changes. The hooks are documented in docs/EXTENSIONS.md.
 """
 
@@ -32,8 +32,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Bumped on a change that breaks existing extensions; an additive change keeps it.
-API_VERSION = 1
+# Bumped on a change that breaks existing extensions; an additive change keeps it. Version 2 added
+# `ExportTarget.available` and the `upload_actions` hook; a version 1 extension needs no change.
+API_VERSION = 2
+SUPPORTED_API_VERSIONS = (1, 2)
 ENTRY_POINT_GROUP = "nexusvox.extensions"
 
 _ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
@@ -111,6 +113,24 @@ class ExportTarget:
     extension: str  # file name suffix with the dot, e.g. `.docx`
     mimetype: str
     export: Callable[[FileTranscript], bytes | str]
+    # Optional, per upload: True/None offers the link; False greys it out; a string greys it out with that text
+    # as the tooltip. Called while the Upload list is built, so keep it cheap.
+    available: Callable[[int], bool | str | None] | None = None
+
+
+@dataclass(frozen=True)
+class UploadAction:
+    """A button on an upload's result card.
+
+    Either `endpoint` (the browser POSTs to it; `{id}` stands for the upload id; it answers JSON, `error` or
+    `note`/`message` is shown) or `panel` (the id of one of the extension's own panels: its script registers
+    `NexusVoxExt.registerUploadAction("<id>", (upload, button) => ...)`).
+    """
+
+    id: str  # same rules as `DashboardPanel.id`
+    label: str
+    endpoint: str = ""  # an absolute path on this server, e.g. `/api/ext/my-tab/summarise/{id}`
+    panel: str = ""
 
 
 class Extension:
@@ -137,6 +157,10 @@ class Extension:
 
     def export_targets(self) -> list[ExportTarget]:
         """Extra ways to export a stored file transcription."""
+        return []
+
+    def upload_actions(self) -> list[UploadAction]:
+        """Extra buttons on an upload's result card."""
         return []
 
 
@@ -166,6 +190,23 @@ def _problem_with_target(target: ExportTarget) -> str:
         return f"mimetype {target.mimetype!r} is not a media type such as 'text/csv'"
     if not callable(target.export):
         return "export is not callable"
+    if target.available is not None and not callable(target.available):
+        return "available is not callable"
+    return ""
+
+
+def _problem_with_action(action: UploadAction) -> str:
+    """Why an upload action cannot be offered, or an empty string."""
+    if not isinstance(action.label, str) or not action.label:
+        return "it has no label"
+    if bool(action.endpoint) == bool(action.panel):
+        return "it needs exactly one of endpoint and panel"
+    if action.endpoint and not (
+        isinstance(action.endpoint, str) and action.endpoint.startswith("/") and not action.endpoint.startswith("//")
+    ):
+        return f"endpoint {action.endpoint!r} is not an absolute path on this server"
+    if action.panel and not _valid_id(action.panel):
+        return f"panel {action.panel!r} is not a panel id"
     return ""
 
 
@@ -176,6 +217,7 @@ class ExtensionRegistry:
     extensions: list[Extension] = field(default_factory=list)
     _panels: dict[str, DashboardPanel] = field(default_factory=dict)
     _targets: dict[str, ExportTarget] = field(default_factory=dict)
+    _actions: dict[str, UploadAction] = field(default_factory=dict)
 
     # ---- Loading -----------------------------------------------------------
 
@@ -208,13 +250,13 @@ class ExtensionRegistry:
             if not extension.name:
                 logger.error("Extension %r has no name; skipped", source or extension)
                 return False
-            if extension.api_version != API_VERSION:
+            if extension.api_version not in SUPPORTED_API_VERSIONS:
                 logger.error(
                     "Extension %r targets extension API %s (None: it declares none), this NexusVox provides %s; "
                     "skipped",
                     label,
                     extension.api_version,
-                    API_VERSION,
+                    " and ".join(str(v) for v in SUPPORTED_API_VERSIONS),
                 )
                 return False
             if any(e.name == extension.name for e in self.extensions):
@@ -226,11 +268,15 @@ class ExtensionRegistry:
             targets = self._claim(
                 extension.export_targets(), self._targets, ExportTarget, label, "export target", _problem_with_target
             )
+            actions = self._claim(
+                extension.upload_actions(), self._actions, UploadAction, label, "upload action", _problem_with_action
+            )
         except Exception:
             logger.exception("Extension %r failed while registering and is skipped", source or loaded)
             return False
         self._panels.update({p.id: p for p in panels})
         self._targets.update({t.id: t for t in targets})
+        self._actions.update({a.id: a for a in actions})
         self.extensions.append(extension)
         logger.info("Loaded extension %s %s", extension.name, extension.version)
         return True
@@ -290,6 +336,30 @@ class ExtensionRegistry:
     def export_target(self, target_id: str) -> ExportTarget | None:
         return self._targets.get(target_id)
 
+    def upload_actions(self) -> list[UploadAction]:
+        return list(self._actions.values())
+
+    def unavailable_exports(self, transcription_id: int) -> dict[str, str]:
+        """The export targets that cannot export this upload, `{target id: reason}`.
+
+        A target without `available` is always offered; one whose check raises is offered too, so the export
+        itself reports what is wrong.
+        """
+        unavailable: dict[str, str] = {}
+        for target in self._targets.values():
+            if target.available is None:
+                continue
+            try:
+                answer = target.available(transcription_id)
+            except Exception:
+                logger.exception("Export target %s failed its availability check for %s", target.id, transcription_id)
+                continue
+            if isinstance(answer, str) and answer:
+                unavailable[target.id] = answer
+            elif answer is False or isinstance(answer, str):
+                unavailable[target.id] = "Not available"
+        return unavailable
+
     def describe(self) -> dict:
         """What the dashboard needs to show the extensions' panels and export links."""
         return {
@@ -301,6 +371,9 @@ class ExtensionRegistry:
             "exports": [
                 {"id": t.id, "label": t.label, "extension": t.extension, "mimetype": t.mimetype}
                 for t in self._targets.values()
+            ],
+            "upload_actions": [
+                {"id": a.id, "label": a.label, "endpoint": a.endpoint, "panel": a.panel} for a in self._actions.values()
             ],
         }
 

@@ -111,6 +111,8 @@ document.querySelectorAll(".tab").forEach(bindTab);
 // installed GET /api/extensions lists nothing and the page is unchanged.
 const extensionPanels = {};
 let extensionExports = [];
+let extensionUploadActions = [];
+const uploadActionHandlers = {};
 
 // Extension scripts call NexusVoxExt.registerPanel(id, container => ...) to draw into their tab.
 window.NexusVoxExt = {
@@ -119,6 +121,10 @@ window.NexusVoxExt = {
     if (!panel) return;
     panel.render = render;
     if (panel.container) renderExtensionPanel(panel);
+  },
+  // A panel script registers what its upload action does: handler(upload, button).
+  registerUploadAction(id, handler) {
+    uploadActionHandlers[id] = handler;
   },
 };
 
@@ -135,6 +141,7 @@ async function loadExtensions() {
   try {
     const info = await fetch("/api/extensions").then((r) => r.json());
     extensionExports = info.exports || [];
+    extensionUploadActions = info.upload_actions || [];
     const nav = document.querySelector("nav.tabs");
     const main = document.querySelector("main");
     (info.panels || []).forEach((p) => {
@@ -154,7 +161,7 @@ async function loadExtensions() {
     console.error("Failed to load extensions:", err);
   }
   // The Upload history may have been drawn before the export targets were known.
-  if (extensionExports.length && document.getElementById("tab-upload").classList.contains("active")) {
+  if ((extensionExports.length || extensionUploadActions.length) && document.getElementById("tab-upload").classList.contains("active")) {
     loadFileTranscriptions();
   }
 }
@@ -1890,6 +1897,50 @@ async function downloadExport(url) {
   }
 }
 
+// An upload action either POSTs to its endpoint or calls a handler its panel script registered.
+async function runUploadAction(button, item) {
+  const action = extensionUploadActions.find((a) => a.id === button.dataset.action);
+  if (!action) return;
+  uploadErrorEl.style.display = "none";
+  button.disabled = true;
+  try {
+    if (action.endpoint) {
+      const res = await fetch(action.endpoint.replace("{id}", item.id), { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body.ok === false) {
+        showUploadError(body.error || `${action.label} failed (${res.status})`);
+      } else if (body.note || body.message) {
+        showUploadError(body.note || body.message);
+      }
+      loadFileTranscriptions();
+    } else {
+      if (!uploadActionHandlers[action.id]) {
+        openExtensionPanel(action.panel);
+        await waitFor(() => uploadActionHandlers[action.id]);
+      }
+      const handler = uploadActionHandlers[action.id];
+      if (!handler) throw new Error("its script did not register a handler");
+      await handler(item, button);
+    }
+  } catch (err) {
+    showUploadError(`${action.label} failed: ${err.message}`);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function waitFor(condition, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (condition() || Date.now() - started > timeoutMs) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 50);
+  });
+}
+
 async function loadFileTranscriptions() {
   const data = await fetch("/api/file-transcriptions").then((r) => r.json());
   const container = document.getElementById("upload-list");
@@ -1907,7 +1958,12 @@ async function loadFileTranscriptions() {
         <span class="upload-model">${escapeHtml(item.model || "")}</span>
         <span class="upload-duration">${formatDuration(item.duration_ms)}</span>
         ${item.cleaned_text ? `<button type="button" class="upload-view-switch" data-index="${index}">Show original</button>` : ""}
-        ${extensionExports.map((t) => `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}">${escapeHtml(t.label)}</a>`).join("")}
+        ${extensionExports.map((t) => {
+          const reason = (item.exports_unavailable || {})[t.id];
+          if (reason !== undefined) return `<a class="upload-export disabled" aria-disabled="true" title="${escapeHtml(reason)}">${escapeHtml(t.label)}</a>`;
+          return `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}">${escapeHtml(t.label)}</a>`;
+        }).join("")}
+        ${extensionUploadActions.map((a) => `<button type="button" class="upload-action" data-action="${escapeHtml(a.id)}" data-index="${index}">${escapeHtml(a.label)}</button>`).join("")}
       </div>
       <div class="upload-filename">${escapeHtml(item.original_filename)}</div>
       <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>
@@ -1917,8 +1973,13 @@ async function loadFileTranscriptions() {
   container.querySelectorAll(".upload-export").forEach((link) => {
     link.addEventListener("click", (event) => {
       event.preventDefault();
+      if (link.classList.contains("disabled")) return;
       downloadExport(link.href);
     });
+  });
+
+  container.querySelectorAll(".upload-action").forEach((button) => {
+    button.addEventListener("click", () => runUploadAction(button, data[Number(button.dataset.index)]));
   });
 
   // A cleaned upload opens on the cleaned text; the button flips it to the transcript as transcribed.

@@ -122,6 +122,19 @@ decide whether a finding is a bug or intended behaviour.
 
 ## Licensing
 
-NexusVox is licensed under the GNU Affero General Public License v3.0 or later. By contributing, you agree that your contributions are licensed under the same terms. There is currently no CLA to sign — if that ever changes, it will be stated here before it applies to anyone.
+NexusVox is licensed under the GNU Affero General Public License v3.0 or later. Your contribution is released under that licence, and the Contributor License Agreement below also lets the owner offer it under other terms.
+
+### Contributor License Agreement (CLA)
+
+By opening a pull request you agree that:
+
+1. **You wrote it, or have the right to submit it.** The contribution is your own work, or you are allowed to contribute it, and it does not knowingly infringe anyone else's rights. If your employer has rights in what you write, you have their permission.
+2. **You keep your copyright.** You grant NightShift AI GmbH (the "owner") a perpetual, worldwide, non-exclusive, royalty-free, irrevocable licence to use, modify, sublicense and distribute your contribution, **including the right to relicense it under any other terms, such as a commercial licence**, alongside the AGPL-3.0-or-later.
+3. **The open-source release stays.** Your contribution remains available to everyone under the AGPL-3.0-or-later as part of NexusVox.
+4. **Contributions are provided as is,** without warranty.
+
+**How to accept:** tick the CLA box in the pull request template. A pull request without it is not merged. You accept once per pull request, and the agreement covers every commit in it.
+
+If you cannot agree to these terms, please do not open a pull request; an issue is always welcome instead.
 
 Note that the speech recognition models are covered by their own licenses, listed in the model table in [README.md](README.md). If you add a model, document its license there — and don't add one that doesn't declare a license.

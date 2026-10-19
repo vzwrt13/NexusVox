@@ -12,3 +12,4 @@
 - [ ] `pytest` passes
 - [ ] Documentation updated, if the change is visible to users
 - [ ] Branched from `main`; no commits made directly on `main`
+- [ ] **Required:** I have read and agree to the [Contributor License Agreement](../blob/main/CONTRIBUTING.md#contributor-license-agreement-cla)

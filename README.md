@@ -194,6 +194,16 @@ Windows 11 only. NexusVox uses Win32 APIs (`SendInput`, `WM_PASTE`) for text inj
 
 ---
 
+## Free and Pro
+
+The **core of NexusVox stays free and open source under the AGPL-3.0-or-later**. That includes dictation, polish, auto cleanup, file upload transcription, speaker detection and basic export. Nothing listed here is going to become paid.
+
+**Pro** is a separate, commercial extension that sits next to the core. It adds on top of NexusVox and does not take anything away from it.
+
+A commercial licence for the core itself (for example to use it without the AGPL's source-sharing terms) is available on request: info@nightshift-ai.de. Contributions are accepted under the [CLA](CONTRIBUTING.md#contributor-license-agreement-cla), which is what makes this possible.
+
+---
+
 ## Contributing
 
 Bug reports and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, lint and test commands, and branch conventions. Please read the project status above first, so you know what to expect before spending time on a change.

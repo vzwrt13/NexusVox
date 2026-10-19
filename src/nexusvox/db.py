@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import unicodedata
+from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import sessionmaker
@@ -23,6 +24,9 @@ from .models import (
 )
 from .polish_presets import MAX_PRESET_NAME_WORDS, PolishPreset
 from .snippets import Snippet, SnippetOption
+
+if TYPE_CHECKING:
+    from .transcriber import Word
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +53,7 @@ class Database:
             "ALTER TABLE transcriptions ADD COLUMN transcribe_ms INTEGER",
             "ALTER TABLE transcriptions ADD COLUMN latency_ms INTEGER",
             "ALTER TABLE snippets ADD COLUMN options TEXT",
+            "ALTER TABLE file_transcriptions ADD COLUMN words TEXT",
         ]
         with self._engine.connect() as conn:
             for sql in migrations:
@@ -436,8 +441,9 @@ class Database:
         original_filename: str,
         model: str | None = None,
         confidence: float | None = None,
+        words: list[Word] | None = None,
     ) -> FileTranscription:
-        """Save a file-upload transcription record."""
+        """Save a file-upload transcription record, with per-word timing when there is any."""
         with self._session_factory() as session:
             record = FileTranscription(
                 text=text,
@@ -447,6 +453,7 @@ class Database:
                 created_at=utc_now(),
                 model=model,
                 confidence=confidence,
+                words=json.dumps([{"word": w.word, "start": w.start, "end": w.end} for w in words]) if words else None,
             )
             session.add(record)
             session.commit()

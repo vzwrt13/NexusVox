@@ -30,7 +30,12 @@ def health() -> dict:
 async def transcribe(
     file: UploadFile = File(...),
     model: str = Form(default="nvidia/parakeet-tdt-0.6b-v3"),
+    response_format: str = Form(default="json"),
+    timestamp_granularities: list[str] = Form(default=[], alias="timestamp_granularities[]"),
 ) -> dict:
+    # Word timestamps only on the OpenAI-style request (verbose_json + word granularity);
+    # every other request gets the plain {"text": ...} reply.
+    want_words = response_format == "verbose_json" and "word" in timestamp_granularities
     audio_bytes = await file.read()
 
     # Write to a temp file — NeMo transcribe() expects file paths
@@ -48,9 +53,30 @@ async def transcribe(
             data = librosa.resample(data, orig_sr=sr, target_sr=16000)
             sf.write(tmp_path, data, 16000)
 
-        result = globals()["model"].transcribe([tmp_path])
+        # Any non-None `timestamps` makes NeMo rebuild its decoding strategy, so dictation passes None.
+        result = globals()["model"].transcribe([tmp_path], timestamps=True if want_words else None)
         text = result[0].text if hasattr(result[0], "text") else str(result[0])
+        words = _words(result[0]) if want_words else None
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
-    return {"text": text}
+    if words is None:
+        return {"text": text}
+    return {"text": text, "words": words}
+
+
+def _words(hypothesis) -> list[dict]:
+    """Per-word {word, start, end} (seconds) from a NeMo hypothesis, OpenAI verbose_json style.
+
+    An entry without usable timing is skipped, so a NeMo version with another shape costs the
+    word list, never the transcript.
+    """
+    timestamp = getattr(hypothesis, "timestamp", None)
+    entries = timestamp.get("word") if isinstance(timestamp, dict) else None
+    words = []
+    for entry in entries or []:
+        try:
+            words.append({"word": entry["word"], "start": float(entry["start"]), "end": float(entry["end"])})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return words

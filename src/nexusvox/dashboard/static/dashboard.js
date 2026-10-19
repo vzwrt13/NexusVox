@@ -1560,8 +1560,10 @@ async function handleFileUpload(file) {
   const statusEl = document.getElementById("upload-status");
   const statusText = document.getElementById("upload-status-text");
   const errorEl = document.getElementById("upload-error");
+  const noteEl = document.getElementById("upload-note");
 
   errorEl.style.display = "none";
+  noteEl.style.display = "none";
   statusEl.style.display = "flex";
   statusText.textContent = "Transcribing " + file.name + "...";
 
@@ -1580,6 +1582,10 @@ async function handleFileUpload(file) {
     }
     // Reset file input
     uploadInput.value = "";
+    if (data.notes && data.notes.length) {
+      noteEl.textContent = "Saved, with a problem: " + data.notes.join(" ");
+      noteEl.style.display = "block";
+    }
     loadFileTranscriptions();
   } catch (err) {
     statusEl.style.display = "none";

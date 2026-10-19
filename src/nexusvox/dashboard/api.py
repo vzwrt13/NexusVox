@@ -425,6 +425,8 @@ class DashboardAPI:
         except Exception as exc:
             logger.error("Retry failed for transcription %d: %s", tid, exc)
             return {"ok": False, "error": f"Transcription failed: {exc}"}
+        if result.notes:
+            return {"ok": False, "error": "Transcription incomplete: " + " ".join(result.notes)}
         return {"ok": True, "text": result.text, "model": self._config.inference.model}
 
     def update_correction(self, tid: int, corrected_text: str) -> dict:
@@ -578,7 +580,7 @@ class DashboardAPI:
             return {"ok": False, "error": f"Audio conversion failed: {exc}"}
 
         try:
-            result = self._transcribe_wav_chunks(wav_chunks)
+            result = self._transcribe_wav_chunks(wav_chunks, word_timestamps=True)
         except Exception as exc:
             logger.error("Transcription failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Transcription failed: {exc}"}
@@ -590,10 +592,12 @@ class DashboardAPI:
             original_filename=filename,
             model=self._config.inference.model,
             confidence=result.confidence,
+            words=result.words,
         )
 
         return {
             "ok": True,
+            "notes": result.notes,
             "id": record.id,
             "text": record.text,
             "language": record.language,
@@ -603,7 +607,7 @@ class DashboardAPI:
             "created_at": record.created_at.isoformat() if record.created_at else None,
         }
 
-    def _transcribe_wav_chunks(self, wav_chunks: list[bytes]):
+    def _transcribe_wav_chunks(self, wav_chunks: list[bytes], *, word_timestamps: bool = False):
         """Transcribe WAV chunks with the current model and language settings (blocking)."""
         return asyncio.run(
             transcribe_file(
@@ -611,6 +615,7 @@ class DashboardAPI:
                 self._config.inference,
                 language=self._config.language,
                 auto_detect_language=self._config.auto_language_detection,
+                word_timestamps=word_timestamps,
             )
         )
 

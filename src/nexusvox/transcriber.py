@@ -10,7 +10,7 @@ import logging
 import math
 import wave
 from abc import ABC, abstractmethod
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import websockets
 from websockets.connection import State
@@ -18,6 +18,28 @@ from websockets.connection import State
 from .config import CUSTOM_PROTOCOLS, MODEL_REGISTRY, InferenceConfig, resolve_compute_type, resolve_device
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Word:
+    """One transcribed word with its position in the audio, in seconds."""
+
+    word: str
+    start: float
+    end: float
+
+
+def parse_words(raw: object) -> list[Word]:
+    """Words from an OpenAI-style ``words`` list; anything malformed is skipped."""
+    if not isinstance(raw, list):
+        return []
+    words: list[Word] = []
+    for item in raw:
+        try:
+            words.append(Word(str(item["word"]), float(item["start"]), float(item["end"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return words
 
 
 class TranscriptionResult:
@@ -28,6 +50,10 @@ class TranscriptionResult:
         self.done = False
         self.usage: dict | None = None
         self.confidence: float | None = None
+        # Per-word timing; empty for engines that do not report it.
+        self.words: list[Word] = []
+        # Human-readable problems (a chunk that timed out, ...) to show next to the result.
+        self.notes: list[str] = []
         self._logprobs: list[float] = []
 
     def append(self, delta: str, logprob: float | None = None) -> None:
@@ -77,6 +103,9 @@ class BaseTranscriber(ABC):
 
     model: str
     needs_docker: bool = True
+    # True when the engine can report per-word timing; `word_timestamps` then asks for it.
+    supports_word_timestamps: bool = False
+    word_timestamps: bool = False
 
     @abstractmethod
     async def connect(self) -> None: ...
@@ -245,6 +274,8 @@ class OpenAIHttpTranscriber(BaseTranscriber):
         result = await finish()
     """
 
+    supports_word_timestamps = True
+
     def __init__(self, config: InferenceConfig) -> None:
         self._server_url = config.server_url
         self._audio_buffer = bytearray()
@@ -274,19 +305,25 @@ class OpenAIHttpTranscriber(BaseTranscriber):
 
         logger.info("Sending %d bytes of WAV audio to %s", len(wav_bytes), self._server_url)
 
+        form = {"model": self.model}
+        if self.word_timestamps:
+            form.update({"response_format": "verbose_json", "timestamp_granularities[]": "word"})
+
         result = TranscriptionResult()
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     self._server_url,
                     files={"file": ("audio.wav", wav_bytes, "audio/wav")},
-                    data={"model": self.model},
+                    data=form,
                 )
                 response.raise_for_status()
                 data = response.json()
 
             text = data.get("text", "")
             result.finalize(text=text)
+            if self.word_timestamps:
+                result.words = parse_words(data.get("words"))
             logger.info("Transcription done: %s", result.text)
         except httpx.TimeoutException:
             logger.warning("Transcription timed out after %.0fs", timeout)

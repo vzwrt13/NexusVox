@@ -6,8 +6,8 @@ import io
 import logging
 import wave
 
-from .config import InferenceConfig
-from .transcriber import TranscriptionResult, create_transcriber
+from .config import MODEL_REGISTRY, InferenceConfig
+from .transcriber import TranscriptionResult, Word, create_transcriber
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +65,12 @@ async def transcribe_file(
     device: str | None = None,
     language: str | None = None,
     auto_detect_language: bool = False,
+    word_timestamps: bool = False,
 ) -> TranscriptionResult:
     """Transcribe WAV chunks via the shared transcriber factory and join results.
+
+    With `word_timestamps`, engines that support it also return per-word timing, shifted to
+    the file's timeline in the joined result.
 
     Dispatches through `create_transcriber` so CPU users (in-process Whisper)
     and GPU users (Docker-backed HTTP/WS) share one code path.
@@ -77,7 +81,19 @@ async def transcribe_file(
         language=language,
         auto_detect_language=auto_detect_language,
     )
+    # Both the model's registry entry and the client must support words; a custom server or Cohere
+    # shares the Parakeet client but never sees the fields.
+    wants_words = (
+        word_timestamps
+        and bool(MODEL_REGISTRY.get(config.model, {}).get("word_timestamps"))
+        and transcriber.supports_word_timestamps
+    )
+    if wants_words:
+        transcriber.word_timestamps = True
     texts: list[str] = []
+    words: list[Word] = []
+    notes: list[str] = []
+    offset_s = 0.0  # start of the current chunk on the file's timeline
     try:
         for i, wav_bytes in enumerate(wav_chunks):
             logger.info("Transcribing chunk %d/%d", i + 1, len(wav_chunks))
@@ -89,11 +105,23 @@ async def transcribe_file(
                 await transcriber.send_audio_chunk(pcm_data[offset : offset + _SEND_CHUNK_BYTES])
             result = await transcriber.finish(timeout=120.0)
             texts.append(result.text)
+
+            label = f"Chunk {i + 1} of {len(wav_chunks)}"
+            if not result.done:
+                notes.append(f"{label} timed out; its text may be incomplete or missing.")
+            elif wants_words and result.text and not result.words:
+                notes.append(f"{label} came back without word timestamps.")
+            words.extend(Word(w.word, w.start + offset_s, w.end + offset_s) for w in result.words)
+            offset_s += len(pcm_data) / 2 / 16_000  # PCM16 mono at 16 kHz
     finally:
         await transcriber.disconnect()
 
+    for note in notes:
+        logger.warning(note)
     combined = TranscriptionResult()
     combined.finalize(text=" ".join(t for t in texts if t).strip())
+    combined.words = words
+    combined.notes = notes
     return combined
 
 

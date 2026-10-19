@@ -90,10 +90,11 @@ function activateTab(name) {
   }
   if (name === "review") loadReviewTranscriptions();
   if (name === "dev") loadBenchmarks();
+  if (name.startsWith("ext-")) openExtensionPanel(name.slice(4));
   return true;
 }
 
-document.querySelectorAll(".tab").forEach((btn) => {
+function bindTab(btn) {
   btn.addEventListener("click", () => {
     const name = btn.dataset.tab;
     if (window.location.hash !== "#" + name) {
@@ -101,7 +102,77 @@ document.querySelectorAll(".tab").forEach((btn) => {
     }
     activateTab(name);
   });
-});
+}
+
+document.querySelectorAll(".tab").forEach(bindTab);
+
+// ── Extensions ───────────────────────────────────────────────────────
+// An installed extension package may add tabs and export links (docs/EXTENSIONS.md). With none
+// installed GET /api/extensions lists nothing and the page is unchanged.
+const extensionPanels = {};
+let extensionExports = [];
+
+// Extension scripts call NexusVoxExt.registerPanel(id, container => ...) to draw into their tab.
+window.NexusVoxExt = {
+  registerPanel(id, render) {
+    const panel = extensionPanels[id];
+    if (!panel) return;
+    panel.render = render;
+    if (panel.container) renderExtensionPanel(panel);
+  },
+};
+
+function renderExtensionPanel(panel) {
+  try {
+    panel.render(panel.container);
+  } catch (err) {
+    console.error("Extension tab failed:", panel.title, err);
+    panel.container.textContent = "This tab failed to load.";
+  }
+}
+
+async function loadExtensions() {
+  try {
+    const info = await fetch("/api/extensions").then((r) => r.json());
+    extensionExports = info.exports || [];
+    const nav = document.querySelector("nav.tabs");
+    const main = document.querySelector("main");
+    (info.panels || []).forEach((p) => {
+      const btn = document.createElement("button");
+      btn.className = "tab";
+      btn.dataset.tab = "ext-" + p.id;
+      btn.textContent = p.title;
+      nav.appendChild(btn);
+      bindTab(btn);
+      const section = document.createElement("section");
+      section.id = "tab-ext-" + p.id;
+      section.className = "tab-content";
+      main.appendChild(section);
+      extensionPanels[p.id] = { title: p.title, script: p.script, section, container: null, render: null };
+    });
+  } catch (err) {
+    console.error("Failed to load extensions:", err);
+  }
+  // The Upload history may have been drawn before the export targets were known.
+  if (extensionExports.length && document.getElementById("tab-upload").classList.contains("active")) {
+    loadFileTranscriptions();
+  }
+}
+
+// The panel's script is fetched when its tab is first opened and renders into the tab once.
+function openExtensionPanel(id) {
+  const panel = extensionPanels[id];
+  if (!panel || panel.requested) return;
+  panel.requested = true;
+  panel.container = document.createElement("div");
+  panel.section.appendChild(panel.container);
+  const script = document.createElement("script");
+  script.src = panel.script;
+  script.onerror = () => {
+    panel.container.textContent = "This tab failed to load.";
+  };
+  document.head.appendChild(script);
+}
 
 function restoreTabFromHash() {
   const name = window.location.hash.replace(/^#/, "");
@@ -1783,6 +1854,32 @@ setInterval(() => {
   if (uploadTabShown()) resumeUploadJob();
 }, UPLOAD_WATCH_MS);
 
+// An export is fetched, not followed as a link, so a failing one shows its message instead of
+// saving the error reply as a file.
+async function downloadExport(url) {
+  uploadErrorEl.style.display = "none";
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      showUploadError(body.error || `Export failed (${res.status})`);
+      return;
+    }
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/);
+    const plain = disposition.match(/filename="([^"]*)"/);
+    const name = encoded ? decodeURIComponent(encoded[1]) : plain ? plain[1] : "export";
+    const blobUrl = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(blobUrl);
+  } catch (err) {
+    showUploadError(`Export failed: ${err.message}`);
+  }
+}
+
 async function loadFileTranscriptions() {
   const data = await fetch("/api/file-transcriptions").then((r) => r.json());
   const container = document.getElementById("upload-list");
@@ -1800,11 +1897,19 @@ async function loadFileTranscriptions() {
         <span class="upload-model">${escapeHtml(item.model || "")}</span>
         <span class="upload-duration">${formatDuration(item.duration_ms)}</span>
         ${item.cleaned_text ? `<button type="button" class="upload-view-switch" data-index="${index}">Show original</button>` : ""}
+        ${extensionExports.map((t) => `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}">${escapeHtml(t.label)}</a>`).join("")}
       </div>
       <div class="upload-filename">${escapeHtml(item.original_filename)}</div>
       <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>
     </div>
   `).join("");
+
+  container.querySelectorAll(".upload-export").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      downloadExport(link.href);
+    });
+  });
 
   // A cleaned upload opens on the cleaned text; the button flips it to the transcript as transcribed.
   container.querySelectorAll(".upload-view-switch").forEach((button) => {
@@ -1826,7 +1931,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (DEV_MODE) {
     document.querySelectorAll("[data-dev-only]").forEach((el) => (el.style.display = ""));
   }
-  restoreTabFromHash();
+  loadExtensions().then(restoreTabFromHash);
 });
 
 // ── Benchmarks (Dev Tab) ─────────────────────────────────────────────

@@ -7,6 +7,7 @@ whose turn holds its midpoint, and consecutive words of one speaker form a parag
 
 from __future__ import annotations
 
+from .config import MODEL_REGISTRY
 from .transcriber import SpeakerTurn, Word
 
 # Diarization runs once over the whole file: a base for loading (or first downloading) the model,
@@ -18,6 +19,11 @@ TIMEOUT_PER_AUDIO_S = 0.5
 def diarization_timeout(duration_s: float) -> float:
     """Timeout for one diarization request over a file of `duration_s` seconds."""
     return TIMEOUT_BASE_S + max(duration_s, 0.0) * TIMEOUT_PER_AUDIO_S
+
+
+def speaker_detection_models() -> list[str]:
+    """Display names of the models that can detect speakers (registry flag `diarization`)."""
+    return [str(info["display_name"]) for info in MODEL_REGISTRY.values() if info.get("diarization")]
 
 
 def speaker_at(word: Word, turns: list[SpeakerTurn]) -> int | None:

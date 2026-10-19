@@ -289,6 +289,7 @@ def test_get_current_model(flask_client):
     assert "model" in data
     assert data["model"] == "parakeet-tdt-0.6b"
     assert data["diarization"] is True
+    assert data["diarization_models"] == ["Parakeet TDT 0.6B"]
 
 
 def test_switch_model(flask_client):
@@ -305,7 +306,11 @@ def test_switch_model(flask_client):
 
     # Verify current model changed
     resp = flask_client.get("/api/models/current")
-    assert resp.get_json() == {"model": "cohere-transcribe", "diarization": False}
+    assert resp.get_json() == {
+        "model": "cohere-transcribe",
+        "diarization": False,
+        "diarization_models": ["Parakeet TDT 0.6B"],
+    }
 
 
 def test_model_status_endpoint(flask_client):

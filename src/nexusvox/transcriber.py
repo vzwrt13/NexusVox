@@ -11,6 +11,8 @@ import math
 import wave
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
+from typing import BinaryIO
+from urllib.parse import urlsplit, urlunsplit
 
 import websockets
 from websockets.connection import State
@@ -69,9 +71,16 @@ def parse_turns(raw: object) -> list[SpeakerTurn]:
 
 
 def diarization_url(server_url: str) -> str:
-    """The diarization endpoint next to an OpenAI-style ``.../audio/transcriptions`` URL."""
-    base, sep, _ = server_url.rstrip("/").rpartition("/transcriptions")
-    return f"{base}/diarization" if sep else f"{server_url.rstrip('/')}/diarization"
+    """The diarization endpoint next to an OpenAI-style ``.../audio/transcriptions`` URL.
+
+    A URL without that path (a bare host, a proxy route) gets the container's own route,
+    ``/v1/audio/diarization``, on the same scheme, host and port.
+    """
+    trimmed = server_url.rstrip("/")
+    if trimmed.endswith("/transcriptions"):
+        return trimmed[: -len("/transcriptions")] + "/diarization"
+    parts = urlsplit(trimmed)
+    return urlunsplit((parts.scheme, parts.netloc, "/v1/audio/diarization", "", ""))
 
 
 class TranscriptionResult:
@@ -157,8 +166,8 @@ class BaseTranscriber(ABC):
     @abstractmethod
     def connected(self) -> bool: ...
 
-    async def diarize(self, wav_bytes: bytes, timeout: float) -> list[SpeakerTurn]:
-        """Speaker turns for a whole WAV file; only engines with `supports_diarization`."""
+    async def diarize(self, wav: bytes | BinaryIO, timeout: float) -> list[SpeakerTurn]:
+        """Speaker turns for a whole WAV file (bytes or a file object); only engines with `supports_diarization`."""
         raise NotImplementedError(f"{type(self).__name__} cannot detect speakers")
 
 
@@ -379,14 +388,14 @@ class OpenAIHttpTranscriber(BaseTranscriber):
         self._audio_buffer = bytearray()
         self._connected = False
 
-    async def diarize(self, wav_bytes: bytes, timeout: float) -> list[SpeakerTurn]:
+    async def diarize(self, wav: bytes | BinaryIO, timeout: float) -> list[SpeakerTurn]:
         """POST the whole file to the server's diarization endpoint; raises on any failure."""
         import httpx
 
         url = diarization_url(self._server_url)
-        logger.info("Sending %d bytes of WAV audio to %s for speaker detection", len(wav_bytes), url)
+        logger.info("Sending WAV audio to %s for speaker detection (timeout %.0f s)", url, timeout)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(url, files={"file": ("audio.wav", wav_bytes, "audio/wav")})
+            response = await client.post(url, files={"file": ("audio.wav", wav, "audio/wav")})
             response.raise_for_status()
             return parse_turns(response.json().get("segments"))
 

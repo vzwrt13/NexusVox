@@ -1563,19 +1563,28 @@ const diarizeToggle = document.getElementById("upload-diarize-toggle");
 const diarizeHint = document.getElementById("upload-diarize-hint");
 const DIARIZE_HINT = diarizeHint.textContent;
 
-// Speaker detection needs a model with a diarization endpoint (Parakeet); the toggle follows the active model.
+// Speaker detection needs a model with a diarization endpoint; the toggle follows the active model.
+// Checked when the tab opens, when the page becomes visible again and right before each upload,
+// because the model can change elsewhere (another browser tab, the config file).
 async function refreshDiarizeToggle() {
-  let supported = false;
+  let current = {};
   try {
-    const current = await fetch("/api/models/current").then((r) => r.json());
-    supported = Boolean(current.diarization);
+    current = await fetch("/api/models/current").then((r) => r.json());
   } catch {
-    supported = false;
+    current = {};
   }
+  const supported = Boolean(current.diarization);
   diarizeToggle.disabled = !supported;
   if (!supported) diarizeToggle.checked = false;
-  diarizeHint.textContent = supported ? DIARIZE_HINT : "Requires Parakeet as the active model.";
+  const models = (current.diarization_models || []).join(" or ") || "a model with speaker detection";
+  diarizeHint.textContent = supported ? DIARIZE_HINT : "Requires " + models + " as the active model.";
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && document.getElementById("tab-upload").classList.contains("active")) {
+    refreshDiarizeToggle();
+  }
+});
 
 async function handleFileUpload(file) {
   const statusEl = document.getElementById("upload-status");
@@ -1586,7 +1595,9 @@ async function handleFileUpload(file) {
   errorEl.style.display = "none";
   noteEl.style.display = "none";
   statusEl.style.display = "flex";
-  const diarize = diarizeToggle.checked && !diarizeToggle.disabled;
+  // Asked for with a model that cannot do it (changed elsewhere): still sent, so the reply's note says why.
+  const diarize = diarizeToggle.checked;
+  await refreshDiarizeToggle();
   statusText.textContent = (diarize ? "Transcribing and detecting speakers in " : "Transcribing ") + file.name + "...";
 
   const formData = new FormData();

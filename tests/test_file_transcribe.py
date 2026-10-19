@@ -9,6 +9,7 @@ import pytest
 from pydub.exceptions import CouldntDecodeError
 
 from nexusvox.file_transcribe import ALLOWED_EXTENSIONS, _get_extension, convert_to_wav
+from nexusvox.transcriber import Word
 
 
 def test_get_extension():
@@ -336,8 +337,8 @@ class _DiarizingTranscriber(_ScriptedTranscriber):
         self._turns = turns
         self.diarize_calls: list[tuple[bytes, float]] = []
 
-    async def diarize(self, wav_bytes, timeout):
-        self.diarize_calls.append((wav_bytes, timeout))
+    async def diarize(self, wav, timeout):
+        self.diarize_calls.append((wav if isinstance(wav, bytes) else wav.read(), timeout))
         if isinstance(self._turns, Exception):
             raise self._turns
         return self._turns
@@ -437,23 +438,105 @@ async def test_no_turns_found_keeps_the_plain_transcript_with_a_note(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_speaker_detection_is_skipped_when_a_chunk_has_no_words(monkeypatch):
-    """Labelled paragraphs come from the words, so a wordless chunk's text would vanish: keep it plain."""
+@pytest.mark.parametrize(
+    "script",
+    [
+        # a chunk without any words
+        [("first", [Word("first", 0.1, 0.4)], True), ("second", [], True)],
+        # a chunk where the server dropped one word's timing: 3 words of text, 2 timed
+        [("one two three", [Word("one", 0.1, 0.2), Word("three", 0.5, 0.6)], True)],
+    ],
+)
+async def test_speaker_detection_is_skipped_when_a_word_has_no_timing(monkeypatch, script):
+    """Labelled paragraphs come from the words, so an untimed word would vanish: keep the full plain text."""
     import nexusvox.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.transcriber import SpeakerTurn, Word
+    from nexusvox.transcriber import SpeakerTurn
 
-    script = [("first", [Word("first", 0.1, 0.4)], True), ("second", [], True)]
     transcriber = _DiarizingTranscriber(script, [SpeakerTurn(0, 0.0, 2.0)])
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+
+    result = await ft.transcribe_file(
+        [_silent_wav() for _ in script], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True
+    )
+
+    assert result.text == " ".join(text for text, _, _ in script)
+    assert all(w.speaker is None for w in result.words)
+    assert result.notes[-1] == "Speaker detection skipped: some words came back without timing."
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_chunk_does_not_block_speaker_labels(monkeypatch):
+    """Nothing of a timed-out chunk is in the plain text either, so the labelled text loses nothing."""
+    import nexusvox.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+    from nexusvox.transcriber import SpeakerTurn
+
+    script = [("", [], False), ("hello", [Word("hello", 0.1, 0.4)], True)]
+    transcriber = _DiarizingTranscriber(script, [SpeakerTurn(1, 0.0, 2.0)])
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
 
     result = await ft.transcribe_file(
         [_silent_wav(), _silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True
     )
 
+    assert result.text == "Speaker 1: hello"
+    assert result.notes == ["Chunk 1 of 2 timed out; its text may be incomplete or missing."]
+
+
+@pytest.mark.asyncio
+async def test_speaker_requests_wait_for_each_other_and_the_timeout_starts_after(monkeypatch):
+    """A second upload queued behind another's speaker detection does not spend its timeout waiting."""
+    import asyncio
+
+    import nexusvox.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+    from nexusvox.transcriber import SpeakerTurn
+
+    transcriber = _DiarizingTranscriber([("hi", [Word("hi", 0.1, 0.2)], True)], [SpeakerTurn(0, 0.0, 1.0)])
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+
+    assert ft._DIARIZE_LOCK.acquire(blocking=False)  # another upload's request is running
+    try:
+        task = asyncio.create_task(
+            ft.transcribe_file([_silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True)
+        )
+        await asyncio.sleep(0.5)
+        assert transcriber.diarize_calls == [] and not task.done()
+    finally:
+        ft._DIARIZE_LOCK.release()
+
+    result = await asyncio.wait_for(task, timeout=5)
+
+    assert len(transcriber.diarize_calls) == 1
+    assert result.text == "Speaker 1: hi"
+
+
+@pytest.mark.asyncio
+async def test_failed_transcription_cancels_speaker_detection_and_frees_the_lock(monkeypatch):
+    import asyncio
+
+    import nexusvox.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+    from nexusvox.transcriber import SpeakerTurn
+
+    class Failing(_DiarizingTranscriber):
+        async def finish(self, timeout=120.0):
+            raise RuntimeError("Transcription error: 500")
+
+    assert ft._DIARIZE_LOCK.acquire(blocking=False)  # keeps the speaker request waiting
+    transcriber = Failing([], [SpeakerTurn(0, 0.0, 1.0)])
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+    try:
+        with pytest.raises(RuntimeError, match="500"):
+            await ft.transcribe_file([_silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True)
+    finally:
+        ft._DIARIZE_LOCK.release()
+    await asyncio.sleep(0.3)  # a cancelled task would otherwise take the lock now
+
     assert transcriber.diarize_calls == []
-    assert result.text == "first second"
-    assert result.notes[-1] == "Speaker detection skipped: not every chunk returned word timestamps."
+    assert ft._DIARIZE_LOCK.acquire(blocking=False)
+    ft._DIARIZE_LOCK.release()
 
 
 @pytest.mark.asyncio
@@ -470,5 +553,21 @@ async def test_diarize_with_a_model_without_speaker_detection_says_so(monkeypatc
     assert transcriber.word_timestamps is False
     assert result.text == "hello"
     assert result.notes == [
-        "Speaker detection needs Parakeet as the active model; the transcript has no speaker labels."
+        "Speaker detection needs Parakeet TDT 0.6B as the active model; the transcript has no speaker labels."
+    ]
+
+
+@pytest.mark.asyncio
+async def test_model_with_speaker_detection_but_a_client_without_it_is_not_told_to_switch(monkeypatch):
+    import nexusvox.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+
+    transcriber = _DiarizingTranscriber([("hello", [Word("hello", 0.1, 0.4)], True)], [])
+    transcriber.supports_diarization = False
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+
+    result = await ft.transcribe_file([_silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True)
+
+    assert result.notes == [
+        "Speaker detection is not available with this server; the transcript has no speaker labels."
     ]

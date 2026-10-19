@@ -119,4 +119,14 @@ def test_diarization_url_sits_next_to_the_transcription_endpoint():
         diarization_url("http://localhost:8002/v1/audio/transcriptions") == "http://localhost:8002/v1/audio/diarization"
     )
     assert diarization_url("http://gpu-box:8002/v1/audio/transcriptions/") == "http://gpu-box:8002/v1/audio/diarization"
-    assert diarization_url("http://localhost:9000/asr") == "http://localhost:9000/asr/diarization"
+    # Without the transcription path: the container's own route on the same host.
+    assert diarization_url("http://gpu-box:8002") == "http://gpu-box:8002/v1/audio/diarization"
+    assert diarization_url("http://localhost:9000/asr") == "http://localhost:9000/v1/audio/diarization"
+
+
+def test_speaker_detection_models_come_from_the_registry(monkeypatch):
+    from nexusvox import diarization
+
+    assert diarization.speaker_detection_models() == ["Parakeet TDT 0.6B"]
+    monkeypatch.setitem(diarization.MODEL_REGISTRY, "other", {"display_name": "Other", "diarization": True})
+    assert diarization.speaker_detection_models() == ["Parakeet TDT 0.6B", "Other"]

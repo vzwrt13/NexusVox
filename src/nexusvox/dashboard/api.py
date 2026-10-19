@@ -590,10 +590,12 @@ class DashboardAPI:
             original_filename=filename,
             model=self._config.inference.model,
             confidence=result.confidence,
+            words=result.words,
         )
 
         return {
             "ok": True,
+            "notes": result.notes,
             "id": record.id,
             "text": record.text,
             "language": record.language,

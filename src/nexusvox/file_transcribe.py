@@ -6,8 +6,8 @@ import io
 import logging
 import wave
 
-from .config import InferenceConfig
-from .transcriber import TranscriptionResult, create_transcriber
+from .config import MODEL_REGISTRY, InferenceConfig
+from .transcriber import TranscriptionResult, Word, create_transcriber
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,13 @@ async def transcribe_file(
         language=language,
         auto_detect_language=auto_detect_language,
     )
+    # Only the model's own registry entry asks for words; a custom server or Cohere never sees the fields.
+    wants_words = bool(MODEL_REGISTRY.get(config.model, {}).get("word_timestamps"))
+    if wants_words:
+        transcriber.word_timestamps = True
     texts: list[str] = []
+    words: list[Word] = []
+    notes: list[str] = []
     try:
         for i, wav_bytes in enumerate(wav_chunks):
             logger.info("Transcribing chunk %d/%d", i + 1, len(wav_chunks))
@@ -89,11 +95,23 @@ async def transcribe_file(
                 await transcriber.send_audio_chunk(pcm_data[offset : offset + _SEND_CHUNK_BYTES])
             result = await transcriber.finish(timeout=120.0)
             texts.append(result.text)
+
+            label = f"Chunk {i + 1} of {len(wav_chunks)}"
+            if not result.done:
+                notes.append(f"{label} timed out; its text and word timestamps are missing.")
+            elif wants_words and result.text and not result.words:
+                notes.append(f"{label} came back without word timestamps.")
+            offset_s = i * MAX_CHUNK_MS / 1000
+            words.extend(Word(w.word, w.start + offset_s, w.end + offset_s) for w in result.words)
     finally:
         await transcriber.disconnect()
 
+    for note in notes:
+        logger.warning(note)
     combined = TranscriptionResult()
     combined.finalize(text=" ".join(t for t in texts if t).strip())
+    combined.words = words
+    combined.notes = notes
     return combined
 
 

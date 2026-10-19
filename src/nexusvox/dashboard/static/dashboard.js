@@ -1580,6 +1580,10 @@ async function handleFileUpload(file) {
     }
     // Reset file input
     uploadInput.value = "";
+    if (data.notes && data.notes.length) {
+      errorEl.textContent = data.notes.join(" ");
+      errorEl.style.display = "block";
+    }
     loadFileTranscriptions();
   } catch (err) {
     statusEl.style.display = "none";

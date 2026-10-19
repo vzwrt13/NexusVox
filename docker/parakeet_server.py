@@ -30,7 +30,12 @@ def health() -> dict:
 async def transcribe(
     file: UploadFile = File(...),
     model: str = Form(default="nvidia/parakeet-tdt-0.6b-v3"),
+    response_format: str = Form(default="json"),
+    timestamp_granularities: list[str] = Form(default=[], alias="timestamp_granularities[]"),
 ) -> dict:
+    # Word timestamps only on the OpenAI-style request (verbose_json + word granularity);
+    # every other request gets the plain {"text": ...} reply and skips the extra decoding.
+    want_words = response_format == "verbose_json" and "word" in timestamp_granularities
     audio_bytes = await file.read()
 
     # Write to a temp file — NeMo transcribe() expects file paths
@@ -48,9 +53,21 @@ async def transcribe(
             data = librosa.resample(data, orig_sr=sr, target_sr=16000)
             sf.write(tmp_path, data, 16000)
 
-        result = globals()["model"].transcribe([tmp_path])
+        result = globals()["model"].transcribe([tmp_path], timestamps=want_words)
         text = result[0].text if hasattr(result[0], "text") else str(result[0])
+        words = _words(result[0]) if want_words else None
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
-    return {"text": text}
+    if words is None:
+        return {"text": text}
+    return {"text": text, "words": words}
+
+
+def _words(hypothesis) -> list[dict]:
+    """Per-word {word, start, end} (seconds) from a NeMo hypothesis, OpenAI verbose_json style."""
+    timestamp = getattr(hypothesis, "timestamp", None) or {}
+    return [
+        {"word": w["word"], "start": float(w["start"]), "end": float(w["end"])}
+        for w in timestamp.get("word", [])
+    ]

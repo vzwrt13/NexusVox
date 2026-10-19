@@ -168,3 +168,107 @@ async def test_transcribe_file_passes_language_and_device_to_factory(monkeypatch
     )
 
     assert captured == {"device": "cpu", "language": "de", "auto": True}
+
+
+class _ScriptedTranscriber(_RecordingTranscriber):
+    """Returns one scripted (text, words, done) per chunk, in order."""
+
+    def __init__(self, script):
+        super().__init__()
+        self._script = list(script)
+        self.word_timestamps = False
+
+    async def finish(self, timeout=120.0):
+        from nexusvox.transcriber import TranscriptionResult
+
+        text, words, done = self._script.pop(0)
+        r = TranscriptionResult()
+        if done:
+            r.finalize(text=text)
+        r.words = words
+        return r
+
+
+def _two_chunk_wavs():
+    return [_silent_wav(), _silent_wav()]
+
+
+def _silent_wav():
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(16_000)
+        wf.writeframes(b"\x00\x00" * 1600)
+    return buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_word_times_are_shifted_by_the_chunk_offset(monkeypatch):
+    import nexusvox.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+    from nexusvox.transcriber import Word
+
+    script = [
+        ("one two", [Word("one", 0.5, 0.9), Word("two", 1.0, 1.4)], True),
+        ("three", [Word("three", 2.0, 2.5)], True),
+    ]
+    transcriber = _ScriptedTranscriber(script)
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+
+    result = await ft.transcribe_file(_two_chunk_wavs(), InferenceConfig(model="parakeet-tdt-0.6b"))
+
+    offset = ft.MAX_CHUNK_MS / 1000
+    assert transcriber.word_timestamps is True
+    assert result.text == "one two three"
+    assert [(w.word, w.start, w.end) for w in result.words] == [
+        ("one", 0.5, 0.9),
+        ("two", 1.0, 1.4),
+        ("three", 2.0 + offset, 2.5 + offset),
+    ]
+    assert result.notes == []
+
+
+@pytest.mark.asyncio
+async def test_engine_without_timestamps_leaves_words_empty(monkeypatch):
+    """Whisper and the others never get the flag, return no words, and that is not a problem."""
+    import nexusvox.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+
+    transcriber = _ScriptedTranscriber([("hello", [], True), ("again", [], True)])
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+
+    result = await ft.transcribe_file(_two_chunk_wavs(), InferenceConfig(model="whisper-small"), device="cpu")
+
+    assert transcriber.word_timestamps is False
+    assert result.text == "hello again"
+    assert result.words == []
+    assert result.notes == []
+
+
+@pytest.mark.asyncio
+async def test_timed_out_or_wordless_chunk_is_reported(monkeypatch, caplog):
+    import logging
+
+    import nexusvox.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+    from nexusvox.transcriber import Word
+
+    script = [
+        ("", [], False),  # timed out
+        ("spoken", [], True),  # text but no words
+        ("fine", [Word("fine", 0.1, 0.2)], True),
+    ]
+    transcriber = _ScriptedTranscriber(script)
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+
+    with caplog.at_level(logging.WARNING, logger=ft.logger.name):
+        result = await ft.transcribe_file(
+            [_silent_wav(), _silent_wav(), _silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b")
+        )
+
+    assert result.text == "spoken fine"
+    assert len(result.notes) == 2
+    assert "Chunk 1 of 3 timed out" in result.notes[0]
+    assert "Chunk 2 of 3" in result.notes[1] and "word timestamps" in result.notes[1]
+    assert [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING] == result.notes

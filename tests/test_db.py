@@ -432,3 +432,43 @@ def test_snippet_options_roundtrip(db):
         {"name": "sprechblase", "text": "https://b"},
     ]
     assert db.get_snippets()[0].options == options
+
+
+def test_file_transcription_stores_words_as_json(db):
+    import json
+
+    from nexusvox.transcriber import Word
+
+    record = db.save_file_transcription(
+        "hi there", "en", 1000, "a.wav", words=[Word("hi", 0.0, 0.2), Word("there", 0.3, 0.6)]
+    )
+
+    assert json.loads(record.words) == [
+        {"word": "hi", "start": 0.0, "end": 0.2},
+        {"word": "there", "start": 0.3, "end": 0.6},
+    ]
+
+
+def test_file_transcription_without_words_stores_null(db):
+    assert db.save_file_transcription("hi", "en", 1000, "a.wav").words is None
+
+
+def test_migration_adds_words_column_to_old_file_transcriptions(tmp_path):
+    import sqlite3
+
+    from nexusvox.config import DatabaseConfig
+    from nexusvox.db import Database
+
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE file_transcriptions (id INTEGER PRIMARY KEY, text TEXT NOT NULL,"
+            " language VARCHAR(5) NOT NULL,"
+            " duration_ms INTEGER NOT NULL, created_at DATETIME, model VARCHAR(100),"
+            " original_filename VARCHAR(255) NOT NULL, confidence FLOAT)"
+        )
+    conn.close()
+
+    database = Database(DatabaseConfig(path=str(path)))
+
+    assert database.save_file_transcription("hi", "en", 1000, "a.wav").words is None

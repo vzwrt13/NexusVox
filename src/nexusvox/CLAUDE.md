@@ -19,7 +19,7 @@
 `BaseTranscriber` ABC (`needs_docker: bool = True` class attr) with a factory pattern. Three implementations:
 
 - **`VoxtralRealtimeTranscriber`** — streams audio chunks over WebSocket to vLLM's `/v1/realtime` endpoint
-- **`OpenAIHttpTranscriber`** — buffers audio in memory, POSTs a WAV file to an OpenAI-compatible `/v1/audio/transcriptions` HTTP endpoint (used by Cohere Transcribe, Parakeet TDT, and GPU-backed Whisper)
+- **`OpenAIHttpTranscriber`** — buffers audio in memory, POSTs a WAV file to an OpenAI-compatible `/v1/audio/transcriptions` HTTP endpoint (used by Cohere Transcribe, Parakeet TDT, and GPU-backed Whisper). Dictation sends only `file` and `model`. File uploads set `word_timestamps = True` for models whose registry entry has `word_timestamps` (Parakeet only), which adds `response_format=verbose_json` and `timestamp_granularities[]=word`; `docker/parakeet_server.py` then also returns `words` (`{word, start, end}` in seconds) and `TranscriptionResult.words` holds them. Engines without timing leave it empty
 - **`LocalWhisperTranscriber`** (`transcribers/local_whisper.py`) — in-process faster-whisper, no Docker. Class-level `_model_cache` keeps loaded models warm across switches. `needs_docker = False`. Blocking `WhisperModel.transcribe()` runs in `loop.run_in_executor` to keep the asyncio loop responsive.
 
 `create_transcriber(config, *, device, language, auto_detect_language)` dispatches:

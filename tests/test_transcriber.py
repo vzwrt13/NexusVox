@@ -221,3 +221,87 @@ def test_wav_encoding_from_pcm16():
         assert wf.getsampwidth() == 2
         assert wf.getframerate() == sample_rate
         assert wf.getnframes() == 2000
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def _patch_httpx(monkeypatch, payload):
+    """Replace httpx.AsyncClient so a POST is captured instead of sent."""
+    import httpx
+
+    posted: dict = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, **kwargs):
+            posted.update(kwargs)
+            return _FakeResponse(payload)
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    return posted
+
+
+async def _run_cycle(transcriber):
+    await transcriber.connect()
+    await transcriber.send_audio_chunk(b"\x00\x00" * 160)
+    return await transcriber.finish()
+
+
+@pytest.mark.asyncio
+async def test_dictation_request_sends_only_file_and_model(monkeypatch):
+    """Dictation never asks for words: the form is exactly what it was before word timestamps."""
+    posted = _patch_httpx(monkeypatch, {"text": "hello"})
+
+    result = await _run_cycle(OpenAIHttpTranscriber(InferenceConfig(model="parakeet-tdt-0.6b")))
+
+    assert set(posted["files"]) == {"file"}
+    assert posted["data"] == {"model": "nvidia/parakeet-tdt-0.6b-v3"}
+    assert result.text == "hello"
+    assert result.words == []
+
+
+@pytest.mark.asyncio
+async def test_word_timestamps_request_and_parse(monkeypatch):
+    payload = {
+        "text": "hello world",
+        "words": [{"word": "hello", "start": 0.1, "end": 0.4}, {"word": "world", "start": 0.5, "end": 0.9}],
+    }
+    posted = _patch_httpx(monkeypatch, payload)
+    transcriber = OpenAIHttpTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"))
+    transcriber.word_timestamps = True
+
+    result = await _run_cycle(transcriber)
+
+    assert posted["data"]["response_format"] == "verbose_json"
+    assert posted["data"]["timestamp_granularities[]"] == "word"
+    assert [(w.word, w.start, w.end) for w in result.words] == [("hello", 0.1, 0.4), ("world", 0.5, 0.9)]
+
+
+@pytest.mark.asyncio
+async def test_word_timestamps_requested_but_engine_returns_none(monkeypatch):
+    """A server that ignores the extra fields (or sends junk) leaves words empty and the text intact."""
+    _patch_httpx(monkeypatch, {"text": "hello", "words": [{"word": "x"}, "junk"]})
+    transcriber = OpenAIHttpTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"))
+    transcriber.word_timestamps = True
+
+    result = await _run_cycle(transcriber)
+
+    assert result.text == "hello"
+    assert result.words == []

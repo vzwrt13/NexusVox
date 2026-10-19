@@ -56,6 +56,7 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "protocol": "openai_http",
         "display_name": "Parakeet TDT 0.6B",
         "docker_profile": "parakeet",
+        "word_timestamps": True,
         "health_url": "http://localhost:8002/health",
         "description": "NVIDIA FastConformer-TDT — 25 European languages with auto language detection",
         "parameters": "600M",

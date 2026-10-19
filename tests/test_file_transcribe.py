@@ -571,3 +571,22 @@ async def test_model_with_speaker_detection_but_a_client_without_it_is_not_told_
     assert result.notes == [
         "Speaker detection is not available with this server; the transcript has no speaker labels."
     ]
+
+
+@pytest.mark.asyncio
+async def test_progress_is_reported_per_chunk(monkeypatch):
+    import nexusvox.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+
+    transcriber = _ScriptedTranscriber([("a", [], True), ("b", [], True), ("c", [], True)])
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+    seen = []
+
+    await ft.transcribe_file(
+        [_silent_wav(), _silent_wav(), _silent_wav()],
+        InferenceConfig(model="whisper-small"),
+        device="cpu",
+        on_progress=lambda *args: seen.append(args),
+    )
+
+    assert seen == [("transcribing", 1, 3), ("transcribing", 2, 3), ("transcribing", 3, 3)]

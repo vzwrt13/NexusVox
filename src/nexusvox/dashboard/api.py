@@ -39,6 +39,7 @@ from ..translator import is_reachable
 from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
 from . import analytics
 from . import benchmarks as bench
+from .file_jobs import FileJob, FileJobs
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ class DashboardAPI:
         self._get_switch_status = get_switch_status
         self._get_learn_status = get_learn_status
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
+        self._file_jobs = FileJobs()
 
     # ---- Models -------------------------------------------------------------
 
@@ -568,21 +570,52 @@ class DashboardAPI:
 
     # ---- File Upload Transcription -----------------------------------------
 
-    def upload_and_transcribe(self, file_bytes: bytes, filename: str, *, diarize: bool = False) -> dict:
-        """Convert an uploaded audio file, transcribe it, and save to DB.
+    def start_file_transcription(self, file_bytes: bytes, filename: str, *, diarize: bool = False) -> dict:
+        """Check an uploaded file and transcribe it in the background; `{"ok": True, "job_id"}` at once.
 
-        With `diarize`, the saved and returned text is labelled by speaker when the model supports it.
+        Progress and the outcome are read with `get_file_job` / `get_current_file_job`.
         """
-        if self._db is None:
-            return {"ok": False, "error": "DB not available"}
+        error = self._check_upload(file_bytes, filename)
+        if error:
+            return {"ok": False, "error": error}
+        job = self._file_jobs.start(
+            filename, lambda job: self.upload_and_transcribe(file_bytes, filename, diarize=diarize, job=job)
+        )
+        if job is None:
+            return {"ok": False, "busy": True, "error": "Another file is still being transcribed"}
+        return {"ok": True, "job_id": job.id}
 
+    def get_file_job(self, job_id: str) -> dict | None:
+        return self._file_jobs.get(job_id)
+
+    def get_current_file_job(self) -> dict | None:
+        """The running file job, or the latest one whose ending no client has read yet."""
+        return self._file_jobs.current()
+
+    def _check_upload(self, file_bytes: bytes, filename: str) -> str:
+        """Why an uploaded file cannot be transcribed, or an empty string."""
+        if self._db is None:
+            return "DB not available"
         from ..file_transcribe import _get_extension
 
         ext = _get_extension(filename)
         if ext not in ALLOWED_EXTENSIONS:
-            return {"ok": False, "error": f"Unsupported format: {ext}"}
+            return f"Unsupported format: {ext}"
         if len(file_bytes) > MAX_UPLOAD_BYTES:
-            return {"ok": False, "error": f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"}
+            return f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"
+        return ""
+
+    def upload_and_transcribe(
+        self, file_bytes: bytes, filename: str, *, diarize: bool = False, job: FileJob | None = None
+    ) -> dict:
+        """Convert an uploaded audio file, transcribe it, and save to DB (blocking); the file is already checked.
+
+        With `diarize`, the saved and returned text is labelled by speaker when the model supports it.
+        `job` receives the stage as the work moves on.
+        """
+        progress = job.update if job else None
+        if progress:
+            progress("converting")
 
         try:
             wav_chunks, duration_ms = convert_to_wav(file_bytes, filename)
@@ -591,20 +624,28 @@ class DashboardAPI:
             return {"ok": False, "error": f"Audio conversion failed: {exc}"}
 
         try:
-            result = self._transcribe_wav_chunks(wav_chunks, word_timestamps=True, diarize=diarize)
+            result = self._transcribe_wav_chunks(
+                wav_chunks, word_timestamps=True, diarize=diarize, on_progress=progress
+            )
         except Exception as exc:
             logger.error("Transcription failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Transcription failed: {exc}"}
 
-        record = self._db.save_file_transcription(
-            text=result.text,
-            language=self._config.language,
-            duration_ms=duration_ms,
-            original_filename=filename,
-            model=self._config.inference.model,
-            confidence=result.confidence,
-            words=result.words,
-        )
+        if progress:
+            progress("saving")
+        try:
+            record = self._db.save_file_transcription(
+                text=result.text,
+                language=self._config.language,
+                duration_ms=duration_ms,
+                original_filename=filename,
+                model=self._config.inference.model,
+                confidence=result.confidence,
+                words=result.words,
+            )
+        except Exception as exc:
+            logger.error("Saving the transcription of %s failed: %s", filename, exc)
+            return {"ok": False, "error": f"Saving the transcript failed: {exc}"}
 
         return {
             "ok": True,
@@ -618,7 +659,14 @@ class DashboardAPI:
             "created_at": record.created_at.isoformat() if record.created_at else None,
         }
 
-    def _transcribe_wav_chunks(self, wav_chunks: list[bytes], *, word_timestamps: bool = False, diarize: bool = False):
+    def _transcribe_wav_chunks(
+        self,
+        wav_chunks: list[bytes],
+        *,
+        word_timestamps: bool = False,
+        diarize: bool = False,
+        on_progress: Callable[..., None] | None = None,
+    ):
         """Transcribe WAV chunks with the current model and language settings (blocking)."""
         return asyncio.run(
             transcribe_file(
@@ -628,6 +676,7 @@ class DashboardAPI:
                 auto_detect_language=self._config.auto_language_detection,
                 word_timestamps=word_timestamps,
                 diarize=diarize,
+                on_progress=on_progress,
             )
         )
 

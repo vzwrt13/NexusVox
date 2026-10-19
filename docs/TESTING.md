@@ -81,6 +81,7 @@ tests/
 ├── test_transcriber.py            # Transcriber ABC, factory, and implementations
 ├── test_docker_ctl.py             # Docker profile start/stop and health checks
 ├── test_file_transcribe.py        # Audio file upload conversion and transcription
+├── test_file_jobs.py              # Background job registry behind the Upload tab progress bar
 ├── test_os_commands.py            # Nexus OS command parsing and dispatch
 ├── test_hotkey.py                 # Hotkey modes, bindings, swallowing, command and paste marker keys
 ├── test_app_os_control.py         # Transcription cycle: os-control hide on skipped/failed cycles, paste last
@@ -107,6 +108,7 @@ tests/
 | `test_transcriber.py` | `transcriber.py` | BaseTranscriber ABC, factory function, VoxtralRealtimeTranscriber, OpenAIHttpTranscriber |
 | `test_docker_ctl.py` | `docker_ctl.py` | Docker profile start/stop, health-check waiting |
 | `test_file_transcribe.py` | `file_transcribe.py` | Extension detection, WAV passthrough, audio conversion, chunking |
+| `test_file_jobs.py` | `dashboard/file_jobs.py` | Upload job stages and progress, done/error mapping, one running job at a time, pruning, unread finished job |
 | `test_os_commands.py` | `os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
 | `test_hotkey.py` | `hotkey.py` | Hold/toggle modes, key bindings and swallowing, the command key and the paste key (first marker wins, typed normally outside a recording) |
 | `test_app_os_control.py` | `app.py` | The cycle's control flow with mocked collaborators: `::hide` after a skipped or failed command recording, pasting the last text |

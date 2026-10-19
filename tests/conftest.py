@@ -14,9 +14,13 @@ from nexusvox.db import Database
 
 
 @pytest.fixture
-def db():
-    """Fresh in-memory SQLite database for each test."""
-    config = DatabaseConfig(path=":memory:")
+def db(tmp_path):
+    """Fresh SQLite database for each test.
+
+    A file, not ``:memory:``: an in-memory database exists once per connection, and the file
+    transcription worker thread opens its own.
+    """
+    config = DatabaseConfig(path=str(tmp_path / "test.db"))
     return Database(config)
 
 

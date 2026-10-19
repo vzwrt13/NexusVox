@@ -86,6 +86,7 @@ function activateTab(name) {
   if (name === "upload") {
     loadFileTranscriptions();
     refreshDiarizeToggle();
+    resumeUploadJob();
   }
   if (name === "review") loadReviewTranscriptions();
   if (name === "dev") loadBenchmarks();
@@ -1607,25 +1608,46 @@ async function refreshDiarizeToggle() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && document.getElementById("tab-upload").classList.contains("active")) {
     refreshDiarizeToggle();
+    resumeUploadJob();
   }
 });
 
-async function handleFileUpload(file) {
-  const statusEl = document.getElementById("upload-status");
-  const statusText = document.getElementById("upload-status-text");
-  const errorEl = document.getElementById("upload-error");
-  const noteEl = document.getElementById("upload-note");
+const UPLOAD_POLL_MS = 1000;
+const uploadStatusEl = document.getElementById("upload-status");
+const uploadStatusText = document.getElementById("upload-status-text");
+const uploadProgressEl = document.getElementById("upload-progress");
+const uploadProgressBar = document.getElementById("upload-progress-bar");
+const uploadErrorEl = document.getElementById("upload-error");
+const uploadNoteEl = document.getElementById("upload-note");
 
+function showUploadProgress(job) {
+  uploadStatusEl.style.display = "flex";
+  uploadProgressEl.style.display = "block";
+  uploadStatusText.textContent = job.filename + ": " + job.message + "...";
+  uploadProgressBar.value = Math.round(job.percent * 100);
+}
+
+function hideUploadProgress() {
+  uploadStatusEl.style.display = "none";
+  uploadProgressEl.style.display = "none";
+}
+
+function showUploadError(message) {
+  uploadErrorEl.textContent = message;
+  uploadErrorEl.style.display = "block";
+}
+
+async function handleFileUpload(file) {
   // Read at the click. Asked for with a model that cannot do it (changed elsewhere): still sent,
-  // so the reply's note says why.
+  // so the job's note says why.
   const diarize = diarizeToggle.checked;
   uploadRunning = true;
   updateTranscribeButton();
-  errorEl.style.display = "none";
-  noteEl.style.display = "none";
-  statusEl.style.display = "flex";
+  uploadErrorEl.style.display = "none";
+  uploadNoteEl.style.display = "none";
+  uploadStatusEl.style.display = "flex";
+  uploadStatusText.textContent = "Uploading " + file.name + "...";
   await refreshDiarizeToggle();
-  statusText.textContent = (diarize ? "Transcribing and detecting speakers in " : "Transcribing ") + file.name + "...";
 
   const formData = new FormData();
   formData.append("file", file);
@@ -1634,29 +1656,122 @@ async function handleFileUpload(file) {
   try {
     const res = await fetch("/api/file-transcribe", { method: "POST", body: formData });
     const data = await res.json();
-
-    statusEl.style.display = "none";
     if (!data.ok) {
-      errorEl.textContent = data.error || "Upload failed";
-      errorEl.style.display = "block";
+      hideUploadProgress();
+      showUploadError(data.error || "Upload failed");
       return;
     }
-    // Done with this file; a failed one stays selected so it can be tried again.
-    if (selectedUploadFile === file) selectUploadFile(null);
-    if (data.notes && data.notes.length) {
-      noteEl.textContent = "Saved, with a problem: " + data.notes.join(" ");
-      noteEl.style.display = "block";
-    }
-    loadFileTranscriptions();
+    await trackUploadJob(data.job_id, file);
   } catch (err) {
-    statusEl.style.display = "none";
-    errorEl.textContent = "Network error: " + err.message;
-    errorEl.style.display = "block";
+    hideUploadProgress();
+    showUploadError("Network error: " + err.message);
   } finally {
     uploadRunning = false;
     updateTranscribeButton();
   }
 }
+
+// GET a JSON endpoint; a non-JSON or failed reply (a proxy's HTML 5xx, say) throws instead of passing as data.
+async function fetchJobJson(url) {
+  const res = await fetch(url);
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    throw new Error("HTTP " + res.status);
+  }
+  return { ok: res.ok, status: res.status, body };
+}
+
+const UPLOAD_POLL_RETRIES = 5; // failed polls in a row before giving up on a job
+
+// Polls a job until it ends, then shows how it ended. `file` is the one selected for it (null when the
+// job was picked up again after the page was reopened). A poll that fails is tried again a few times;
+// when the dashboard stays unreachable the job is left running on the server and the page says so.
+async function trackUploadJob(jobId, file) {
+  uploadRunning = true;
+  updateTranscribeButton();
+  let failures = 0;
+  try {
+    for (;;) {
+      let reply;
+      try {
+        reply = await fetchJobJson("/api/file-transcribe/" + jobId);
+        failures = 0;
+      } catch (err) {
+        if (++failures >= UPLOAD_POLL_RETRIES) {
+          hideUploadProgress();
+          showUploadError("Lost contact with the dashboard (" + err.message + "). The file may still be transcribing; reopen this tab to check.");
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, UPLOAD_POLL_MS));
+        continue;
+      }
+      if (!reply.ok) {
+        hideUploadProgress();
+        showUploadError(reply.body.error || "Lost track of the transcription");
+        return;
+      }
+      if (reply.body.state !== "running") {
+        showUploadOutcome(reply.body, file);
+        return;
+      }
+      showUploadProgress(reply.body);
+      await new Promise((resolve) => setTimeout(resolve, UPLOAD_POLL_MS));
+    }
+  } finally {
+    uploadRunning = false;
+    updateTranscribeButton();
+  }
+}
+
+function showUploadOutcome(job, file) {
+  hideUploadProgress();
+  if (job.state === "error") {
+    showUploadError(job.error || "Transcription failed");
+    return; // a failed file stays selected so it can be tried again
+  }
+  // Done with this file.
+  if (file && selectedUploadFile === file) selectUploadFile(null);
+  const notes = (job.result && job.result.notes) || [];
+  if (notes.length) {
+    uploadNoteEl.textContent = "Saved, with a problem: " + notes.join(" ");
+    uploadNoteEl.style.display = "block";
+  }
+  loadFileTranscriptions();
+}
+
+// A job keeps running on the server when the page is closed or reloaded, and another browser tab can start
+// one; the Upload tab picks it up when it opens and then keeps looking while it is shown.
+async function resumeUploadJob() {
+  if (uploadRunning) return;
+  let job = null;
+  try {
+    const reply = await fetchJobJson("/api/file-transcribe/current");
+    job = reply.ok ? reply.body.job : null;
+  } catch {
+    return; // the next look tries again
+  }
+  if (!job || uploadRunning) return;
+  uploadErrorEl.style.display = "none";
+  uploadNoteEl.style.display = "none";
+  if (job.state === "running") {
+    showUploadProgress(job);
+    await trackUploadJob(job.job_id, null);
+  } else {
+    showUploadOutcome(job, null);
+  }
+}
+
+const UPLOAD_WATCH_MS = 3000;
+
+function uploadTabShown() {
+  return document.visibilityState === "visible" && document.getElementById("tab-upload").classList.contains("active");
+}
+
+setInterval(() => {
+  if (uploadTabShown()) resumeUploadJob();
+}, UPLOAD_WATCH_MS);
 
 async function loadFileTranscriptions() {
   const data = await fetch("/api/file-transcriptions").then((r) => r.json());

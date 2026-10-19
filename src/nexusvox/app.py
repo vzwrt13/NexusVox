@@ -23,6 +23,7 @@ from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker,
 from .dashboard import open_dashboard
 from .db import Database
 from .edit_watch import EditWatcher
+from .extensions import load_extensions
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, describe_hotkey
 from .injector import foreground_window, inject_text
@@ -99,6 +100,9 @@ class NexusVoxApp:
             config.inference.device,
         )
         apply_startup_fallback(config.inference, self._device)
+
+        # Optional extension packages (entry points); a broken one is logged and skipped.
+        load_extensions()
 
         # Components
         self._audio = AudioCapture(config.audio)

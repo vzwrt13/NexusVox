@@ -67,6 +67,8 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 
 **Optional — a program on the control port:** only needed for *Command recordings* and the *Assistant forward*. It is a separate program, not shipped with NexusVox; [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md) describes the one-line TCP contract and has a minimal example server. Both features are off by default.
 
+**Optional — an extension package:** NexusVox loads installed packages that register under the `nexusvox.extensions` entry-point group and can add a step after a file upload, dashboard tabs and export formats. None ships with NexusVox; [docs/EXTENSIONS.md](docs/EXTENSIONS.md) describes the interface. Without one nothing changes.
+
 **Optional — [ffmpeg](https://ffmpeg.org/) on your `PATH`:** only needed to upload non-WAV audio files (MP3, FLAC, OGG, WEBM) in the dashboard's Upload tab. WAV uploads and push-to-talk dictation work without it. Install with `winget install Gyan.FFmpeg`, then verify with `ffmpeg -version`.
 
 ---

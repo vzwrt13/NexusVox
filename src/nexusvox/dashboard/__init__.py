@@ -8,11 +8,13 @@ import threading
 import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
 
 from ..config import Config
 from ..db import Database
+from ..extensions import load_extensions
 from .api import DashboardAPI
 
 if TYPE_CHECKING:
@@ -24,6 +26,12 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _PORT = 47392  # Uncommon port to avoid collisions.
 _server_started = False
 _lock = threading.Lock()
+
+
+def _attachment(filename: str) -> str:
+    """A Content-Disposition value for a download; non-ASCII names go in the RFC 5987 form."""
+    ascii_name = filename.encode("ascii", "replace").decode().replace("?", "_").replace('"', "_")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
 
 
 def _create_app(api: DashboardAPI) -> Flask:
@@ -397,6 +405,38 @@ def _create_app(api: DashboardAPI) -> Flask:
         limit = request.args.get("limit", 50, type=int)
         return jsonify(api.get_file_transcriptions(limit))
 
+    @app.route("/api/file-transcriptions/<int:tid>/export/<target_id>")
+    def export_file_transcription(tid, target_id):
+        result = api.export_file_transcription(tid, target_id)
+        if not result["ok"]:
+            return jsonify({"ok": False, "error": result["error"]}), result["status"]
+        return Response(
+            result["data"],
+            mimetype=result["mimetype"],
+            headers={"Content-Disposition": _attachment(result["filename"])},
+        )
+
+    # ---- Extension endpoints -----------------------------------------------
+
+    @app.route("/api/extensions")
+    def get_extensions():
+        return jsonify(api.extensions.describe())
+
+    @app.route("/ext/<panel_id>/<path:filename>")
+    def extension_static(panel_id, filename):
+        panel = api.extensions.panel(panel_id)
+        if panel is None:
+            abort(404)
+        return send_from_directory(panel.static_dir, filename)
+
+    for panel in api.extensions.panels():
+        if panel.blueprint is None:
+            continue
+        try:
+            app.register_blueprint(panel.blueprint, url_prefix=f"/api/ext/{panel.id}")
+        except Exception:  # a clashing blueprint name or a bad route must not take the dashboard down
+            logger.exception("Could not mount the API of dashboard panel %r; the panel stays without it", panel.id)
+
     # ---- Benchmark endpoints (Dev tab) -------------------------------------
 
     @app.route("/api/benchmarks")
@@ -447,6 +487,7 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None)
                 get_switch_status=get_switch_status,
                 get_learn_status=get_learn_status,
                 benchmarks_dir=benchmarks_dir,
+                extensions=load_extensions(),
             )
             flask_app = _create_app(dashboard_api)
 

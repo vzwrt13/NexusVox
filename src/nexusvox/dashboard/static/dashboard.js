@@ -90,10 +90,11 @@ function activateTab(name) {
   }
   if (name === "review") loadReviewTranscriptions();
   if (name === "dev") loadBenchmarks();
+  if (name.startsWith("ext-")) openExtensionPanel(name.slice(4));
   return true;
 }
 
-document.querySelectorAll(".tab").forEach((btn) => {
+function bindTab(btn) {
   btn.addEventListener("click", () => {
     const name = btn.dataset.tab;
     if (window.location.hash !== "#" + name) {
@@ -101,7 +102,73 @@ document.querySelectorAll(".tab").forEach((btn) => {
     }
     activateTab(name);
   });
-});
+}
+
+document.querySelectorAll(".tab").forEach(bindTab);
+
+// ── Extensions ───────────────────────────────────────────────────────
+// An installed extension package may add tabs and export links (docs/EXTENSIONS.md). With none
+// installed GET /api/extensions lists nothing and the page is unchanged.
+const extensionPanels = {};
+let extensionExports = [];
+
+// Extension scripts call NexusVoxExt.registerPanel(id, container => ...) to draw into their tab.
+window.NexusVoxExt = {
+  registerPanel(id, render) {
+    const panel = extensionPanels[id];
+    if (!panel) return;
+    panel.render = render;
+    if (panel.container) renderExtensionPanel(panel);
+  },
+};
+
+function renderExtensionPanel(panel) {
+  try {
+    panel.render(panel.container);
+  } catch (err) {
+    console.error("Extension tab failed:", panel.title, err);
+    panel.container.textContent = "This tab failed to load.";
+  }
+}
+
+async function loadExtensions() {
+  try {
+    const info = await fetch("/api/extensions").then((r) => r.json());
+    extensionExports = info.exports || [];
+    const nav = document.querySelector("nav.tabs");
+    const main = document.querySelector("main");
+    (info.panels || []).forEach((p) => {
+      const btn = document.createElement("button");
+      btn.className = "tab";
+      btn.dataset.tab = "ext-" + p.id;
+      btn.textContent = p.title;
+      nav.appendChild(btn);
+      bindTab(btn);
+      const section = document.createElement("section");
+      section.id = "tab-ext-" + p.id;
+      section.className = "tab-content";
+      main.appendChild(section);
+      extensionPanels[p.id] = { title: p.title, script: p.script, section, container: null, render: null };
+    });
+  } catch (err) {
+    console.error("Failed to load extensions:", err);
+  }
+}
+
+// The panel's script is fetched when its tab is first opened and renders into the tab once.
+function openExtensionPanel(id) {
+  const panel = extensionPanels[id];
+  if (!panel || panel.requested) return;
+  panel.requested = true;
+  panel.container = document.createElement("div");
+  panel.section.appendChild(panel.container);
+  const script = document.createElement("script");
+  script.src = panel.script;
+  script.onerror = () => {
+    panel.container.textContent = "This tab failed to load.";
+  };
+  document.head.appendChild(script);
+}
 
 function restoreTabFromHash() {
   const name = window.location.hash.replace(/^#/, "");
@@ -1800,6 +1867,7 @@ async function loadFileTranscriptions() {
         <span class="upload-model">${escapeHtml(item.model || "")}</span>
         <span class="upload-duration">${formatDuration(item.duration_ms)}</span>
         ${item.cleaned_text ? `<button type="button" class="upload-view-switch" data-index="${index}">Show original</button>` : ""}
+        ${extensionExports.map((t) => `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}" download>${escapeHtml(t.label)}</a>`).join("")}
       </div>
       <div class="upload-filename">${escapeHtml(item.original_filename)}</div>
       <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>
@@ -1826,7 +1894,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (DEV_MODE) {
     document.querySelectorAll("[data-dev-only]").forEach((el) => (el.style.display = ""));
   }
-  restoreTabFromHash();
+  loadExtensions().then(restoreTabFromHash);
 });
 
 // ── Benchmarks (Dev Tab) ─────────────────────────────────────────────

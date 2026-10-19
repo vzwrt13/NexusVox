@@ -622,6 +622,14 @@ canvas { width: 100% !important; max-height: 260px; }
 }
 .upload-view-switch:hover { text-decoration: underline; }
 
+/* Download links added by an extension's export targets. */
+.upload-export {
+  font-size: 12px;
+  color: var(--accent-light);
+  text-decoration: none;
+}
+.upload-export:hover { text-decoration: underline; }
+
 .upload-filename {
   font-size: 13px;
   font-weight: 500;

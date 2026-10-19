@@ -477,6 +477,11 @@ class Database:
             session.refresh(record)
             return record
 
+    def get_file_transcription(self, transcription_id: int) -> FileTranscription | None:
+        """Get one file transcription, or None for an unknown id."""
+        with self._session_factory() as session:
+            return session.get(FileTranscription, transcription_id)
+
     def get_file_transcriptions(self, limit: int = 50) -> list[FileTranscription]:
         """Get file transcriptions, newest first."""
         with self._session_factory() as session:

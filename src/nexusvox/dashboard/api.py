@@ -29,6 +29,7 @@ from ..config import (
 from ..db import Database
 from ..diarization import speaker_detection_models
 from ..dictionary import suggest_entries
+from ..extensions import ExtensionRegistry, file_transcript_from_record
 from ..file_cleanup import clean_transcript
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..llm import is_reachable as llm_reachable
@@ -61,6 +62,7 @@ class DashboardAPI:
         get_switch_status: Callable[[], dict] | None = None,
         get_learn_status: Callable[[], dict] | None = None,
         benchmarks_dir: Path | None = None,
+        extensions: ExtensionRegistry | None = None,
     ) -> None:
         self._sf = session_factory
         self._config = config
@@ -70,6 +72,7 @@ class DashboardAPI:
         self._get_learn_status = get_learn_status
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
         self._file_jobs = FileJobs()
+        self.extensions = extensions if extensions is not None else ExtensionRegistry()
 
     # ---- Models -------------------------------------------------------------
 
@@ -679,9 +682,13 @@ class DashboardAPI:
             logger.error("Saving the transcription of %s failed: %s", filename, exc)
             return {"ok": False, "error": f"Saving the transcript failed: {exc}"}
 
+        extension_results, extension_notes = self.extensions.file_transcribed(file_transcript_from_record(record))
+        notes.extend(extension_notes)
+
         return {
             "ok": True,
             "notes": notes,
+            "extensions": extension_results,
             "id": record.id,
             "text": record.text,
             "cleaned_text": record.cleaned_text,
@@ -734,6 +741,29 @@ class DashboardAPI:
             }
             for r in rows
         ]
+
+    def export_file_transcription(self, transcription_id: int, target_id: str) -> dict:
+        """Export a stored file transcription with an extension's export target.
+
+        `{"ok": True, "filename", "mimetype", "data": bytes}`; `status` says which HTTP error fits a failure.
+        """
+        target = self.extensions.export_target(target_id)
+        if target is None:
+            return {"ok": False, "status": 404, "error": "Unknown export target"}
+        record = self._db.get_file_transcription(transcription_id) if self._db else None
+        if record is None:
+            return {"ok": False, "status": 404, "error": "Unknown file transcription"}
+        try:
+            data = target.export(file_transcript_from_record(record))
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+            if not isinstance(data, bytes):
+                raise TypeError(f"expected bytes or str, got {type(data).__name__}")
+        except Exception as exc:
+            logger.exception("Export target %s failed on file transcription %s", target_id, transcription_id)
+            return {"ok": False, "status": 500, "error": f"Export failed: {exc}"}
+        stem = Path(record.original_filename).stem or "transcript"
+        return {"ok": True, "filename": stem + target.extension, "mimetype": target.mimetype, "data": data}
 
     # ---- Benchmarks (Dev tab) ----------------------------------------------
 

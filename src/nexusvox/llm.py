@@ -17,12 +17,23 @@ import re
 import threading
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from .config import LlmConfig
 
 logger = logging.getLogger(__name__)
 
 _PROBE_TIMEOUT_S = 1.5
+# How long a background caller (an upload's cleanup) waits for live requests (dictation, polish) to finish.
+BACKGROUND_WAIT_S = 30.0
+
+# Requests in flight that someone is waiting on. A model server answers one request at a time, so a
+# background caller starts its next request only while this is zero: a live request then waits behind
+# at most the background request already running, not behind a whole queue of them.
+_live_lock = threading.Condition()
+_live_requests = 0
+_local = threading.local()
 
 _FENCE_RE = re.compile(r"^```[\w-]*\n(.*)\n```$", re.DOTALL)
 # A reasoning model behind protocol = "openai" has no `think: false` and may put its thinking first.
@@ -48,8 +59,37 @@ def _request(config: LlmConfig, system: str, user: str) -> tuple[str, dict]:
     }
 
 
+@contextmanager
+def background() -> Iterator[None]:
+    """Requests made by this thread inside the block yield to live requests (dictation, polish)."""
+    _local.background = True
+    try:
+        yield
+    finally:
+        _local.background = False
+
+
 def complete(config: LlmConfig, system: str, user: str) -> str:
-    """The model's reply to one system + user message pair. Raises `LlmError`."""
+    """The model's reply to one system + user message pair. Raises `LlmError`.
+
+    Inside `background()` the request first waits (up to `BACKGROUND_WAIT_S`) until no live request runs.
+    """
+    global _live_requests
+    if getattr(_local, "background", False):
+        with _live_lock:
+            _live_lock.wait_for(lambda: _live_requests == 0, timeout=BACKGROUND_WAIT_S)
+        return _send(config, system, user)
+    with _live_lock:
+        _live_requests += 1
+    try:
+        return _send(config, system, user)
+    finally:
+        with _live_lock:
+            _live_requests -= 1
+            _live_lock.notify_all()
+
+
+def _send(config: LlmConfig, system: str, user: str) -> str:
     url, body = _request(config, system, user)
     headers = {"Content-Type": "application/json"}
     if config.api_key:

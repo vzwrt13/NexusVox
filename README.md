@@ -163,7 +163,7 @@ Open `http://localhost:47392` while NexusVox is running:
 | Analytics | Word count, session stats, usage charts |
 | Settings | Model switcher, config editor, voice command toggles |
 | Edit | Correct transcriptions in-line |
-| Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg); optional speaker detection with Parakeet |
+| Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg); optional speaker detection with Parakeet; optional text cleanup with the local language model |
 | Review | Flag and replay recordings |
 
 ![The NexusVox settings tab: toggles for automatic language detection, a compute device selector resolved to GPU (CUDA), a transcription model selector set to Parakeet TDT 0.6B, and a model overview listing architecture, parameter count, protocol, runtime, supported languages and VRAM.](docs/images/settings.png)

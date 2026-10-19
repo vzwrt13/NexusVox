@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from nexusvox.dictionary import DictionaryEntry
 
 
@@ -1164,3 +1166,75 @@ def test_upload_with_diarize_passes_the_flag_and_stores_speakers(flask_client, d
     assert stored.text == data["text"]
     assert [w["speaker"] for w in json.loads(stored.words)] == [1, 2]
     assert flask_client.get("/api/file-transcriptions").get_json()[0]["text"] == data["text"]
+
+
+def _fake_transcription(monkeypatch, text):
+    from nexusvox.transcriber import TranscriptionResult, Word
+
+    result = TranscriptionResult()
+    result.finalize(text=text)
+    result.words = [Word("well", 0.1, 0.4)]
+
+    async def fake_transcribe(wav_chunks, cfg, **kwargs):
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+
+
+def test_upload_with_cleanup_stores_the_cleaned_text_beside_the_original(
+    flask_client, db, sample_wav_bytes, monkeypatch
+):
+    import json
+
+    _fake_transcription(monkeypatch, "Speaker 1: well um hello there.\n\nSpeaker 2: um hi.")
+    monkeypatch.setattr(
+        "nexusvox.cleanup.complete",
+        lambda config, system, user: "Well, hello there." if "hello" in user else "Hi.",
+    )
+
+    job = upload_file(flask_client, sample_wav_bytes, cleanup="light")
+
+    data = job["result"]
+    assert job["state"] == "done", job["error"]
+    stored = db.get_file_transcriptions(limit=1)[0]
+    assert stored.text == "Speaker 1: well um hello there.\n\nSpeaker 2: um hi."  # the transcript is untouched
+    assert stored.cleaned_text == "Speaker 1: Well, hello there.\n\nSpeaker 2: Hi."
+    assert stored.cleanup_level == "light"
+    assert json.loads(stored.words) == [{"word": "well", "start": 0.1, "end": 0.4}]
+    assert data["text"] == stored.text and data["cleaned_text"] == stored.cleaned_text
+    listed = flask_client.get("/api/file-transcriptions").get_json()[0]
+    assert (listed["text"], listed["cleaned_text"]) == (stored.text, stored.cleaned_text)
+
+
+def test_upload_with_failing_cleanup_still_completes_with_a_note(flask_client, db, sample_wav_bytes, monkeypatch):
+    from nexusvox.llm import LlmError
+
+    _fake_transcription(monkeypatch, "well um this is a longer sentence than before")
+
+    def down(config, system, user):
+        raise LlmError("connection refused")
+
+    monkeypatch.setattr("nexusvox.cleanup.complete", down)
+
+    job = upload_file(flask_client, sample_wav_bytes, cleanup="medium")
+
+    assert job["state"] == "done"
+    assert any("Text cleanup" in note for note in job["result"]["notes"])
+    stored = db.get_file_transcriptions(limit=1)[0]
+    assert stored.text == "well um this is a longer sentence than before"
+    assert stored.cleaned_text is None and stored.cleanup_level is None
+
+
+@pytest.mark.parametrize("value", ["", "off", "heavy"])
+def test_upload_without_a_valid_cleanup_level_asks_no_model(flask_client, db, sample_wav_bytes, monkeypatch, value):
+    _fake_transcription(monkeypatch, "well um this is a longer sentence than before")
+
+    def fail(*args):
+        raise AssertionError("the model must not be called")
+
+    monkeypatch.setattr("nexusvox.cleanup.complete", fail)
+
+    job = upload_file(flask_client, sample_wav_bytes, cleanup=value)
+
+    assert job["state"] == "done"
+    assert job["result"]["cleaned_text"] is None

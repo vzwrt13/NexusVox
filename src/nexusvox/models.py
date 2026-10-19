@@ -67,6 +67,10 @@ class FileTranscription(Base):
     # JSON list of {"word", "start", "end"} (seconds from the file's start), plus "speaker" (1, 2, ...)
     # when speaker detection ran; NULL when the engine reported no word timing.
     words: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The transcript after the optional LLM cleanup (`text` stays as transcribed) and the level used
+    # ("light" / "medium"); both NULL when cleanup was not asked for or changed nothing.
+    cleaned_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cleanup_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
 
 class DictionaryEntryRow(Base):

@@ -46,7 +46,8 @@ transcription_delay_ms = 480
 # Transcription model. In-process on CPU (no Docker): "parakeet-tdt-0.6b" (ONNX int8,
 # ~670 MB download), "whisper-small", "whisper-base", "whisper-medium",
 # "whisper-large-v3-turbo", "distil-whisper-large-v3" (EN), "distil-whisper-medium-en" (EN).
-# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe", "parakeet-tdt-0.6b".
+# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe". Parakeet and the
+# Whisper models also run there, in a container.
 # Your own server (see [inference.custom] below): "custom-server".
 # See the model table in README.md for resources and model licenses.
 model = "parakeet-tdt-0.6b"

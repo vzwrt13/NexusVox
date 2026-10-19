@@ -72,10 +72,12 @@ def clean_class_state():
     LocalParakeetTranscriber._model_cache.clear()
     LocalParakeetTranscriber._vad_cache.clear()
     LocalParakeetTranscriber._set_status("idle")
+    LocalParakeetTranscriber._preloading = False
     yield
     LocalParakeetTranscriber._model_cache.clear()
     LocalParakeetTranscriber._vad_cache.clear()
     LocalParakeetTranscriber._set_status("idle")
+    LocalParakeetTranscriber._preloading = False
 
 
 def _install(monkeypatch, model: _FakeModel) -> object:
@@ -185,6 +187,28 @@ def test_offset_moves_every_word_onto_the_file_timeline():
 
     assert [(w.start) for w in words] == [10.0, 10.5]
     assert all(w.end >= w.start for w in words)
+
+
+def test_punctuation_with_the_word_mark_stays_on_the_word_before_it():
+    # onnx-asr writes "Hello, world - ok" for these tokens: no space before a non-word character.
+    tokens = [" Hello", " ,", " world", " -", " ok"]
+
+    words = words_from_tokens(tokens, [0.0, 0.3, 0.5, 0.9, 1.1])
+
+    assert [w.word for w in words] == ["Hello,", "world-", "ok"]
+    assert words[0].end <= words[1].start
+
+
+def test_a_bare_word_mark_before_punctuation_does_not_open_a_word():
+    words = words_from_tokens([" yes", "\u2581", ",", " no"], [0.0, 0.2, 0.3, 0.6])
+
+    assert [w.word for w in words] == ["yes,", "no"]
+
+
+def test_the_words_match_the_text_word_count_for_a_sentence_with_punctuation():
+    tokens = [" Wait", " ,", " what", " ?", " Fine", " ."]
+
+    assert len(words_from_tokens(tokens, [0.0, 0.2, 0.4, 0.6, 0.9, 1.1])) == len("Wait, what? Fine.".split())
 
 
 def test_no_tokens_no_words():
@@ -518,6 +542,122 @@ async def test_connect_starts_a_background_load_only_when_the_model_is_missing(m
     assert len(loads) == 1
 
 
+@pytest.mark.asyncio
+async def test_connect_queues_one_background_load_at_a_time(monkeypatch):
+    import asyncio
+    import threading
+
+    release = threading.Event()
+    loads: list[tuple] = []
+
+    def slow_load(cls, *a):
+        loads.append(a)
+        release.wait(2)
+        return _FakeModel()
+
+    monkeypatch.setattr(LocalParakeetTranscriber, "_get_model", classmethod(slow_load))
+    monkeypatch.setattr(LocalParakeetTranscriber, "_is_downloaded", staticmethod(lambda: False))
+
+    for _ in range(4):  # four hotkey presses while the first download runs
+        await _make().connect()
+    await asyncio.sleep(0.1)
+    assert len(loads) == 1
+    assert LocalParakeetTranscriber.load_status()["state"] == "downloading"  # visible at once, before the load ends
+
+    release.set()
+    await asyncio.sleep(0.2)
+    assert LocalParakeetTranscriber._preloading is False
+
+
+@pytest.mark.asyncio
+async def test_connect_does_not_retry_a_failed_load_the_finish_retries_once(monkeypatch):
+    import asyncio
+
+    attempts: list[str] = []
+
+    def failing(cls, *a):
+        attempts.append("load")
+        cls._set_status("error", "offline")
+        raise OSError("offline")
+
+    monkeypatch.setattr(LocalParakeetTranscriber, "_get_model", classmethod(failing))
+    t = _make()
+    LocalParakeetTranscriber._set_status("error", "offline")
+
+    await t.connect()
+    await asyncio.sleep(0.1)
+    assert attempts == []  # connect leaves the retry to finish
+
+    await t.send_audio_chunk(_pcm(1.0))
+    with pytest.raises(OSError, match="offline"):
+        await t.finish()
+    assert attempts == ["load"]
+
+
+def test_a_new_transcriber_clears_an_earlier_failed_load():
+    LocalParakeetTranscriber._set_status("error", "offline")
+
+    _make()
+
+    assert LocalParakeetTranscriber.load_status()["state"] == "idle"
+
+
+@pytest.mark.asyncio
+async def test_a_load_error_resets_the_transcriber_and_propagates(monkeypatch):
+    def failing(cls, *a):
+        raise OSError("corrupt cache")
+
+    monkeypatch.setattr(LocalParakeetTranscriber, "_get_model", classmethod(failing))
+    t = _make()
+    await t.connect()
+    await t.send_audio_chunk(_pcm(1.0))
+
+    with pytest.raises(OSError, match="corrupt cache"):
+        await t.finish()
+
+    assert t.connected is False
+    assert t._audio_buffer == bytearray()
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_timed_out_stops_and_does_not_hold_up_the_next_dictation(monkeypatch):
+    import asyncio
+    import threading
+
+    entered = threading.Event()
+    gate = threading.Event()
+    calls: list[str] = []
+
+    class _Blocking(_FakeModel):
+        def recognize(self, samples, *, sample_rate):
+            calls.append("recognize")
+            entered.set()
+            gate.wait(5)
+            return "slow result"
+
+    monkeypatch.setattr(LocalParakeetTranscriber, "_get_model", classmethod(lambda cls, *a: _Blocking()))
+
+    first = _make()
+    await first.connect()
+    await first.send_audio_chunk(_pcm(1.0))
+    running = asyncio.create_task(first.finish(timeout=10))
+    assert await asyncio.to_thread(entered.wait, 5)  # the single worker is inside the model call
+
+    # Two more dictations queue behind it and give up; their jobs must not run once the worker is free.
+    queued = []
+    for _ in range(2):
+        t = _make()
+        await t.connect()
+        await t.send_audio_chunk(_pcm(1.0))
+        queued.append(await t.finish(timeout=0.05))
+    assert [r.done for r in queued] == [False, False]
+
+    gate.set()
+    assert (await running).text == "slow result"
+    await asyncio.to_thread(LocalParakeetTranscriber._executor.submit(lambda: None).result, 5)  # queue drained
+    assert calls == ["recognize"]  # the cancelled jobs never reached the model
+
+
 def test_other_engines_report_no_load_status():
     from nexusvox.transcriber import OpenAIHttpTranscriber
 
@@ -561,6 +701,23 @@ def test_the_dashboard_sees_the_model_load_while_no_switch_runs(state):
     assert _bare_app(_make()).get_switch_status() == {"status": state, "error": None}
 
 
+def test_a_finished_switch_does_not_hide_a_running_download():
+    LocalParakeetTranscriber._set_status("downloading")
+    app = _bare_app(_make())
+    app._switch_status = "ready"  # switch_model sets this right before the preload starts
+
+    assert app.get_switch_status() == {"status": "downloading", "error": None}
+
+
+@pytest.mark.parametrize("switch_status", ["idle", "ready"])
+def test_a_failed_load_is_reported_with_its_reason(switch_status):
+    app = _bare_app(_make())
+    LocalParakeetTranscriber._set_status("error", "HTTP 503 from huggingface.co")
+    app._switch_status = switch_status
+
+    assert app.get_switch_status() == {"status": "error", "error": "HTTP 503 from huggingface.co"}
+
+
 def test_a_ready_model_leaves_the_switch_status_alone():
     LocalParakeetTranscriber._set_status("ready")
 
@@ -583,7 +740,8 @@ def test_engines_without_a_load_status_never_change_the_switch_status():
     assert app.get_switch_status() == {"status": "idle", "error": None}
 
 
-def _dashboard_client(db, session_factory, monkeypatch, device):
+def _dashboard_client(db, session_factory, monkeypatch, device, *, running=None):
+    """A dashboard whose app runs `running` (default: the engine `device` selects)."""
     from nexusvox.config import Config
     from nexusvox.dashboard import _create_app
     from nexusvox.dashboard.api import DashboardAPI
@@ -591,7 +749,9 @@ def _dashboard_client(db, session_factory, monkeypatch, device):
     config = Config()
     config.inference.device = device
     monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: d if d in ("cuda", "cpu") else "cpu")
-    app = _create_app(DashboardAPI(session_factory, config, db=db))
+    transcriber = running or create_transcriber(config.inference, device=device)
+    api = DashboardAPI(session_factory, config, db=db, get_transcriber=lambda: transcriber)
+    app = _create_app(api)
     app.config["TESTING"] = True
     return app.test_client()
 
@@ -611,6 +771,24 @@ def test_speaker_detection_stays_on_for_parakeet_on_gpu(db, session_factory, mon
 
     assert data["diarization"] is True
     assert data["diarization_hint"] == ""
+
+
+def test_speaker_detection_follows_the_running_engine_not_the_device_setting(db, session_factory, monkeypatch):
+    """The setting says CPU but needs a restart: the container is still what runs, so it can still detect speakers."""
+    from nexusvox.transcriber import OpenAIHttpTranscriber
+
+    container = OpenAIHttpTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"))
+    with _dashboard_client(db, session_factory, monkeypatch, "cpu", running=container) as client:
+        data = client.get("/api/models/current").get_json()
+
+    assert data["diarization"] is True
+    assert data["diarization_hint"] == ""
+
+
+def test_the_current_model_does_not_probe_for_a_gpu(db, session_factory, monkeypatch):
+    with _dashboard_client(db, session_factory, monkeypatch, "cuda") as client:
+        monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: pytest.fail("the device was probed"))
+        assert client.get("/api/models/current").status_code == 200
 
 
 def test_parakeet_is_listed_and_switchable_on_cpu(db, session_factory, monkeypatch):

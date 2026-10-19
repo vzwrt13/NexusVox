@@ -246,13 +246,16 @@ class NexusVoxApp:
     def get_switch_status(self) -> dict:
         """Return the current model-switch status for the dashboard.
 
-        With no switch running, an in-process model that is still downloading or loading reports that
-        (`downloading` / `loading`), so the first start of CPU Parakeet does not look hung.
+        Once no switch is in flight (idle, or just ready), an in-process model that is still downloading
+        or loading reports that (`downloading` / `loading`), and one that failed to load reports `error`
+        with the reason, so the first start of CPU Parakeet neither looks done nor hung.
         """
-        if self._switch_status == "idle":
+        if self._switch_status in ("idle", "ready"):
             load = self._transcriber.load_status()
             if load and load["state"] in ("downloading", "loading"):
                 return {"status": load["state"], "error": None}
+            if load and load["state"] == "error":
+                return {"status": "error", "error": load["error"]}
         return {"status": self._switch_status, "error": self._switch_error}
 
     async def switch_model(self, model_id: str) -> None:

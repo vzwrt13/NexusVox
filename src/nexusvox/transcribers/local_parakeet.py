@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -37,15 +39,19 @@ FRAME_S = 0.08
 # SentencePiece marks the first piece of a word with this character; onnx-asr already turns it
 # into a space, and both spellings are accepted.
 _WORD_START = "▁"
+# onnx-asr drops the space before a character that is not a word character ("Hello ," -> "Hello,"), so
+# a token like " ," or " -" belongs to the word before it, in the words as in the text.
+_WORD_CHAR = re.compile(r"\w")
 
 
 def words_from_tokens(tokens: list[str], timestamps: list[float], offset_s: float = 0.0) -> list[Word]:
     """Group a model's tokens into words with timing, in seconds from `offset_s`.
 
-    A token that starts with the SentencePiece word mark (or a space) opens a new word; the rest
-    continue the current one, so punctuation stays attached to the word before it. A word starts
-    when its first token is emitted and ends one frame after its last token, never later than the
-    next word starts.
+    A token that starts with the SentencePiece word mark (or a space) and then a word character opens
+    a new word; the rest continue the current one. Punctuation stays attached to the word before it,
+    also when its token carries the word mark, which is how onnx-asr writes the text too. A word
+    starts when its first token is emitted and ends one frame after its last token, never later
+    than the next word starts.
     """
     pieces: list[tuple[str, float, float]] = []  # (text, first token time, last token time)
     new_word = True
@@ -55,7 +61,7 @@ def words_from_tokens(tokens: list[str], timestamps: list[float], offset_s: floa
         text = token.lstrip(_WORD_START + " ")
         if not text:
             continue  # a bare word mark: only the word break counts
-        if new_word or not pieces:
+        if not pieces or (new_word and _WORD_CHAR.match(text)):
             pieces.append((text, stamp, stamp))
         else:
             word, first, _last = pieces[-1]
@@ -81,10 +87,14 @@ class LocalParakeetTranscriber(BaseTranscriber):
     _model_cache: dict[tuple[str, str], object] = {}
     _vad_cache: dict[str, object] = {}
     _cache_lock = threading.Lock()
-    # onnx-asr's decoding is plain Python over the ONNX sessions; one recognition at a time keeps a
-    # dictation and an upload from fighting over the CPU cores.
-    _run_lock = threading.Lock()
+    # onnx-asr's decoding is plain Python over the ONNX sessions: one recognition at a time keeps a
+    # dictation and an upload from fighting over the CPU cores. A single worker serialises them and
+    # keeps them off the loop's default pool, which docker_ctl and Whisper use too.
+    _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="parakeet")
     _status: dict[str, str | None] = {"state": "idle", "error": None}
+    # True while a background load runs, so connect() queues one at a time.
+    _preloading = False
+    _state_lock = threading.Lock()
 
     def __init__(self, config: InferenceConfig) -> None:
         registry = MODEL_REGISTRY[config.model]
@@ -93,6 +103,10 @@ class LocalParakeetTranscriber(BaseTranscriber):
         self._audio_buffer = bytearray()
         self._connected = False
         self.model = str(registry["hf_name"])
+        # A new transcriber (start, model switch) gets a fresh try after an earlier failed load.
+        with self._state_lock:
+            if self._status["state"] == "error":
+                self._set_status("idle")
 
     # ---- Model loading ------------------------------------------------------
 
@@ -156,45 +170,68 @@ class LocalParakeetTranscriber(BaseTranscriber):
 
     # ---- Transcription ------------------------------------------------------
 
-    def _recognize(self, samples: np.ndarray) -> tuple[str, list[Word]]:
-        """Text and word timing of mono 16 kHz float samples; blocking, call from a worker thread."""
-        if len(samples) < _MIN_SAMPLES:
+    def _recognize(self, samples: np.ndarray, cancelled: threading.Event) -> tuple[str, list[Word]]:
+        """Text and word timing of mono 16 kHz float samples; blocking, call from the worker thread.
+
+        `cancelled` is set when the caller gave up (timeout); the job then stops at the next safe point, so
+        abandoned work does not make the dictations behind it wait for results nobody reads.
+        """
+        if len(samples) < _MIN_SAMPLES or cancelled.is_set():
             return "", []
         model = self._get_model(self._onnx_model, self._quantization)
-        with self._run_lock:
-            if len(samples) <= MAX_DIRECT_S * SAMPLE_RATE:
-                if not self.word_timestamps:
-                    return model.recognize(samples, sample_rate=SAMPLE_RATE).strip(), []
-                result = model.with_timestamps().recognize(samples, sample_rate=SAMPLE_RATE)
-                words = words_from_tokens(result.tokens or [], result.timestamps or [])
-                return result.text.strip(), words
+        if cancelled.is_set():
+            return "", []
+        if len(samples) <= MAX_DIRECT_S * SAMPLE_RATE:
+            if not self.word_timestamps:
+                return model.recognize(samples, sample_rate=SAMPLE_RATE).strip(), []
+            result = model.with_timestamps().recognize(samples, sample_rate=SAMPLE_RATE)
+            words = words_from_tokens(result.tokens or [], result.timestamps or [])
+            return result.text.strip(), words
 
-            # Too long for one call: the VAD cuts it into speech segments of at most MAX_DIRECT_S.
-            segmented = model.with_vad(self._get_vad(), max_speech_duration_s=MAX_DIRECT_S)
+        # Too long for one call: the VAD cuts it into speech segments of at most MAX_DIRECT_S.
+        segmented = model.with_vad(self._get_vad(), max_speech_duration_s=MAX_DIRECT_S)
+        if self.word_timestamps:
+            segmented = segmented.with_timestamps()
+        texts: list[str] = []
+        words = []
+        for segment in segmented.recognize(samples, sample_rate=SAMPLE_RATE):
+            if cancelled.is_set():
+                return "", []
+            texts.append(segment.text.strip())
             if self.word_timestamps:
-                segmented = segmented.with_timestamps()
-            texts: list[str] = []
-            words = []
-            for segment in segmented.recognize(samples, sample_rate=SAMPLE_RATE):
-                texts.append(segment.text.strip())
-                if self.word_timestamps:
-                    words.extend(words_from_tokens(segment.tokens or [], segment.timestamps or [], segment.start))
-            return " ".join(t for t in texts if t), words
+                words.extend(words_from_tokens(segment.tokens or [], segment.timestamps or [], segment.start))
+        return " ".join(t for t in texts if t), words
 
     async def connect(self) -> None:
         self._audio_buffer = bytearray()
         self._connected = True
         # Trigger a background load so the first recording doesn't pay the full download and
         # load latency inside finish().
-        key = (self._onnx_model, self._quantization)
-        if key not in self._model_cache:
+        if self._begin_preload():
             asyncio.get_event_loop().run_in_executor(None, self._preload)
+
+    def _begin_preload(self) -> bool:
+        """Claim the one background load; False when the model is cached, a load runs, or the last one failed.
+
+        After a failure the next `finish()` makes the one retry, so a press does not cost two download attempts.
+        The status is set here, before the load thread starts, so the dashboard never sees a gap.
+        """
+        with self._state_lock:
+            if (self._onnx_model, self._quantization) in self._model_cache or LocalParakeetTranscriber._preloading:
+                return False
+            if self._status["state"] == "error":
+                return False
+            LocalParakeetTranscriber._preloading = True
+            self._set_status("loading" if self._is_downloaded() else "downloading")
+            return True
 
     def _preload(self) -> None:
         try:
             self._get_model(self._onnx_model, self._quantization)
         except Exception:
             logger.exception("Loading the Parakeet model failed")
+        finally:
+            LocalParakeetTranscriber._preloading = False
 
     async def send_audio_chunk(self, pcm16_bytes: bytes) -> None:
         if not self._connected:
@@ -211,16 +248,22 @@ class LocalParakeetTranscriber(BaseTranscriber):
 
         result = TranscriptionResult()
         loop = asyncio.get_event_loop()
+        cancelled = threading.Event()
         try:
-            text, words = await asyncio.wait_for(loop.run_in_executor(None, self._recognize, samples), timeout=timeout)
+            text, words = await asyncio.wait_for(
+                loop.run_in_executor(self._executor, self._recognize, samples, cancelled), timeout=timeout
+            )
             result.finalize(text=text)
             result.words = words
             logger.info("Transcription done: %s", result.text)
         except TimeoutError:
             logger.warning("In-process transcription timed out after %.0fs", timeout)
-
-        self._connected = False
-        self._audio_buffer = bytearray()
+        finally:
+            # Stops a job still queued or running (a timeout, a cancelled task); a no-op once it is done.
+            cancelled.set()
+            # Also after a load or ONNX error, which propagates: no stale audio, no half-open recording.
+            self._connected = False
+            self._audio_buffer = bytearray()
         return result
 
     async def disconnect(self) -> None:

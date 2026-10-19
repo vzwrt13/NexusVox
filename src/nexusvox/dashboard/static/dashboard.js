@@ -938,6 +938,12 @@ async function loadModelSwitcher() {
     `<option value="${m.id}"${m.id === current.model ? " selected" : ""}>${m.name}</option>`
   ).join("");
   renderModelOverview(current.model);
+  // An in-process model (Parakeet on CPU) may still be downloading or loading from the start.
+  const status = await fetch("/api/models/status").then((r) => r.json()).catch(() => null);
+  if (status && (status.status === "downloading" || status.status === "loading")) {
+    showModelStatus(STATUS_MESSAGES[status.status]);
+    pollModelStatus(current.model);
+  }
 }
 
 function renderModelOverview(modelId) {
@@ -1013,6 +1019,8 @@ const STATUS_MESSAGES = {
   stopping: "Disconnecting current model...",
   starting: "Starting new container...",
   waiting: "Waiting for model to load...",
+  downloading: "Downloading the model, first use only (about 670 MB)...",
+  loading: "Loading the model...",
   ready: "Model ready!",
   error: "Switch failed.",
 };
@@ -1681,7 +1689,9 @@ async function refreshDiarizeToggle() {
   diarizeToggle.disabled = !supported;
   if (!supported) diarizeToggle.checked = false;
   const models = (current.diarization_models || []).join(" or ") || "a model with speaker detection";
-  diarizeHint.textContent = supported ? DIARIZE_HINT : "Requires " + models + " as the active model.";
+  diarizeHint.textContent = supported
+    ? DIARIZE_HINT
+    : current.diarization_hint || "Requires " + models + " as the active model.";
 }
 
 document.addEventListener("visibilitychange", () => {

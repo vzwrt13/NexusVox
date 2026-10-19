@@ -21,6 +21,7 @@ from ..config import (
     SUPPORTED_LANGUAGES,
     Config,
     HotkeyConfig,
+    model_needs_docker,
     normalize_hotkey_key,
     resolve_device,
     save_config,
@@ -37,6 +38,7 @@ from ..llm import warm_up as llm_warm_up
 from ..os_commands import NEXUS_ACTIONS
 from ..polish_presets import PolishPreset
 from ..snippets import Snippet, SnippetOption
+from ..transcriber import SPEAKERS_NEED_GPU
 from ..translator import is_reachable
 from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
 from . import analytics
@@ -105,12 +107,16 @@ class DashboardAPI:
 
     def get_current_model(self) -> dict:
         model = self._config.inference.model
+        flagged = bool(MODEL_REGISTRY.get(model, {}).get("diarization"))
+        # Parakeet's speaker detection is part of its Docker container; in-process on CPU it has none.
+        in_container = model_needs_docker(model, resolve_device(self._config.inference.device))
         # `diarization`: the upload tab's speaker detection works with this model; `diarization_models`
-        # names the models it works with, for the hint when it does not.
+        # names the models it works with, and `diarization_hint` says why it is off for a model that has it.
         return {
             "model": model,
-            "diarization": bool(MODEL_REGISTRY.get(model, {}).get("diarization")),
+            "diarization": flagged and in_container,
             "diarization_models": speaker_detection_models(),
+            "diarization_hint": "" if in_container or not flagged else SPEAKERS_NEED_GPU,
         }
 
     def set_model(self, model_id: str) -> dict:

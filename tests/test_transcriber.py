@@ -73,7 +73,7 @@ def test_factory_returns_local_whisper_on_cpu_for_small():
     assert isinstance(transcriber, LocalWhisperTranscriber)
 
 
-@pytest.mark.parametrize("model", ["voxtral-mini-4b", "cohere-transcribe", "parakeet-tdt-0.6b"])
+@pytest.mark.parametrize("model", ["voxtral-mini-4b", "cohere-transcribe"])
 def test_factory_raises_for_gpu_models_on_cpu(model):
     config = InferenceConfig(model=model)
     with pytest.raises(RuntimeError, match="requires a GPU"):

@@ -138,7 +138,7 @@ async def transcribe_file(
 
         text = " ".join(t for t in texts if t).strip()
         if diarize and not wants_speakers:
-            notes.append(_unavailable_note(entry))
+            notes.append(_unavailable_note(entry, transcriber))
         elif speakers is not None and text:
             if on_progress and not speakers.done():
                 on_progress("diarizing")
@@ -207,9 +207,12 @@ def _whole_file_wav(wav_chunks: list[bytes]) -> tuple[io.BytesIO, float]:
     return buf, frames / 16_000
 
 
-def _unavailable_note(entry: dict) -> str:
+def _unavailable_note(entry: dict, transcriber: BaseTranscriber) -> str:
     """Why an upload that asked for speakers got none, naming the models that can detect them."""
     if entry.get("diarization"):
+        reason = getattr(transcriber, "no_diarization_reason", "")
+        if reason:
+            return reason + "; the transcript has no speaker labels."
         return "Speaker detection is not available with this server; the transcript has no speaker labels."
     names = " or ".join(speaker_detection_models()) or "a model with speaker detection"
     return f"Speaker detection needs {names} as the active model; the transcript has no speaker labels."

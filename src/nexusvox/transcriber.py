@@ -21,6 +21,9 @@ from .config import CUSTOM_PROTOCOLS, MODEL_REGISTRY, InferenceConfig, resolve_c
 
 logger = logging.getLogger(__name__)
 
+# Why Parakeet has no speaker detection in-process on CPU: it is part of the Parakeet container.
+SPEAKERS_NEED_GPU = "Speaker detection needs the GPU container"
+
 
 @dataclass(frozen=True)
 class Word:
@@ -149,6 +152,8 @@ class BaseTranscriber(ABC):
     word_timestamps: bool = False
     # True when the client can ask a server for speaker turns (`diarize`).
     supports_diarization: bool = False
+    # For an engine whose model can detect speakers elsewhere (the Docker build) but not here: why not.
+    no_diarization_reason: str = ""
 
     @abstractmethod
     async def connect(self) -> None: ...
@@ -165,6 +170,10 @@ class BaseTranscriber(ABC):
     @property
     @abstractmethod
     def connected(self) -> bool: ...
+
+    def load_status(self) -> dict[str, str | None] | None:
+        """Model download/load progress (`state`, `error`) for engines that load a model in-process, else None."""
+        return None
 
     async def diarize(self, wav: bytes | BinaryIO, timeout: float) -> list[SpeakerTurn]:
         """Speaker turns for a whole WAV file (bytes or a file object); only engines with `supports_diarization`."""
@@ -414,8 +423,9 @@ def create_transcriber(
     """Factory: create the right transcriber based on the configured model and device.
 
     Resolution precedence for device: explicit `device` kwarg > `config.device` > "auto".
-    On CPU, whisper entries run in-process via LocalWhisperTranscriber (no Docker).
-    GPU-only models (voxtral/cohere/parakeet) raise if selected with device=cpu.
+    On CPU, whisper entries run in-process via LocalWhisperTranscriber and Parakeet via
+    LocalParakeetTranscriber (ONNX int8); neither needs Docker.
+    GPU-only models (voxtral/cohere) raise if selected with device=cpu.
     """
     registry = MODEL_REGISTRY.get(config.model)
     if registry is None:
@@ -428,6 +438,11 @@ def create_transcriber(
     compute_type = resolve_compute_type(resolved_device, config.compute_type)
 
     if registry.get("inprocess_supported") and resolved_device == "cpu":
+        if registry.get("inprocess_engine") == "parakeet-onnx":
+            from .transcribers.local_parakeet import LocalParakeetTranscriber
+
+            return LocalParakeetTranscriber(config)
+
         from .transcribers.local_whisper import LocalWhisperTranscriber
 
         return LocalWhisperTranscriber(

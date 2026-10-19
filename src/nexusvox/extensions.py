@@ -7,7 +7,7 @@ An installed package registers an `Extension` under the `nexusvox.extensions` en
 
 The entry point may name an `Extension` subclass, an instance, or a zero-argument function returning one.
 NexusVox loads every extension once at start. An extension that cannot be imported, targets an
-unsupported API version, is built wrongly or raises in a hook is logged and skipped; it never stops the app.
+another `API_VERSION`, is built wrongly or raises in a hook is logged and skipped; it never stops the app.
 With no extension installed nothing changes. The hooks are documented in docs/EXTENSIONS.md.
 """
 
@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from .transcriber import Word
 
@@ -32,10 +33,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Bumped on a change that breaks existing extensions; an additive change keeps it. Version 2 added
-# `ExportTarget.available` and the `upload_actions` hook; a version 1 extension needs no change.
-API_VERSION = 2
-SUPPORTED_API_VERSIONS = (1, 2)
+# Bumped on a change that breaks existing extensions; an additive change keeps it.
+API_VERSION = 1
 ENTRY_POINT_GROUP = "nexusvox.extensions"
 
 _ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
@@ -113,7 +112,7 @@ class ExportTarget:
     extension: str  # file name suffix with the dot, e.g. `.docx`
     mimetype: str
     export: Callable[[FileTranscript], bytes | str]
-    # Optional, per upload: True/None offers the link; False greys it out; a string greys it out with that text
+    # Optional, per upload: True/None offers the link; any other falsy answer (False, 0, ...) greys it out; a string greys it out with that text
     # as the tooltip. Called while the Upload list is built, so keep it cheap.
     available: Callable[[int], bool | str | None] | None = None
 
@@ -168,6 +167,14 @@ def _valid_id(value: object) -> bool:
     return isinstance(value, str) and _ID_PATTERN.fullmatch(value) is not None
 
 
+def _is_local_path(value: object) -> bool:
+    """True for an absolute path on this server: no scheme or host, no backslash (browsers read it as `/`)."""
+    if not isinstance(value, str) or not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return False
+    parts = urlsplit(value)
+    return not parts.scheme and not parts.netloc
+
+
 def _problem_with_panel(panel: DashboardPanel) -> str:
     """Why a panel cannot be served, or an empty string."""
     if not isinstance(panel.title, str) or not panel.title:
@@ -195,18 +202,16 @@ def _problem_with_target(target: ExportTarget) -> str:
     return ""
 
 
-def _problem_with_action(action: UploadAction) -> str:
+def _problem_with_action(action: UploadAction, own_panels: set[str]) -> str:
     """Why an upload action cannot be offered, or an empty string."""
     if not isinstance(action.label, str) or not action.label:
         return "it has no label"
     if bool(action.endpoint) == bool(action.panel):
         return "it needs exactly one of endpoint and panel"
-    if action.endpoint and not (
-        isinstance(action.endpoint, str) and action.endpoint.startswith("/") and not action.endpoint.startswith("//")
-    ):
+    if action.endpoint and not _is_local_path(action.endpoint):
         return f"endpoint {action.endpoint!r} is not an absolute path on this server"
-    if action.panel and not _valid_id(action.panel):
-        return f"panel {action.panel!r} is not a panel id"
+    if action.panel and action.panel not in own_panels:
+        return f"panel {action.panel!r} is not one of the extension's own panels"
     return ""
 
 
@@ -250,13 +255,13 @@ class ExtensionRegistry:
             if not extension.name:
                 logger.error("Extension %r has no name; skipped", source or extension)
                 return False
-            if extension.api_version not in SUPPORTED_API_VERSIONS:
+            if extension.api_version != API_VERSION:
                 logger.error(
                     "Extension %r targets extension API %s (None: it declares none), this NexusVox provides %s; "
                     "skipped",
                     label,
                     extension.api_version,
-                    " and ".join(str(v) for v in SUPPORTED_API_VERSIONS),
+                    API_VERSION,
                 )
                 return False
             if any(e.name == extension.name for e in self.extensions):
@@ -268,8 +273,14 @@ class ExtensionRegistry:
             targets = self._claim(
                 extension.export_targets(), self._targets, ExportTarget, label, "export target", _problem_with_target
             )
+            own_panels = {p.id for p in panels}
             actions = self._claim(
-                extension.upload_actions(), self._actions, UploadAction, label, "upload action", _problem_with_action
+                extension.upload_actions(),
+                self._actions,
+                UploadAction,
+                label,
+                "upload action",
+                lambda action: _problem_with_action(action, own_panels),
             )
         except Exception:
             logger.exception("Extension %r failed while registering and is skipped", source or loaded)
@@ -354,9 +365,9 @@ class ExtensionRegistry:
             except Exception:
                 logger.exception("Export target %s failed its availability check for %s", target.id, transcription_id)
                 continue
-            if isinstance(answer, str) and answer:
-                unavailable[target.id] = answer
-            elif answer is False or isinstance(answer, str):
+            if isinstance(answer, str):
+                unavailable[target.id] = answer or "Not available"
+            elif answer is not None and not answer:
                 unavailable[target.id] = "Not available"
         return unavailable
 

@@ -669,7 +669,7 @@ def test_a_download_name_with_control_characters_and_slashes_stays_a_valid_heade
 # ---- API version 2: export availability and upload actions -----------------------
 
 
-def test_an_extension_written_for_api_version_1_still_loads():
+def test_an_extension_that_ignores_the_additions_behaves_as_before():
     class Old(Extension):
         name = "old"
         api_version = 1
@@ -700,6 +700,8 @@ def test_unavailable_exports_carry_their_reason():
     assert _gated_registry(lambda tid: "No summary yet").unavailable_exports(1) == {"gated-md": "No summary yet"}
     assert _gated_registry(lambda tid: False).unavailable_exports(1) == {"gated-md": "Not available"}
     assert _gated_registry(lambda tid: True).unavailable_exports(1) == {}
+    assert _gated_registry(lambda tid: 0).unavailable_exports(1) == {"gated-md": "Not available"}
+    assert _gated_registry(lambda tid: None).unavailable_exports(1) == {}
 
 
 def test_a_failing_availability_check_still_offers_the_export():
@@ -725,18 +727,26 @@ def test_the_upload_list_marks_unavailable_exports(db, session_factory):
 class ActionExtension(V1Extension):
     name = "actions"
 
+    def __init__(self, static_dir):
+        self._static = static_dir
+
+    def dashboard_panels(self):
+        return [DashboardPanel("x", "X", self._static)]
+
     def upload_actions(self):
         return [
             UploadAction("summarise", "Summarise", endpoint="/api/ext/x/summarise/{id}"),
             UploadAction("scripted", "Scripted", panel="x"),
+            UploadAction("typo", "Typo", panel="y"),
+            UploadAction("backslash", "Backslash", endpoint=r"/\evil.example/{id}"),
             UploadAction("both", "Both", endpoint="/api/x", panel="x"),
             UploadAction("elsewhere", "Elsewhere", endpoint="https://example.com/{id}"),
         ]
 
 
-def test_upload_actions_are_listed_and_malformed_ones_dropped():
+def test_upload_actions_are_listed_and_malformed_ones_dropped(tmp_path):
     reg = ExtensionRegistry()
-    assert reg.add(ActionExtension)
+    assert reg.add(ActionExtension(tmp_path))
 
     assert [a.id for a in reg.upload_actions()] == ["summarise", "scripted"]
     assert reg.describe()["upload_actions"] == [
@@ -745,12 +755,12 @@ def test_upload_actions_are_listed_and_malformed_ones_dropped():
     ]
 
 
-def test_the_dashboard_lists_upload_actions(db, session_factory):
+def test_the_dashboard_lists_upload_actions(db, session_factory, tmp_path):
     reg = ExtensionRegistry()
-    reg.add(ActionExtension)
+    reg.add(ActionExtension(tmp_path))
     app = _create_app(DashboardAPI(session_factory, Config(), db=db, extensions=reg))
 
     info = app.test_client().get("/api/extensions").get_json()
 
-    assert info["api_version"] == API_VERSION == 2
+    assert info["api_version"] == API_VERSION
     assert [a["id"] for a in info["upload_actions"]] == ["summarise", "scripted"]

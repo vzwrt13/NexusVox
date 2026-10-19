@@ -25,7 +25,7 @@ from nexusvox.extensions import Extension
 class MyExtension(Extension):
     name = "my-extension"  # required, unique, shown in logs and results
     version = "1.0.0"
-    api_version = 2  # the extension API this package was written against: a literal, see Versioning
+    api_version = 1  # the extension API this package was written against: a literal, see Versioning
 ```
 
 **A broken extension never stops NexusVox.** One that cannot be imported, has no `name`, reuses a taken
@@ -36,9 +36,9 @@ is logged and skipped (a hook failure only skips that call).
 
 `nexusvox.extensions.API_VERSION` is an integer. It is bumped when a change breaks existing extensions
 (a hook renamed, a field removed or retyped); adding a hook, an optional field or a keyword with a default
-keeps it. NexusVox loads an extension only when its `api_version` is one it supports (1 and 2), so an extension built
+keeps it. NexusVox loads an extension only when its `api_version` equals the core's, so an extension built
 for another version is skipped with a log line instead of misbehaving. Every extension must set
-`api_version` itself, as a literal (`api_version = 2`, not `API_VERSION`): there is no default, and an extension
+`api_version` itself, as a literal (`api_version = 1`, not `API_VERSION`): there is no default, and an extension
 that does not declare one is skipped.
 
 ## Hook 1: after a file upload was transcribed
@@ -110,19 +110,19 @@ is affected. The link points at `GET /api/file-transcriptions/<id>/export/<targe
 
 `GET /api/extensions` returns `{api_version, extensions, panels, exports, upload_actions}` for the dashboard.
 
-## API version 2: availability and upload actions
+## Availability and upload actions
 
-Version 2 added `ExportTarget.available` and the `upload_actions` hook. Both are optional: an extension
-declaring `api_version = 1` loads and behaves as before. NexusVox supports versions 1 and 2; set
-`api_version = 2` once you use the additions.
+`ExportTarget.available` and the `upload_actions` hook are additions, not breaking changes: the API version
+stays at 1 and extensions that do not use them behave as before. A NexusVox release that predates them ignores the extra field and never calls the hook.
+and hook are simply ignored or rejected, so guard with the `nexusvox` version if you must support older ones.
 
 ### Marking an export unavailable
 
 `ExportTarget` takes an optional `available(transcription_id) -> bool | str | None`. `True` or `None` offers
-the link as usual; `False` shows it greyed out and not clickable; a string does the same and becomes the
-tooltip (e.g. `"No summary yet"`). The answers come with the upload list (`exports_unavailable`, a
+the link as usual; `False` (or any other falsy answer such as `0`) shows it greyed out and not clickable; a
+string does the same and becomes the tooltip (e.g. `"No summary yet"`). The answers come with the upload list (`exports_unavailable`, a
 `{target id: reason}` object per upload in `GET /api/file-transcriptions`), not one request per link, so keep
-the check cheap. A check that raises leaves the link on, so the export itself reports the problem.
+the check cheap: it runs once per listed upload (up to 50) for each target that has one. A check that raises leaves the link on, so the export itself reports the problem.
 
 ```python
 ExportTarget(
@@ -148,7 +148,7 @@ Each action adds a button to the result card of every stored upload in the Uploa
 |----------------------|---------|
 | `id` | Same rules as a panel id; unique across all extensions |
 | `label` | The button's text |
-| `endpoint` | An absolute path on the dashboard server, e.g. a route of your panel's blueprint. The button `POST`s to it, `{id}` replaced by the upload id. It answers JSON: `error` (or `"ok": false`) is shown as an error, `note` or `message` as a note. The list reloads afterwards, so a newly possible export becomes available |
-| `panel` | Instead of `endpoint`: the id of one of your own panels. Its script, loaded on the first click, calls `NexusVoxExt.registerUploadAction("<action id>", (upload, button) => ...)`; `upload` is the upload as listed by `GET /api/file-transcriptions` |
+| `endpoint` | An absolute path on this server (no scheme, host or backslash), e.g. a route of your panel's blueprint. The button `POST`s to it, every `{id}` replaced by the upload id. It answers JSON: `error` (or `"ok": false`) is shown as an error, `note` or `message` as a note. The list reloads afterwards, so a newly possible export becomes available |
+| `panel` | Instead of `endpoint`: the id of one of the same extension's own panels (any other id drops the action). Its script, loaded on the first click, calls `NexusVoxExt.registerUploadAction("<action id>", (upload, button) => ...)`; `upload` is the upload as listed by `GET /api/file-transcriptions` |
 
 Set exactly one of `endpoint` and `panel`; anything else drops the action.

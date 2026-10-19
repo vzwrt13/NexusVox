@@ -175,9 +175,14 @@ function openExtensionPanel(id) {
   panel.section.appendChild(panel.container);
   const script = document.createElement("script");
   script.src = panel.script;
-  script.onerror = () => {
-    panel.container.textContent = "This tab failed to load.";
-  };
+  // Resolves with true once the script ran, false when it could not be loaded.
+  panel.ready = new Promise((resolve) => {
+    script.onload = () => resolve(true);
+    script.onerror = () => {
+      panel.container.textContent = "This tab failed to load.";
+      resolve(false);
+    };
+  });
   document.head.appendChild(script);
 }
 
@@ -1898,47 +1903,46 @@ async function downloadExport(url) {
 }
 
 // An upload action either POSTs to its endpoint or calls a handler its panel script registered.
+// Running actions are remembered so a rebuilt list does not offer the button again meanwhile.
+const runningUploadActions = new Set();
+
 async function runUploadAction(button, item) {
   const action = extensionUploadActions.find((a) => a.id === button.dataset.action);
   if (!action) return;
+  const key = `${action.id}:${item.id}`;
+  if (runningUploadActions.has(key)) return;
+  runningUploadActions.add(key);
   uploadErrorEl.style.display = "none";
+  uploadNoteEl.style.display = "none";
   button.disabled = true;
   try {
     if (action.endpoint) {
-      const res = await fetch(action.endpoint.replace("{id}", item.id), { method: "POST" });
+      const res = await fetch(action.endpoint.replaceAll("{id}", item.id), { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.ok === false) {
         showUploadError(body.error || `${action.label} failed (${res.status})`);
       } else if (body.note || body.message) {
-        showUploadError(body.note || body.message);
+        uploadNoteEl.textContent = body.note || body.message;
+        uploadNoteEl.style.display = "block";
       }
-      loadFileTranscriptions();
     } else {
       if (!uploadActionHandlers[action.id]) {
         openExtensionPanel(action.panel);
-        await waitFor(() => uploadActionHandlers[action.id]);
+        const panel = extensionPanels[action.panel];
+        if (!panel) throw new Error(`panel "${action.panel}" does not exist`);
+        if (!(await panel.ready)) throw new Error("its script could not be loaded");
       }
       const handler = uploadActionHandlers[action.id];
       if (!handler) throw new Error("its script did not register a handler");
       await handler(item, button);
     }
+    loadFileTranscriptions();
   } catch (err) {
     showUploadError(`${action.label} failed: ${err.message}`);
   } finally {
+    runningUploadActions.delete(key);
     button.disabled = false;
   }
-}
-
-function waitFor(condition, timeoutMs = 5000) {
-  return new Promise((resolve) => {
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (condition() || Date.now() - started > timeoutMs) {
-        clearInterval(timer);
-        resolve();
-      }
-    }, 50);
-  });
 }
 
 async function loadFileTranscriptions() {
@@ -1963,7 +1967,7 @@ async function loadFileTranscriptions() {
           if (reason !== undefined) return `<a class="upload-export disabled" aria-disabled="true" title="${escapeHtml(reason)}">${escapeHtml(t.label)}</a>`;
           return `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}">${escapeHtml(t.label)}</a>`;
         }).join("")}
-        ${extensionUploadActions.map((a) => `<button type="button" class="upload-action" data-action="${escapeHtml(a.id)}" data-index="${index}">${escapeHtml(a.label)}</button>`).join("")}
+        ${extensionUploadActions.map((a) => `<button type="button" class="upload-action" data-action="${escapeHtml(a.id)}" data-index="${index}"${runningUploadActions.has(`${a.id}:${item.id}`) ? " disabled" : ""}>${escapeHtml(a.label)}</button>`).join("")}
       </div>
       <div class="upload-filename">${escapeHtml(item.original_filename)}</div>
       <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>

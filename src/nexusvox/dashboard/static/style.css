@@ -631,10 +631,9 @@ canvas { width: 100% !important; max-height: 260px; }
 .upload-export:hover { text-decoration: underline; }
 /* An export the extension reports as unavailable for this upload: greyed out, the tooltip says why. */
 .upload-export.disabled {
-  color: var(--text-muted, #888);
+  color: var(--text-faint);
   opacity: 0.5;
   cursor: not-allowed;
-  pointer-events: auto;
 }
 .upload-export.disabled:hover { text-decoration: none; }
 

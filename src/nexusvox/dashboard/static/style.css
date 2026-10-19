@@ -589,6 +589,9 @@ canvas { width: 100% !important; max-height: 260px; }
 }
 
 .upload-option { margin-bottom: 16px; }
+.upload-selected { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+.upload-selected.has-file { color: var(--text); }
+.upload-actions { margin-bottom: 16px; }
 
 /* Speaker-labelled transcripts are paragraphs separated by blank lines. */
 .upload-text { white-space: pre-wrap; }

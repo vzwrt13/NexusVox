@@ -1531,9 +1531,28 @@ async function submitReview(id, btn) {
 }
 
 // ── File Upload (Upload Tab) ─────────────────────────────────────────
+// Choosing or dropping a file only selects it; the Transcribe button starts the job, so the
+// options (Detect speakers) can be set in between and are read at the click.
 const uploadZone = document.getElementById("upload-zone");
 const uploadInput = document.getElementById("upload-input");
 const uploadBrowse = document.getElementById("upload-browse");
+const uploadSelected = document.getElementById("upload-selected");
+const transcribeBtn = document.getElementById("upload-transcribe");
+let selectedUploadFile = null;
+let uploadRunning = false;
+
+function updateTranscribeButton() {
+  transcribeBtn.disabled = !selectedUploadFile || uploadRunning;
+}
+
+function selectUploadFile(file) {
+  selectedUploadFile = file;
+  uploadSelected.textContent = file ? "Selected: " + file.name : "No file selected.";
+  uploadSelected.classList.toggle("has-file", Boolean(file));
+  document.getElementById("upload-error").style.display = "none";
+  document.getElementById("upload-note").style.display = "none";
+  updateTranscribeButton();
+}
 
 uploadBrowse.addEventListener("click", (e) => {
   e.preventDefault();
@@ -1541,7 +1560,12 @@ uploadBrowse.addEventListener("click", (e) => {
 });
 
 uploadInput.addEventListener("change", () => {
-  if (uploadInput.files.length) handleFileUpload(uploadInput.files[0]);
+  if (uploadInput.files.length) selectUploadFile(uploadInput.files[0]);
+  uploadInput.value = ""; // so choosing the same file again still counts as a choice
+});
+
+transcribeBtn.addEventListener("click", () => {
+  if (selectedUploadFile && !uploadRunning) handleFileUpload(selectedUploadFile);
 });
 
 uploadZone.addEventListener("dragover", (e) => {
@@ -1556,7 +1580,7 @@ uploadZone.addEventListener("dragleave", () => {
 uploadZone.addEventListener("drop", (e) => {
   e.preventDefault();
   uploadZone.classList.remove("drag-over");
-  if (e.dataTransfer.files.length) handleFileUpload(e.dataTransfer.files[0]);
+  if (e.dataTransfer.files.length) selectUploadFile(e.dataTransfer.files[0]);
 });
 
 const diarizeToggle = document.getElementById("upload-diarize-toggle");
@@ -1592,11 +1616,14 @@ async function handleFileUpload(file) {
   const errorEl = document.getElementById("upload-error");
   const noteEl = document.getElementById("upload-note");
 
+  // Read at the click. Asked for with a model that cannot do it (changed elsewhere): still sent,
+  // so the reply's note says why.
+  const diarize = diarizeToggle.checked;
+  uploadRunning = true;
+  updateTranscribeButton();
   errorEl.style.display = "none";
   noteEl.style.display = "none";
   statusEl.style.display = "flex";
-  // Asked for with a model that cannot do it (changed elsewhere): still sent, so the reply's note says why.
-  const diarize = diarizeToggle.checked;
   await refreshDiarizeToggle();
   statusText.textContent = (diarize ? "Transcribing and detecting speakers in " : "Transcribing ") + file.name + "...";
 
@@ -1614,8 +1641,8 @@ async function handleFileUpload(file) {
       errorEl.style.display = "block";
       return;
     }
-    // Reset file input
-    uploadInput.value = "";
+    // Done with this file; a failed one stays selected so it can be tried again.
+    if (selectedUploadFile === file) selectUploadFile(null);
     if (data.notes && data.notes.length) {
       noteEl.textContent = "Saved, with a problem: " + data.notes.join(" ");
       noteEl.style.display = "block";
@@ -1625,6 +1652,9 @@ async function handleFileUpload(file) {
     statusEl.style.display = "none";
     errorEl.textContent = "Network error: " + err.message;
     errorEl.style.display = "block";
+  } finally {
+    uploadRunning = false;
+    updateTranscribeButton();
   }
 }
 

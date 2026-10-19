@@ -164,7 +164,7 @@ async def test_finish_requires_connect(monkeypatch):
 
 @pytest.mark.parametrize(
     "model_key",
-    [k for k, v in MODEL_REGISTRY.items() if v.get("inprocess_supported")],
+    [k for k, v in MODEL_REGISTRY.items() if v.get("inprocess_supported") and not v.get("inprocess_engine")],
 )
 def test_inprocess_registry_entries_are_loadable(model_key):
     """Every inprocess_supported entry has a non-empty hf_name and constructs

@@ -37,6 +37,7 @@ from ..llm import warm_up as llm_warm_up
 from ..os_commands import NEXUS_ACTIONS
 from ..polish_presets import PolishPreset
 from ..snippets import Snippet, SnippetOption
+from ..transcriber import BaseTranscriber
 from ..translator import is_reachable
 from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
 from . import analytics
@@ -61,6 +62,7 @@ class DashboardAPI:
         on_model_switch: Callable[[str], None] | None = None,
         get_switch_status: Callable[[], dict] | None = None,
         get_learn_status: Callable[[], dict] | None = None,
+        get_transcriber: Callable[[], BaseTranscriber] | None = None,
         benchmarks_dir: Path | None = None,
         extensions: ExtensionRegistry | None = None,
     ) -> None:
@@ -70,6 +72,7 @@ class DashboardAPI:
         self._on_model_switch = on_model_switch
         self._get_switch_status = get_switch_status
         self._get_learn_status = get_learn_status
+        self._get_transcriber = get_transcriber
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
         self._file_jobs = FileJobs()
         self.extensions = extensions if extensions is not None else ExtensionRegistry()
@@ -105,12 +108,18 @@ class DashboardAPI:
 
     def get_current_model(self) -> dict:
         model = self._config.inference.model
+        flagged = bool(MODEL_REGISTRY.get(model, {}).get("diarization"))
+        # Whether the engine that is running can do it: Parakeet's speaker detection is part of its Docker
+        # container, so the in-process CPU engine cannot. Without a running app, assume the container.
+        transcriber = self._get_transcriber() if self._get_transcriber else None
+        engine_can = transcriber.supports_diarization if transcriber else True
         # `diarization`: the upload tab's speaker detection works with this model; `diarization_models`
-        # names the models it works with, for the hint when it does not.
+        # names the models it works with, and `diarization_hint` says why it is off for a model that has it.
         return {
             "model": model,
-            "diarization": bool(MODEL_REGISTRY.get(model, {}).get("diarization")),
+            "diarization": flagged and engine_can,
             "diarization_models": speaker_detection_models(),
+            "diarization_hint": transcriber.no_diarization_reason if flagged and not engine_can else "",
         }
 
     def set_model(self, model_id: str) -> dict:

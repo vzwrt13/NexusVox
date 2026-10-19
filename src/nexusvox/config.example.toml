@@ -39,14 +39,15 @@ chunk_size = 4096
 
 [inference]
 # Inference server URL (automatically set when switching GPU-backed models).
-# Ignored when running Whisper in-process on CPU.
+# Ignored when a model runs in-process on CPU.
 server_url = "http://localhost:8002/v1/audio/transcriptions"
 # Transcription delay in ms (multiples of 80, range 80-2400)
 transcription_delay_ms = 480
-# Transcription model. In-process on CPU (no Docker): "whisper-small", "whisper-base",
-# "whisper-medium", "whisper-large-v3-turbo", "distil-whisper-large-v3" (EN),
-# "distil-whisper-medium-en" (EN).
-# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe", "parakeet-tdt-0.6b".
+# Transcription model. In-process on CPU (no Docker): "parakeet-tdt-0.6b" (ONNX int8,
+# ~670 MB download), "whisper-small", "whisper-base", "whisper-medium",
+# "whisper-large-v3-turbo", "distil-whisper-large-v3" (EN), "distil-whisper-medium-en" (EN).
+# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe". Parakeet and the
+# Whisper models also run there, in a container.
 # Your own server (see [inference.custom] below): "custom-server".
 # See the model table in README.md for resources and model licenses.
 model = "parakeet-tdt-0.6b"

@@ -65,9 +65,13 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "architecture": "FastConformer-TDT",
         "languages": "25 European languages with auto-detection",
         "streaming": "false",
-        "vram_gb": "~2 GB",
-        "requires_gpu": True,
-        "inprocess_supported": False,
+        "vram_gb": "GPU ~2 GB · CPU ~670 MB download",
+        # GPU: the Docker NeMo container. CPU: in-process ONNX int8 through onnx-asr (no Docker).
+        "requires_gpu": False,
+        "inprocess_supported": True,
+        "inprocess_engine": "parakeet-onnx",
+        "onnx_model": "nemo-parakeet-tdt-0.6b-v3",
+        "onnx_quantization": "int8",
     },
     "whisper-large-v3-turbo": {
         "hf_name": "deepdml/faster-whisper-large-v3-turbo-ct2",

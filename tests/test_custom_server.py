@@ -77,6 +77,7 @@ def test_unknown_protocol_raises():
         ("custom-server", "cuda", False),
         ("custom-server", "cpu", False),
         ("parakeet-tdt-0.6b", "cuda", True),
+        ("parakeet-tdt-0.6b", "cpu", False),
         ("whisper-large-v3-turbo", "cuda", True),
         ("whisper-large-v3-turbo", "cpu", False),
     ],

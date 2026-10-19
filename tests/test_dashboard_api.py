@@ -313,6 +313,7 @@ def test_get_current_model(flask_client):
     assert data["model"] == "parakeet-tdt-0.6b"
     assert data["diarization"] is True
     assert data["diarization_models"] == ["Parakeet TDT 0.6B"]
+    assert data["diarization_hint"] == ""
 
 
 def test_switch_model(flask_client):
@@ -333,6 +334,7 @@ def test_switch_model(flask_client):
         "model": "cohere-transcribe",
         "diarization": False,
         "diarization_models": ["Parakeet TDT 0.6B"],
+        "diarization_hint": "",
     }
 
 
@@ -390,7 +392,7 @@ def test_get_models_filters_gpu_only_when_device_is_cpu(db, session_factory, mon
     assert "whisper-base" in ids
     assert "voxtral-mini-4b" not in ids
     assert "cohere-transcribe" not in ids
-    assert "parakeet-tdt-0.6b" not in ids
+    assert "parakeet-tdt-0.6b" in ids  # runs in-process on CPU (ONNX)
 
 
 def test_switch_to_gpu_model_on_cpu_is_rejected(db, session_factory, monkeypatch):

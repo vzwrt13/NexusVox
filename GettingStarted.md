@@ -19,7 +19,7 @@ pip install -e .
 python -m nexusvox
 ```
 
-That runs Whisper in-process. The model downloads from HuggingFace on first use (~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`.
+That runs the model in-process — Parakeet (ONNX, int8) by default, Whisper if you pick it. The model downloads from HuggingFace on first use (~670 MB for Parakeet, ~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Parakeet on CPU has no speaker detection for uploads — that needs the GPU container.
 
 To stay on CPU even if you later add a GPU, open the dashboard (`http://localhost:47392`) → Settings → **Compute Device** → set to `CPU`.
 
@@ -57,7 +57,7 @@ ffmpeg -version               # verify — open a new terminal first so PATH is 
 | Distil-Whisper Medium.en (EN, CPU) | `Systran/faster-distil-whisper-medium.en` | MIT | in-process | CPU, ~800 MB RAM | **No** |
 | Distil-Whisper Large V3 (EN, CPU) | `Systran/faster-distil-whisper-large-v3` | MIT | in-process | CPU, ~1.5 GB RAM | **No** |
 | Whisper Large V3 Turbo | `deepdml/faster-whisper-large-v3-turbo-ct2` | MIT | in-process (CPU) / Docker (GPU) | CPU or ~4 GB VRAM | **No** on CPU |
-| Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ² | Docker | ~2 GB VRAM | Yes |
+| Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ² | Docker (GPU) / in-process ONNX int8 (CPU) | ~2 GB VRAM, or CPU (~670 MB download) | Yes on GPU |
 | Cohere Transcribe | `CohereLabs/cohere-transcribe-03-2026` | Apache-2.0 ¹ | Docker | ~6 GB VRAM | Yes |
 | Voxtral Mini 4B | `mistralai/Voxtral-Mini-4B-Realtime-2602` | Apache-2.0 | Docker | ≥16 GB VRAM | Yes |
 | Custom server ³ | — | your server's | your own server | none on this PC | **No** |
@@ -178,10 +178,11 @@ chunk_size = 4096
 server_url = "ws://localhost:8000/v1/realtime"
 # Transcription delay in ms (multiples of 80, range 80-2400)
 transcription_delay_ms = 480
-# Transcription model. In-process on CPU (no Docker): "whisper-small", "whisper-base",
-# "whisper-medium", "whisper-large-v3-turbo", "distil-whisper-large-v3" (EN),
-# "distil-whisper-medium-en" (EN).
-# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe", "parakeet-tdt-0.6b".
+# Transcription model. In-process on CPU (no Docker): "parakeet-tdt-0.6b" (ONNX int8),
+# "whisper-small", "whisper-base", "whisper-medium", "whisper-large-v3-turbo",
+# "distil-whisper-large-v3" (EN), "distil-whisper-medium-en" (EN).
+# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe". Parakeet and
+# Whisper also run there, in a container.
 # Your own server (see [inference.custom] below): "custom-server".
 model = "voxtral-mini-4b"
 # Compute device: "auto" (detect CUDA, else CPU), "cuda", or "cpu".

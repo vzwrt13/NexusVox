@@ -28,7 +28,7 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 - **Push-to-talk** — hold `Ctrl+Shift+Alt`, speak, release; text is injected at the cursor instantly. Or switch to *Toggle* mode in Settings: press once to start, press again to stop
 - **Your own hotkey** — any modifiers, optionally ending in a key (`Ctrl+Shift+A`, `F9`, ...), set in Settings → Voice Input with a *Record* button or in `config.toml`. A bound letter is swallowed while it is held as part of the combo, so it never lands in the app you are dictating into
 - **GPU-backed transcription** — Voxtral (WebSocket streaming), Cohere and Parakeet run on NVIDIA GPUs via Docker; Whisper runs there too and is far quicker than on CPU
-- **CPU fallback** — six Whisper variants run in-process with no Docker and no GPU, for machines that have no other option
+- **CPU fallback** — six Whisper variants and Parakeet (ONNX, int8) run in-process with no Docker and no GPU, for machines that have no other option
 - **Nine transcription models** — pick per recording in the dashboard
 - **Voice commands** — spoken formatting shortcuts (new line, new paragraph, tab, all caps, punctuation symbols), and an opt-in "press enter" / "Enter drücken" at the end of a dictation that sends a chat message
 - **Paste the last text again** — hold the hotkey, tap `V` (`Ctrl+Shift+Alt+V`), let go: nothing is transcribed, the text NexusVox pasted last is pasted once more. The key is set in Settings → Voice Input (or `[hotkey].paste_key`)
@@ -95,9 +95,9 @@ pip install -e .
 python -m nexusvox
 ```
 
-The shipped default model is GPU-backed, so on a machine without a usable GPU the first run stops with a message telling you to pick a CPU-capable model. Open the dashboard at `http://localhost:47392` → Settings → **Model** and choose one of the Whisper entries — `whisper-small` for speed, `whisper-medium` for accuracy — then restart. Alternatively set `[inference].model = "whisper-small"` in `config.toml` before the first run.
+Without a usable GPU, Parakeet runs in-process on the CPU (ONNX, int8 — no Docker); Voxtral and Cohere need a GPU, and a config that names one of them starts on Whisper for that session instead. Open the dashboard at `http://localhost:47392` → Settings → **Model** to pick another CPU-capable entry — `whisper-small` for speed, `whisper-medium` for accuracy — or set `[inference].model = "whisper-small"` in `config.toml` before the first run.
 
-Whisper downloads on first use (~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`.
+Models download on first use (~670 MB for Parakeet on CPU, ~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and cache under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Speaker detection for uploads needs the Parakeet GPU container.
 
 See [GettingStarted.md](GettingStarted.md) for the full setup guide including configuration, model selection, and troubleshooting.
 
@@ -113,7 +113,7 @@ See [GettingStarted.md](GettingStarted.md) for the full setup guide including co
 | Distil-Whisper Medium.en (EN, CPU) | `Systran/faster-distil-whisper-medium.en` | MIT | in-process | CPU (~800 MB RAM) | **No** |
 | Distil-Whisper Large V3 (EN, CPU) | `Systran/faster-distil-whisper-large-v3` | MIT | in-process | CPU (~1.5 GB RAM) | **No** |
 | Whisper Large V3 Turbo | `deepdml/faster-whisper-large-v3-turbo-ct2` | MIT | in-process (CPU) / Docker (GPU) | CPU or ~4 GB VRAM | **No** on CPU |
-| Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ² | Docker | ~2 GB VRAM | Yes |
+| Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ² | Docker (GPU) / in-process ONNX int8 (CPU) | ~2 GB VRAM, or CPU (~670 MB download) | Yes on GPU |
 | Cohere Transcribe | `CohereLabs/cohere-transcribe-03-2026` | Apache-2.0 ¹ | Docker | ~6 GB VRAM | Yes |
 | Voxtral Mini 4B | `mistralai/Voxtral-Mini-4B-Realtime-2602` | Apache-2.0 | Docker | ≥16 GB VRAM | Yes |
 | Custom server ³ | — | your server's | your own server | none on this PC | **No** |
@@ -124,7 +124,7 @@ See [GettingStarted.md](GettingStarted.md) for the full setup guide including co
 
 Model licenses are **separate from NexusVox's own license** — NexusVox is AGPL-3.0, but no model weights ship with it; each model is downloaded from Hugging Face under its own terms. Check the license of the model you pick, especially for commercial use.
 
-Select your device in the dashboard Settings tab: `Auto` (detect CUDA, fall back to CPU), `GPU (CUDA)`, or `CPU`. On CPU, only the in-process entries are shown.
+Select your device in the dashboard Settings tab: `Auto` (detect CUDA, fall back to CPU), `GPU (CUDA)`, or `CPU`. On CPU, only the entries that run in-process are shown (Parakeet among them, without speaker detection).
 
 ---
 
@@ -170,7 +170,7 @@ Open `http://localhost:47392` while NexusVox is running:
 
 ![The NexusVox settings tab: toggles for automatic language detection, a compute device selector resolved to GPU (CUDA), a transcription model selector set to Parakeet TDT 0.6B, and a model overview listing architecture, parameter count, protocol, runtime, supported languages and VRAM.](docs/images/settings.png)
 
-**Speaker detection (Parakeet only).** In the Upload tab, choose a file, switch on *Detect speakers* and click *Transcribe*; the transcript comes back as `Speaker 1: …` paragraphs, one per turn. The Parakeet container runs NVIDIA's [Streaming Sortformer](https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2) (`nvidia/diar_streaming_sortformer_4spk-v2`, CC-BY-4.0, ~0.5 GB download, no token) once over the whole file; it is loaded on the first upload that asks for it and only occupies the GPU while it runs, so a dictation made during that run waits a few seconds. It tells **at most 4 speakers** apart — with more, voices get merged. If the container was built before this feature, rebuild it (`docker compose --profile parakeet up --build`).
+**Speaker detection (Parakeet on GPU only).** In the Upload tab, choose a file, switch on *Detect speakers* and click *Transcribe*; the transcript comes back as `Speaker 1: …` paragraphs, one per turn. The Parakeet container runs NVIDIA's [Streaming Sortformer](https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2) (`nvidia/diar_streaming_sortformer_4spk-v2`, CC-BY-4.0, ~0.5 GB download, no token) once over the whole file; it is loaded on the first upload that asks for it and only occupies the GPU while it runs, so a dictation made during that run waits a few seconds. It tells **at most 4 speakers** apart — with more, voices get merged. If the container was built before this feature, rebuild it (`docker compose --profile parakeet up --build`).
 
 *Models are switched from the Settings tab. Selecting a GPU-backed model restarts the matching Docker container and points the app at the right port; the panel below shows what you are switching to.*
 

@@ -244,7 +244,18 @@ class NexusVoxApp:
         return self._edit_watcher.status()
 
     def get_switch_status(self) -> dict:
-        """Return the current model-switch status for the dashboard."""
+        """Return the current model-switch status for the dashboard.
+
+        Once no switch is in flight (idle, or just ready), an in-process model that is still downloading
+        or loading reports that (`downloading` / `loading`), and one that failed to load reports `error`
+        with the reason, so the first start of CPU Parakeet neither looks done nor hung.
+        """
+        if self._switch_status in ("idle", "ready"):
+            load = self._transcriber.load_status()
+            if load and load["state"] in ("downloading", "loading"):
+                return {"status": load["state"], "error": None}
+            if load and load["state"] == "error":
+                return {"status": "error", "error": load["error"]}
         return {"status": self._switch_status, "error": self._switch_error}
 
     async def switch_model(self, model_id: str) -> None:
@@ -300,6 +311,8 @@ class NexusVoxApp:
 
             self._switch_status = "ready"
             logger.info("Switched to model: %s", model_id)
+            if self._is_inprocess():
+                asyncio.create_task(self._preload_transcriber())
 
             async def _reset_status():
                 await asyncio.sleep(5)
@@ -751,7 +764,7 @@ class NexusVoxApp:
         # For in-process transcribers (Whisper on CPU), eagerly load the model
         # so the first hotkey press doesn't pay the full load + download latency.
         # A custom server is remote and has nothing to preload.
-        if not self._transcriber.needs_docker and not MODEL_REGISTRY[self._config.inference.model].get("custom"):
+        if self._is_inprocess():
             asyncio.create_task(self._preload_transcriber())
 
         if self._config.remote_mic.enabled:
@@ -787,6 +800,10 @@ class NexusVoxApp:
 
         # Cleanup
         await self._shutdown()
+
+    def _is_inprocess(self) -> bool:
+        """Whether the active model runs in this process; a custom server is remote and has nothing to load."""
+        return not self._transcriber.needs_docker and not MODEL_REGISTRY[self._config.inference.model].get("custom")
 
     async def _preload_transcriber(self) -> None:
         """Warm up an in-process transcriber so the first hotkey press is snappy."""

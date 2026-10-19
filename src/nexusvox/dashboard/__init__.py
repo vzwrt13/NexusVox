@@ -468,6 +468,7 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None)
             on_model_switch = None
             get_switch_status = None
             get_learn_status = None
+            get_transcriber = None
             if app is not None:
 
                 def on_model_switch(model_id: str) -> None:
@@ -476,6 +477,9 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None)
 
                 get_switch_status = app.get_switch_status
                 get_learn_status = app.get_learn_status
+
+                def get_transcriber():
+                    return app._transcriber
 
             # Resolve benchmarks dir relative to the project root (CWD).
             benchmarks_dir = Path.cwd() / "benchmarks"
@@ -487,6 +491,7 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None)
                 on_model_switch=on_model_switch,
                 get_switch_status=get_switch_status,
                 get_learn_status=get_learn_status,
+                get_transcriber=get_transcriber,
                 benchmarks_dir=benchmarks_dir,
                 extensions=load_extensions(),
             )

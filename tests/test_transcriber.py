@@ -251,7 +251,7 @@ def _patch_httpx(monkeypatch, payload):
             return False
 
         async def post(self, url, **kwargs):
-            posted.update(kwargs)
+            posted.update(kwargs, url=url)
             return _FakeResponse(payload)
 
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
@@ -305,3 +305,28 @@ async def test_word_timestamps_requested_but_engine_returns_none(monkeypatch):
 
     assert result.text == "hello"
     assert result.words == []
+
+
+@pytest.mark.asyncio
+async def test_diarize_posts_the_whole_file_to_the_diarization_endpoint(monkeypatch):
+    from nexusvox.transcriber import SpeakerTurn
+
+    payload = {"segments": [{"speaker": 0, "start": 0.0, "end": 1.2}, {"speaker": 1, "start": 1.2, "end": 2.0}]}
+    posted = _patch_httpx(monkeypatch, payload)
+    transcriber = OpenAIHttpTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"))
+
+    turns = await transcriber.diarize(b"RIFF-wav", timeout=310.0)
+
+    assert posted["url"] == "http://localhost:8002/v1/audio/diarization"
+    assert posted["files"]["file"][1] == b"RIFF-wav"
+    assert turns == [SpeakerTurn(0, 0.0, 1.2), SpeakerTurn(1, 1.2, 2.0)]
+
+
+@pytest.mark.asyncio
+async def test_engines_without_speaker_detection_refuse_to_diarize():
+    from nexusvox.transcriber import BaseTranscriber, VoxtralRealtimeTranscriber
+
+    assert BaseTranscriber.supports_diarization is False
+    assert OpenAIHttpTranscriber.supports_diarization is True
+    with pytest.raises(NotImplementedError):
+        await VoxtralRealtimeTranscriber(InferenceConfig(model="voxtral-mini-4b")).diarize(b"", timeout=1.0)

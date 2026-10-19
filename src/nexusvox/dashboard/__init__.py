@@ -374,7 +374,8 @@ def _create_app(api: DashboardAPI) -> Flask:
         if not f.filename:
             return jsonify({"ok": False, "error": "No filename"}), 400
         file_bytes = f.read()
-        result = api.upload_and_transcribe(file_bytes, f.filename)
+        diarize = request.form.get("diarize", "").lower() in ("1", "true", "on", "yes")
+        result = api.upload_and_transcribe(file_bytes, f.filename, diarize=diarize)
         status = 200 if result.get("ok") else 400
         return jsonify(result), status
 

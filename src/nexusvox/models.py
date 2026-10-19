@@ -64,8 +64,8 @@ class FileTranscription(Base):
     model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # JSON list of {"word", "start", "end"} (seconds from the file's start); NULL when the
-    # engine reported no word timing.
+    # JSON list of {"word", "start", "end"} (seconds from the file's start), plus "speaker" (1, 2, ...)
+    # when speaker detection ran; NULL when the engine reported no word timing.
     words: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 

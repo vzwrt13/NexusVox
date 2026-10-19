@@ -479,6 +479,17 @@
       <h2 class="edit-heading">Upload Audio File</h2>
       <p class="settings-hint" style="margin-bottom: 16px;">Upload an audio file to transcribe using the current model. Supported formats: WAV, MP3, FLAC, OGG, WebM (max 25 MB).</p>
 
+      <div class="setting-row upload-option">
+        <div class="setting-info">
+          <h3>Detect speakers</h3>
+          <p id="upload-diarize-hint">Labels the transcript by speaker ("Speaker 1: ..."), one paragraph per turn. Tells up to 4 speakers apart.</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="upload-diarize-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
       <div class="upload-zone" id="upload-zone">
         <input type="file" id="upload-input" accept=".wav,.mp3,.flac,.ogg,.webm" hidden>
         <div class="upload-zone-content">

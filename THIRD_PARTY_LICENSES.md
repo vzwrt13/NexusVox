@@ -83,3 +83,18 @@ AGPL; MIT, BSD and Apache-2.0 are permissive and may be combined into an AGPL-li
 No model weights are distributed with NexusVox — they are downloaded from Hugging Face at
 runtime and are covered by their own licenses, which are listed in the model table in
 [README.md](README.md). Review them before using a model, in particular for commercial use.
+
+### Speaker detection: NVIDIA Streaming Sortformer
+
+- Model: `nvidia/diar_streaming_sortformer_4spk-v2`
+  (https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2)
+- License: Creative Commons Attribution 4.0 International (CC-BY-4.0),
+  https://creativecommons.org/licenses/by/4.0/legalcode
+- Used by: the Parakeet container (`docker/parakeet_server.py`), only when an upload in the
+  dashboard asks for speaker detection. Loaded through NVIDIA NeMo (Apache-2.0), pinned in
+  `docker/Dockerfile.parakeet`.
+
+Like the speech models, the weights are not distributed with NexusVox; the container downloads
+them from Hugging Face on first use. CC-BY-4.0 allows use, modification and redistribution,
+commercial use included, provided NVIDIA is credited; NexusVox credits the model here and in
+[README.md](README.md). The model tells at most four speakers apart.

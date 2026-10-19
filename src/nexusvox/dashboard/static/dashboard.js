@@ -83,7 +83,10 @@ function activateTab(name) {
 
   if (name === "analytics") loadAnalytics();
   if (name === "edit") loadFlaggedTranscriptions();
-  if (name === "upload") loadFileTranscriptions();
+  if (name === "upload") {
+    loadFileTranscriptions();
+    refreshDiarizeToggle();
+  }
   if (name === "review") loadReviewTranscriptions();
   if (name === "dev") loadBenchmarks();
   return true;
@@ -1556,6 +1559,24 @@ uploadZone.addEventListener("drop", (e) => {
   if (e.dataTransfer.files.length) handleFileUpload(e.dataTransfer.files[0]);
 });
 
+const diarizeToggle = document.getElementById("upload-diarize-toggle");
+const diarizeHint = document.getElementById("upload-diarize-hint");
+const DIARIZE_HINT = diarizeHint.textContent;
+
+// Speaker detection needs a model with a diarization endpoint (Parakeet); the toggle follows the active model.
+async function refreshDiarizeToggle() {
+  let supported = false;
+  try {
+    const current = await fetch("/api/models/current").then((r) => r.json());
+    supported = Boolean(current.diarization);
+  } catch {
+    supported = false;
+  }
+  diarizeToggle.disabled = !supported;
+  if (!supported) diarizeToggle.checked = false;
+  diarizeHint.textContent = supported ? DIARIZE_HINT : "Requires Parakeet as the active model.";
+}
+
 async function handleFileUpload(file) {
   const statusEl = document.getElementById("upload-status");
   const statusText = document.getElementById("upload-status-text");
@@ -1565,10 +1586,12 @@ async function handleFileUpload(file) {
   errorEl.style.display = "none";
   noteEl.style.display = "none";
   statusEl.style.display = "flex";
-  statusText.textContent = "Transcribing " + file.name + "...";
+  const diarize = diarizeToggle.checked && !diarizeToggle.disabled;
+  statusText.textContent = (diarize ? "Transcribing and detecting speakers in " : "Transcribing ") + file.name + "...";
 
   const formData = new FormData();
   formData.append("file", file);
+  if (diarize) formData.append("diarize", "1");
 
   try {
     const res = await fetch("/api/file-transcribe", { method: "POST", body: formData });
@@ -1612,7 +1635,7 @@ async function loadFileTranscriptions() {
         <span class="upload-duration">${formatDuration(item.duration_ms)}</span>
       </div>
       <div class="upload-filename">${escapeHtml(item.original_filename)}</div>
-      <div class="flagged-original">${escapeHtml(item.text)}</div>
+      <div class="flagged-original upload-text">${escapeHtml(item.text)}</div>
     </div>
   `).join("");
 }

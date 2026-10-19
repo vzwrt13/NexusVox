@@ -2,7 +2,11 @@ FROM nvcr.io/nvidia/nemo:25.04
 
 RUN pip install --no-cache-dir fastapi uvicorn python-multipart
 
-RUN pip install --no-cache-dir "nemo_toolkit[asr]"
+# Pinned: 2.5 is the first release with the streaming Sortformer API (spkcache_update_period)
+# that speaker diarization uses; the base image ships an older NeMo. It brings a newer transformers,
+# which the base image's TensorRT Model Optimizer no longer imports with; NeMo only probes for it
+# (unused for ASR), so it is removed rather than left to fail the import.
+RUN pip install --no-cache-dir "nemo_toolkit[asr]==2.7.3"     && pip uninstall -y nvidia-modelopt nvidia-modelopt-core
 
 COPY parakeet_server.py /app/server.py
 

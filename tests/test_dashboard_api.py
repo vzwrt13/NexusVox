@@ -288,6 +288,7 @@ def test_get_current_model(flask_client):
     data = resp.get_json()
     assert "model" in data
     assert data["model"] == "parakeet-tdt-0.6b"
+    assert data["diarization"] is True
 
 
 def test_switch_model(flask_client):
@@ -304,7 +305,7 @@ def test_switch_model(flask_client):
 
     # Verify current model changed
     resp = flask_client.get("/api/models/current")
-    assert resp.get_json()["model"] == "cohere-transcribe"
+    assert resp.get_json() == {"model": "cohere-transcribe", "diarization": False}
 
 
 def test_model_status_endpoint(flask_client):
@@ -910,6 +911,7 @@ def test_upload_asks_for_words_stores_them_and_returns_notes(flask_client, db, s
     ).get_json()
 
     assert seen["word_timestamps"] is True
+    assert seen["diarize"] is False
     assert data["ok"] is True and data["notes"] == result.notes
     stored = db.get_file_transcriptions(limit=1)[0]
     assert [w["word"] for w in json.loads(stored.words)] == ["hello", "world"]
@@ -964,3 +966,35 @@ def test_polish_key_and_model_settings(flask_client, monkeypatch):
     monkeypatch.setattr(api_module, "llm_reachable", lambda cfg: False)
     status = flask_client.get("/api/settings/llm-status").get_json()
     assert status == {"url": "http://127.0.0.1:11434", "model": "gemma4:12b", "reachable": False}
+
+
+def test_upload_with_diarize_passes_the_flag_and_stores_speakers(flask_client, db, sample_wav_bytes, monkeypatch):
+    import io
+    import json
+
+    from nexusvox.transcriber import TranscriptionResult, Word
+
+    result = TranscriptionResult()
+    result.finalize(text="Speaker 1: hello\n\nSpeaker 2: world")
+    result.words = [Word("hello", 0.1, 0.4, speaker=1), Word("world", 0.5, 0.9, speaker=2)]
+    seen: dict = {}
+
+    def fake_transcribe(wav_chunks, cfg, **kwargs):
+        seen.update(kwargs)
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
+
+    data = flask_client.post(
+        "/api/file-transcribe",
+        data={"file": (io.BytesIO(sample_wav_bytes), "meeting.wav"), "diarize": "1"},
+        content_type="multipart/form-data",
+    ).get_json()
+
+    assert seen["diarize"] is True
+    assert data["ok"] is True and data["text"] == "Speaker 1: hello\n\nSpeaker 2: world"
+    stored = db.get_file_transcriptions(limit=1)[0]
+    assert stored.text == data["text"]
+    assert [w["speaker"] for w in json.loads(stored.words)] == [1, 2]
+    assert flask_client.get("/api/file-transcriptions").get_json()[0]["text"] == data["text"]

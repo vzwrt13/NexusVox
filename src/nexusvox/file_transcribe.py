@@ -7,7 +7,8 @@ import logging
 import wave
 
 from .config import MODEL_REGISTRY, InferenceConfig
-from .transcriber import TranscriptionResult, Word, create_transcriber
+from .diarization import diarization_timeout, format_transcript, label_words
+from .transcriber import TranscriptionResult, Word, create_transcriber, pcm16_to_wav_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +67,15 @@ async def transcribe_file(
     language: str | None = None,
     auto_detect_language: bool = False,
     word_timestamps: bool = False,
+    diarize: bool = False,
 ) -> TranscriptionResult:
     """Transcribe WAV chunks via the shared transcriber factory and join results.
 
     With `word_timestamps`, engines that support it also return per-word timing, shifted to
-    the file's timeline in the joined result.
+    the file's timeline in the joined result. With `diarize` (implies word timestamps), engines
+    that support it also detect speakers once over the whole file; the text then becomes
+    "Speaker 1: ..." paragraphs and each word carries its speaker. When speaker detection is not
+    possible or fails, the plain transcript comes back with a note saying why.
 
     Dispatches through `create_transcriber` so CPU users (in-process Whisper)
     and GPU users (Docker-backed HTTP/WS) share one code path.
@@ -83,16 +88,20 @@ async def transcribe_file(
     )
     # Both the model's registry entry and the client must support words; a custom server or Cohere
     # shares the Parakeet client but never sees the fields.
+    entry = MODEL_REGISTRY.get(config.model, {})
     wants_words = (
-        word_timestamps
+        (word_timestamps or diarize)
         and bool(MODEL_REGISTRY.get(config.model, {}).get("word_timestamps"))
         and transcriber.supports_word_timestamps
     )
     if wants_words:
         transcriber.word_timestamps = True
+    wants_speakers = diarize and wants_words and bool(entry.get("diarization")) and transcriber.supports_diarization
     texts: list[str] = []
     words: list[Word] = []
     notes: list[str] = []
+    pcm_parts: list[bytes] = []  # the whole file again, for speaker detection
+    words_complete = True  # every chunk with text also came back with its words
     offset_s = 0.0  # start of the current chunk on the file's timeline
     try:
         for i, wav_bytes in enumerate(wav_chunks):
@@ -109,20 +118,61 @@ async def transcribe_file(
             label = f"Chunk {i + 1} of {len(wav_chunks)}"
             if not result.done:
                 notes.append(f"{label} timed out; its text may be incomplete or missing.")
+                words_complete = False
             elif wants_words and result.text and not result.words:
                 notes.append(f"{label} came back without word timestamps.")
+                words_complete = False
             words.extend(Word(w.word, w.start + offset_s, w.end + offset_s) for w in result.words)
             offset_s += len(pcm_data) / 2 / 16_000  # PCM16 mono at 16 kHz
+            if wants_speakers:
+                pcm_parts.append(pcm_data)
+
+        text = " ".join(t for t in texts if t).strip()
+        if diarize and not wants_speakers:
+            notes.append("Speaker detection needs Parakeet as the active model; the transcript has no speaker labels.")
+        elif wants_speakers and text:
+            labelled = await _detect_speakers(transcriber, pcm_parts, words, words_complete, offset_s, notes)
+            if labelled is not None:
+                words = labelled
+                text = format_transcript(words)
     finally:
         await transcriber.disconnect()
 
     for note in notes:
         logger.warning(note)
     combined = TranscriptionResult()
-    combined.finalize(text=" ".join(t for t in texts if t).strip())
+    combined.finalize(text=text)
     combined.words = words
     combined.notes = notes
     return combined
+
+
+async def _detect_speakers(
+    transcriber, pcm_parts: list[bytes], words: list[Word], words_complete: bool, duration_s: float, notes: list[str]
+) -> list[Word] | None:
+    """`words` labelled with their speakers, or None (with a note) when that is not possible.
+
+    The whole file goes to the server in one request, so speaker numbers stay the same across
+    the 60 s transcription chunks.
+    """
+    if not words or not words_complete:
+        # Labelled paragraphs are built from the words; text without words would be lost.
+        notes.append("Speaker detection skipped: not every chunk returned word timestamps.")
+        return None
+    timeout = diarization_timeout(duration_s)
+    try:
+        turns = await transcriber.diarize(pcm16_to_wav_bytes(b"".join(pcm_parts)), timeout=timeout)
+    except Exception as exc:
+        import httpx
+
+        reason = f"timed out after {timeout:.0f} s" if isinstance(exc, httpx.TimeoutException) else str(exc)
+        reason = reason or type(exc).__name__
+        notes.append(f"Speaker detection failed ({reason}); the transcript has no speaker labels.")
+        return None
+    if not turns:
+        notes.append("Speaker detection found no speakers; the transcript has no speaker labels.")
+        return None
+    return label_words(words, turns)
 
 
 def _get_extension(filename: str) -> str:

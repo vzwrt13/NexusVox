@@ -196,6 +196,46 @@ def test_save_file_transcription_with_confidence(db):
     assert record.confidence == 0.91
 
 
+def test_save_file_transcription_keeps_cleaned_text_beside_the_original(db):
+    record = db.save_file_transcription(
+        "well um hello", "en", 1000, "a.wav", cleaned_text="Well, hello.", cleanup_level="light"
+    )
+
+    stored = db.get_file_transcriptions(limit=1)[0]
+    assert (stored.id, stored.text) == (record.id, "well um hello")
+    assert (stored.cleaned_text, stored.cleanup_level) == ("Well, hello.", "light")
+
+
+def test_file_transcription_without_cleanup_has_no_cleaned_text(db):
+    record = db.save_file_transcription("hello", "en", 1000, "a.wav", cleanup_level="light")
+
+    assert record.cleaned_text is None and record.cleanup_level is None
+
+
+def test_migration_adds_the_cleanup_columns_to_an_old_database(tmp_path):
+    import sqlite3
+
+    from nexusvox.config import DatabaseConfig
+    from nexusvox.db import Database
+
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE file_transcriptions (id INTEGER PRIMARY KEY, text TEXT NOT NULL,"
+            " language VARCHAR(5) NOT NULL, duration_ms INTEGER NOT NULL, created_at DATETIME, model VARCHAR(100),"
+            " original_filename VARCHAR(255) NOT NULL, confidence FLOAT, words TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO file_transcriptions (text, language, duration_ms, original_filename)"
+            " VALUES ('hi', 'en', 1, 'a.wav')"
+        )
+
+    old = Database(DatabaseConfig(path=str(path)))
+
+    row = old.get_file_transcriptions(limit=1)[0]
+    assert row.text == "hi" and row.cleaned_text is None and row.cleanup_level is None
+
+
 def test_get_file_transcriptions_newest_first(db):
     db.save_file_transcription("first", "en", 1000, "a.wav")
     db.save_file_transcription("second", "en", 1000, "b.wav")

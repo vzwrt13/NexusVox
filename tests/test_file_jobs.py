@@ -21,6 +21,8 @@ def test_percent_grows_with_the_stages():
         ("transcribing", 1, 4),
         ("transcribing", 3, 4),
         ("diarizing", 0, 0),
+        ("cleaning", 1, 3),
+        ("cleaning", 3, 3),
         ("saving", 0, 0),
     ]:
         job.update(stage, current, total)
@@ -28,6 +30,13 @@ def test_percent_grows_with_the_stages():
 
     assert positions == sorted(positions) and len(set(positions)) == len(positions)
     assert job.snapshot()["message"] == "Saving"
+
+
+def test_cleaning_names_the_passage_in_progress():
+    job = FileJob("a.wav")
+    job.update("cleaning", 2, 5)
+
+    assert job.snapshot()["message"] == "Cleaning up text, passage 2 of 5"
 
 
 def test_finish_maps_the_result_to_done_or_error():

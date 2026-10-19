@@ -29,6 +29,7 @@ from ..config import (
 from ..db import Database
 from ..diarization import speaker_detection_models
 from ..dictionary import suggest_entries
+from ..file_cleanup import clean_transcript
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
@@ -570,8 +571,13 @@ class DashboardAPI:
 
     # ---- File Upload Transcription -----------------------------------------
 
-    def start_file_transcription(self, file_bytes: bytes, filename: str, *, diarize: bool = False) -> dict:
+    def start_file_transcription(
+        self, file_bytes: bytes, filename: str, *, diarize: bool = False, cleanup_level: str = ""
+    ) -> dict:
         """Check an uploaded file and transcribe it in the background; `{"ok": True, "job_id"}` at once.
+
+        A `cleanup_level` of `light` or `medium` also runs the transcript through the [llm] model;
+        anything else is no cleanup.
 
         Progress and the outcome are read with `get_file_job` / `get_current_file_job`.
         """
@@ -579,7 +585,10 @@ class DashboardAPI:
         if error:
             return {"ok": False, "error": error}
         job = self._file_jobs.start(
-            filename, lambda job: self.upload_and_transcribe(file_bytes, filename, diarize=diarize, job=job)
+            filename,
+            lambda job: self.upload_and_transcribe(
+                file_bytes, filename, diarize=diarize, cleanup_level=cleanup_level, job=job
+            ),
         )
         if job is None:
             return {"ok": False, "busy": True, "error": "Another file is still being transcribed"}
@@ -606,12 +615,19 @@ class DashboardAPI:
         return ""
 
     def upload_and_transcribe(
-        self, file_bytes: bytes, filename: str, *, diarize: bool = False, job: FileJob | None = None
+        self,
+        file_bytes: bytes,
+        filename: str,
+        *,
+        diarize: bool = False,
+        cleanup_level: str = "",
+        job: FileJob | None = None,
     ) -> dict:
         """Convert an uploaded audio file, transcribe it, and save to DB (blocking); the file is already checked.
 
         With `diarize`, the saved and returned text is labelled by speaker when the model supports it.
-        `job` receives the stage as the work moves on.
+        With a `cleanup_level`, the transcript is also cleaned up by the [llm] model; that text is saved
+        beside the transcript, never in place of it. `job` receives the stage as the work moves on.
         """
         progress = job.update if job else None
         if progress:
@@ -631,6 +647,20 @@ class DashboardAPI:
             logger.error("Transcription failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Transcription failed: {exc}"}
 
+        notes = list(result.notes)
+        cleaned_text = None
+        if cleanup_level in CLEANUP_LEVELS and cleanup_level != "off" and result.text:
+            try:
+                cleaned = clean_transcript(result.text, cleanup_level, self._config.llm, progress)
+            except Exception as exc:  # clean_transcript reports model failures itself; this is a bug
+                logger.error("Cleaning up the transcript of %s failed: %s", filename, exc)
+                notes.append("Text cleanup failed; the transcript is saved as transcribed.")
+            else:
+                if cleaned.note:
+                    notes.append(cleaned.note)
+                if cleaned.text != result.text:
+                    cleaned_text = cleaned.text
+
         if progress:
             progress("saving")
         try:
@@ -642,6 +672,8 @@ class DashboardAPI:
                 model=self._config.inference.model,
                 confidence=result.confidence,
                 words=result.words,
+                cleaned_text=cleaned_text,
+                cleanup_level=cleanup_level,
             )
         except Exception as exc:
             logger.error("Saving the transcription of %s failed: %s", filename, exc)
@@ -649,9 +681,11 @@ class DashboardAPI:
 
         return {
             "ok": True,
-            "notes": result.notes,
+            "notes": notes,
             "id": record.id,
             "text": record.text,
+            "cleaned_text": record.cleaned_text,
+            "cleanup_level": record.cleanup_level,
             "language": record.language,
             "duration_ms": record.duration_ms,
             "model": record.model,
@@ -689,6 +723,8 @@ class DashboardAPI:
             {
                 "id": r.id,
                 "text": r.text,
+                "cleaned_text": r.cleaned_text,
+                "cleanup_level": r.cleanup_level,
                 "language": r.language,
                 "duration_ms": r.duration_ms,
                 "model": r.model,

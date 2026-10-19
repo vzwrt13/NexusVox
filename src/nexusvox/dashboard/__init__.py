@@ -375,7 +375,8 @@ def _create_app(api: DashboardAPI) -> Flask:
             return jsonify({"ok": False, "error": "No filename"}), 400
         file_bytes = f.read()
         diarize = request.form.get("diarize", "").lower() in ("1", "true", "on", "yes")
-        result = api.start_file_transcription(file_bytes, f.filename, diarize=diarize)
+        cleanup_level = request.form.get("cleanup", "").strip().lower()
+        result = api.start_file_transcription(file_bytes, f.filename, diarize=diarize, cleanup_level=cleanup_level)
         if result.get("ok"):
             return jsonify(result), 202
         return jsonify(result), 409 if result.get("busy") else 400

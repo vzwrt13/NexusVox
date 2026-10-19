@@ -9,6 +9,9 @@ from collections.abc import Callable
 # Progress bar position (0..1) at the start and end of the chunk loop; conversion comes before, saving after.
 _CHUNKS_FROM = 0.1
 _CHUNKS_TO = 0.9
+# The optional text cleanup runs between the chunks (and speaker detection) and saving.
+_CLEANUP_FROM = 0.92
+_CLEANUP_TO = 0.95
 _KEEP_FINISHED = 10
 
 
@@ -28,7 +31,8 @@ class FileJob:
         self._lock = threading.Lock()
 
     def update(self, stage: str, current: int = 0, total: int = 0) -> None:
-        """Move to a stage: `converting`, `transcribing` (chunk `current` of `total`), `diarizing` or `saving`."""
+        """Move to a stage: `converting`, `transcribing` (chunk `current` of `total`), `diarizing`,
+        `cleaning` (passage `current` of `total`) or `saving`."""
         with self._lock:
             if self.state == "running":
                 self.stage, self.current, self.total = stage, current, total
@@ -79,6 +83,9 @@ def _describe(stage: str, current: int, total: int) -> tuple[str, float]:
         return f"Transcribing chunk {current} of {total}", _CHUNKS_FROM + (_CHUNKS_TO - _CHUNKS_FROM) * done
     if stage == "diarizing":
         return "Detecting speakers", _CHUNKS_TO
+    if stage == "cleaning" and total:
+        done = (current - 1) / total
+        return f"Cleaning up text, passage {current} of {total}", _CLEANUP_FROM + (_CLEANUP_TO - _CLEANUP_FROM) * done
     if stage == "saving":
         return "Saving", 0.95
     return "Converting audio", 0.0

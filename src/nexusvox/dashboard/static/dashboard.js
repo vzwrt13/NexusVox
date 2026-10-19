@@ -1584,6 +1584,12 @@ uploadZone.addEventListener("drop", (e) => {
   if (e.dataTransfer.files.length) selectUploadFile(e.dataTransfer.files[0]);
 });
 
+const cleanupToggle = document.getElementById("upload-cleanup-toggle");
+const cleanupLevel = document.getElementById("upload-cleanup-level");
+cleanupToggle.addEventListener("change", () => {
+  cleanupLevel.disabled = !cleanupToggle.checked;
+});
+
 const diarizeToggle = document.getElementById("upload-diarize-toggle");
 const diarizeHint = document.getElementById("upload-diarize-hint");
 const DIARIZE_HINT = diarizeHint.textContent;
@@ -1641,6 +1647,7 @@ async function handleFileUpload(file) {
   // Read at the click. Asked for with a model that cannot do it (changed elsewhere): still sent,
   // so the job's note says why.
   const diarize = diarizeToggle.checked;
+  const cleanup = cleanupToggle.checked ? cleanupLevel.value : "";
   uploadRunning = true;
   updateTranscribeButton();
   uploadErrorEl.style.display = "none";
@@ -1652,6 +1659,7 @@ async function handleFileUpload(file) {
   const formData = new FormData();
   formData.append("file", file);
   if (diarize) formData.append("diarize", "1");
+  if (cleanup) formData.append("cleanup", cleanup);
 
   try {
     const res = await fetch("/api/file-transcribe", { method: "POST", body: formData });
@@ -1782,18 +1790,29 @@ async function loadFileTranscriptions() {
     return;
   }
 
-  container.innerHTML = data.map((item) => `
+  container.innerHTML = data.map((item, index) => `
     <div class="flagged-card">
       <div class="flagged-meta">
         <span>${item.created_at ? new Date(item.created_at).toLocaleString() : ""}</span>
         <span class="flagged-lang">${(item.language || "").toUpperCase()}</span>
         <span class="upload-model">${escapeHtml(item.model || "")}</span>
         <span class="upload-duration">${formatDuration(item.duration_ms)}</span>
+        ${item.cleaned_text ? `<button type="button" class="upload-view-switch" data-index="${index}">Show original</button>` : ""}
       </div>
       <div class="upload-filename">${escapeHtml(item.original_filename)}</div>
-      <div class="flagged-original upload-text">${escapeHtml(item.text)}</div>
+      <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>
     </div>
   `).join("");
+
+  // A cleaned upload opens on the cleaned text; the button flips it to the transcript as transcribed.
+  container.querySelectorAll(".upload-view-switch").forEach((button) => {
+    button.addEventListener("click", () => {
+      const item = data[Number(button.dataset.index)];
+      const showingOriginal = button.textContent === "Show cleaned";
+      button.textContent = showingOriginal ? "Show original" : "Show cleaned";
+      button.closest(".flagged-card").querySelector(".upload-text").textContent = showingOriginal ? item.cleaned_text : item.text;
+    });
+  });
 }
 
 // ── Dev Mode Detection ───────────────────────────────────────────────

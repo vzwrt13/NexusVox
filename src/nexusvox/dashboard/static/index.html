@@ -499,6 +499,21 @@
         </label>
       </div>
 
+      <div class="setting-row upload-option">
+        <div class="setting-info">
+          <h3>Clean up text</h3>
+          <p>Runs the transcript through the language model afterwards, passage by passage: removes fillers and false starts and fixes punctuation (Light), or also grammar (Medium). Speaker labels stay. The original transcript is kept and can be shown instead. Takes a while for a long file; a passage the model fails on keeps its original wording.</p>
+        </div>
+        <select id="upload-cleanup-level" class="select-input" disabled aria-label="Cleanup level">
+          <option value="light">Light</option>
+          <option value="medium">Medium</option>
+        </select>
+        <label class="toggle">
+          <input type="checkbox" id="upload-cleanup-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
       <div class="upload-actions">
         <button type="button" class="flagged-save-btn" id="upload-transcribe" disabled>Transcribe</button>
       </div>

@@ -62,6 +62,8 @@ class Database:
             "ALTER TABLE transcriptions ADD COLUMN latency_ms INTEGER",
             "ALTER TABLE snippets ADD COLUMN options TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN words TEXT",
+            "ALTER TABLE file_transcriptions ADD COLUMN cleaned_text TEXT",
+            "ALTER TABLE file_transcriptions ADD COLUMN cleanup_level VARCHAR(10)",
         ]
         with self._engine.connect() as conn:
             for sql in migrations:
@@ -450,8 +452,13 @@ class Database:
         model: str | None = None,
         confidence: float | None = None,
         words: list[Word] | None = None,
+        cleaned_text: str | None = None,
+        cleanup_level: str | None = None,
     ) -> FileTranscription:
-        """Save a file-upload transcription record, with per-word timing when there is any."""
+        """Save a file-upload transcription record, with per-word timing when there is any.
+
+        `cleaned_text` is the LLM-cleaned version of `text` (which stays as transcribed).
+        """
         with self._session_factory() as session:
             record = FileTranscription(
                 text=text,
@@ -462,6 +469,8 @@ class Database:
                 model=model,
                 confidence=confidence,
                 words=json.dumps([_word_json(w) for w in words]) if words else None,
+                cleaned_text=cleaned_text,
+                cleanup_level=cleanup_level if cleaned_text else None,
             )
             session.add(record)
             session.commit()

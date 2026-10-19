@@ -31,6 +31,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _word_json(word: Word) -> dict:
+    """A word as stored in ``file_transcriptions.words``; ``speaker`` only once diarization set it."""
+    data: dict = {"word": word.word, "start": word.start, "end": word.end}
+    if word.speaker is not None:
+        data["speaker"] = word.speaker
+    return data
+
+
 class Database:
     def __init__(self, config: DatabaseConfig) -> None:
         self._engine = create_engine(f"sqlite:///{config.path}")
@@ -453,7 +461,7 @@ class Database:
                 created_at=utc_now(),
                 model=model,
                 confidence=confidence,
-                words=json.dumps([{"word": w.word, "start": w.start, "end": w.end} for w in words]) if words else None,
+                words=json.dumps([_word_json(w) for w in words]) if words else None,
             )
             session.add(record)
             session.commit()

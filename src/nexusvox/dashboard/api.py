@@ -27,6 +27,7 @@ from ..config import (
     validate_hotkey,
 )
 from ..db import Database
+from ..diarization import speaker_detection_models
 from ..dictionary import suggest_entries
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..llm import is_reachable as llm_reachable
@@ -97,7 +98,14 @@ class DashboardAPI:
         ]
 
     def get_current_model(self) -> dict:
-        return {"model": self._config.inference.model}
+        model = self._config.inference.model
+        # `diarization`: the upload tab's speaker detection works with this model; `diarization_models`
+        # names the models it works with, for the hint when it does not.
+        return {
+            "model": model,
+            "diarization": bool(MODEL_REGISTRY.get(model, {}).get("diarization")),
+            "diarization_models": speaker_detection_models(),
+        }
 
     def set_model(self, model_id: str) -> dict:
         if model_id not in MODEL_REGISTRY:
@@ -560,8 +568,11 @@ class DashboardAPI:
 
     # ---- File Upload Transcription -----------------------------------------
 
-    def upload_and_transcribe(self, file_bytes: bytes, filename: str) -> dict:
-        """Convert an uploaded audio file, transcribe it, and save to DB."""
+    def upload_and_transcribe(self, file_bytes: bytes, filename: str, *, diarize: bool = False) -> dict:
+        """Convert an uploaded audio file, transcribe it, and save to DB.
+
+        With `diarize`, the saved and returned text is labelled by speaker when the model supports it.
+        """
         if self._db is None:
             return {"ok": False, "error": "DB not available"}
 
@@ -580,7 +591,7 @@ class DashboardAPI:
             return {"ok": False, "error": f"Audio conversion failed: {exc}"}
 
         try:
-            result = self._transcribe_wav_chunks(wav_chunks, word_timestamps=True)
+            result = self._transcribe_wav_chunks(wav_chunks, word_timestamps=True, diarize=diarize)
         except Exception as exc:
             logger.error("Transcription failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Transcription failed: {exc}"}
@@ -607,7 +618,7 @@ class DashboardAPI:
             "created_at": record.created_at.isoformat() if record.created_at else None,
         }
 
-    def _transcribe_wav_chunks(self, wav_chunks: list[bytes], *, word_timestamps: bool = False):
+    def _transcribe_wav_chunks(self, wav_chunks: list[bytes], *, word_timestamps: bool = False, diarize: bool = False):
         """Transcribe WAV chunks with the current model and language settings (blocking)."""
         return asyncio.run(
             transcribe_file(
@@ -616,6 +627,7 @@ class DashboardAPI:
                 language=self._config.language,
                 auto_detect_language=self._config.auto_language_detection,
                 word_timestamps=word_timestamps,
+                diarize=diarize,
             )
         )
 

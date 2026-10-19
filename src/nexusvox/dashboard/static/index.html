@@ -477,7 +477,7 @@
     <!-- Upload Tab -->
     <section id="tab-upload" class="tab-content">
       <h2 class="edit-heading">Upload Audio File</h2>
-      <p class="settings-hint" style="margin-bottom: 16px;">Upload an audio file to transcribe using the current model. Supported formats: WAV, MP3, FLAC, OGG, WebM (max 25 MB).</p>
+      <p class="settings-hint" style="margin-bottom: 16px;">Choose an audio file, set the options, then click Transcribe to transcribe it with the current model. Supported formats: WAV, MP3, FLAC, OGG, WebM (max 25 MB).</p>
 
       <div class="upload-zone" id="upload-zone">
         <input type="file" id="upload-input" accept=".wav,.mp3,.flac,.ogg,.webm" hidden>
@@ -485,6 +485,22 @@
           <div class="upload-icon">&#x1F4C1;</div>
           <p>Drag &amp; drop an audio file here, or <button class="upload-browse-btn" id="upload-browse">browse</button></p>
         </div>
+      </div>
+      <p id="upload-selected" class="upload-selected">No file selected.</p>
+
+      <div class="setting-row upload-option">
+        <div class="setting-info">
+          <h3>Detect speakers</h3>
+          <p id="upload-diarize-hint">Labels the transcript by speaker ("Speaker 1: ..."), one paragraph per turn. Tells up to 4 speakers apart.</p>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="upload-diarize-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="upload-actions">
+        <button type="button" class="flagged-save-btn" id="upload-transcribe" disabled>Transcribe</button>
       </div>
 
       <div id="upload-status" class="upload-status" style="display: none;">

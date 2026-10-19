@@ -163,10 +163,12 @@ Open `http://localhost:47392` while NexusVox is running:
 | Analytics | Word count, session stats, usage charts |
 | Settings | Model switcher, config editor, voice command toggles |
 | Edit | Correct transcriptions in-line |
-| Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg) |
+| Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg); optional speaker detection with Parakeet |
 | Review | Flag and replay recordings |
 
 ![The NexusVox settings tab: toggles for automatic language detection, a compute device selector resolved to GPU (CUDA), a transcription model selector set to Parakeet TDT 0.6B, and a model overview listing architecture, parameter count, protocol, runtime, supported languages and VRAM.](docs/images/settings.png)
+
+**Speaker detection (Parakeet only).** In the Upload tab, choose a file, switch on *Detect speakers* and click *Transcribe*; the transcript comes back as `Speaker 1: …` paragraphs, one per turn. The Parakeet container runs NVIDIA's [Streaming Sortformer](https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2) (`nvidia/diar_streaming_sortformer_4spk-v2`, CC-BY-4.0, ~0.5 GB download, no token) once over the whole file; it is loaded on the first upload that asks for it and only occupies the GPU while it runs, so a dictation made during that run waits a few seconds. It tells **at most 4 speakers** apart — with more, voices get merged. If the container was built before this feature, rebuild it (`docker compose --profile parakeet up --build`).
 
 *Models are switched from the Settings tab. Selecting a GPU-backed model restarts the matching Docker container and points the app at the right port; the panel below shows what you are switching to.*
 
@@ -206,6 +208,6 @@ In practice: use it, study it, change it, run it — privately or inside your co
 
 If those terms don't fit your case, a separate commercial license can be arranged with the copyright holder (NightShift AI GmbH, info@nightshift-ai.de).
 
-[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) covers the bundled Chart.js (MIT) and the licenses of the runtime dependencies.
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) covers the bundled Chart.js (MIT), the licenses of the runtime dependencies and the speaker detection model.
 
 Speech recognition models are **not** covered by this license. They are downloaded from Hugging Face at runtime under their own terms — see the [model table](#model-backends) above.

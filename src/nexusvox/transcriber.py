@@ -11,6 +11,8 @@ import math
 import wave
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
+from typing import BinaryIO
+from urllib.parse import urlsplit, urlunsplit
 
 import websockets
 from websockets.connection import State
@@ -27,6 +29,17 @@ class Word:
     word: str
     start: float
     end: float
+    # Display number of the speaker (1, 2, ...) once diarization labelled the word; None otherwise.
+    speaker: int | None = None
+
+
+@dataclass(frozen=True)
+class SpeakerTurn:
+    """A stretch of audio in which one speaker talks, in seconds; `speaker` is the model's index."""
+
+    speaker: int
+    start: float
+    end: float
 
 
 def parse_words(raw: object) -> list[Word]:
@@ -40,6 +53,34 @@ def parse_words(raw: object) -> list[Word]:
         except (KeyError, TypeError, ValueError):
             continue
     return words
+
+
+def parse_turns(raw: object) -> list[SpeakerTurn]:
+    """Turns from a diarization server's ``segments`` list; anything malformed is skipped."""
+    if not isinstance(raw, list):
+        return []
+    turns: list[SpeakerTurn] = []
+    for item in raw:
+        try:
+            turn = SpeakerTurn(int(item["speaker"]), float(item["start"]), float(item["end"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if turn.end >= turn.start:
+            turns.append(turn)
+    return turns
+
+
+def diarization_url(server_url: str) -> str:
+    """The diarization endpoint next to an OpenAI-style ``.../audio/transcriptions`` URL.
+
+    A URL without that path (a bare host, a proxy route) gets the container's own route,
+    ``/v1/audio/diarization``, on the same scheme, host and port.
+    """
+    trimmed = server_url.rstrip("/")
+    if trimmed.endswith("/transcriptions"):
+        return trimmed[: -len("/transcriptions")] + "/diarization"
+    parts = urlsplit(trimmed)
+    return urlunsplit((parts.scheme, parts.netloc, "/v1/audio/diarization", "", ""))
 
 
 class TranscriptionResult:
@@ -106,6 +147,8 @@ class BaseTranscriber(ABC):
     # True when the engine can report per-word timing; `word_timestamps` then asks for it.
     supports_word_timestamps: bool = False
     word_timestamps: bool = False
+    # True when the client can ask a server for speaker turns (`diarize`).
+    supports_diarization: bool = False
 
     @abstractmethod
     async def connect(self) -> None: ...
@@ -122,6 +165,10 @@ class BaseTranscriber(ABC):
     @property
     @abstractmethod
     def connected(self) -> bool: ...
+
+    async def diarize(self, wav: bytes | BinaryIO, timeout: float) -> list[SpeakerTurn]:
+        """Speaker turns for a whole WAV file (bytes or a file object); only engines with `supports_diarization`."""
+        raise NotImplementedError(f"{type(self).__name__} cannot detect speakers")
 
 
 class VoxtralRealtimeTranscriber(BaseTranscriber):
@@ -275,6 +322,7 @@ class OpenAIHttpTranscriber(BaseTranscriber):
     """
 
     supports_word_timestamps = True
+    supports_diarization = True
 
     def __init__(self, config: InferenceConfig) -> None:
         self._server_url = config.server_url
@@ -339,6 +387,17 @@ class OpenAIHttpTranscriber(BaseTranscriber):
         """Clear buffer state."""
         self._audio_buffer = bytearray()
         self._connected = False
+
+    async def diarize(self, wav: bytes | BinaryIO, timeout: float) -> list[SpeakerTurn]:
+        """POST the whole file to the server's diarization endpoint; raises on any failure."""
+        import httpx
+
+        url = diarization_url(self._server_url)
+        logger.info("Sending WAV audio to %s for speaker detection (timeout %.0f s)", url, timeout)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(url, files={"file": ("audio.wav", wav, "audio/wav")})
+            response.raise_for_status()
+            return parse_turns(response.json().get("segments"))
 
     @property
     def connected(self) -> bool:

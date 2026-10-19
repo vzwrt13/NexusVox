@@ -449,6 +449,20 @@ def test_file_transcription_stores_words_as_json(db):
     ]
 
 
+def test_file_transcription_stores_speakers_of_labelled_words(db):
+    import json
+
+    from nexusvox.transcriber import Word
+
+    words = [Word("hi", 0.0, 0.2, speaker=1), Word("there", 0.3, 0.6, speaker=2)]
+    record = db.save_file_transcription("Speaker 1: hi\n\nSpeaker 2: there", "en", 1000, "a.wav", words=words)
+
+    assert json.loads(record.words) == [
+        {"word": "hi", "start": 0.0, "end": 0.2, "speaker": 1},
+        {"word": "there", "start": 0.3, "end": 0.6, "speaker": 2},
+    ]
+
+
 def test_file_transcription_without_words_stores_null(db):
     assert db.save_file_transcription("hi", "en", 1000, "a.wav").words is None
 

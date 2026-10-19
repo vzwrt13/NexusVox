@@ -106,6 +106,8 @@ docker compose --profile cohere up --build    # Cohere (HTTP, port 8001)
 
 The first start will download the model and cache it in a Docker volume. Subsequent starts are fast.
 
+The Parakeet container also serves speaker detection for the dashboard's Upload tab (*Detect speakers*, up to 4 speakers). Its model downloads on the first upload that uses it, so that upload takes a little longer. A Parakeet image built before speaker detection existed has an older NeMo and must be rebuilt once with `--build`.
+
 Wait until the server reports it is ready. The default Parakeet endpoint will be available at `http://localhost:8002/v1/audio/transcriptions`.
 
 > To run the container in the background, add `-d`:

@@ -57,6 +57,8 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "display_name": "Parakeet TDT 0.6B",
         "docker_profile": "parakeet",
         "word_timestamps": True,
+        # Speaker detection for file uploads (the container's /v1/audio/diarization endpoint).
+        "diarization": True,
         "health_url": "http://localhost:8002/health",
         "description": "NVIDIA FastConformer-TDT — 25 European languages with auto language detection",
         "parameters": "600M",

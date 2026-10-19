@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-import time
 import uuid
 from collections.abc import Callable
 
@@ -26,7 +25,6 @@ class FileJob:
         self.result: dict | None = None
         self.error = ""
         self.acknowledged = False  # a client has been told how it ended
-        self.started = time.monotonic()
         self._lock = threading.Lock()
 
     def update(self, stage: str, current: int = 0, total: int = 0) -> None:
@@ -43,8 +41,17 @@ class FileJob:
             else:
                 self.state, self.error = "error", str(result.get("error") or "Transcription failed")
 
-    def snapshot(self) -> dict:
+    def snapshot(self, *, mark_read: bool = False, only_unread: bool = False) -> dict | None:
+        """The job's status. With `mark_read`, a finished job counts as seen; with `only_unread`, a finished
+        job that was already seen gives None. Both are decided under the job's lock, so of two clients
+        asking at once exactly one gets an unread outcome.
+        """
         with self._lock:
+            if self.state != "running":
+                if only_unread and self.acknowledged:
+                    return None
+                if mark_read:
+                    self.acknowledged = True
             if self.state == "done":
                 message, percent = "Done", 1.0
             elif self.state == "error":
@@ -103,8 +110,8 @@ class FileJobs:
     def _run(job: FileJob, work: Callable[[FileJob], dict]) -> None:
         try:
             job.finish(work(job))
-        except Exception as exc:
-            job.finish({"ok": False, "error": f"Transcription failed: {exc}"})
+        except Exception as exc:  # the work reports expected failures itself; this is a bug or a full disk
+            job.finish({"ok": False, "error": f"Unexpected error: {exc}"})
 
     def get(self, job_id: str) -> dict | None:
         """The job's status. A finished job counts as seen once a client has read it."""
@@ -112,10 +119,7 @@ class FileJobs:
             job = self._jobs.get(job_id)
         if job is None:
             return None
-        snap = job.snapshot()
-        if snap["state"] != "running":
-            job.acknowledged = True
-        return snap
+        return job.snapshot(mark_read=True)
 
     def current(self) -> dict | None:
         """The latest job if it is running or no client has read how it ended yet, else None.
@@ -125,6 +129,6 @@ class FileJobs:
         """
         with self._lock:
             latest = next(reversed(self._jobs.values()), None)
-        if latest is None or (latest.state != "running" and latest.acknowledged):
+        if latest is None:
             return None
-        return self.get(latest.id)
+        return latest.snapshot(mark_read=True, only_unread=True)

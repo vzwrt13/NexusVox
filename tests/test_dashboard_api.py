@@ -28,12 +28,6 @@ def upload_file(client, wav_bytes, name="test.wav", **form):
     raise AssertionError("file job did not end")
 
 
-def run_coro(coro):
-    import asyncio
-
-    return asyncio.new_event_loop().run_until_complete(coro)
-
-
 def test_get_settings(flask_client):
     resp = flask_client.get("/api/settings")
 
@@ -486,14 +480,10 @@ def test_file_transcribe_success(flask_client, sample_wav_bytes, monkeypatch):
     mock_result = TranscriptionResult()
     mock_result.finalize(text="transcribed text")
 
-    monkeypatch.setattr(
-        "nexusvox.dashboard.api.transcribe_file",
-        lambda wav, cfg, **kwargs: mock_result,
-    )
-    monkeypatch.setattr(
-        "nexusvox.dashboard.api.asyncio.run",
-        lambda coro: mock_result,
-    )
+    async def fake_transcribe(wav, cfg, **kwargs):
+        return mock_result
+
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
 
     job = upload_file(flask_client, sample_wav_bytes)
 
@@ -537,7 +527,6 @@ def test_file_job_moves_through_its_stages_to_done(flask_client, sample_wav_byte
         return result
 
     monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
-    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", run_coro)
 
     resp = flask_client.post(
         "/api/file-transcribe",
@@ -566,7 +555,7 @@ def test_file_job_moves_through_its_stages_to_done(flask_client, sample_wav_byte
 
 
 def test_file_job_reports_a_transcription_error(flask_client, db, sample_wav_bytes, monkeypatch):
-    def broken(wav_chunks, cfg, **kwargs):
+    async def broken(wav_chunks, cfg, **kwargs):
         raise RuntimeError("server went away")
 
     monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", broken)
@@ -590,8 +579,11 @@ def test_file_job_ends_as_an_error_when_saving_crashes(flask_client, db, sample_
 
     result = TranscriptionResult()
     result.finalize(text="x")
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", lambda wav, cfg, **kwargs: result)
-    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
+
+    async def fake_transcribe(wav, cfg, **kwargs):
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
 
     def crash(*args, **kwargs):
         raise OSError("disk full")
@@ -600,7 +592,7 @@ def test_file_job_ends_as_an_error_when_saving_crashes(flask_client, db, sample_
 
     job = upload_file(flask_client, sample_wav_bytes)
 
-    assert job["state"] == "error" and "disk full" in job["error"]
+    assert job["state"] == "error" and job["error"] == "Saving the transcript failed: disk full"
 
 
 def test_second_upload_is_refused_while_one_runs(flask_client, sample_wav_bytes, monkeypatch):
@@ -618,7 +610,6 @@ def test_second_upload_is_refused_while_one_runs(flask_client, sample_wav_bytes,
         return result
 
     monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", slow)
-    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", run_coro)
 
     def post():
         return flask_client.post(
@@ -643,7 +634,7 @@ def test_a_job_that_ended_while_away_is_reported_once(flask_client, sample_wav_b
     import io
     import time
 
-    def broken(wav_chunks, cfg, **kwargs):
+    async def broken(wav_chunks, cfg, **kwargs):
         raise RuntimeError("boom")
 
     monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", broken)
@@ -1083,12 +1074,11 @@ def test_upload_asks_for_words_stores_them_and_returns_notes(flask_client, db, s
     result.notes = ["Chunk 2 of 2 came back without word timestamps."]
     seen: dict = {}
 
-    def fake_transcribe(wav_chunks, cfg, **kwargs):
+    async def fake_transcribe(wav_chunks, cfg, **kwargs):
         seen.update(kwargs)
         return result
 
     monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
-    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
 
     data = upload_file(flask_client, sample_wav_bytes)["result"]
 
@@ -1160,12 +1150,11 @@ def test_upload_with_diarize_passes_the_flag_and_stores_speakers(flask_client, d
     result.words = [Word("hello", 0.1, 0.4, speaker=1), Word("world", 0.5, 0.9, speaker=2)]
     seen: dict = {}
 
-    def fake_transcribe(wav_chunks, cfg, **kwargs):
+    async def fake_transcribe(wav_chunks, cfg, **kwargs):
         seen.update(kwargs)
         return result
 
     monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
-    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
 
     data = upload_file(flask_client, sample_wav_bytes, "meeting.wav", diarize="1")["result"]
 

@@ -608,14 +608,11 @@ class DashboardAPI:
     def upload_and_transcribe(
         self, file_bytes: bytes, filename: str, *, diarize: bool = False, job: FileJob | None = None
     ) -> dict:
-        """Convert an uploaded audio file, transcribe it, and save to DB (blocking).
+        """Convert an uploaded audio file, transcribe it, and save to DB (blocking); the file is already checked.
 
         With `diarize`, the saved and returned text is labelled by speaker when the model supports it.
         `job` receives the stage as the work moves on.
         """
-        error = self._check_upload(file_bytes, filename)
-        if error:
-            return {"ok": False, "error": error}
         progress = job.update if job else None
         if progress:
             progress("converting")
@@ -636,15 +633,19 @@ class DashboardAPI:
 
         if progress:
             progress("saving")
-        record = self._db.save_file_transcription(
-            text=result.text,
-            language=self._config.language,
-            duration_ms=duration_ms,
-            original_filename=filename,
-            model=self._config.inference.model,
-            confidence=result.confidence,
-            words=result.words,
-        )
+        try:
+            record = self._db.save_file_transcription(
+                text=result.text,
+                language=self._config.language,
+                duration_ms=duration_ms,
+                original_filename=filename,
+                model=self._config.inference.model,
+                confidence=result.confidence,
+                words=result.words,
+            )
+        except Exception as exc:
+            logger.error("Saving the transcription of %s failed: %s", filename, exc)
+            return {"ok": False, "error": f"Saving the transcript failed: {exc}"}
 
         return {
             "ok": True,

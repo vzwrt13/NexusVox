@@ -1608,6 +1608,7 @@ async function refreshDiarizeToggle() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && document.getElementById("tab-upload").classList.contains("active")) {
     refreshDiarizeToggle();
+    resumeUploadJob();
   }
 });
 
@@ -1670,26 +1671,57 @@ async function handleFileUpload(file) {
   }
 }
 
+// GET a JSON endpoint; a non-JSON or failed reply (a proxy's HTML 5xx, say) throws instead of passing as data.
+async function fetchJobJson(url) {
+  const res = await fetch(url);
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    throw new Error("HTTP " + res.status);
+  }
+  return { ok: res.ok, status: res.status, body };
+}
+
+const UPLOAD_POLL_RETRIES = 5; // failed polls in a row before giving up on a job
+
 // Polls a job until it ends, then shows how it ended. `file` is the one selected for it (null when the
-// job was picked up again after the page was reopened).
+// job was picked up again after the page was reopened). A poll that fails is tried again a few times;
+// when the dashboard stays unreachable the job is left running on the server and the page says so.
 async function trackUploadJob(jobId, file) {
   uploadRunning = true;
   updateTranscribeButton();
-  for (;;) {
-    const res = await fetch("/api/file-transcribe/" + jobId);
-    const job = await res.json();
-    if (!res.ok) {
-      hideUploadProgress();
-      showUploadError(job.error || "Lost track of the transcription");
-      return;
-    }
-    if (job.state === "running") {
-      showUploadProgress(job);
+  let failures = 0;
+  try {
+    for (;;) {
+      let reply;
+      try {
+        reply = await fetchJobJson("/api/file-transcribe/" + jobId);
+        failures = 0;
+      } catch (err) {
+        if (++failures >= UPLOAD_POLL_RETRIES) {
+          hideUploadProgress();
+          showUploadError("Lost contact with the dashboard (" + err.message + "). The file may still be transcribing; reopen this tab to check.");
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, UPLOAD_POLL_MS));
+        continue;
+      }
+      if (!reply.ok) {
+        hideUploadProgress();
+        showUploadError(reply.body.error || "Lost track of the transcription");
+        return;
+      }
+      if (reply.body.state !== "running") {
+        showUploadOutcome(reply.body, file);
+        return;
+      }
+      showUploadProgress(reply.body);
       await new Promise((resolve) => setTimeout(resolve, UPLOAD_POLL_MS));
-      continue;
     }
-    showUploadOutcome(job, file);
-    return;
+  } finally {
+    uploadRunning = false;
+    updateTranscribeButton();
   }
 }
 
@@ -1709,27 +1741,37 @@ function showUploadOutcome(job, file) {
   loadFileTranscriptions();
 }
 
-// A job keeps running on the server when the page is closed or reloaded; pick it up again when the tab opens.
+// A job keeps running on the server when the page is closed or reloaded, and another browser tab can start
+// one; the Upload tab picks it up when it opens and then keeps looking while it is shown.
 async function resumeUploadJob() {
   if (uploadRunning) return;
+  let job = null;
   try {
-    const { job } = await fetch("/api/file-transcribe/current").then((r) => r.json());
-    if (!job || uploadRunning) return;
-    uploadErrorEl.style.display = "none";
-    uploadNoteEl.style.display = "none";
-    if (job.state === "running") {
-      showUploadProgress(job);
-      await trackUploadJob(job.job_id, null);
-      uploadRunning = false;
-      updateTranscribeButton();
-    } else {
-      showUploadOutcome(job, null);
-    }
+    const reply = await fetchJobJson("/api/file-transcribe/current");
+    job = reply.ok ? reply.body.job : null;
   } catch {
-    uploadRunning = false;
-    updateTranscribeButton();
+    return; // the next look tries again
+  }
+  if (!job || uploadRunning) return;
+  uploadErrorEl.style.display = "none";
+  uploadNoteEl.style.display = "none";
+  if (job.state === "running") {
+    showUploadProgress(job);
+    await trackUploadJob(job.job_id, null);
+  } else {
+    showUploadOutcome(job, null);
   }
 }
+
+const UPLOAD_WATCH_MS = 3000;
+
+function uploadTabShown() {
+  return document.visibilityState === "visible" && document.getElementById("tab-upload").classList.contains("active");
+}
+
+setInterval(() => {
+  if (uploadTabShown()) resumeUploadJob();
+}, UPLOAD_WATCH_MS);
 
 async function loadFileTranscriptions() {
   const data = await fetch("/api/file-transcriptions").then((r) => r.json());

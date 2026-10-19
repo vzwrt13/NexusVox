@@ -70,7 +70,7 @@ def test_an_exception_in_the_work_becomes_an_error():
     _join_workers()
 
     snap = jobs.get(job.id)
-    assert snap["state"] == "error" and snap["error"] == "Transcription failed: bad"
+    assert snap["state"] == "error" and snap["error"] == "Unexpected error: bad"
 
 
 def test_current_returns_a_finished_job_until_it_was_read():

@@ -549,12 +549,18 @@ def test_learn_from_edits_roundtrip(tmp_path):
     assert (loaded.enabled, loaded.window_s) == (True, 12.5)
 
 
+def test_learn_from_edits_window_defaults_to_20_seconds():
+    assert LearnFromEditsConfig().window_s == 20.0
+    template = tomllib.loads(EXAMPLE_CONFIG_PATH.read_text(encoding="utf-8"))
+    assert template["learn_from_edits"]["window_s"] == 20.0
+
+
 def test_learn_from_edits_off_when_missing(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[general]\n", encoding="utf-8")
 
     loaded = load_config(path).learn_from_edits
-    assert (loaded.enabled, loaded.window_s) == (False, 30.0)
+    assert (loaded.enabled, loaded.window_s) == (False, 20.0)
 
 
 def test_paste_key_roundtrip_and_default(tmp_path):

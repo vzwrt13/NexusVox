@@ -444,7 +444,7 @@ class LearnFromEditsConfig:
     (never a password field)."""
 
     enabled: bool = False
-    window_s: float = 30.0
+    window_s: float = 20.0
 
 
 @dataclass
@@ -657,7 +657,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         cleanup=_cleanup_config(cleanup_data),
         learn_from_edits=LearnFromEditsConfig(
             enabled=learn_data.get("enabled", False),
-            window_s=float(learn_data.get("window_s", 30.0)),
+            window_s=float(learn_data.get("window_s", 20.0)),
         ),
         remote_mic=RemoteMicConfig(
             enabled=remote_mic_data.get("enabled", False),

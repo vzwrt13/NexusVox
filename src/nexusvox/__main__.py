@@ -8,13 +8,13 @@ from .config import load_config
 
 
 def main() -> None:
+    config = load_config()
     logging.basicConfig(
-        level=logging.INFO,  # TODO: Make switch for Logging Level in Frontend/config
+        level=config.log_level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
 
-    config = load_config()
     app = NexusVoxApp(config)
 
     try:

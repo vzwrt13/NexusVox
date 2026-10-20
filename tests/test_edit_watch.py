@@ -109,6 +109,13 @@ class FakeField:
         return self._texts.pop(0) if len(self._texts) > 1 else self._texts[0]
 
 
+class DyingField(FakeField):
+    """Reads its texts, then reports the element dead (a browser rebuilt the field)."""
+
+    def read(self) -> str | None:
+        return self._texts.pop(0) if self._texts else None
+
+
 @pytest.fixture(autouse=True)
 def fast_timing(monkeypatch):
     monkeypatch.setattr(edit_watch, "_SETTLE_S", 0)
@@ -305,3 +312,201 @@ def test_skip_is_counted_without_a_watch():
 def test_extract_edit_finds_the_last_of_overlapping_occurrences():
     # finditer would stop at the first "ha ha"; the paste is the one at the end.
     assert extract_edit("ha ha ha", "ha ha", "ha ha hu") == "ha hu"
+
+
+# --- why nothing was learned ---
+
+
+@pytest.mark.parametrize(
+    ("before", "injected", "after", "outcome"),
+    [
+        ("a nexus fox b", "nexus fox", "a nexus fox b", "unchanged"),
+        ("I use nexus\nfox", "I use nexus fox", "I use nexus fox", "too_small"),
+        ("I use nexus fox", "I use nexus fox", "Completely different sentence here", "rewritten"),
+        ("Hi I use nexus fox", "I use nexus fox", "Hi ", "rewritten"),
+        (
+            "please send the report to the whole team",
+            "please send the report to the whole team",
+            "please send the summary to all the team",
+            "too_many_changes",
+        ),
+        ("I use nexus fox", "I use nexus fox", "I really use nexus fox", "no_replacement"),
+        (
+            "Okay so then it's our test today for sure",
+            "Okay so then it's our test today for sure",
+            "Okay so then jetzt aber test today for sure",
+            "no_replacement",
+        ),
+        ("Ich nutze Nexus Fox", "Ich nutze Nexus Fox", "Ich nutze NexusVox", "suggested"),
+        ("Ich nutze Nexus Fox", "Ich nutze Nexus Fox", "Ich nutze Nexus Fox heute", "unchanged"),
+    ],
+)
+def test_judge_names_the_reason(before, injected, after, outcome):
+    verdict = edit_watch.judge(before, injected, after, [])
+    assert verdict.outcome == outcome
+    assert bool(verdict.suggestions) == (outcome == "suggested")
+    assert verdict.outcome in OUTCOMES
+
+
+def test_judge_rewritten_says_how_much_is_left():
+    verdict = edit_watch.judge("I use nexus fox", "I use nexus fox", "Completely different sentence here", [])
+    assert "needed" in verdict.detail
+    gone = edit_watch.judge("Hi I use nexus fox", "I use nexus fox", "Hi ", [])
+    assert gone.detail == "the dictation is gone from the field"
+
+
+def test_judge_too_many_changes_gives_the_numbers():
+    text = "please send the report to the whole team"
+    detail = edit_watch.judge(text, text, "please send the summary to all the team", []).detail
+    assert f"at most {edit_watch.MAX_CHANGES}" in detail
+    assert "words kept" in detail
+
+
+@pytest.mark.parametrize(
+    ("before", "injected", "after"),
+    [
+        # Inline autocomplete appends a completion to the last word: one word of three survives.
+        ("open nexus fox", "open nexus fox", "open NexusVox.de/pricing"),
+        # The address bar swaps the typed words for a search URL after Enter.
+        ("nexus fox pricing", "nexus fox pricing", "https://www.google.com/search?q=nexus+fox+pricing"),
+    ],
+)
+def test_address_bar_rewrites_are_reported_not_silent(before, injected, after):
+    verdict = edit_watch.judge(before, injected, after, [])
+    assert verdict.outcome == "too_many_changes"
+    assert "words kept" in verdict.detail
+
+
+def test_text_autocompleted_after_the_dictation_is_not_part_of_the_edit():
+    verdict = edit_watch.judge("open nexus fox now", "open nexus fox now", "open NexusVox now/pricing", [])
+    assert verdict.outcome == "suggested"
+
+
+def _log_of(field_factory, caplog, injected="I use nexus fox", window_s=0.05, next_dictation=None):
+    watcher = EditWatcher(lambda s: None, lambda: [], field_factory=field_factory)
+    with caplog.at_level("INFO", logger=edit_watch.logger.name):
+        watcher.watch(injected, window_s)
+        if next_dictation:
+            time.sleep(0.1)
+            watcher.watch(next_dictation, window_s)
+        deadline = time.monotonic() + 2
+        while not watcher.status()["counts"] and time.monotonic() < deadline:
+            time.sleep(0.01)
+        watcher.stop()
+    return watcher, [r.getMessage() for r in caplog.records if r.name == edit_watch.logger.name]
+
+
+def test_log_names_the_reason_and_that_the_window_ran_out(caplog):
+    field = FakeField(["I use nexus fox", "I really use nexus fox"])
+    _, lines = _log_of(lambda: field, caplog, window_s=0.1)
+    assert any(OUTCOMES["no_replacement"] in line and "time window over" in line for line in lines)
+
+
+def test_log_names_the_next_dictation_as_the_end(caplog):
+    fields = iter([FakeField(["I use nexus fox"]), None])
+    _, lines = _log_of(lambda: next(fields), caplog, window_s=30, next_dictation="next dictation")
+    assert any(OUTCOMES["unchanged"] in line and "the next dictation arrived" in line for line in lines)
+
+
+def test_a_field_that_dies_before_an_edit_is_not_reported_as_unchanged(caplog):
+    fields = iter([DyingField(["I use nexus fox"])])
+    watcher, lines = _log_of(lambda: next(fields, None), caplog, window_s=5)
+    assert watcher.status()["counts"] == {"lost_field": 1}
+    assert any("could not be read any more" in line for line in lines)
+
+
+def test_a_failed_read_is_logged_at_info(caplog):
+    class Failing(edit_watch.UiaTextField):
+        def __init__(self):
+            class Element:
+                def GetCurrentPattern(self, _id):
+                    raise OSError("element is gone")
+
+            super().__init__(None, None, Element())
+
+    with caplog.at_level("INFO", logger=edit_watch.logger.name):
+        assert Failing().read() is None
+    assert any("element is gone" in r.getMessage() and r.levelname == "INFO" for r in caplog.records)
+
+
+# --- a rebuilt field is fetched again ---
+
+
+def _watch_with(factory, window_s=0.3, injected="I use nexus fox"):
+    got: list[DictionaryEntry] = []
+    done = threading.Event()
+
+    def on_suggestions(s):
+        got.extend(s)
+        done.set()
+
+    watcher = EditWatcher(on_suggestions, lambda: [], field_factory=factory)
+    watcher.watch(injected, window_s)
+    done.wait(2)
+    deadline = time.monotonic() + 2
+    while not watcher.status()["counts"] and time.monotonic() < deadline:
+        time.sleep(0.01)
+    watcher.stop()
+    return watcher, got
+
+
+def test_a_rebuilt_field_is_fetched_again_and_its_edit_counts():
+    fields = iter([DyingField(["I use nexus fox"]), FakeField(["I use NexusVox"])])
+    watcher, got = _watch_with(lambda: next(fields))
+    assert got == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+    assert watcher.status()["counts"] == {"suggested": 1}
+
+
+def test_the_refetch_retries_while_the_new_element_is_not_ready():
+    fields = iter([DyingField(["I use nexus fox"]), None, DyingField([]), FakeField(["I use NexusVox"])])
+    _, got = _watch_with(lambda: next(fields))
+    assert got == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+
+
+def test_a_refetched_element_that_is_another_field_is_not_diffed():
+    # Focus moved on to a page: the last good read (the fixed dictation) must still be the one that counts.
+    page = FakeField(["Welcome to our shop. Nothing to do with the dictation at all."])
+    fields = iter([DyingField(["I use nexus fox", "I use NexusVox"]), page, page, page])
+    _, got = _watch_with(lambda: next(fields))
+    assert got == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+
+
+def test_the_refetch_gives_up_after_a_few_tries():
+    calls = []
+
+    def factory():
+        calls.append(1)
+        return DyingField(["I use nexus fox"]) if len(calls) == 1 else None
+
+    watcher, _ = _watch_with(factory)
+    assert watcher.status()["counts"] == {"lost_field": 1}
+    assert len(calls) == 1 + edit_watch._REFETCH_TRIES
+
+
+def test_a_refetched_password_field_ends_the_watch():
+    calls = []
+
+    def factory():
+        calls.append(1)
+        if len(calls) == 1:
+            return DyingField(["I use nexus fox"])
+        raise FieldSkipped("password")
+
+    watcher, _ = _watch_with(factory)
+    assert watcher.status()["counts"] == {"lost_field": 1}
+    assert len(calls) == 2
+
+
+@pytest.mark.usefixtures("short_paste_wait")
+def test_a_first_read_that_fails_is_retried_on_the_focused_element():
+    fields = iter([FakeField([None]), FakeField(["I use nexus fox", "I use NexusVox"])])
+    watcher, got = _watch_with(lambda: next(fields))
+    assert got == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+    assert watcher.status()["counts"] == {"suggested": 1}
+
+
+def test_status_lists_which_outcomes_are_watched():
+    status = EditWatcher(lambda s: None, lambda: []).status()
+    assert set(status["watched"]) <= set(OUTCOMES)
+    assert "suggested" in status["watched"]
+    assert "terminal" not in status["watched"]

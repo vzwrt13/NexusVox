@@ -6,6 +6,9 @@ language = "en"
 injection_delay_ms = 500
 # Enable automatic language detection per recording (experimental)
 auto_language_detection = false
+# How much the console log says: "DEBUG", "INFO", "WARNING" or "ERROR".
+# Takes effect on the next start.
+log_level = "INFO"
 [hotkey]
 # Press all listed modifiers simultaneously to record
 # Modifier options: ctrl, shift, alt, win (may be empty when a key is set)

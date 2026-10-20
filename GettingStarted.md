@@ -153,6 +153,8 @@ language = "en"
 injection_delay_ms = 500
 # Enable automatic language detection per recording (experimental)
 auto_language_detection = false
+# How much the console log says: "DEBUG", "INFO", "WARNING" or "ERROR" (takes effect on the next start)
+log_level = "INFO"
 # Enable voice commands for text formatting (new line, new paragraph, tab, all caps)
 voice_commands_enabled = true
 
@@ -302,7 +304,7 @@ Options are one `name = text` per line under a snippet; *Fill from GitHub* impor
 
 ### Learn From Edits
 
-Turn on Settings → Correction Dictionary → Learn From Edits (or `[learn_from_edits].enabled`). After each paste NexusVox reads the text field for 30 seconds (`window_s`); fix a misheard word there and it shows up below the toggle as a suggestion to add or dismiss - nothing enters the dictionary on its own. Password fields and terminals are never read (terminals expose no readable text), and nothing is learned from a dictation that auto cleanup or translation changed. The line under the toggle says how the last paste ended, so you can tell "nothing corrected" from "this app cannot be read".
+Turn on Settings → Correction Dictionary → Learn From Edits (or `[learn_from_edits].enabled`). After each paste NexusVox reads the text field for 30 seconds (`window_s`); fix a misheard word there and it shows up below the toggle as a suggestion to add or dismiss - nothing enters the dictionary on its own. Password fields and terminals are never read (terminals expose no readable text), and nothing is learned from a dictation that auto cleanup or translation changed. The line under the toggle says how the last paste ended, so you can tell "nothing corrected" from "this app cannot be read". The console log (`[general].log_level`, `INFO` by default) names the reason for every paste that taught nothing: the field could not be read, the edit was too small, there were too many changes, no word was replaced, and whether the watch ended because the time window ran out or the next dictation arrived. If a read fails (a browser rebuilds its address bar, for example) NexusVox fetches the focused field again before it gives up, and the last text it saw is still compared.
 
 ---
 

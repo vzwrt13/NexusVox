@@ -5,6 +5,8 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+import pytest
+
 import nexusvox.config as config_module
 from nexusvox.config import (
     EXAMPLE_CONFIG_PATH,
@@ -365,6 +367,52 @@ def test_resolve_compute_type_defaults():
 def test_resolve_compute_type_override_wins():
     assert resolve_compute_type("cpu", "float16") == "float16"
     assert resolve_compute_type("cuda", "int8") == "int8"
+
+
+def test_log_level_defaults_to_info(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[general]\nlanguage = "en"\n')
+    assert load_config(path).log_level == "INFO"
+    assert Config().log_level == "INFO"
+
+
+def test_log_level_is_read_case_insensitively_and_saved(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[general]\nlog_level = "debug"\n')
+    cfg = load_config(path)
+    assert cfg.log_level == "DEBUG"
+    save_config(cfg, path)
+    assert tomllib.loads(path.read_text())["general"]["log_level"] == "DEBUG"
+    assert load_config(path).log_level == "DEBUG"
+
+
+def test_unknown_log_level_falls_back_to_info(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[general]\nlog_level = "chatty"\n')
+    assert load_config(path).log_level == "INFO"
+
+
+def test_main_applies_the_configured_log_level(monkeypatch):
+    import logging
+
+    from nexusvox import __main__ as entry
+
+    seen = {}
+    monkeypatch.setattr(entry, "load_config", lambda: Config(log_level="WARNING"))
+    monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
+
+    class App:
+        def __init__(self, config):
+            pass
+
+        def run(self):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(entry, "NexusVoxApp", App)
+    with pytest.raises(SystemExit) as exit_:
+        entry.main()
+    assert exit_.value.code == 0
+    assert seen["level"] == "WARNING"
 
 
 def test_unknown_hotkey_mode_falls_back_to_hold(tmp_path):

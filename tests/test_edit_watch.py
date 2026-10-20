@@ -321,6 +321,8 @@ def test_extract_edit_finds_the_last_of_overlapping_occurrences():
     ("before", "injected", "after", "outcome"),
     [
         ("a nexus fox b", "nexus fox", "a nexus fox b", "unchanged"),
+        ("a nexus fox b", "nexus fox", "a nexus\u00a0fox  b", "unchanged"),
+        ("a nexus fox b", "nexus fox", "a nexus\nfox b", "too_small"),
         ("unrelated text", "nexus fox", "unrelated text", "not_found"),
         ("I use nexus\nfox", "I use nexus fox", "I use nexus fox", "too_small"),
         ("I use nexus fox", "I use nexus fox", "Completely different sentence here", "rewritten"),
@@ -422,22 +424,27 @@ def test_a_field_that_dies_before_an_edit_is_not_reported_as_unchanged(caplog):
     assert any("could not be read any more" in line for line in lines)
 
 
-def test_a_failed_read_is_logged_at_info(caplog):
-    class Failing(edit_watch.UiaTextField):
-        def __init__(self):
-            class Element:
-                def GetCurrentPattern(self, _id):
-                    raise OSError("element is gone")
+def test_a_failed_read_keeps_its_error_and_logs_it_at_debug(caplog):
+    class Element:
+        def GetCurrentPattern(self, _id):
+            raise OSError("element is gone")
 
-            super().__init__(None, None, Element())
-
-    field = Failing()
+    field = edit_watch.UiaTextField(None, None, Element())
     with caplog.at_level("DEBUG", logger=edit_watch.logger.name):
         assert field.read() is None
-        assert field.read() is None
-    failures = [r for r in caplog.records if "element is gone" in r.getMessage()]
-    # INFO the first time, so the log names it; DEBUG after, a dead element is polled every second.
-    assert [r.levelname for r in failures] == ["INFO", "DEBUG"]
+    assert str(field.last_error) == "element is gone"
+    assert [r.levelname for r in caplog.records if "element is gone" in r.getMessage()] == ["DEBUG"]
+
+
+def test_a_field_rebuilt_on_every_poll_is_announced_once_per_watch(caplog):
+    def rebuilt():
+        return DyingField(["I use nexus fox", "I use nexus fox"])
+
+    with caplog.at_level("INFO", logger=edit_watch.logger.name):
+        watcher, _ = _watch_with(rebuilt, window_s=0.3)
+    lines = [r.getMessage() for r in caplog.records if r.name == edit_watch.logger.name]
+    assert sum("reading the field failed" in line for line in lines) == 1
+    assert len(lines) <= 2  # that line and the outcome
 
 
 def test_a_dead_field_after_a_rewrap_is_lost_not_too_small(caplog):
@@ -524,7 +531,7 @@ def test_a_field_rebuilt_while_waiting_for_the_paste_is_fetched_again():
 
 def test_a_refetched_first_element_without_the_dictation_is_not_announced(caplog):
     fields = iter([DyingField([]), FakeField(["something else"])])
-    with caplog.at_level("INFO", logger=edit_watch.logger.name):
+    with caplog.at_level("DEBUG", logger=edit_watch.logger.name):
         watcher, _ = _watch_with(lambda: next(fields, None))
     assert watcher.status()["counts"] == {"unreadable": 1}
     assert not any("fetched the focused element again" in r.getMessage() for r in caplog.records)
@@ -550,3 +557,85 @@ def test_status_lists_which_outcomes_are_watched():
     assert set(status["watched"]) <= set(OUTCOMES)
     assert "suggested" in status["watched"]
     assert "terminal" not in status["watched"]
+
+
+# --- review round 3 ---
+
+
+def _small_page_with_the_words():
+    return FakeField(["Results for fox: nexus tips and github repos, nothing else here"])
+
+
+def test_a_page_with_the_dictated_words_is_not_our_field():
+    # Enter in the address bar: the bar dies, the focused results page holds all three words.
+    fields = iter([DyingField(["nexus fox github"]), _small_page_with_the_words()])
+    watcher, got = _watch_with(lambda: next(fields, None), injected="nexus fox github")
+    assert got == []
+    assert watcher.status()["counts"] == {"lost_field": 1}
+
+
+def test_a_long_page_that_quotes_the_dictation_is_not_our_field():
+    page = FakeField(["Search results. " * 40 + "nexus fox github" + " More results." * 40])
+    fields = iter([DyingField(["nexus fox github"]), page])
+    watcher, _ = _watch_with(lambda: next(fields, None), injected="nexus fox github")
+    assert watcher.status()["counts"] == {"lost_field": 1}
+
+
+def test_the_first_read_refetch_does_not_wait_for_the_paste_in_every_try(monkeypatch):
+    monkeypatch.setattr(edit_watch, "_PASTE_WAIT_S", 2.0)
+    monkeypatch.setattr(edit_watch, "_POLL_S", 1.0)
+    fields = iter([DyingField([])] + [FakeField(["something else"])] * 5)
+    started = time.monotonic()
+    status = _outcome(lambda: next(fields, None))
+    # Three tries of 0.2 s, not three waits of 2 s.
+    assert time.monotonic() - started < 1.8
+    assert status["counts"] == {"unreadable": 1}
+
+
+def test_a_too_long_field_that_then_dies_is_still_reported_as_too_long():
+    fields = iter([DyingField(["x" * (edit_watch.MAX_FIELD_CHARS + 1)])])
+    watcher, _ = _watch_with(lambda: next(fields, None))
+    assert watcher.status()["counts"] == {"too_long": 1}
+
+
+def test_a_paste_that_never_showed_before_the_field_died_is_reported_as_not_found():
+    fields = iter([DyingField(["old address"])])
+    watcher, _ = _watch_with(lambda: next(fields, None))
+    assert watcher.status()["counts"] == {"not_found": 1}
+
+
+@pytest.mark.parametrize("reason", ["password", "terminal"])
+def test_a_password_field_or_terminal_met_while_refetching_the_first_read_is_named(reason):
+    calls = []
+
+    def factory():
+        calls.append(1)
+        if len(calls) == 1:
+            return DyingField([])
+        raise FieldSkipped(reason)
+
+    watcher, _ = _watch_with(factory)
+    assert watcher.status()["counts"] == {reason: 1}
+
+
+def test_the_refetch_stops_when_told_to():
+    calls = []
+    watcher = EditWatcher(lambda s: None, lambda: [], field_factory=lambda: calls.append(1))
+    assert watcher._refetch(lambda f: "x", stop=lambda: True) is None
+    assert calls == []
+
+
+def test_the_refetch_checks_stop_between_tries():
+    calls = []
+    watcher = EditWatcher(lambda s: None, lambda: [], field_factory=lambda: calls.append(1) or FakeField(["x"]))
+    states = iter([False, True])
+    assert watcher._refetch(lambda f: None, stop=lambda: next(states)) is None
+    assert len(calls) == 1
+
+
+def test_watched_outcomes_are_derived_from_the_messages():
+    skipped = {key for key, message in OUTCOMES.items() if message.startswith("skipped")}
+    assert set(OUTCOMES) - skipped == edit_watch.WATCHED
+    assert {"suggested", "unchanged", "lost_field"} <= edit_watch.WATCHED
+    assert not {"terminal", "not_found", "unreadable"} & edit_watch.WATCHED
+    assert EditWatcher(lambda s: None, lambda: []).status()["watched"] == list(edit_watch.WATCHED_KEYS)

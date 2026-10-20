@@ -422,7 +422,7 @@ async function loadLearnStatus() {
   if (lastSuggestedCount !== null && (counts.suggested || 0) > lastSuggestedCount) loadDictionarySuggestions();
   lastSuggestedCount = counts.suggested || 0;
   // Outcomes of a watch that ran to its end; everything else is a paste that was skipped.
-  const watchedKeys = new Set(s.watched || ["suggested", "unchanged"]);
+  const watchedKeys = new Set(s.watched || []);
   const watched = Object.entries(counts).filter(([k]) => watchedKeys.has(k)).reduce((n, [, c]) => n + c, 0);
   const skipped = Object.entries(counts)
     .filter(([k]) => !watchedKeys.has(k))

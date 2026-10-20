@@ -60,8 +60,11 @@ _POLL_S = 1.0
 _PASTE_WAIT_S = 2.0
 # How often the focused element is fetched again after a failed read (a browser rebuilds its address bar).
 _REFETCH_TRIES = 3
-# Share of the dictated words a re-fetched element must still hold to count as the same field.
-_REFETCH_MIN_WORDS = 0.75
+# A re-fetched element much longer than the field it replaces is a page, not that field:
+# it may hold at most twice the text of the first read plus this many characters.
+_REFETCH_GROWTH_CHARS = 500
+# Share of the first read a diffed re-fetched element must still match to count as the same field.
+_REFETCH_MIN_SIMILARITY = 0.6
 # Fields up to this size may be diffed to decide whether a re-fetched element is ours (bigger ones are not).
 _REFETCH_DIFF_MAX_CHARS = 2_000
 
@@ -72,7 +75,7 @@ _UIA_TEXT_PATTERN_ID = 10014
 OUTCOMES = {
     "suggested": "suggestions found",
     "unchanged": "watched, the dictation was not changed",
-    "too_small": "watched, nothing learned: the edit was too small (only whitespace or line wrapping changed)",
+    "too_small": "watched, nothing learned: the edit was too small (only line breaks or spacing changed)",
     "rewritten": "watched, nothing learned: the dictation was deleted or rewritten",
     "too_many_changes": "watched, nothing learned: too many changes, this looks like rewording",
     "no_replacement": "watched, nothing learned: no word was replaced by another",
@@ -86,10 +89,10 @@ OUTCOMES = {
     "too_long": f"skipped: the field holds more than {MAX_FIELD_CHARS:,} characters",
     "not_found": "skipped: the pasted text did not show up in the field",
 }
-# Outcomes of a watch that ran to its end; every other key is a paste that was skipped.
-WATCHED = frozenset(
-    {"suggested", "unchanged", "too_small", "rewritten", "too_many_changes", "no_replacement", "lost_field"}
-)
+# Outcomes of a watch that ran to its end: every one whose message does not say "skipped".
+WATCHED = frozenset(key for key, message in OUTCOMES.items() if not message.startswith("skipped"))
+# The same, in the order and shape `EditWatcher.status()` hands to the dashboard.
+WATCHED_KEYS = tuple(sorted(WATCHED))
 
 # How a watch ended, as the log words it.
 _ENDED = {
@@ -105,6 +108,11 @@ def _normalize(text: str) -> str:
 
 def _squash(text: str) -> str:
     return " ".join(text.split())
+
+
+def _line_squash(text: str) -> str:
+    """`text` with every run of whitespace inside a line squashed, the line breaks kept."""
+    return "\n".join(_squash(line) for line in text.split("\n"))
 
 
 def _find_last(text: str, injected: str) -> tuple[int, int] | None:
@@ -234,8 +242,10 @@ def judge(
         return Verdict("rewritten", [], f"{edit.ratio:.0%} of it is left, {MIN_SIMILARITY:.0%} needed")
     edited = edit.edited
     if _squash(edited) == _squash(injected):
-        # A field may re-wrap the paste; compare with the span as the field held it right after the paste.
-        return Verdict("unchanged" if edited == edit.original else "too_small", [])
+        # Only whitespace differs. A different run of spaces (a non-breaking space, a re-built field) is
+        # no edit; moved line breaks are, against the span as the field held it right after the paste.
+        same_lines = _line_squash(edited) == _line_squash(edit.original)
+        return Verdict("unchanged" if same_lines else "too_small", [])
     # Fixing a misheard term keeps most words and touches one or two places; a rewrite does not.
     old_words = injected.split()
     words = difflib.SequenceMatcher(a=old_words, b=edited.split(), autojunk=False)
@@ -304,7 +314,7 @@ class UiaTextField:
         self._uia = uia
         self._automation = automation
         self._element = element
-        self._failed = False
+        self.last_error: Exception | None = None  # why the last read failed, for the watcher's log
 
     @classmethod
     def focused(cls) -> UiaTextField | None:
@@ -335,11 +345,9 @@ class UiaTextField:
                 text_pattern = pattern.QueryInterface(uia.IUIAutomationTextPattern)
                 return text_pattern.DocumentRange.GetText(MAX_FIELD_CHARS + 1)
         except Exception as exc:
-            # Once per element at INFO (the watcher polls a dead one every second), the rest at DEBUG.
-            logger.log(
-                logging.DEBUG if self._failed else logging.INFO, "Learn from edits: reading the field failed: %s", exc
-            )
-            self._failed = True
+            # The watcher announces a dead field once per watch; here every failed poll is only DEBUG.
+            self.last_error = exc
+            logger.debug("Learn from edits: reading the field failed: %s", exc)
         return None
 
 
@@ -389,7 +397,7 @@ class EditWatcher:
             last = self._last
             return {
                 "counts": dict(self._counts),
-                "watched": sorted(WATCHED),
+                "watched": list(WATCHED_KEYS),
                 "last": {"outcome": last[0], "message": OUTCOMES[last[0]], "at": last[1]} if last else None,
             }
 
@@ -422,14 +430,31 @@ class EditWatcher:
     def _watch_one(self, item: _Watch) -> _Watch | None:
         """Watch one paste; returns the next queued item (or None to stop)."""
         time.sleep(_SETTLE_S)
+        announced = False
+
+        def announce_dead(dead: TextField) -> None:
+            """Say once per watch (INFO) that a field died; a field rebuilt on every poll must not flood the log."""
+            nonlocal announced
+            error = getattr(dead, "last_error", None)
+            log = logger.debug if announced else logger.info
+            log(
+                "Learn from edits: reading the field failed%s, fetching the focused element again",
+                f" ({error})" if error else "",
+            )
+            announced = True
+
         try:
             field = self._field_factory()
-            before, skip = self._read_pasted(field, item.injected) if field else (None, "no_field")
-            if field and before is None and skip == "unreadable":
-                # The element may be dead already (a rebuilt address bar); the focused one may not be.
-                refreshed = self._refetch(lambda f: self._read_pasted(f, item.injected)[0])
-                if refreshed is not None:
-                    field, before = refreshed
+            before, skip = None, "no_field"
+            if field:
+                before, skip, died = self._read_pasted(field, item.injected)
+                if died:
+                    # The element may be dead already (a rebuilt address bar); the focused one may not be.
+                    # `skip` keeps what the dead one showed (too long, no paste yet) if there is no other.
+                    announce_dead(field)
+                    refreshed = self._refetch(lambda f: self._read_pasted(f, item.injected, wait_s=0)[0])
+                    if refreshed is not None:
+                        field, before = refreshed
         except FieldSkipped as skipped:
             field, before, skip = None, None, skipped.reason
         except Exception:
@@ -442,6 +467,10 @@ class EditWatcher:
         deadline = time.monotonic() + item.window_s
         nxt: _Watch | None | bool = False
         ended = "window"
+
+        def must_stop() -> bool:
+            return time.monotonic() >= deadline or not self._queue.empty()
+
         while time.monotonic() < deadline:
             try:
                 nxt = self._queue.get(timeout=_POLL_S)
@@ -452,8 +481,14 @@ class EditWatcher:
             current = field.read()
             if current is None:
                 # A browser rebuilds its address bar or page: the element we hold is dead, a new one may not be.
-                refreshed = self._refetch(lambda f: self._still_ours(f, item.injected, before))
+                announce_dead(field)
+                try:
+                    refreshed = self._refetch(lambda f: self._still_ours(f, item.injected, before), must_stop)
+                except FieldSkipped:  # focus is in a password field or a terminal now
+                    refreshed = None
                 if refreshed is None:
+                    if must_stop():
+                        continue  # the window is over or the next dictation waits: the loop says which
                     ended = "unreadable"
                     break
                 field, current = refreshed
@@ -462,69 +497,79 @@ class EditWatcher:
         self._report(before, item, after, ended)
         return self._queue.get() if nxt is False else nxt
 
-    def _refetch(self, accept: Callable[[TextField], _T | None]) -> tuple[TextField, _T] | None:
+    def _refetch(
+        self, accept: Callable[[TextField], _T | None], stop: Callable[[], bool] = lambda: False
+    ) -> tuple[TextField, _T] | None:
         """The focused element again after a read failed, with what `accept` made of it.
 
         `accept` reads the element and returns None when it is not our field: focus that moved on to
         another field or page would otherwise be diffed as if the user had rewritten the paste.
-        Gives up after `_REFETCH_TRIES`, or at once for a password field or a terminal.
+        Gives up after `_REFETCH_TRIES`, or as soon as `stop()` says the watch must go on or end. A password
+        field or a terminal (`FieldSkipped`) is passed on to the caller.
         """
         for _ in range(_REFETCH_TRIES):
+            if stop():
+                return None
             time.sleep(_POLL_S / 5)
             try:
                 field = self._field_factory()
                 accepted = accept(field) if field else None
             except FieldSkipped:
-                return None
+                raise
             except Exception:
                 logger.debug("Learn from edits: fetching the focused element again failed", exc_info=True)
                 continue
             if accepted is not None:
-                logger.info("Learn from edits: field read failed, fetched the focused element again")
+                logger.debug("Learn from edits: fetched the focused element again")
                 return field, accepted
         return None
 
     @staticmethod
     def _still_ours(field: TextField, injected: str, before: str) -> str | None:
-        """The field's text when it still holds the dictation, as pasted or with the user's fixes, else None.
+        """The field's text when it is still the field of the paste, as pasted or with the user's fixes, else None.
 
-        A field that keeps being rebuilt is checked on every poll, so this stays cheap: the paste itself,
-        or nearly all of the dictated words, decide it. Only a small field with a fix too big for that
-        (a short dictation of which two words changed) is diffed against `before`.
+        A field that keeps being rebuilt is checked on every poll, so this stays cheap and strict: a
+        much longer text is a page, not our field; the paste itself decides the rest, and only a small
+        field is diffed against `before` (a short dictation of which two words were fixed). The words
+        alone never decide: a results page holds the dictated words too.
         """
         text = field.read()
         if text is None or len(text) > MAX_FIELD_CHARS:
             return None
+        if len(text) > 2 * len(before) + _REFETCH_GROWTH_CHARS:
+            return None
         if _find_last(_normalize(text), injected) is not None:
             return text
-        words = injected.lower().split()
-        present = set(text.lower().split())
-        if sum(w in present for w in words) / len(words) >= _REFETCH_MIN_WORDS:
-            return text
-        small = len(text) <= _REFETCH_DIFF_MAX_CHARS and len(before) <= _REFETCH_DIFF_MAX_CHARS
-        return text if small and extract_edit(before, injected, text) is not None else None
+        if len(text) > _REFETCH_DIFF_MAX_CHARS or len(before) > _REFETCH_DIFF_MAX_CHARS:
+            return None
+        # A fix of the dictation leaves most of the field as it was; another small text does not.
+        same = difflib.SequenceMatcher(a=_squash(before), b=_squash(text), autojunk=False)
+        if same.quick_ratio() < _REFETCH_MIN_SIMILARITY or same.ratio() < _REFETCH_MIN_SIMILARITY:
+            return None
+        return text if extract_edit(before, injected, text) is not None else None
 
     @staticmethod
-    def _read_pasted(field: TextField, injected: str) -> tuple[str | None, str]:
-        """The field text once the paste shows up in it (apps paste asynchronously).
+    def _read_pasted(field: TextField, injected: str, wait_s: float = _PASTE_WAIT_S) -> tuple[str | None, str, bool]:
+        """The field text once the paste shows up in it (apps paste asynchronously), within `wait_s`.
 
-        Returns (text, "") or, when it does not show up, (None, the reason as a key of `OUTCOMES`).
+        Returns (text, "", False) or, when it does not show up, (None, the reason as a key of `OUTCOMES`,
+        died). `died` says a read failed: the element is gone, and the reason is the last one seen before
+        ("unreadable" when it never answered).
         """
-        deadline = time.monotonic() + _PASTE_WAIT_S
-        reason = "not_found"
+        deadline = time.monotonic() + wait_s
+        reason = "unreadable"
         while True:
             text = field.read()
             if text is None:
-                # Dead, whatever it held a moment ago: the caller may fetch the focused element again.
-                return None, "unreadable"
+                return None, reason, True
             if len(text) > MAX_FIELD_CHARS:
                 reason = "too_long"
             elif _find_last(_normalize(text), injected) is not None:
-                return text, ""
+                return text, "", False
             else:
                 reason = "not_found"
             if time.monotonic() >= deadline:
-                return None, reason
+                return None, reason, False
             time.sleep(_POLL_S / 5)
 
     def _report(self, before: str, item: _Watch, after: str, ended: str = "window") -> None:

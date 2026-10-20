@@ -393,13 +393,10 @@ def test_unknown_log_level_falls_back_to_info(tmp_path):
 
 
 def test_main_applies_the_configured_log_level(monkeypatch):
+    import importlib
     import logging
-
-    from nexusvox import __main__ as entry
-
-    seen = {}
-    monkeypatch.setattr(entry, "load_config", lambda: Config(log_level="WARNING"))
-    monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
+    import sys
+    import types
 
     class App:
         def __init__(self, config):
@@ -408,9 +405,16 @@ def test_main_applies_the_configured_log_level(monkeypatch):
         def run(self):
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(entry, "NexusVoxApp", App)
+    # The real app module binds PortAudio at import, which CI runners on Linux do not have.
+    monkeypatch.setitem(sys.modules, "nexusvox.app", types.SimpleNamespace(NexusVoxApp=App))
+    monkeypatch.delitem(sys.modules, "nexusvox.__main__", raising=False)
+    entry = importlib.import_module("nexusvox.__main__")
+    seen = {}
+    monkeypatch.setattr(entry, "load_config", lambda: Config(log_level="WARNING"))
+    monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
     with pytest.raises(SystemExit) as exit_:
         entry.main()
+    sys.modules.pop("nexusvox.__main__", None)  # it holds the stub app
     assert exit_.value.code == 0
     assert seen["level"] == "WARNING"
 

@@ -410,13 +410,21 @@ def test_main_applies_the_configured_log_level(monkeypatch):
     monkeypatch.delitem(sys.modules, "nexusvox.__main__", raising=False)
     entry = importlib.import_module("nexusvox.__main__")
     seen = {}
-    monkeypatch.setattr(entry, "load_config", lambda: Config(log_level="WARNING"))
+    own = logging.getLogger("nexusvox")
+    previous = own.level
+    monkeypatch.setattr(entry, "load_config", lambda: Config(log_level="DEBUG"))
     monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
-    with pytest.raises(SystemExit) as exit_:
-        entry.main()
-    sys.modules.pop("nexusvox.__main__", None)  # it holds the stub app
+    try:
+        with pytest.raises(SystemExit) as exit_:
+            entry.main()
+        own_level = own.level
+    finally:
+        own.setLevel(previous)
+        sys.modules.pop("nexusvox.__main__", None)  # it holds the stub app
     assert exit_.value.code == 0
-    assert seen["level"] == "WARNING"
+    # DEBUG reaches NexusVox's own loggers only, not comtypes or urllib3.
+    assert own_level == logging.DEBUG
+    assert seen["level"] == logging.INFO
 
 
 def test_unknown_hotkey_mode_falls_back_to_hold(tmp_path):

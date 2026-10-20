@@ -98,7 +98,7 @@ Aurora Precision theme, shared with the website. Tokens are the `:root` variable
 | POST | `/api/dictionary/suggestions/<id>/accept` | Turn a suggestion into an entry |
 | DELETE | `/api/dictionary/suggestions/<id>` | Dismiss a suggestion |
 | POST | `/api/settings/learn-from-edits` | Toggle learning from edits after a paste |
-| GET | `/api/settings/learn-from-edits-status` | How the pastes since start ended for learning: `{counts, watched, last: {outcome, message, at}}`; `watched` lists the outcome keys of watches that ran to their end (the rest were skipped) |
+| GET | `/api/settings/learn-from-edits-status` | How the pastes since start ended for learning: `{counts, watched, last: {outcome, message, at}}`; `watched` lists the outcome keys of watches that ran to their end (the rest were skipped; also answered without the app) |
 | GET | `/api/benchmarks` | List benchmark files with summary stats |
 | GET | `/api/benchmarks/compare` | Cross-model comparison with pass/fail |
 | GET | `/api/benchmarks/<filename>` | Full benchmark data (summary + samples) |

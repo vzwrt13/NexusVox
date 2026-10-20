@@ -321,6 +321,7 @@ def test_extract_edit_finds_the_last_of_overlapping_occurrences():
     ("before", "injected", "after", "outcome"),
     [
         ("a nexus fox b", "nexus fox", "a nexus fox b", "unchanged"),
+        ("unrelated text", "nexus fox", "unrelated text", "not_found"),
         ("I use nexus\nfox", "I use nexus fox", "I use nexus fox", "too_small"),
         ("I use nexus fox", "I use nexus fox", "Completely different sentence here", "rewritten"),
         ("Hi I use nexus fox", "I use nexus fox", "Hi ", "rewritten"),
@@ -360,6 +361,12 @@ def test_judge_too_many_changes_gives_the_numbers():
     detail = edit_watch.judge(text, text, "please send the summary to all the team", []).detail
     assert f"at most {edit_watch.MAX_CHANGES}" in detail
     assert "words kept" in detail
+
+
+def test_judge_says_when_the_dictation_was_never_there():
+    verdict = edit_watch.judge("unrelated text", "nexus fox", "unrelated text", [])
+    assert "never" not in verdict.detail  # worded as a fact about the starting text
+    assert "not in the text the watch started from" in verdict.detail
 
 
 @pytest.mark.parametrize(
@@ -424,9 +431,19 @@ def test_a_failed_read_is_logged_at_info(caplog):
 
             super().__init__(None, None, Element())
 
-    with caplog.at_level("INFO", logger=edit_watch.logger.name):
-        assert Failing().read() is None
-    assert any("element is gone" in r.getMessage() and r.levelname == "INFO" for r in caplog.records)
+    field = Failing()
+    with caplog.at_level("DEBUG", logger=edit_watch.logger.name):
+        assert field.read() is None
+        assert field.read() is None
+    failures = [r for r in caplog.records if "element is gone" in r.getMessage()]
+    # INFO the first time, so the log names it; DEBUG after, a dead element is polled every second.
+    assert [r.levelname for r in failures] == ["INFO", "DEBUG"]
+
+
+def test_a_dead_field_after_a_rewrap_is_lost_not_too_small(caplog):
+    fields = iter([DyingField(["I use nexus" + chr(10) + "fox", "I use nexus fox"])])
+    watcher, _ = _log_of(lambda: next(fields, None), caplog, injected="I use nexus fox", window_s=5)
+    assert watcher.status()["counts"] == {"lost_field": 1}
 
 
 # --- a rebuilt field is fetched again ---
@@ -495,6 +512,29 @@ def test_a_refetched_password_field_ends_the_watch():
     watcher, _ = _watch_with(factory)
     assert watcher.status()["counts"] == {"lost_field": 1}
     assert len(calls) == 2
+
+
+def test_a_field_rebuilt_while_waiting_for_the_paste_is_fetched_again():
+    # The address bar still shows the old text, then is rebuilt: the first read never saw the paste.
+    fields = iter([DyingField(["old address"]), FakeField(["I use nexus fox", "I use NexusVox"])])
+    watcher, got = _watch_with(lambda: next(fields))
+    assert got == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+    assert watcher.status()["counts"] == {"suggested": 1}
+
+
+def test_a_refetched_first_element_without_the_dictation_is_not_announced(caplog):
+    fields = iter([DyingField([]), FakeField(["something else"])])
+    with caplog.at_level("INFO", logger=edit_watch.logger.name):
+        watcher, _ = _watch_with(lambda: next(fields, None))
+    assert watcher.status()["counts"] == {"unreadable": 1}
+    assert not any("fetched the focused element again" in r.getMessage() for r in caplog.records)
+
+
+def test_a_refetched_field_with_one_fixed_word_is_still_ours():
+    injected = "please open nexus fox now"
+    fields = iter([DyingField([injected]), FakeField(["please open NexusVox now"])])
+    watcher, got = _watch_with(lambda: next(fields), injected=injected)
+    assert got == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
 
 
 @pytest.mark.usefixtures("short_paste_wait")

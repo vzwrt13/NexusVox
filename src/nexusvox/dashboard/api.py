@@ -310,7 +310,9 @@ class DashboardAPI:
     def get_learn_status(self) -> dict:
         """How the pastes since start ended for learning from edits (`EditWatcher.status`)."""
         if self._get_learn_status is None:
-            return {"counts": {}, "last": None}
+            from ..edit_watch import WATCHED
+
+            return {"counts": {}, "watched": sorted(WATCHED), "last": None}
         return self._get_learn_status()
 
     def set_store_audio(self, enabled: bool) -> dict:

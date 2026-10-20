@@ -878,7 +878,9 @@ def test_learn_from_edits_setting(flask_client):
 
 
 def test_learn_from_edits_status_without_the_app(flask_client):
-    assert flask_client.get("/api/settings/learn-from-edits-status").get_json() == {"counts": {}, "last": None}
+    status = flask_client.get("/api/settings/learn-from-edits-status").get_json()
+    assert status["counts"] == {} and status["last"] is None
+    assert {"suggested", "unchanged", "too_small", "too_many_changes"} <= set(status["watched"])
 
 
 def test_learn_from_edits_status_from_the_watcher(db, session_factory):

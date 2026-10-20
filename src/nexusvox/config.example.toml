@@ -7,6 +7,7 @@ injection_delay_ms = 500
 # Enable automatic language detection per recording (experimental)
 auto_language_detection = false
 # How much the console log says: "DEBUG", "INFO", "WARNING" or "ERROR".
+# DEBUG applies to NexusVox's own messages; other libraries stay at INFO.
 # Takes effect on the next start.
 log_level = "INFO"
 [hotkey]

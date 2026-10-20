@@ -30,7 +30,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 from .dictionary import DictionaryEntry, apply_dictionary, suggest_entries
 from .lang_detect import language_guess
@@ -38,6 +38,8 @@ from .uia import automation as uia_automation
 from .uia import foreground_is_terminal, is_terminal_element
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 # A field longer than this is not watched (large documents, chat logs).
 MAX_FIELD_CHARS = 20_000
@@ -58,6 +60,10 @@ _POLL_S = 1.0
 _PASTE_WAIT_S = 2.0
 # How often the focused element is fetched again after a failed read (a browser rebuilds its address bar).
 _REFETCH_TRIES = 3
+# Share of the dictated words a re-fetched element must still hold to count as the same field.
+_REFETCH_MIN_WORDS = 0.75
+# Fields up to this size may be diffed to decide whether a re-fetched element is ours (bigger ones are not).
+_REFETCH_DIFF_MAX_CHARS = 2_000
 
 _UIA_VALUE_PATTERN_ID = 10002
 _UIA_TEXT_PATTERN_ID = 10014
@@ -173,13 +179,14 @@ class _Edit:
     edited: str | None
     original: str = ""
     ratio: float | None = None  # similarity of dictation and edit, None when the span was deleted
+    found: bool = True  # False when the dictation is not in `before` at all
 
 
 def _edit_of(before: str, injected: str, after: str) -> _Edit:
     before, after = _normalize(before), _normalize(after)
     span = _find_last(before, injected)
     if span is None:
-        return _Edit(None)
+        return _Edit(None, found=False)
     start, end = span
     opcodes = _char_opcodes(before, after, start, end)
     edited = after[_map_position(start, opcodes, start=True) : _map_position(end, opcodes, start=False)]
@@ -219,6 +226,8 @@ def judge(
     for a snippet's stored text would never match a transcript.
     """
     edit = _edit_of(before, injected, after)
+    if not edit.found:
+        return Verdict("not_found", [], "the dictation is not in the text the watch started from")
     if edit.edited is None:
         if edit.ratio is None:
             return Verdict("rewritten", [], "the dictation is gone from the field")
@@ -295,6 +304,7 @@ class UiaTextField:
         self._uia = uia
         self._automation = automation
         self._element = element
+        self._failed = False
 
     @classmethod
     def focused(cls) -> UiaTextField | None:
@@ -325,8 +335,11 @@ class UiaTextField:
                 text_pattern = pattern.QueryInterface(uia.IUIAutomationTextPattern)
                 return text_pattern.DocumentRange.GetText(MAX_FIELD_CHARS + 1)
         except Exception as exc:
-            logger.info("Learn from edits: reading the field failed: %s", exc)
-            logger.debug("Learn from edits: read failure", exc_info=True)
+            # Once per element at INFO (the watcher polls a dead one every second), the rest at DEBUG.
+            logger.log(
+                logging.DEBUG if self._failed else logging.INFO, "Learn from edits: reading the field failed: %s", exc
+            )
+            self._failed = True
         return None
 
 
@@ -412,16 +425,11 @@ class EditWatcher:
         try:
             field = self._field_factory()
             before, skip = self._read_pasted(field, item.injected) if field else (None, "no_field")
-            for _ in range(_REFETCH_TRIES if skip == "unreadable" else 0):
-                # The element read at the first try may be dead already; the focused one may not be.
-                time.sleep(_POLL_S / 5)
-                field = self._field_factory()
-                if field is None:
-                    continue
-                before, skip = self._read_pasted(field, item.injected)
-                if before is not None or skip != "unreadable":
-                    logger.info("Learn from edits: field read failed, fetched the focused element again")
-                    break
+            if field and before is None and skip == "unreadable":
+                # The element may be dead already (a rebuilt address bar); the focused one may not be.
+                refreshed = self._refetch(lambda f: self._read_pasted(f, item.injected)[0])
+                if refreshed is not None:
+                    field, before = refreshed
         except FieldSkipped as skipped:
             field, before, skip = None, None, skipped.reason
         except Exception:
@@ -444,7 +452,7 @@ class EditWatcher:
             current = field.read()
             if current is None:
                 # A browser rebuilds its address bar or page: the element we hold is dead, a new one may not be.
-                refreshed = self._refetch(item.injected, before)
+                refreshed = self._refetch(lambda f: self._still_ours(f, item.injected, before))
                 if refreshed is None:
                     ended = "unreadable"
                     break
@@ -454,26 +462,47 @@ class EditWatcher:
         self._report(before, item, after, ended)
         return self._queue.get() if nxt is False else nxt
 
-    def _refetch(self, injected: str, before: str) -> tuple[TextField, str] | None:
-        """The focused element again, with its text, after a read failed; None when it is not our field.
+    def _refetch(self, accept: Callable[[TextField], _T | None]) -> tuple[TextField, _T] | None:
+        """The focused element again after a read failed, with what `accept` made of it.
 
-        The text must still hold the dictation (`extract_edit` finds it): focus that moved on to
+        `accept` reads the element and returns None when it is not our field: focus that moved on to
         another field or page would otherwise be diffed as if the user had rewritten the paste.
+        Gives up after `_REFETCH_TRIES`, or at once for a password field or a terminal.
         """
         for _ in range(_REFETCH_TRIES):
             time.sleep(_POLL_S / 5)
             try:
                 field = self._field_factory()
-                text = field.read() if field else None
+                accepted = accept(field) if field else None
             except FieldSkipped:
                 return None
             except Exception:
                 logger.debug("Learn from edits: fetching the focused element again failed", exc_info=True)
                 continue
-            if text is not None and len(text) <= MAX_FIELD_CHARS and extract_edit(before, injected, text) is not None:
+            if accepted is not None:
                 logger.info("Learn from edits: field read failed, fetched the focused element again")
-                return field, text
+                return field, accepted
         return None
+
+    @staticmethod
+    def _still_ours(field: TextField, injected: str, before: str) -> str | None:
+        """The field's text when it still holds the dictation, as pasted or with the user's fixes, else None.
+
+        A field that keeps being rebuilt is checked on every poll, so this stays cheap: the paste itself,
+        or nearly all of the dictated words, decide it. Only a small field with a fix too big for that
+        (a short dictation of which two words changed) is diffed against `before`.
+        """
+        text = field.read()
+        if text is None or len(text) > MAX_FIELD_CHARS:
+            return None
+        if _find_last(_normalize(text), injected) is not None:
+            return text
+        words = injected.lower().split()
+        present = set(text.lower().split())
+        if sum(w in present for w in words) / len(words) >= _REFETCH_MIN_WORDS:
+            return text
+        small = len(text) <= _REFETCH_DIFF_MAX_CHARS and len(before) <= _REFETCH_DIFF_MAX_CHARS
+        return text if small and extract_edit(before, injected, text) is not None else None
 
     @staticmethod
     def _read_pasted(field: TextField, injected: str) -> tuple[str | None, str]:
@@ -482,11 +511,12 @@ class EditWatcher:
         Returns (text, "") or, when it does not show up, (None, the reason as a key of `OUTCOMES`).
         """
         deadline = time.monotonic() + _PASTE_WAIT_S
-        reason = "unreadable"
+        reason = "not_found"
         while True:
             text = field.read()
             if text is None:
-                return None, reason
+                # Dead, whatever it held a moment ago: the caller may fetch the focused element again.
+                return None, "unreadable"
             if len(text) > MAX_FIELD_CHARS:
                 reason = "too_long"
             elif _find_last(_normalize(text), injected) is not None:
@@ -505,7 +535,7 @@ class EditWatcher:
             return
         outcome, detail = verdict.outcome, verdict.detail
         how = _ENDED[ended] if ended != "window" else f"{_ENDED[ended]}, {item.window_s:g} s"
-        if ended == "unreadable" and outcome == "unchanged":
+        if ended == "unreadable" and outcome in ("unchanged", "too_small"):
             # No edit was ever seen, but the field died: "not changed" would claim more than we know.
             outcome = "lost_field"
         if outcome != "suggested":

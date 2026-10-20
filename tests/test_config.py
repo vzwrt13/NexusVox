@@ -5,6 +5,8 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+import pytest
+
 import nexusvox.config as config_module
 from nexusvox.config import (
     EXAMPLE_CONFIG_PATH,
@@ -367,6 +369,64 @@ def test_resolve_compute_type_override_wins():
     assert resolve_compute_type("cuda", "int8") == "int8"
 
 
+def test_log_level_defaults_to_info(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[general]\nlanguage = "en"\n')
+    assert load_config(path).log_level == "INFO"
+    assert Config().log_level == "INFO"
+
+
+def test_log_level_is_read_case_insensitively_and_saved(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[general]\nlog_level = "debug"\n')
+    cfg = load_config(path)
+    assert cfg.log_level == "DEBUG"
+    save_config(cfg, path)
+    assert tomllib.loads(path.read_text())["general"]["log_level"] == "DEBUG"
+    assert load_config(path).log_level == "DEBUG"
+
+
+def test_unknown_log_level_falls_back_to_info(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[general]\nlog_level = "chatty"\n')
+    assert load_config(path).log_level == "INFO"
+
+
+def test_main_applies_the_configured_log_level(monkeypatch):
+    import importlib
+    import logging
+    import sys
+    import types
+
+    class App:
+        def __init__(self, config):
+            pass
+
+        def run(self):
+            raise KeyboardInterrupt
+
+    # The real app module binds PortAudio at import, which CI runners on Linux do not have.
+    monkeypatch.setitem(sys.modules, "nexusvox.app", types.SimpleNamespace(NexusVoxApp=App))
+    monkeypatch.delitem(sys.modules, "nexusvox.__main__", raising=False)
+    entry = importlib.import_module("nexusvox.__main__")
+    seen = {}
+    own = logging.getLogger("nexusvox")
+    previous = own.level
+    monkeypatch.setattr(entry, "load_config", lambda: Config(log_level="DEBUG"))
+    monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
+    try:
+        with pytest.raises(SystemExit) as exit_:
+            entry.main()
+        own_level = own.level
+    finally:
+        own.setLevel(previous)
+        sys.modules.pop("nexusvox.__main__", None)  # it holds the stub app
+    assert exit_.value.code == 0
+    # DEBUG reaches NexusVox's own loggers only, not comtypes or urllib3.
+    assert own_level == logging.DEBUG
+    assert seen["level"] == logging.INFO
+
+
 def test_unknown_hotkey_mode_falls_back_to_hold(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[hotkey]\nmodifiers = ["ctrl", "alt"]\nmode = "double-tap"\n')
@@ -489,12 +549,18 @@ def test_learn_from_edits_roundtrip(tmp_path):
     assert (loaded.enabled, loaded.window_s) == (True, 12.5)
 
 
+def test_learn_from_edits_window_defaults_to_20_seconds():
+    assert LearnFromEditsConfig().window_s == 20.0
+    template = tomllib.loads(EXAMPLE_CONFIG_PATH.read_text(encoding="utf-8"))
+    assert template["learn_from_edits"]["window_s"] == 20.0
+
+
 def test_learn_from_edits_off_when_missing(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("[general]\n", encoding="utf-8")
 
     loaded = load_config(path).learn_from_edits
-    assert (loaded.enabled, loaded.window_s) == (False, 30.0)
+    assert (loaded.enabled, loaded.window_s) == (False, 20.0)
 
 
 def test_paste_key_roundtrip_and_default(tmp_path):

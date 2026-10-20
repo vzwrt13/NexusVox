@@ -421,9 +421,11 @@ async function loadLearnStatus() {
   // A watch that just ended with suggestions: show them without a reload.
   if (lastSuggestedCount !== null && (counts.suggested || 0) > lastSuggestedCount) loadDictionarySuggestions();
   lastSuggestedCount = counts.suggested || 0;
-  const watched = (counts.suggested || 0) + (counts.unchanged || 0);
+  // Outcomes of a watch that ran to its end; everything else is a paste that was skipped.
+  const watchedKeys = new Set(s.watched || []);
+  const watched = Object.entries(counts).filter(([k]) => watchedKeys.has(k)).reduce((n, [, c]) => n + c, 0);
   const skipped = Object.entries(counts)
-    .filter(([k]) => k !== "suggested" && k !== "unchanged")
+    .filter(([k]) => !watchedKeys.has(k))
     .sort((a, b) => b[1] - a[1]);
   const skippedTotal = skipped.reduce((n, [, c]) => n + c, 0);
   learnStatus.className = "status-line" + (s.last && s.last.outcome === "suggested" ? " ok" : "");

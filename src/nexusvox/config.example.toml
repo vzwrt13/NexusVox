@@ -6,6 +6,10 @@ language = "en"
 injection_delay_ms = 500
 # Enable automatic language detection per recording (experimental)
 auto_language_detection = false
+# How much the console log says: "DEBUG", "INFO", "WARNING" or "ERROR".
+# DEBUG applies to NexusVox's own messages; other libraries stay at INFO.
+# Takes effect on the next start.
+log_level = "INFO"
 [hotkey]
 # Press all listed modifiers simultaneously to record
 # Modifier options: ctrl, shift, alt, win (may be empty when a key is set)
@@ -222,7 +226,7 @@ in_terminals = false
 # own. Password fields are never read, and translated or "press enter" dictations are
 # skipped. Also switchable in the dashboard Settings tab.
 enabled = false
-window_s = 30.0
+window_s = 20.0
 
 [remote_mic]
 # Let a phone use NexusVox as its speech recogniser: hold its bubble to dictate, the audio

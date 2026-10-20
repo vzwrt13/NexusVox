@@ -29,6 +29,7 @@ from ..config import (
 from ..db import Database
 from ..diarization import speaker_detection_models
 from ..dictionary import suggest_entries
+from ..edit_watch import WATCHED_KEYS
 from ..extensions import ExtensionRegistry, file_transcript_from_record
 from ..file_cleanup import clean_transcript
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
@@ -310,7 +311,7 @@ class DashboardAPI:
     def get_learn_status(self) -> dict:
         """How the pastes since start ended for learning from edits (`EditWatcher.status`)."""
         if self._get_learn_status is None:
-            return {"counts": {}, "last": None}
+            return {"counts": {}, "watched": list(WATCHED_KEYS), "last": None}
         return self._get_learn_status()
 
     def set_store_audio(self, enabled: bool) -> dict:

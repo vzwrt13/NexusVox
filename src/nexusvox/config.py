@@ -222,6 +222,8 @@ class HotkeyConfig:
 
 
 HOTKEY_MODES = ("hold", "toggle")
+# `[general].log_level`: names of the standard logging levels a user may pick.
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 HOTKEY_MODIFIERS = ("ctrl", "shift", "alt", "win")
 
 # Non-modifier keys a hotkey may end with, name -> Win32 virtual-key code. Layout
@@ -442,7 +444,7 @@ class LearnFromEditsConfig:
     (never a password field)."""
 
     enabled: bool = False
-    window_s: float = 30.0
+    window_s: float = 20.0
 
 
 @dataclass
@@ -495,6 +497,7 @@ class Config:
     language: str = "en"
     injection_delay_ms: int = 500
     auto_language_detection: bool = False
+    log_level: str = "INFO"
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
@@ -510,6 +513,12 @@ class Config:
     polish: PolishConfig = field(default_factory=PolishConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
     remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
+
+
+def _log_level(value: object) -> str:
+    """`[general].log_level` in upper case; INFO when it is not one of `LOG_LEVELS`."""
+    level = str(value).strip().upper()
+    return level if level in LOG_LEVELS else "INFO"
 
 
 def _polish_key(hotkey_data: dict) -> str:
@@ -578,6 +587,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         language=general.get("language", "en"),
         injection_delay_ms=general.get("injection_delay_ms", 500),
         auto_language_detection=general.get("auto_language_detection", False),
+        log_level=_log_level(general.get("log_level", "INFO")),
         hotkey=HotkeyConfig(
             modifiers=hotkey_modifiers,
             key=normalize_hotkey_key(hotkey_key) or "",
@@ -647,7 +657,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         cleanup=_cleanup_config(cleanup_data),
         learn_from_edits=LearnFromEditsConfig(
             enabled=learn_data.get("enabled", False),
-            window_s=float(learn_data.get("window_s", 30.0)),
+            window_s=float(learn_data.get("window_s", 20.0)),
         ),
         remote_mic=RemoteMicConfig(
             enabled=remote_mic_data.get("enabled", False),
@@ -671,6 +681,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f'language = "{config.language}"',
             f"injection_delay_ms = {config.injection_delay_ms}",
             f"auto_language_detection = {'true' if config.auto_language_detection else 'false'}",
+            f'log_level = "{config.log_level}"',
             "",
             "[hotkey]",
             "modifiers = [{}]".format(", ".join(f'"{m}"' for m in config.hotkey.modifiers)),

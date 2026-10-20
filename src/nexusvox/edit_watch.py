@@ -549,14 +549,16 @@ class EditWatcher:
         return text if extract_edit(before, injected, text) is not None else None
 
     @staticmethod
-    def _read_pasted(field: TextField, injected: str, wait_s: float = _PASTE_WAIT_S) -> tuple[str | None, str, bool]:
-        """The field text once the paste shows up in it (apps paste asynchronously), within `wait_s`.
+    def _read_pasted(field: TextField, injected: str, wait_s: float | None = None) -> tuple[str | None, str, bool]:
+        """The field text once the paste shows up in it (apps paste asynchronously).
+
+        Waits up to `wait_s` for it (default `_PASTE_WAIT_S`, read at call time so tests can shorten it).
 
         Returns (text, "", False) or, when it does not show up, (None, the reason as a key of `OUTCOMES`,
         died). `died` says a read failed: the element is gone, and the reason is the last one seen before
         ("unreadable" when it never answered).
         """
-        deadline = time.monotonic() + wait_s
+        deadline = time.monotonic() + (_PASTE_WAIT_S if wait_s is None else wait_s)
         reason = "unreadable"
         while True:
             text = field.read()

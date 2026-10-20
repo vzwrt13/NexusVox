@@ -13,9 +13,9 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 
 **An NVIDIA GPU is strongly recommended.** A CPU-only path exists and needs no Docker, but it is slow enough that dictation stops feeling immediate — see [Performance](#performance) for measured numbers before you choose it.
 
-> **Project status.** NexusVox is published as a reference implementation. It is complete and
-> working, but not under active development — no new features are planned. Issues and pull
-> requests are welcome; responses may be slow.
+> **Project status.** NexusVox is actively maintained and developed. The free app stays open source
+> under the AGPL. A NexusVox Pro edition with paid add-ons is in development; there is no release date
+> yet. Issues and pull requests are welcome.
 
 ![The NexusVox analytics dashboard: a dark interface with tiles for transcription count, average, minimum and maximum words per minute, average duration and minutes saved, above a line chart of transcriptions over time with a date-range filter.](docs/images/dashboard.png)
 
@@ -210,7 +210,7 @@ A commercial licence for the core itself (for example to use it without the AGPL
 
 ## Contributing
 
-Bug reports and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, lint and test commands, and branch conventions. Please read the project status above first, so you know what to expect before spending time on a change.
+Bug reports and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, lint and test commands, and branch conventions. Please read the project status above and the notes in CONTRIBUTING.md first.
 
 ---
 

@@ -1,13 +1,12 @@
 # Contributing to NexusVox
 
-Thanks for your interest. NexusVox is a local speech-to-text tool for Windows, published as a
-reference implementation rather than a product.
+Thanks for your interest. NexusVox is a local speech-to-text tool for Windows. It is actively
+maintained and developed: the free app stays open source, and a NexusVox Pro edition with paid
+add-ons is in development.
 
-Please know what you are walking into: the project is **not under active development**. It
-works and it is finished for its purpose, but no new features are planned, and the maintainer
-does not watch the repository daily. Issues and pull requests are read and welcome, but a
-reply can take a while, and a change that is not clearly a fix may simply not be merged. If
-that is fine with you, everything below applies.
+The maintainer does not watch the repository daily. Issues and pull requests are read and
+welcome, but a reply can take a while, and a change that does not fit the project's direction
+may not be merged. Open an issue first for anything larger than a fix.
 
 ## Before you start
 

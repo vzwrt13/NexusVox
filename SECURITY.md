@@ -18,8 +18,8 @@ NexusVox version, your Windows version, and whether you were on the CPU or the
 GPU path. A proof of concept is welcome but not required — a clear description of
 the mechanism is worth more than a script that only runs on your machine.
 
-**What to expect.** NexusVox is published as a reference implementation and is
-not under active development; the repository is not watched daily. A first reply
+**What to expect.** NexusVox is actively maintained, but the
+repository is not watched daily. A first reply
 may take a couple of weeks. If a report is valid and the fix is small, it will be
 made. If it is valid and the fix is large, that will be said plainly rather than
 left open indefinitely. You are free to disclose publicly after 90 days

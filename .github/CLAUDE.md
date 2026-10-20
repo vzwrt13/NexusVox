@@ -11,10 +11,10 @@
 
 1. Update `version` in `pyproject.toml` **and** `__version__` in `src/nexusvox/__init__.py` -- they must agree
 2. Merge that through a pull request like any other change
-3. Tag the merge commit on `main` with an **annotated** tag:
+3. Write the tag message to `release-notes/v<version>.md` in the same pull request (first line = release title, then features / fixes / docs and upgrade notes). Tag the merge commit on `main` with an **annotated** tag:
 
    ```bash
-   git tag -a v0.2.0        # opens an editor, or use -F -
+   git tag -a v0.2.0 -F release-notes/v0.2.0.md   # or without -F to use an editor
    git push origin v0.2.0
    ```
 

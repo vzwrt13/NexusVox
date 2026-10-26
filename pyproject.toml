@@ -56,7 +56,7 @@ dependencies = [
     "pycaw>=20240210; sys_platform=='win32'",
     "comtypes>=1.4; sys_platform=='win32'",
     # WASAPI loopback (system audio) for meeting_recorder.py
-    "PyAudioWPatch>=0.2.12.14; sys_platform=='win32'",
+    "PyAudioWPatch>=0.2.12.7; sys_platform=='win32'",
 ]
 
 [project.urls]

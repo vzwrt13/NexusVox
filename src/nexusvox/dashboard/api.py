@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -32,9 +33,18 @@ from ..dictionary import suggest_entries
 from ..edit_watch import WATCHED_KEYS
 from ..extensions import ExtensionRegistry, file_transcript_from_record
 from ..file_cleanup import clean_transcript
-from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
+from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_CHUNK_MS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
+from ..meeting_transcribe import (
+    MIX_FILENAME,
+    TRACK_NAMES,
+    convert_track,
+    format_meeting,
+    load_meeting,
+    merge_words,
+    mix_tracks,
+)
 from ..os_commands import NEXUS_ACTIONS
 from ..polish_presets import PolishPreset
 from ..snippets import Snippet, SnippetOption
@@ -425,15 +435,12 @@ class DashboardAPI:
         """Resolve the absolute path to a transcription's audio file."""
         if self._db is None:
             return None
-        from pathlib import Path
-
         from ..models import Transcription
 
         with self._sf() as session:
             row = session.get(Transcription, tid)
             if row and row.audio_path:
-                db_dir = Path(self._config.database.path).resolve().parent
-                return str(db_dir / row.audio_path)
+                return str(self._db_dir() / row.audio_path)
         return None
 
     def retry_transcription(self, tid: int) -> dict:
@@ -674,19 +681,31 @@ class DashboardAPI:
                 if cleaned.text != result.text:
                     cleaned_text = cleaned.text
 
+        return self._store_file_transcription(
+            filename,
+            notes,
+            progress,
+            text=result.text,
+            duration_ms=duration_ms,
+            confidence=result.confidence,
+            words=result.words,
+            cleaned_text=cleaned_text,
+            cleanup_level=cleanup_level,
+        )
+
+    def _store_file_transcription(self, filename: str, notes: list[str], progress, **fields) -> dict:
+        """Save a finished file transcription, run the extension hook and build the job result (blocking).
+
+        `fields` go to `Database.save_file_transcription`; the language and model are the current settings.
+        """
         if progress:
             progress("saving")
         try:
             record = self._db.save_file_transcription(
-                text=result.text,
                 language=self._config.language,
-                duration_ms=duration_ms,
                 original_filename=filename,
                 model=self._config.inference.model,
-                confidence=result.confidence,
-                words=result.words,
-                cleaned_text=cleaned_text,
-                cleanup_level=cleanup_level,
+                **fields,
             )
         except Exception as exc:
             logger.error("Saving the transcription of %s failed: %s", filename, exc)
@@ -705,6 +724,7 @@ class DashboardAPI:
             "notes": notes,
             "extensions": extension_results,
             "id": record.id,
+            "kind": record.kind,
             "text": record.text,
             "cleaned_text": record.cleaned_text,
             "cleanup_level": record.cleanup_level,
@@ -714,6 +734,126 @@ class DashboardAPI:
             "original_filename": record.original_filename,
             "created_at": record.created_at.isoformat() if record.created_at else None,
         }
+
+    # ---- Meetings -----------------------------------------------------------
+
+    def start_meeting_transcription(self, folder: str | Path) -> dict:
+        """Transcribe a recorded meeting folder in the background (the same job registry uploads use)."""
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
+        folder = Path(folder)
+        job = self._file_jobs.start(folder.name, lambda job: self.transcribe_meeting(folder, job=job))
+        if job is None:
+            return {"ok": False, "busy": True, "error": "Another file is still being transcribed"}
+        return {"ok": True, "job_id": job.id}
+
+    def transcribe_meeting(self, folder: str | Path, *, job: FileJob | None = None) -> dict:
+        """Transcribe both tracks of a meeting folder, merge them into one Me/Others transcript, mix
+        `meeting.wav` and save the result as a `kind="meeting"` row (blocking). No upload size limit applies.
+        """
+        folder = Path(folder)
+        progress = job.update if job else None
+        if progress:
+            progress("converting")
+        try:
+            meeting = load_meeting(folder)
+        except Exception as exc:
+            logger.error("Loading meeting %s failed: %s", folder, exc)
+            return {"ok": False, "error": f"Could not load the meeting: {exc}"}
+        notes = list(meeting.notes)
+        if not meeting.tracks:
+            return {"ok": False, "error": "The meeting has no readable audio track"}
+
+        words: dict[str, list] = {}
+        plain: dict[str, str] = {}
+        incomplete: list[str] = []
+        confidences: list[float] = []
+        tracks_16k: list[Path] = []
+        chunk_s = MAX_CHUNK_MS // 1000
+        total_chunks = sum(max(1, -(-t.frames // t.sample_rate // chunk_s)) for t in meeting.tracks.values())
+        done_chunks = 0
+        with tempfile.TemporaryDirectory(prefix="nexusvox-meeting-") as tmp:
+            for name, track in meeting.tracks.items():
+                label = TRACK_NAMES[name]
+                try:
+                    chunks = convert_track(track, Path(tmp) / f"{name}.wav")
+                except Exception as exc:
+                    logger.error("Audio conversion failed for meeting %s: %s", folder, exc)
+                    return {"ok": False, "error": f"Audio conversion failed: {exc}"}
+                tracks_16k.append(Path(tmp) / f"{name}.wav")
+
+                def track_progress(stage, current=0, total=0, base=done_chunks):
+                    if progress:
+                        progress(stage, base + current, total_chunks)
+
+                try:
+                    result = self._transcribe_wav_chunks(chunks, word_timestamps=True, on_progress=track_progress)
+                except Exception as exc:
+                    logger.error("Transcription failed for meeting %s: %s", folder, exc)
+                    return {"ok": False, "error": f"Transcription failed: {exc}"}
+                done_chunks += len(chunks)
+                del chunks  # one track's chunks at a time
+                notes.extend(f"{label}: {n}" for n in result.notes)
+                words[name], plain[name] = list(result.words), result.text
+                if result.confidence is not None:
+                    confidences.append(result.confidence)
+                # The server skips a word whose timing it cannot read; the labelled text is built from timed words.
+                if len(result.words) < len(result.text.split()):
+                    incomplete.append(label)
+
+            if incomplete:
+                # Interleaving needs every word timed: a gap would vanish from the merged text. Keep all the words.
+                notes.append(
+                    f"Word timing is missing or incomplete for {' and '.join(incomplete)}, so the meeting is "
+                    "not interleaved by time: each track's text follows the other."
+                )
+                text = "\n\n".join(f"{TRACK_NAMES[n]}: {plain[n]}" for n in ("mic", "system") if plain.get(n))
+                merged = []
+            else:
+                merged = merge_words(words.get("mic", []), words.get("system", []))
+                text = format_meeting(merged)
+
+            if progress:
+                progress("saving")
+            mix_path: Path | None = folder / MIX_FILENAME
+            try:
+                seconds = mix_tracks(tracks_16k, mix_path)
+            except Exception as exc:
+                logger.exception("Mixing meeting %s failed: %s", folder, exc)
+                notes.append(f"The playable mix could not be written: {exc}")
+                mix_path, seconds = None, max(t.frames / t.sample_rate for t in meeting.tracks.values())
+
+        return self._store_file_transcription(
+            folder.name,
+            notes,
+            progress,
+            text=text,
+            duration_ms=round(seconds * 1000),
+            confidence=sum(confidences) / len(confidences) if confidences else None,
+            words=merged,
+            kind="meeting",
+            audio_path=self._stored_audio_path(mix_path) if mix_path else None,
+        )
+
+    def _stored_audio_path(self, path: Path) -> str:
+        """`path` relative to the database folder when it lies inside it (like recordings), else absolute."""
+        resolved = path.resolve()
+        try:
+            return str(resolved.relative_to(self._db_dir()))
+        except ValueError:
+            return str(resolved)
+
+    def get_file_audio_path(self, tid: int) -> str | None:
+        """Absolute path of the playable audio kept for a file transcription (a meeting's mix), if any."""
+        record = self._db.get_file_transcription(tid) if self._db else None
+        if record is None or not record.audio_path:
+            return None
+        path = self._db_dir() / record.audio_path
+        return str(path) if path.is_file() else None
+
+    def _db_dir(self) -> Path:
+        """The folder of the database file, which recordings' relative `audio_path`s are relative to."""
+        return Path(self._config.database.path).resolve().parent
 
     def _transcribe_wav_chunks(
         self,
@@ -751,6 +891,8 @@ class DashboardAPI:
                 "duration_ms": r.duration_ms,
                 "model": r.model,
                 "original_filename": r.original_filename,
+                "kind": r.kind or "upload",
+                "has_audio": bool(r.audio_path),
                 "confidence": r.confidence,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "exports_unavailable": self.extensions.unavailable_exports(r.id),

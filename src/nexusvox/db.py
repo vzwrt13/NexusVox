@@ -64,6 +64,8 @@ class Database:
             "ALTER TABLE file_transcriptions ADD COLUMN words TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN cleaned_text TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN cleanup_level VARCHAR(10)",
+            "ALTER TABLE file_transcriptions ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'upload'",
+            "ALTER TABLE file_transcriptions ADD COLUMN audio_path VARCHAR(500)",
         ]
         with self._engine.connect() as conn:
             for sql in migrations:
@@ -454,6 +456,8 @@ class Database:
         words: list[Word] | None = None,
         cleaned_text: str | None = None,
         cleanup_level: str | None = None,
+        kind: str = "upload",
+        audio_path: str | None = None,
     ) -> FileTranscription:
         """Save a file-upload transcription record, with per-word timing when there is any.
 
@@ -471,6 +475,8 @@ class Database:
                 words=json.dumps([_word_json(w) for w in words]) if words else None,
                 cleaned_text=cleaned_text,
                 cleanup_level=cleanup_level if cleaned_text else None,
+                kind=kind,
+                audio_path=audio_path,
             )
             session.add(record)
             session.commit()

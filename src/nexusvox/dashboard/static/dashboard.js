@@ -1971,7 +1971,8 @@ async function loadFileTranscriptions() {
         }).join("")}
         ${extensionUploadActions.map((a) => `<button type="button" class="upload-action" data-action="${escapeHtml(a.id)}" data-index="${index}"${runningUploadActions.has(`${a.id}:${item.id}`) ? " disabled" : ""}>${escapeHtml(a.label)}</button>`).join("")}
       </div>
-      <div class="upload-filename">${escapeHtml(item.original_filename)}</div>
+      <div class="upload-filename">${escapeHtml(item.original_filename)}${item.kind === "meeting" ? " (meeting)" : ""}</div>
+      ${item.has_audio ? `<audio class="upload-audio" controls preload="none" src="/api/file-transcriptions/${item.id}/audio"></audio>` : ""}
       <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>
     </div>
   `).join("");

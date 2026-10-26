@@ -68,6 +68,12 @@ def speaker_paragraphs(words: list[Word]) -> list[tuple[int, str]]:
     return [(speaker, " ".join(parts)) for speaker, parts in paragraphs]
 
 
-def format_transcript(words: list[Word]) -> str:
-    """The labelled transcript: "Speaker 1: ..." paragraphs separated by a blank line."""
-    return "\n\n".join(f"Speaker {speaker}: {text}" for speaker, text in speaker_paragraphs(words))
+def format_transcript(words: list[Word], names: dict[int, str] | None = None) -> str:
+    """The labelled transcript: "Speaker 1: ..." paragraphs separated by a blank line.
+
+    `names` maps a speaker number to its label (a meeting uses "Me" and "Others").
+    """
+    names = names or {}
+    return "\n\n".join(
+        f"{names.get(speaker, f'Speaker {speaker}')}: {text}" for speaker, text in speaker_paragraphs(words)
+    )

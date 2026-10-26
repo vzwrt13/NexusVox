@@ -128,6 +128,11 @@ class FileJobs:
             return None
         return job.snapshot(mark_read=True)
 
+    def running_filename(self) -> str | None:
+        """The name of the job that is running now, if any."""
+        with self._lock:
+            return next((j.filename for j in self._jobs.values() if j.state == "running"), None)
+
     def current(self) -> dict | None:
         """The latest job if it is running or no client has read how it ended yet, else None.
 

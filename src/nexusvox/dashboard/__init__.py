@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _PORT = 47392  # Uncommon port to avoid collisions.
 _server_started = False
+_api: DashboardAPI | None = None
 _lock = threading.Lock()
 
 
@@ -159,6 +160,61 @@ def _create_app(api: DashboardAPI) -> Flask:
     def set_store_audio():
         data = request.get_json(force=True)
         return jsonify(api.set_store_audio(bool(data.get("enabled", True))))
+
+    @app.route("/api/settings/meeting-hotkey", methods=["POST"])
+    def set_meeting_hotkey():
+        data = request.get_json(force=True)
+        modifiers = data.get("modifiers", [])
+        if not isinstance(modifiers, list):
+            return jsonify({"error": "modifiers must be a list", **api.get_settings()}), 400
+        result = api.set_meeting_hotkey(modifiers, data.get("key", ""))
+        return jsonify(result), (400 if "error" in result else 200)
+
+    @app.route("/api/settings/meeting-devices", methods=["POST"])
+    def set_meeting_devices():
+        data = request.get_json(force=True)
+        return jsonify(api.set_meeting_devices(data.get("mic", ""), data.get("output", "")))
+
+    @app.route("/api/settings/meeting-consent-hint", methods=["POST"])
+    def set_meeting_consent_hint():
+        data = request.get_json(force=True)
+        return jsonify(api.set_meeting_consent_hint(bool(data.get("enabled", True))))
+
+    # ---- Meeting recording ---------------------------------------------------
+
+    @app.route("/api/meetings/status")
+    def meeting_status():
+        return jsonify(api.get_meeting_status())
+
+    @app.route("/api/meetings/devices")
+    def meeting_devices():
+        return jsonify(api.get_meeting_devices())
+
+    @app.route("/api/meetings/start", methods=["POST"])
+    def meeting_start():
+        result = api.start_meeting()
+        return jsonify(result), (200 if result["ok"] else 500)
+
+    @app.route("/api/meetings/pending")
+    def meeting_pending():
+        return jsonify(api.get_pending_meetings())
+
+    @app.route("/api/meetings/pending/<name>/transcribe", methods=["POST"])
+    def meeting_pending_transcribe(name):
+        result = api.transcribe_pending_meeting(name)
+        if result["ok"]:
+            return jsonify(result)
+        return jsonify(result), (409 if result.get("busy") else 404)
+
+    @app.route("/api/meetings/pending/<name>", methods=["DELETE"])
+    def meeting_pending_delete(name):
+        result = api.delete_pending_meeting(name)
+        return jsonify(result), (200 if result["ok"] else 404 if result["error"] == "Unknown meeting" else 500)
+
+    @app.route("/api/meetings/stop", methods=["POST"])
+    def meeting_stop():
+        result = api.stop_meeting()
+        return jsonify(result), (200 if result["ok"] or result.get("busy") else 500)
 
     @app.route("/api/settings/translate", methods=["POST"])
     def set_translate():
@@ -404,7 +460,15 @@ def _create_app(api: DashboardAPI) -> Flask:
     @app.route("/api/file-transcriptions")
     def file_transcriptions():
         limit = request.args.get("limit", 50, type=int)
-        return jsonify(api.get_file_transcriptions(limit))
+        kind = request.args.get("kind")
+        return jsonify(api.get_file_transcriptions(limit, kind if kind in ("upload", "meeting") else None))
+
+    @app.route("/api/file-transcriptions/<int:tid>", methods=["DELETE"])
+    def delete_file_transcription(tid):
+        result = api.delete_file_transcription(tid)
+        if result["ok"]:
+            return jsonify(result)
+        return jsonify(result), (404 if result["error"].startswith("Unknown") else 500)
 
     @app.route("/api/file-transcriptions/<int:tid>/audio")
     def file_transcription_audio(tid):
@@ -465,9 +529,9 @@ def _create_app(api: DashboardAPI) -> Flask:
     return app
 
 
-def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None) -> None:
-    """Start the Flask server (once) and open the dashboard in the browser."""
-    global _server_started
+def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None = None) -> DashboardAPI:
+    """Start the Flask server (once) without opening the browser, and return its API object."""
+    global _server_started, _api
 
     with _lock:
         if not _server_started:
@@ -491,7 +555,7 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None)
             # Resolve benchmarks dir relative to the project root (CWD).
             benchmarks_dir = Path.cwd() / "benchmarks"
 
-            dashboard_api = DashboardAPI(
+            _api = DashboardAPI(
                 db._session_factory,
                 config,
                 db=db,
@@ -502,7 +566,7 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None)
                 benchmarks_dir=benchmarks_dir,
                 extensions=load_extensions(),
             )
-            flask_app = _create_app(dashboard_api)
+            flask_app = _create_app(_api)
 
             thread = threading.Thread(
                 target=flask_app.run,
@@ -513,5 +577,16 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None)
             thread.start()
             _server_started = True
             logger.info("Dashboard server started on http://127.0.0.1:%d", _PORT)
+        assert _api is not None
+        return _api
 
-    webbrowser.open(f"http://127.0.0.1:{_PORT}")
+
+def running_dashboard_api() -> DashboardAPI | None:
+    """The API object of the dashboard server when it has been started, else None."""
+    return _api
+
+
+def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None, tab: str = "") -> None:
+    """Start the Flask server (once) and open the dashboard in the browser, on `tab` when given."""
+    ensure_dashboard_api(db, config, app)
+    webbrowser.open(f"http://127.0.0.1:{_PORT}" + (f"/#{tab}" if tab else ""))

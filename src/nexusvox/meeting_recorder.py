@@ -21,6 +21,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from . import audio_state
+
 logger = logging.getLogger(__name__)
 
 SAMPLE_WIDTH = 2  # PCM16
@@ -50,22 +52,96 @@ class AudioSource(Protocol):
     def stop(self) -> None: ...
 
 
+_refresh_lock = threading.Lock()
+
+
+def _refresh_devices(sd) -> None:
+    """Make PortAudio notice devices plugged in since it started: it lists them once, at initialisation.
+
+    Re-initialising invalidates open streams, so it only happens while none is open here or in dictation.
+    """
+    with _refresh_lock:
+        if audio_state.streams_open():
+            return
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception:
+            logger.exception("Refreshing the audio device list failed")
+
+
+def _wasapi_index(sd) -> int | None:
+    """Index of the Windows WASAPI host API, whose names are the full ones (MME cuts them at 31 characters)."""
+    for index, api in enumerate(sd.query_hostapis()):
+        if "WASAPI" in api["name"]:
+            return index
+    return None
+
+
+def list_devices() -> dict[str, list[str]]:
+    """Names of the input and the output devices a meeting can use: `{"inputs": [...], "outputs": [...]}`.
+
+    A device that cannot be listed (no audio stack, no PyAudioWPatch) leaves its list empty.
+    """
+    inputs: list[str] = []
+    outputs: list[str] = []
+    try:
+        import sounddevice as sd
+
+        _refresh_devices(sd)
+        wasapi = _wasapi_index(sd)
+        for dev in sd.query_devices():
+            if dev["max_input_channels"] > 0 and (wasapi is None or dev["hostapi"] == wasapi):
+                if dev["name"] not in inputs:
+                    inputs.append(dev["name"])
+    except Exception:
+        logger.exception("Listing the input devices failed")
+    try:
+        import pyaudiowpatch as pyaudio
+
+        pa = pyaudio.PyAudio()
+        try:
+            wasapi_info = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
+            for i in range(wasapi_info["deviceCount"]):
+                dev = pa.get_device_info_by_host_api_device_index(wasapi_info["index"], i)
+                if dev["maxOutputChannels"] > 0 and not dev.get("isLoopbackDevice") and dev["name"] not in outputs:
+                    outputs.append(dev["name"])
+        finally:
+            pa.terminate()
+    except Exception:
+        logger.exception("Listing the output devices failed")
+    return {"inputs": inputs, "outputs": outputs}
+
+
 class MicSource:
-    """The default input device through sounddevice, mono, at the device's native rate.
+    """An input device through sounddevice (the default one, or the one named `device`), mono, at its native rate.
 
     `describe()` pins the device and its rate; `start()` opens exactly that, so the WAV header written
     from `describe()` always matches the stream even if the default input changes in between.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, device: str = "") -> None:
+        self._name = device
         self._stream = None
         self._device: int | None = None
         self._fmt: AudioFormat | None = None
 
+    def _find(self, sd) -> dict:
+        """The named input device (on WASAPI when there is one); the default input when unnamed or gone."""
+        if self._name:
+            _refresh_devices(sd)
+            wasapi = _wasapi_index(sd)
+            for dev in sd.query_devices():
+                if dev["name"] == self._name and dev["max_input_channels"] > 0:
+                    if wasapi is None or dev["hostapi"] == wasapi:
+                        return dev
+            logger.warning("Meeting microphone %r not found; using the default input", self._name)
+        return sd.query_devices(kind="input")
+
     def describe(self) -> AudioFormat:
         import sounddevice as sd
 
-        dev = sd.query_devices(kind="input")
+        dev = self._find(sd)
         self._device = int(dev["index"])
         self._fmt = AudioFormat(int(dev["default_samplerate"]), 1)
         return self._fmt
@@ -84,34 +160,51 @@ class MicSource:
             device=self._device, samplerate=fmt.sample_rate, channels=fmt.channels, dtype="int16", callback=callback
         )
         self._stream.start()
+        audio_state.stream_opened()
 
     def stop(self) -> None:
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+            audio_state.stream_closed()
 
 
 class LoopbackSource:
-    """The default output device in WASAPI loopback mode through PyAudioWPatch (Windows only).
+    """An output device (the default one, or the one named `output`) in WASAPI loopback mode through
+    PyAudioWPatch (Windows only).
 
     Loopback delivers no frames while nothing plays; `TrackWriter` pads that silence. `describe()` opens
     PyAudio once, resolves the device and keeps both until `stop()`, so `start()` opens the very device
     and format the WAV header was written for, without enumerating the devices a second time.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, output: str = "") -> None:
+        self._output = output
         self._pa = None
         self._stream = None
         self._dev: dict | None = None
 
-    @staticmethod
-    def _find_device(pa, pyaudio) -> dict:
+    def _find_device(self, pa, pyaudio) -> dict:
         wasapi = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
         speakers = pa.get_device_info_by_index(wasapi["defaultOutputDevice"])
+        if self._output:
+            for i in range(wasapi["deviceCount"]):
+                dev = pa.get_device_info_by_host_api_device_index(wasapi["index"], i)
+                if dev["name"] == self._output and dev["maxOutputChannels"] > 0 and not dev.get("isLoopbackDevice"):
+                    speakers = dev
+                    break
+            else:
+                logger.warning("Meeting output %r not found; using the default output", self._output)
         if speakers.get("isLoopbackDevice"):
             return speakers
-        for loopback in pa.get_loopback_device_info_generator():
+        loopbacks = list(pa.get_loopback_device_info_generator())
+        # Loopback devices are named "<output> [Loopback]": the exact name first, so an output whose name
+        # contains another's ("Speakers" / "Speakers 2") is never mistaken for it.
+        for loopback in loopbacks:
+            if loopback["name"] == f"{speakers['name']} [Loopback]":
+                return loopback
+        for loopback in loopbacks:
             if speakers["name"] in loopback["name"]:
                 return loopback
         raise RuntimeError(f"No loopback device for output {speakers['name']!r}")

@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 import numpy as np
 import sounddevice as sd
 
+from . import audio_state
 from .config import AudioConfig
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,7 @@ class AudioCapture:
             callback=self._audio_callback,
         )
         self._stream.start()
+        audio_state.stream_opened()
 
     def stop(self) -> None:
         """Stop capturing audio."""
@@ -83,6 +85,7 @@ class AudioCapture:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+            audio_state.stream_closed()
         # Signal end of stream
         if self._loop is not None:
             self._loop.call_soon_threadsafe(self._queue.put_nowait, None)

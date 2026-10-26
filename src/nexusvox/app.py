@@ -20,12 +20,12 @@ from .assistant import parse_assistant_command, send_to_assistant, send_to_servi
 from .audio import AudioCapture
 from .clipboard import ClipboardError
 from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker, resolve_device, save_config
-from .dashboard import open_dashboard
+from .dashboard import ensure_dashboard_api, open_dashboard, running_dashboard_api
 from .db import Database
 from .edit_watch import EditWatcher
 from .extensions import load_extensions
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
-from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, describe_hotkey
+from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, MeetingHotkey, describe_hotkey
 from .injector import foreground_window, inject_text
 from .lang_detect import detect_language
 from .llm import LlmError
@@ -126,6 +126,10 @@ class NexusVoxApp:
             on_command=self._on_hotkey_command,
         )
 
+        # Meeting recording has its own toggle hotkey; dictation is untouched while a meeting runs.
+        self._meeting_hotkey = MeetingHotkey(config.meeting, self._on_meeting_hotkey)
+        self._meeting_toggle_lock = threading.Lock()
+
         # Mutes other apps' microphone sessions while the hotkey is held. Always built
         # (None only when pycaw is missing); `[mic_guard].enabled` is checked per hold so
         # the dashboard toggle is live. Release is unconditional and idempotent.
@@ -188,6 +192,33 @@ class NexusVoxApp:
             self._mic_guard.release_async()
         if self._loop is not None and self._record_stop_event is not None:
             self._loop.call_soon_threadsafe(self._record_stop_event.set)
+
+    def _on_meeting_hotkey(self) -> None:
+        """Called inside the keyboard hook: the work goes to a thread, the hook never blocks."""
+        threading.Thread(target=self._toggle_meeting, name="meeting-toggle", daemon=True).start()
+
+    def _toggle_meeting(self) -> None:
+        """Stop the running meeting, or start one. While the consent hint is on, a start opens the dashboard's
+        Meetings tab instead, where the hint is shown and the recording is started by its button. A press that
+        arrives while the previous one is still being handled (devices opening) is ignored."""
+        if not self._meeting_toggle_lock.acquire(blocking=False):
+            return
+        try:
+            api = ensure_dashboard_api(self._db, self._config, self)
+            result = api.toggle_meeting(ask_consent=True)
+            if result.get("action") == "consent":
+                open_dashboard(self._db, self._config, app=self, tab="meetings")
+                return
+            # A stop that only found the transcriber busy still ended the recording: that is no error.
+            if result.get("ok") or result.get("busy"):
+                _play(beep_stop if result.get("action") == "stop" else beep_start)
+            else:
+                _play(beep_error)
+        except Exception:
+            logger.exception("Meeting hotkey failed")
+            _play(beep_error)
+        finally:
+            self._meeting_toggle_lock.release()
 
     def _on_remote_start(self) -> bool:
         """Called on the loop when a phone starts a recording. False while busy: a cycle
@@ -741,6 +772,7 @@ class NexusVoxApp:
 
         # Start components
         self._hotkey.start()
+        self._meeting_hotkey.start()
         self._tray.start()
 
         logger.info(
@@ -819,6 +851,10 @@ class NexusVoxApp:
         """Clean up all components."""
         logger.info("Shutting down...")
         self._hotkey.stop()
+        self._meeting_hotkey.stop()
+        api = running_dashboard_api()
+        if api is not None:
+            api.shutdown_meeting()
         self._tray.stop()
         self._audio.stop()
         self._edit_watcher.stop()

@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 from pynput import keyboard
 
-from .config import COMMAND_KEY_VKS, HOTKEY_KEY_VKS, HotkeyConfig, OsControlConfig
+from .config import COMMAND_KEY_VKS, HOTKEY_KEY_VKS, HotkeyConfig, MeetingConfig, OsControlConfig
 
 # What a marker key pressed during a recording turns that recording into.
 COMMAND = "command"
@@ -263,7 +263,78 @@ class HotkeyListener:
             self._listener = None
 
 
-def describe_hotkey(config: HotkeyConfig) -> str:
+def _physical_modifiers() -> set[str]:
+    """The modifiers held right now, asked straight from Win32."""
+    user32 = ctypes.windll.user32
+    return {name for name, vks in _MODIFIER_VKS.items() if user32.GetAsyncKeyState(vks[0]) & 0x8000}
+
+
+class MeetingHotkey:
+    """The meeting toggle: one press of modifiers + key calls `on_toggle`, the next press calls it again.
+
+    A listener of its own, so it never touches the dictation hotkey's state and dictation keeps working during
+    a meeting. Same rules as `HotkeyListener`: decided inside the low-level hook on virtual-key codes, the key
+    that completes the chord is swallowed with its repeats and key-up (the modifiers pass through), the key
+    must come last, and the binding is re-read from the shared config on every event, so the dashboard is live.
+    `on_toggle` runs inside the hook: it must hand the work to another thread and return.
+    """
+
+    def __init__(
+        self,
+        config: MeetingConfig,
+        on_toggle: Callable[[], None],
+        physical_modifiers: Callable[[], set[str]] | None = None,
+    ) -> None:
+        self._config = config
+        self._on_toggle = on_toggle
+        self._physical_modifiers = physical_modifiers or _physical_modifiers
+        self._pressed_modifiers: set[str] = set()
+        self._key_swallowed = False  # the key is held since a swallowed key-down
+        self._listener: keyboard.Listener | None = None
+
+    def _handle(self, vk: int, pressed: bool) -> bool:
+        """Feed one key event. Returns True if the event must be swallowed."""
+        key_vk = HOTKEY_KEY_VKS.get(self._config.key)
+        if vk == key_vk:
+            if pressed:
+                if self._key_swallowed:
+                    return True  # auto-repeat while held as part of the chord
+                # The tracked set is only a hint: a key-up the hook never saw (Ctrl+Alt+Del, a lock screen) would
+                # leave a modifier counted as held, so the physical state decides and heals the set. The chord
+                # must match exactly: with more modifiers down it is another shortcut (dictation's paste-last).
+                self._pressed_modifiers &= self._physical_modifiers()
+                if self._pressed_modifiers != set(self._config.modifiers):
+                    return False  # plain typing or another chord
+                self._key_swallowed = True
+                self._on_toggle()
+                return True
+            swallowed, self._key_swallowed = self._key_swallowed, False
+            return swallowed
+        modifier = _VK_TO_MODIFIER.get(vk)
+        if modifier is not None:
+            if pressed:
+                self._pressed_modifiers.add(modifier)
+            else:
+                self._pressed_modifiers.discard(modifier)
+        return False
+
+    def _win32_event_filter(self, msg: int, data) -> None:
+        """pynput hook callback, runs synchronously inside WH_KEYBOARD_LL."""
+        if self._handle(data.vkCode, msg in _PRESS_MESSAGES) and self._listener is not None:
+            self._listener.suppress_event()
+
+    def start(self) -> None:
+        self._listener = keyboard.Listener(win32_event_filter=self._win32_event_filter)
+        self._listener.daemon = True
+        self._listener.start()
+
+    def stop(self) -> None:
+        if self._listener is not None:
+            self._listener.stop()
+            self._listener = None
+
+
+def describe_hotkey(config: HotkeyConfig | MeetingConfig) -> str:
     """Human-readable binding, e.g. "Ctrl+Shift+A" or "Ctrl+Shift+Alt"."""
     parts = [m.capitalize() for m in config.modifiers]
     if config.key:

@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import subprocess
 import tempfile
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -22,10 +24,13 @@ from ..config import (
     SUPPORTED_LANGUAGES,
     Config,
     HotkeyConfig,
+    MeetingConfig,
+    meeting_hotkey_clash,
     normalize_hotkey_key,
     resolve_device,
     save_config,
     validate_hotkey,
+    validate_meeting_hotkey,
 )
 from ..db import Database
 from ..diarization import speaker_detection_models
@@ -36,6 +41,8 @@ from ..file_cleanup import clean_transcript
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_CHUNK_MS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
+from ..meeting_recorder import META_FILENAME, list_devices
+from ..meeting_session import MeetingSession
 from ..meeting_transcribe import (
     MIX_FILENAME,
     TRACK_NAMES,
@@ -62,6 +69,25 @@ logger = logging.getLogger(__name__)
 _MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
 
 
+def _remove_folder(folder: Path) -> None:
+    """Delete a meeting folder so that a failure can be retried: `meeting.json` goes last, because it is what
+    marks the folder as a meeting. A file that is locked (a player, a virus scanner) raises after the others
+    are gone and the folder keeps its `meeting.json`."""
+    first_error: OSError | None = None
+    for entry in sorted(folder.iterdir(), key=lambda p: p.name == META_FILENAME):
+        if entry.name == META_FILENAME and first_error is not None:
+            break
+        try:
+            entry.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            first_error = first_error or exc
+    if first_error is not None:
+        raise first_error
+    folder.rmdir()
+
+
 class DashboardAPI:
     """Methods callable from JavaScript as ``pywebview.api.<method>(...)``."""
 
@@ -76,6 +102,7 @@ class DashboardAPI:
         get_transcriber: Callable[[], BaseTranscriber] | None = None,
         benchmarks_dir: Path | None = None,
         extensions: ExtensionRegistry | None = None,
+        meeting: MeetingSession | None = None,
     ) -> None:
         self._sf = session_factory
         self._config = config
@@ -87,6 +114,10 @@ class DashboardAPI:
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
         self._file_jobs = FileJobs()
         self.extensions = extensions if extensions is not None else ExtensionRegistry()
+        self._meeting = meeting or MeetingSession(config.meeting, self._meetings_dir)
+        # The dashboard and the hotkey both start and stop meetings: one at a time, and a press that arrives
+        # while another is being handled sees its outcome.
+        self._meeting_lock = threading.RLock()
 
     # ---- Models -------------------------------------------------------------
 
@@ -203,6 +234,12 @@ class DashboardAPI:
             "polish_in_terminals": self._config.polish.in_terminals,
             "cleanup_level": self._config.cleanup.level,
             "cleanup_levels": list(CLEANUP_LEVELS),
+            "meeting_modifiers": list(self._config.meeting.modifiers),
+            "meeting_key": self._config.meeting.key,
+            "meeting_hotkey_default": {"modifiers": list(MeetingConfig().modifiers), "key": MeetingConfig().key},
+            "meeting_mic_device": self._config.meeting.mic_device,
+            "meeting_output_device": self._config.meeting.output_device,
+            "meeting_consent_hint": self._config.meeting.consent_hint,
         }
 
     def get_translator_status(self) -> dict:
@@ -238,6 +275,12 @@ class DashboardAPI:
         modifiers = [str(m).lower() for m in modifiers]
         key = str(key or "")
         error = validate_hotkey(modifiers, key)
+        if error is None and meeting_hotkey_clash(
+            self._config.meeting.modifiers,
+            self._config.meeting.key,
+            HotkeyConfig(modifiers=modifiers, key=normalize_hotkey_key(key) or ""),
+        ):
+            error = "The meeting hotkey would also start dictation with that; change the meeting hotkey first"
         if error is not None:
             return {"error": error, **self.get_settings()}
         # Keep the canonical order so the config file and the hint read the same everywhere.
@@ -737,6 +780,164 @@ class DashboardAPI:
 
     # ---- Meetings -----------------------------------------------------------
 
+    def _meetings_dir(self) -> Path:
+        """Where each meeting gets its own folder: `meetings/` inside the audio directory."""
+        return self._db_dir() / self._config.database.audio_dir / "meetings"
+
+    def get_meeting_status(self) -> dict:
+        """Whether a meeting is being recorded and for how long (the dashboard's timer)."""
+        return self._meeting.status()
+
+    def start_meeting(self) -> dict:
+        with self._meeting_lock:
+            try:
+                folder = self._meeting.start()
+            except Exception as exc:
+                logger.error("Starting the meeting recording failed: %s", exc)
+                return {"ok": False, "error": f"Could not start the recording: {exc}"}
+            return {**self._meeting.status(), "ok": True, "folder": folder.name}
+
+    def stop_meeting(self) -> dict:
+        """End the recording and start transcribing it. `busy` means another file is still being transcribed:
+        the recording is safe in `folder` and is listed as waiting for its transcription (`get_pending_meetings`)."""
+        with self._meeting_lock:
+            try:
+                folder = self._meeting.stop()
+            except Exception as exc:
+                logger.error("Stopping the meeting recording failed: %s", exc)
+                return {"ok": False, "error": f"Could not stop the recording: {exc}"}
+            job = self.start_meeting_transcription(folder)
+            if job.get("busy"):
+                job["error"] = "Recording saved, but another file is still being transcribed"
+            return {**job, "folder": folder.name, "recording": False}
+
+    def toggle_meeting(self, *, ask_consent: bool = False) -> dict:
+        """Start a meeting, or stop the running one (the meeting hotkey). `action` says what happened: `stop`,
+        `start`, or `consent` when the hint is on and `ask_consent` is set: nothing was started, the dashboard
+        has to show the hint first. A stopped meeting that could not be transcribed yet is still `ok` for the
+        hotkey (`busy`): the recording itself ended."""
+        with self._meeting_lock:
+            if self._meeting.recording:
+                return {**self.stop_meeting(), "action": "stop"}
+            if ask_consent and self._config.meeting.consent_hint:
+                return {"ok": True, "action": "consent"}
+            return {**self.start_meeting(), "action": "start"}
+
+    def _meeting_folder(self, name: str) -> Path | None:
+        """The folder of a recorded meeting by name, None when the name is not a meeting folder."""
+        if not re.fullmatch(r"meeting-[0-9A-Za-z-]+", name or ""):
+            return None
+        folder = self._meetings_dir() / name
+        return folder if (folder / META_FILENAME).is_file() else None
+
+    def get_pending_meetings(self) -> list[dict]:
+        """Recorded meetings without a transcript: the transcriber was busy, the app quit mid-meeting or the
+        transcription failed. Not the meeting being recorded or transcribed right now. Newest first."""
+        base = self._meetings_dir()
+        if self._db is None or not base.is_dir():
+            return []
+        skip = self._db.meeting_folder_names() | {
+            self._meeting.status().get("folder"),
+            self._file_jobs.running_filename(),
+        }
+        pending = []
+        for folder in base.iterdir():
+            if folder.name in skip or self._meeting_folder(folder.name) is None:
+                continue
+            try:
+                started = json.loads((folder / META_FILENAME).read_text(encoding="utf-8")).get("started_at")
+            except (OSError, ValueError):
+                started = None
+            pending.append({"name": folder.name, "started_at": started})
+        return sorted(pending, key=lambda p: p["name"], reverse=True)
+
+    def transcribe_pending_meeting(self, name: str) -> dict:
+        folder = self._meeting_folder(name)
+        if folder is None or name not in {p["name"] for p in self.get_pending_meetings()}:
+            return {"ok": False, "error": "Unknown meeting"}
+        return self.start_meeting_transcription(folder)
+
+    def delete_pending_meeting(self, name: str) -> dict:
+        folder = self._meeting_folder(name)
+        if folder is None or name not in {p["name"] for p in self.get_pending_meetings()}:
+            return {"ok": False, "error": "Unknown meeting"}
+        try:
+            _remove_folder(folder)
+        except OSError as exc:
+            logger.error("Deleting meeting folder %s failed: %s", folder, exc)
+            return {"ok": False, "error": f"Could not delete the audio files: {exc}"}
+        return {"ok": True}
+
+    def get_meeting_devices(self) -> dict:
+        """Input and output device names to choose from, plus the chosen ones (empty: the default device)."""
+        return {
+            **list_devices(),
+            "mic_device": self._config.meeting.mic_device,
+            "output_device": self._config.meeting.output_device,
+        }
+
+    def set_meeting_hotkey(self, modifiers: list, key: str) -> dict:
+        """Change the meeting hotkey. Live: the listener reads the shared config on every key event."""
+        modifiers = [str(m).lower() for m in modifiers]
+        key = str(key or "")
+        error = validate_meeting_hotkey(modifiers, key, self._config.hotkey)
+        if error is not None:
+            return {"error": error, **self.get_settings()}
+        self._config.meeting.modifiers = [m for m in HOTKEY_MODIFIERS if m in modifiers]
+        self._config.meeting.key = normalize_hotkey_key(key) or ""
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_meeting_devices(self, mic: str, output: str) -> dict:
+        """Used from the next meeting on; an empty name is the system default device."""
+        self._config.meeting.mic_device = str(mic or "")
+        self._config.meeting.output_device = str(output or "")
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_meeting_consent_hint(self, enabled: bool) -> dict:
+        self._config.meeting.consent_hint = bool(enabled)
+        save_config(self._config)
+        return self.get_settings()
+
+    def shutdown_meeting(self) -> None:
+        """Close a running recording when the app quits, so its WAV files get proper headers."""
+        if self._meeting.recording:
+            try:
+                self._meeting.stop()
+            except Exception:
+                logger.exception("Closing the meeting recording on exit failed")
+
+    def delete_file_transcription(self, tid: int) -> dict:
+        """Delete an upload or a meeting with its audio: an upload's stored file, a meeting's whole folder
+        (`mic.wav`, `system.wav`, `meeting.json`, `meeting.wav`). A file that is already gone does not stop it."""
+        record = self._db.get_file_transcription(tid) if self._db else None
+        if record is None:
+            return {"ok": False, "error": "Unknown file transcription"}
+        try:
+            if (record.kind or "upload") == "meeting":
+                self._remove_meeting_files(record)
+            elif record.audio_path:
+                path = (self._db_dir() / record.audio_path).resolve()
+                if path.is_relative_to(self._db_dir()):
+                    path.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.error("Deleting the audio of file transcription %s failed: %s", tid, exc)
+            return {"ok": False, "error": f"Could not delete the audio files: {exc}"}
+        self._db.delete_file_transcription(tid)
+        return {"ok": True}
+
+    def _remove_meeting_files(self, record) -> None:
+        """Remove a meeting's folder: found next to its mix, else by name in the meetings directory.
+        Only a folder named `meeting-*` that holds `meeting.json` is ever removed."""
+        candidates = [self._meetings_dir() / record.original_filename]
+        if record.audio_path:
+            candidates.insert(0, (self._db_dir() / record.audio_path).parent)
+        for folder in candidates:
+            if folder.name.startswith("meeting-") and (folder / META_FILENAME).is_file():
+                _remove_folder(folder)
+                return
+
     def start_meeting_transcription(self, folder: str | Path) -> dict:
         """Transcribe a recorded meeting folder in the background (the same job registry uploads use)."""
         if self._db is None:
@@ -876,11 +1077,11 @@ class DashboardAPI:
             )
         )
 
-    def get_file_transcriptions(self, limit: int = 50) -> list[dict]:
-        """Return file transcription records."""
+    def get_file_transcriptions(self, limit: int = 50, kind: str | None = None) -> list[dict]:
+        """Return file transcription records; `kind` (`upload` / `meeting`) narrows them."""
         if self._db is None:
             return []
-        rows = self._db.get_file_transcriptions(limit)
+        rows = self._db.get_file_transcriptions(limit, kind)
         return [
             {
                 "id": r.id,

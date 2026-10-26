@@ -35,6 +35,21 @@ paste_key = "V"
 # Empty (default) turns it off. Also editable in the dashboard Settings tab.
 polish_key = ""
 
+[meeting]
+# Meeting recording: your microphone and the system output (what the other participants say)
+# are recorded to two tracks and transcribed into one "Me" / "Others" transcript. Start and stop
+# it from the dashboard's Meetings tab or with this toggle hotkey; dictation keeps working during
+# a meeting. Only record when every participant knows (see docs/MEETINGS.md).
+# The hotkey needs at least one modifier and a key, and must not also be the dictation hotkey.
+modifiers = ["ctrl", "alt"]
+key = "M"
+# Devices by name (see the dashboard Meetings tab). Empty: the system default devices.
+mic_device = ""
+output_device = ""
+# Show "Inform all participants before you record" before each recording. The dashboard's
+# "Don't show again" turns it off.
+consent_hint = true
+
 [audio]
 # Sample rate in Hz (must match model expectation)
 sample_rate = 16000

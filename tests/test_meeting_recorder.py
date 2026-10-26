@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+import threading
 import tracemalloc
 import wave
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 
-from nexusvox.meeting_recorder import AudioFormat, MeetingRecorder
+from nexusvox.meeting_recorder import GAP_TOLERANCE_S, AudioFormat, MeetingRecorder, TrackWriter
 
 
 class FakeClock:
@@ -152,15 +154,110 @@ def test_each_meeting_gets_its_own_folder(tmp_path):
     assert a != b
 
 
-def test_failing_source_start_closes_files_and_raises(tmp_path):
+def test_failing_source_start_leaves_nothing_behind_and_raises_the_original_error(tmp_path):
     rec, mic, system, _clock = _recorder(tmp_path, AudioFormat(8000, 1), AudioFormat(8000, 1))
 
     def boom(sink):
         raise RuntimeError("no device")
 
     system.start = boom
-    with pytest.raises(RuntimeError, match="no device"):
+    # A cleanup failure must not mask the start error.
+    original_finish = TrackWriter.finish
+
+    def bad_finish(self, end):
+        original_finish(self, end)
+        raise OSError("disk")
+
+    with patch.object(TrackWriter, "finish", bad_finish), pytest.raises(RuntimeError, match="no device"):
         rec.start()
-    assert mic.stopped
+    assert mic.stopped and system.stopped
     assert not rec.recording
-    assert _wav_info(rec.folder / "mic.wav")[0] == 8000
+    assert rec.folder is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_stop_closes_every_track_and_writes_meta_when_one_fails(tmp_path):
+    rec, mic, system, clock = _recorder(tmp_path, AudioFormat(8000, 1), AudioFormat(8000, 1))
+    folder = rec.start()
+    clock.advance(1.0)
+    mic.push(1.0)
+    system.push(1.0)
+    rec.flush()
+    original_finish = TrackWriter.finish
+
+    def bad_finish(self, end):
+        original_finish(self, end)
+        if self.path.name == "mic.wav":
+            raise OSError("disk full")
+
+    with patch.object(TrackWriter, "finish", bad_finish):
+        rec.stop()
+    assert not rec.recording
+    meta = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))
+    assert meta["ended_at"] is not None
+    assert "disk full" in meta["tracks"]["mic"]["error"]
+    assert "error" not in meta["tracks"]["system"]
+    assert _wav_info(folder / "system.wav")[2] == 8000
+
+
+def test_first_block_pads_the_offset_from_start(tmp_path):
+    rec, _mic, system, clock = _recorder(tmp_path, AudioFormat(8000, 1), AudioFormat(8000, 1))
+    folder = rec.start()
+    clock.advance(0.2)  # below the jitter tolerance, but the lead-in is always aligned
+    system.push(0.1)
+    rec.flush()
+    rec.stop()
+    with wave.open(str(folder / "system.wav"), "rb") as w:
+        lead_in = w.readframes(800)  # 0.2 s elapsed - 0.1 s block = 0.1 s of silence first
+        first_audio = w.readframes(1)
+    assert lead_in == bytes(1600)
+    assert first_audio != bytes(2)
+
+
+def test_fast_device_clock_is_trimmed(tmp_path):
+    rec, _mic, system, clock = _recorder(tmp_path, AudioFormat(8000, 1), AudioFormat(8000, 1))
+    folder = rec.start()
+    for _ in range(100):
+        clock.advance(1.0)
+        system.push(1.001)  # device clock 1000 ppm fast
+    rec.flush()
+    rec.stop()
+    drift_s = abs(_wav_info(folder / "system.wav")[2] - 100 * 8000) / 8000
+    assert drift_s <= GAP_TOLERANCE_S + 0.01
+
+
+def test_blocks_dropped_on_a_full_queue_are_padded(tmp_path):
+    rec, _mic, system, clock = _recorder(tmp_path, AudioFormat(8000, 1), AudioFormat(8000, 1))
+    folder = rec.start()
+    track = rec._tracks["system"]
+    gate = threading.Event()
+    original_write = track.writer.write
+
+    def slow_write(data, arrival):
+        gate.wait()
+        original_write(data, arrival)
+
+    track.writer.write = slow_write
+    # Fill the queue (the stalled writer thread holds one block) and overflow it.
+    sent = 0
+    while track.dropped == 0:
+        clock.advance(0.05)
+        system.push(0.05)
+        sent += 1
+    # The dropped block (0.05 s, under the tolerance) must be put back as silence.
+    gate.set()
+    rec.flush()
+    rec.stop()
+    assert track.dropped >= 1
+    frames = _wav_info(folder / "system.wav")[2]
+    assert frames == round(sent * 0.05 * 8000)
+
+
+def test_format_from_describe_is_what_gets_written(tmp_path):
+    rec, mic, _system, clock = _recorder(tmp_path, AudioFormat(8000, 1), AudioFormat(8000, 1))
+    calls = []
+    original = mic.describe
+    mic.describe = lambda: calls.append(1) or original()
+    rec.start()
+    rec.stop()
+    assert calls == [1]  # describe() once per start; start() does not resolve the device again

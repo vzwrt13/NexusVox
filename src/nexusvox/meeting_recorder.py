@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import queue
+import shutil
 import threading
 import time
 import wave
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_WIDTH = 2  # PCM16
 # A gap shorter than this is device jitter, not silence; it is not padded.
-GAP_TOLERANCE_S = 0.5
+GAP_TOLERANCE_S = 0.25
 # Padding is written in slices of at most this many seconds, so a long silence never allocates a long buffer.
 PAD_SLICE_S = 1.0
 QUEUE_CHUNKS = 4096
@@ -50,20 +51,29 @@ class AudioSource(Protocol):
 
 
 class MicSource:
-    """The default input device through sounddevice, mono, at the device's native rate."""
+    """The default input device through sounddevice, mono, at the device's native rate.
+
+    `describe()` pins the device and its rate; `start()` opens exactly that, so the WAV header written
+    from `describe()` always matches the stream even if the default input changes in between.
+    """
 
     def __init__(self) -> None:
         self._stream = None
+        self._device: int | None = None
+        self._fmt: AudioFormat | None = None
 
     def describe(self) -> AudioFormat:
         import sounddevice as sd
 
-        return AudioFormat(int(sd.query_devices(kind="input")["default_samplerate"]), 1)
+        dev = sd.query_devices(kind="input")
+        self._device = int(dev["index"])
+        self._fmt = AudioFormat(int(dev["default_samplerate"]), 1)
+        return self._fmt
 
     def start(self, sink: Callable[[bytes], None]) -> None:
         import sounddevice as sd
 
-        fmt = self.describe()
+        fmt = self._fmt or self.describe()
 
         def callback(indata, frames, time_info, status) -> None:
             if status:
@@ -71,7 +81,7 @@ class MicSource:
             sink(bytes(indata))
 
         self._stream = sd.RawInputStream(
-            samplerate=fmt.sample_rate, channels=fmt.channels, dtype="int16", callback=callback
+            device=self._device, samplerate=fmt.sample_rate, channels=fmt.channels, dtype="int16", callback=callback
         )
         self._stream.start()
 
@@ -85,12 +95,15 @@ class MicSource:
 class LoopbackSource:
     """The default output device in WASAPI loopback mode through PyAudioWPatch (Windows only).
 
-    Loopback delivers no frames while nothing plays; `TrackWriter` pads that silence.
+    Loopback delivers no frames while nothing plays; `TrackWriter` pads that silence. `describe()` opens
+    PyAudio once, resolves the device and keeps both until `stop()`, so `start()` opens the very device
+    and format the WAV header was written for, without enumerating the devices a second time.
     """
 
     def __init__(self) -> None:
         self._pa = None
         self._stream = None
+        self._dev: dict | None = None
 
     @staticmethod
     def _find_device(pa, pyaudio) -> dict:
@@ -106,24 +119,28 @@ class LoopbackSource:
     def describe(self) -> AudioFormat:
         import pyaudiowpatch as pyaudio
 
-        pa = pyaudio.PyAudio()
+        self.stop()
+        self._pa = pyaudio.PyAudio()
         try:
-            dev = self._find_device(pa, pyaudio)
-            return AudioFormat(int(dev["defaultSampleRate"]), int(dev["maxInputChannels"]))
-        finally:
-            pa.terminate()
+            self._dev = self._find_device(self._pa, pyaudio)
+        except Exception:
+            self.stop()
+            raise
+        return AudioFormat(int(self._dev["defaultSampleRate"]), int(self._dev["maxInputChannels"]))
 
     def start(self, sink: Callable[[bytes], None]) -> None:
         import pyaudiowpatch as pyaudio
 
-        self._pa = pyaudio.PyAudio()
+        if self._dev is None:
+            self.describe()
+        dev = self._dev
+        assert self._pa is not None and dev is not None
+
+        def callback(in_data, frame_count, time_info, status):
+            sink(in_data)
+            return None, pyaudio.paContinue
+
         try:
-            dev = self._find_device(self._pa, pyaudio)
-
-            def callback(in_data, frame_count, time_info, status):
-                sink(in_data)
-                return None, pyaudio.paContinue
-
             self._stream = self._pa.open(
                 format=pyaudio.paInt16,
                 channels=int(dev["maxInputChannels"]),
@@ -144,14 +161,18 @@ class LoopbackSource:
         if self._pa is not None:
             self._pa.terminate()
             self._pa = None
+        self._dev = None
 
 
 class TrackWriter:
     """Streams one track to a WAV file and keeps it aligned with the shared start time.
 
     `write` is told when each block arrived. A block's audio ends at its arrival, so the frames the track
-    should hold before it follow from the clock; when the file holds fewer by more than `GAP_TOLERANCE_S`
-    (a loopback device that sent nothing during silence), zeros fill the difference.
+    should hold before it follow from the clock. The very first block pads the whole offset from `t0`. After
+    that a difference within `GAP_TOLERANCE_S` is device jitter and left alone; a larger deficit (a loopback
+    that sent nothing during silence) is filled with zeros, and a larger surplus (a device clock running
+    fast) is dropped from the start of the block. So a track never drifts more than the tolerance from the
+    clock, and `finish()` pads it up to the stop time.
     """
 
     def __init__(self, path: Path, fmt: AudioFormat, t0: float) -> None:
@@ -159,32 +180,43 @@ class TrackWriter:
         self.fmt = fmt
         self._t0 = t0
         self.frames = 0
+        self._started = False
+        self._closed = False
+        self.frame_bytes = SAMPLE_WIDTH * fmt.channels
         self._wav = wave.open(str(path), "wb")  # noqa: SIM115 - closed in finish()
         self._wav.setnchannels(fmt.channels)
         self._wav.setsampwidth(SAMPLE_WIDTH)
         self._wav.setframerate(fmt.sample_rate)
-        self._frame_bytes = SAMPLE_WIDTH * fmt.channels
 
-    def _pad(self, frames: int) -> None:
+    def pad(self, frames: int) -> None:
         slice_frames = max(1, int(PAD_SLICE_S * self.fmt.sample_rate))
         while frames > 0:
             n = min(frames, slice_frames)
-            self._wav.writeframes(bytes(n * self._frame_bytes))
+            self._wav.writeframes(bytes(n * self.frame_bytes))
             self.frames += n
             frames -= n
 
     def write(self, data: bytes, arrival: float) -> None:
-        block_frames = len(data) // self._frame_bytes
-        expected = round((arrival - self._t0) * self.fmt.sample_rate) - block_frames
-        deficit = expected - self.frames
-        if deficit > GAP_TOLERANCE_S * self.fmt.sample_rate:
-            self._pad(deficit)
-        self._wav.writeframes(data[: block_frames * self._frame_bytes])
+        block_frames = len(data) // self.frame_bytes
+        data = data[: block_frames * self.frame_bytes]
+        deficit = round((arrival - self._t0) * self.fmt.sample_rate) - block_frames - self.frames
+        tolerance = GAP_TOLERANCE_S * self.fmt.sample_rate if self._started else 0
+        self._started = True
+        if deficit > tolerance:
+            self.pad(deficit)
+        elif -deficit > tolerance:
+            drop = min(block_frames, -deficit)
+            data = data[drop * self.frame_bytes :]
+            block_frames -= drop
+        self._wav.writeframes(data)
         self.frames += block_frames
 
     def finish(self, end: float) -> None:
+        if self._closed:
+            return
+        self._closed = True
         try:
-            self._pad(round((end - self._t0) * self.fmt.sample_rate) - self.frames)
+            self.pad(round((end - self._t0) * self.fmt.sample_rate) - self.frames)
         finally:
             self._wav.close()
 
@@ -199,6 +231,8 @@ class _Track:
         self._clock = clock
         self._queue: queue.Queue[tuple[float, bytes] | None] = queue.Queue(QUEUE_CHUNKS)
         self._thread = threading.Thread(target=self._run, name=f"meeting-{name}", daemon=True)
+        self._lock = threading.Lock()
+        self._lost_frames = 0
         self.dropped = 0
         self.error: str | None = None
 
@@ -207,12 +241,21 @@ class _Track:
         try:
             self._queue.put_nowait((self._clock(), data))
         except queue.Full:
-            self.dropped += 1
+            with self._lock:
+                self.dropped += 1
+                self._lost_frames += len(data) // self.writer.frame_bytes
+
+    def _take_lost(self) -> int:
+        with self._lock:
+            lost, self._lost_frames = self._lost_frames, 0
+        return lost
 
     def _run(self) -> None:
         while (item := self._queue.get()) is not None:
             if self.error is None:
                 try:
+                    # Blocks lost to a full queue were part of the timeline: put their silence back first.
+                    self.writer.pad(self._take_lost())
                     self.writer.write(item[1], item[0])
                 except Exception as exc:  # disk full, file removed: keep draining, report at the end
                     self.error = str(exc)
@@ -226,9 +269,18 @@ class _Track:
     def flush(self) -> None:
         self._queue.join()
 
-    def end(self) -> None:
-        self._queue.put(None)
-        self._thread.join()
+    def end(self, end: float) -> None:
+        """Drain the queue, then close the file; a failure is recorded, never raised."""
+        if self._thread.is_alive():
+            self._queue.put(None)
+            self._thread.join()
+        try:
+            if self.error is None:
+                self.writer.pad(self._take_lost())
+            self.writer.finish(end)
+        except Exception as exc:
+            self.error = self.error or str(exc)
+            logger.error("Closing meeting %s track failed: %s", self.name, exc)
 
 
 class MeetingRecorder:
@@ -265,40 +317,51 @@ class MeetingRecorder:
         folder.mkdir(parents=True)
         return folder
 
+    def _stop_sources(self) -> None:
+        for name, source in self._sources.items():
+            try:
+                source.stop()
+            except Exception:
+                logger.exception("Stopping meeting source %s failed", name)
+
     def start(self) -> Path:
+        """Begin recording; on failure nothing is left behind (no folder, no open file) and the error is raised."""
         if self.recording:
             raise RuntimeError("Meeting recording already running")
-        self._started_at = self._now()
-        t0 = self._clock()
-        folder = self._new_folder(self._started_at)
+        folder: Path | None = None
         tracks: dict[str, _Track] = {}
         try:
+            # Resolve every device before the clock starts: t0 must not include device enumeration.
+            formats = {name: source.describe() for name, source in self._sources.items()}
+            self._started_at = self._now()
+            folder = self._new_folder(self._started_at)
+            t0 = self._clock()
             for name, source in self._sources.items():
-                writer = TrackWriter(folder / f"{name}.wav", source.describe(), t0)
+                writer = TrackWriter(folder / f"{name}.wav", formats[name], t0)
                 tracks[name] = _Track(name, source, writer, self._clock)
-            self._tracks = tracks
             self.folder = folder
+            self._tracks = tracks
             self._write_meta(ended_at=None)
             for track in tracks.values():
                 track.begin()
             for track in tracks.values():
                 track.source.start(track.sink)
-        except Exception:
-            self._abort(tracks)
+        except BaseException:
+            self._abort(tracks, folder)
             raise
         logger.info("Meeting recording started: %s", folder)
         return folder
 
-    def _abort(self, tracks: dict[str, _Track]) -> None:
+    def _abort(self, tracks: dict[str, _Track], folder: Path | None) -> None:
+        """Undo a failed start: stop every source, close every file, delete the folder."""
         self._tracks = {}
+        self._stop_sources()
         for track in tracks.values():
-            try:
-                track.source.stop()
-            except Exception:
-                logger.exception("Stopping meeting source %s failed", track.name)
-            if track._thread.is_alive():
-                track.end()
-            track.writer.finish(self._clock())
+            track.end(self._clock())
+        self.folder = None
+        self._started_at = None
+        if folder is not None:
+            shutil.rmtree(folder, ignore_errors=True)
 
     def flush(self) -> None:
         """Wait until every block received so far is on disk."""
@@ -306,20 +369,18 @@ class MeetingRecorder:
             track.flush()
 
     def stop(self) -> Path:
+        """Stop recording. Every track is closed even if another fails; failures land in `meeting.json`."""
         if not self.recording:
             raise RuntimeError("No meeting recording running")
         tracks = self._tracks
-        for track in tracks.values():
-            try:
-                track.source.stop()
-            except Exception:
-                logger.exception("Stopping meeting source %s failed", track.name)
+        self._stop_sources()
         end = self._clock()
-        for track in tracks.values():
-            track.end()
-            track.writer.finish(end)
-        self._tracks = {}
-        self._write_meta(ended_at=self._now(), tracks=tracks)
+        try:
+            for track in tracks.values():
+                track.end(end)
+        finally:
+            self._tracks = {}
+            self._write_meta(ended_at=self._now(), tracks=tracks)
         logger.info("Meeting recording stopped: %s", self.folder)
         assert self.folder is not None
         return self.folder
@@ -366,8 +427,11 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO)
     recorder = MeetingRecorder(args.dir)
     print(f"Recording to {recorder.start()} - Ctrl+C to stop")
+    deadline = time.monotonic() + args.seconds if args.seconds > 0 else None
     try:
-        time.sleep(args.seconds) if args.seconds > 0 else threading.Event().wait()
+        # A timed wait: an untimed lock wait is not interrupted by Ctrl+C on Windows.
+        while deadline is None or time.monotonic() < deadline:
+            time.sleep(0.5)
     except KeyboardInterrupt:
         pass
     print(f"Saved {recorder.stop()}")

@@ -499,7 +499,10 @@ class _NamedRecorder(FakeRecorder):
 
 
 def _app(monkeypatch, result, beeps, opened):
-    app_module = pytest.importorskip("nexusvox.app", reason="nexusvox.app needs the Windows runtime")
+    try:
+        import nexusvox.app as app_module
+    except Exception:  # Windows-only imports (pynput hook, tray, SendInput, PortAudio) on other platforms
+        pytest.skip("nexusvox.app needs the Windows runtime")
     app = app_module.NexusVoxApp.__new__(app_module.NexusVoxApp)
     app._meeting_toggle_lock = threading.Lock()
     app._db, app._config = None, Config()
@@ -647,8 +650,8 @@ def test_an_output_named_like_another_one_gets_its_own_loopback():
     assert LoopbackSource("Speakers (Realtek) 2")._find_device(FakePa(), FakePyAudio)["index"] == 12
 
 
-def test_portaudio_is_only_refreshed_while_no_stream_is_open(monkeypatch):
-    from nexusvox import audio, meeting_recorder
+def test_portaudio_is_only_refreshed_while_no_stream_is_open():
+    from nexusvox import audio_state, meeting_recorder
 
     calls: list[str] = []
 
@@ -665,9 +668,10 @@ def test_portaudio_is_only_refreshed_while_no_stream_is_open(monkeypatch):
     assert calls == ["terminate", "initialize"]
 
     calls.clear()
-    monkeypatch.setattr(audio, "_active", 1)  # a dictation stream is open
-    meeting_recorder._refresh_devices(FakeSd)
-    monkeypatch.setattr(audio, "_active", 0)
-    monkeypatch.setattr(meeting_recorder, "_mic_streams", 1)  # or a meeting one
-    meeting_recorder._refresh_devices(FakeSd)
+    audio_state.stream_opened()  # a dictation or meeting stream is open
+    try:
+        meeting_recorder._refresh_devices(FakeSd)
+    finally:
+        audio_state.stream_closed()
     assert calls == []
+    assert audio_state.streams_open() == 0

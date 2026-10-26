@@ -21,6 +21,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from . import audio_state
+
 logger = logging.getLogger(__name__)
 
 SAMPLE_WIDTH = 2  # PCM16
@@ -50,8 +52,7 @@ class AudioSource(Protocol):
     def stop(self) -> None: ...
 
 
-_streams_lock = threading.Lock()
-_mic_streams = 0  # meeting microphone streams open right now
+_refresh_lock = threading.Lock()
 
 
 def _refresh_devices(sd) -> None:
@@ -59,10 +60,8 @@ def _refresh_devices(sd) -> None:
 
     Re-initialising invalidates open streams, so it only happens while none is open here or in dictation.
     """
-    from . import audio
-
-    with _streams_lock:
-        if _mic_streams or audio.capture_active():
+    with _refresh_lock:
+        if audio_state.streams_open():
             return
         try:
             sd._terminate()
@@ -148,7 +147,6 @@ class MicSource:
         return self._fmt
 
     def start(self, sink: Callable[[bytes], None]) -> None:
-        global _mic_streams
         import sounddevice as sd
 
         fmt = self._fmt or self.describe()
@@ -162,17 +160,14 @@ class MicSource:
             device=self._device, samplerate=fmt.sample_rate, channels=fmt.channels, dtype="int16", callback=callback
         )
         self._stream.start()
-        with _streams_lock:
-            _mic_streams += 1
+        audio_state.stream_opened()
 
     def stop(self) -> None:
-        global _mic_streams
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
             self._stream = None
-            with _streams_lock:
-                _mic_streams -= 1
+            audio_state.stream_closed()
 
 
 class LoopbackSource:

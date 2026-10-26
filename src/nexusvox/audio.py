@@ -5,23 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import threading
 from collections.abc import AsyncIterator
 
 import numpy as np
 import sounddevice as sd
 
+from . import audio_state
 from .config import AudioConfig
 
 logger = logging.getLogger(__name__)
-
-_active = 0  # dictation streams open right now
-_active_lock = threading.Lock()
-
-
-def capture_active() -> bool:
-    """Whether a dictation stream is open: PortAudio must not be re-initialised meanwhile."""
-    return _active > 0
 
 
 class AudioCapture:
@@ -62,7 +54,6 @@ class AudioCapture:
 
     def start(self) -> None:
         """Start capturing audio from the default microphone."""
-        global _active
         self._loop = asyncio.get_event_loop()
         self._chunk_count = 0
         # Calculate frames per callback to produce ~chunk_size bytes
@@ -86,18 +77,15 @@ class AudioCapture:
             callback=self._audio_callback,
         )
         self._stream.start()
-        with _active_lock:
-            _active += 1
+        audio_state.stream_opened()
 
     def stop(self) -> None:
         """Stop capturing audio."""
-        global _active
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
             self._stream = None
-            with _active_lock:
-                _active -= 1
+            audio_state.stream_closed()
         # Signal end of stream
         if self._loop is not None:
             self._loop.call_soon_threadsafe(self._queue.put_nowait, None)

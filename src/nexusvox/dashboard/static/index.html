@@ -17,6 +17,7 @@
       <button class="tab active" data-tab="settings">Settings</button>
       <button class="tab" data-tab="analytics">Analytics</button>
       <button class="tab" data-tab="edit">Edit</button>
+      <button class="tab" data-tab="meetings">Meetings</button>
       <button class="tab" data-tab="upload">Upload</button>
       <button class="tab" data-tab="review">Review</button>
       <button class="tab tab-dev" data-tab="dev" data-dev-only style="display:none">Dev</button>
@@ -531,6 +532,79 @@
 
       <h3 class="upload-history-heading">Previous Uploads</h3>
       <div id="upload-list" class="flagged-list"></div>
+    </section>
+    <!-- Meetings Tab -->
+    <section id="tab-meetings" class="tab-content">
+      <h2 class="edit-heading">Meetings</h2>
+      <p class="settings-hint">Records your microphone and the system audio (what the other participants say) and turns them into one transcript with <em>Me</em> and <em>Others</em>. Dictation keeps working during a meeting.</p>
+
+      <div class="settings-card meeting-card">
+        <div class="meeting-controls">
+          <span id="meeting-indicator" class="meeting-indicator" aria-hidden="true"></span>
+          <span id="meeting-timer" class="meeting-timer">00:00</span>
+          <button type="button" class="flagged-save-btn" id="meeting-toggle">Start recording</button>
+        </div>
+        <p id="meeting-status" class="status-line" hidden></p>
+        <div id="meeting-progress" class="upload-progress" style="display: none;">
+          <progress id="meeting-progress-bar" max="100" value="0"></progress>
+        </div>
+        <p class="settings-hint">Hotkey: <span id="meeting-hotkey-keycaps" class="keycaps"></span> (press to start, press again to stop).</p>
+
+        <div id="meeting-consent" class="meeting-consent" role="dialog" aria-labelledby="meeting-consent-title" hidden>
+          <h3 id="meeting-consent-title">Inform all participants before you record</h3>
+          <p>Recording a conversation without everyone's consent can be a criminal offence (in Germany, &sect;&nbsp;201 StGB). Tell the participants that you are recording.</p>
+          <label class="meeting-consent-skip"><input type="checkbox" id="meeting-consent-skip"> Don't show this again</label>
+          <div class="hotkey-actions">
+            <button type="button" class="flagged-save-btn" id="meeting-consent-ok">Start recording</button>
+            <button type="button" class="period-btn" id="meeting-consent-cancel">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-card meeting-card">
+        <h4 class="nexus-section-title">Meeting settings</h4>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Meeting hotkey</h3>
+            <p>Starts and stops a meeting from anywhere. It needs a key and at least one modifier, and must not be the dictation hotkey. Documentation: <code>docs/MEETINGS.md</code>.</p>
+            <p id="meeting-hotkey-status" class="status-line" hidden></p>
+          </div>
+          <div class="hotkey-editor">
+            <div class="hotkey-mods" id="meeting-hotkey-mods">
+              <label class="hotkey-mod"><input type="checkbox" value="ctrl"> Ctrl</label>
+              <label class="hotkey-mod"><input type="checkbox" value="shift"> Shift</label>
+              <label class="hotkey-mod"><input type="checkbox" value="alt"> Alt</label>
+              <label class="hotkey-mod"><input type="checkbox" value="win"> Win</label>
+              <span class="hotkey-plus">+</span>
+              <select id="meeting-hotkey-key" class="select-input hotkey-key" aria-label="Meeting hotkey key"></select>
+            </div>
+          </div>
+        </div>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Microphone</h3>
+            <p>Your side of the conversation. Applies from the next meeting.</p>
+          </div>
+          <select id="meeting-mic-select" class="select-input" aria-label="Meeting microphone"></select>
+        </div>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Output device</h3>
+            <p>The device the other participants are played on (it is recorded, not changed). Applies from the next meeting.</p>
+          </div>
+          <select id="meeting-output-select" class="select-input" aria-label="Meeting output device"></select>
+        </div>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Show the consent hint</h3>
+            <p>Reminds you to inform all participants before each recording. With it on, the meeting hotkey opens this tab so you can confirm.</p>
+          </div>
+          <label class="toggle"><input type="checkbox" id="meeting-consent-toggle"><span class="toggle-slider"></span></label>
+        </div>
+      </div>
+
+      <h3 class="upload-history-heading">Previous Meetings</h3>
+      <div id="meeting-list" class="flagged-list"></div>
     </section>
     <!-- Review Tab -->
     <section id="tab-review" class="tab-content">

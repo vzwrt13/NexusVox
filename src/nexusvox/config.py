@@ -266,6 +266,40 @@ def validate_hotkey(modifiers: list[str], key: str) -> str | None:
 
 
 @dataclass
+class MeetingConfig:
+    """Meeting recording (microphone + system audio) started from the dashboard or its own hotkey.
+
+    The hotkey is a toggle and always needs a key, so it never collides with the dictation hotkey; the
+    default Ctrl+Alt+M leaves the default dictation chord (Ctrl+Shift+Alt) untouched. Empty device names
+    mean the system default devices.
+    """
+
+    modifiers: list[str] = field(default_factory=lambda: ["ctrl", "alt"])
+    key: str = "M"
+    mic_device: str = ""
+    output_device: str = ""
+    # Show "Inform all participants before you record" before each recording; off after "don't show again".
+    consent_hint: bool = True
+
+
+def validate_meeting_hotkey(modifiers: list[str], key: str, dictation: HotkeyConfig) -> str | None:
+    """Error message for a meeting binding that is unusable or would also trigger dictation."""
+    error = validate_hotkey(modifiers, key)
+    if error is not None:
+        return error
+    if not normalize_hotkey_key(key):
+        return "The meeting hotkey needs a key"
+    if not modifiers:
+        return "The meeting hotkey needs at least one modifier"
+    chord = set(modifiers)
+    if normalize_hotkey_key(key) == dictation.key and chord == set(dictation.modifiers):
+        return "That is the dictation hotkey"
+    if not dictation.key and set(dictation.modifiers) <= chord:
+        return "That chord would also start dictation; leave out one of its modifiers"
+    return None
+
+
+@dataclass
 class AudioConfig:
     sample_rate: int = 16_000
     chunk_size: int = 4096
@@ -499,6 +533,7 @@ class Config:
     auto_language_detection: bool = False
     log_level: str = "INFO"
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
+    meeting: MeetingConfig = field(default_factory=MeetingConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
@@ -547,6 +582,13 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     if validate_hotkey(hotkey_modifiers, hotkey_key) is not None:
         # An unusable binding would make the app unreachable; fall back to the default.
         hotkey_modifiers, hotkey_key = ["ctrl", "shift", "alt"], ""
+    meeting_data = data.get("meeting", {})
+    meeting_modifiers = [str(m).lower() for m in meeting_data.get("modifiers", ["ctrl", "alt"])]
+    meeting_key = str(meeting_data.get("key", "M"))
+    hotkey_config = HotkeyConfig(modifiers=hotkey_modifiers, key=normalize_hotkey_key(hotkey_key) or "")
+    if validate_meeting_hotkey(meeting_modifiers, meeting_key, hotkey_config) is not None:
+        # An unusable binding in the file falls back to the default, like the dictation hotkey.
+        meeting_modifiers, meeting_key = ["ctrl", "alt"], "M"
     audio_data = data.get("audio", {})
     inference_data = data.get("inference", {})
     custom_data = inference_data.get("custom", {})
@@ -594,6 +636,13 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             mode=hotkey_mode if hotkey_mode in HOTKEY_MODES else "hold",
             paste_key=normalize_hotkey_key(str(hotkey_data.get("paste_key", "V"))) or "",
             polish_key=_polish_key(hotkey_data),
+        ),
+        meeting=MeetingConfig(
+            modifiers=meeting_modifiers,
+            key=normalize_hotkey_key(meeting_key) or "M",
+            mic_device=str(meeting_data.get("mic_device", "")),
+            output_device=str(meeting_data.get("output_device", "")),
+            consent_hint=bool(meeting_data.get("consent_hint", True)),
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
@@ -689,6 +738,13 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f'mode = "{config.hotkey.mode}"',
             f'paste_key = "{config.hotkey.paste_key}"',
             f'polish_key = "{config.hotkey.polish_key}"',
+            "",
+            "[meeting]",
+            "modifiers = [{}]".format(", ".join(f'"{m}"' for m in config.meeting.modifiers)),
+            f'key = "{config.meeting.key}"',
+            f"mic_device = {json.dumps(config.meeting.mic_device)}",
+            f"output_device = {json.dumps(config.meeting.output_device)}",
+            f"consent_hint = {'true' if config.meeting.consent_hint else 'false'}",
             "",
             "[audio]",
             f"sample_rate = {config.audio.sample_rate}",

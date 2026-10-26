@@ -488,12 +488,20 @@ class Database:
         with self._session_factory() as session:
             return session.get(FileTranscription, transcription_id)
 
-    def get_file_transcriptions(self, limit: int = 50) -> list[FileTranscription]:
-        """Get file transcriptions, newest first."""
+    def get_file_transcriptions(self, limit: int = 50, kind: str | None = None) -> list[FileTranscription]:
+        """Get file transcriptions, newest first; `kind` (`upload` / `meeting`) narrows them."""
         with self._session_factory() as session:
-            return (
-                session.query(FileTranscription)
-                .order_by(FileTranscription.created_at.desc(), FileTranscription.id.desc())
-                .limit(limit)
-                .all()
-            )
+            query = session.query(FileTranscription)
+            if kind is not None:
+                query = query.filter(FileTranscription.kind == kind)
+            return query.order_by(FileTranscription.created_at.desc(), FileTranscription.id.desc()).limit(limit).all()
+
+    def delete_file_transcription(self, transcription_id: int) -> bool:
+        """Remove one file transcription row; False for an unknown id."""
+        with self._session_factory() as session:
+            row = session.get(FileTranscription, transcription_id)
+            if row is None:
+                return False
+            session.delete(row)
+            session.commit()
+            return True

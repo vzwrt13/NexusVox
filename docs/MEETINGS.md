@@ -1,0 +1,57 @@
+# Meeting capture
+
+NexusVox can record a meeting or call without a bot in it: it captures your microphone and the
+system audio (what the other participants say) on your PC, transcribes both and gives you one
+transcript with **Me** and **Others**. Everything stays on your machine; the audio goes only to the
+transcription model you have configured (see the Requirements in the README).
+
+Dictation keeps working while a meeting is recorded.
+
+## Record a meeting
+
+- **Dashboard:** open the **Meetings** tab and press **Start recording**. A timer and a red indicator
+  show that it runs. **Stop recording** ends it and starts the transcription; the progress shows in
+  the same tab and the finished meeting appears under *Previous Meetings*.
+- **Hotkey:** the meeting hotkey (default `Ctrl+Alt+M`, `[meeting]` in `config.toml`, also editable
+  in the Meetings tab) starts and stops a meeting from anywhere. It is separate from the dictation
+  hotkey and needs a key plus at least one modifier; a binding that would also start dictation is
+  refused. While the consent hint is on, the hotkey opens the Meetings tab to start a meeting, so the
+  hint is shown first; stopping always works straight from the hotkey. A short beep confirms start
+  and stop, an error beep says it failed.
+
+Each meeting is stored in its own folder `audio/meetings/meeting-YYYYMMDD-HHMMSS/` next to the
+database: `mic.wav` and `system.wav` (the two tracks), `meeting.wav` (a playable mix, written after
+the transcription) and `meeting.json`. If another file is still being transcribed when you stop, the
+recording is kept in its folder and the dashboard says so.
+
+Pick a microphone and an output device in the Meetings tab if the system defaults are not the ones you
+use for the call. The output device is only *recorded*, never changed: choose the device the call is
+played on.
+
+## Consent: tell everyone before you record
+
+**Inform all participants before you record.** In Germany, recording the spoken word of others
+without their consent can be a criminal offence (§ 201 StGB, violation of the confidentiality of the
+spoken word), and other countries have comparable rules, some of them requiring every party to agree.
+This is not legal advice; you are responsible for using the feature lawfully.
+
+NexusVox shows this reminder before each recording from the dashboard. *Don't show this again* (or the
+*Show the consent hint* toggle in the Meetings tab, `[meeting].consent_hint`) turns it off.
+
+## Quality: use a headset
+
+- **Headset or earphones.** With speakers, the microphone also picks up the other participants and
+  your transcript gets their words twice. NexusVox removes runs of such echo from *Me*, but a headset
+  avoids it at the source and gives clean separation.
+- **Bluetooth headsets drop in quality** while the microphone is in use: Windows switches them to the
+  hands-free profile, which is narrow-band and sounds muffled, and the transcription suffers. Use the
+  PC's own microphone, a wired headset or a USB headset for meetings, or a Bluetooth headset together
+  with another microphone.
+- Silence on the system track is normal: Windows delivers no audio while nothing plays, and NexusVox
+  pads it so both tracks stay as long as the meeting.
+
+## Delete a meeting
+
+Every entry in the Upload history and every meeting in the Meetings tab has a **Delete** button with a
+confirmation in the page. It removes the entry and its audio: for an upload its stored audio, for a
+meeting the whole folder (`mic.wav`, `system.wav`, `meeting.wav`, `meeting.json`).

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
 import struct
 import time
 import wave
@@ -16,17 +18,18 @@ from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.diarization import format_transcript
 from nexusvox.extensions import Extension, ExtensionRegistry
 from nexusvox.meeting_transcribe import (
+    ECHO_MIN_RUN,
     MAX_GAIN,
     PEAK_LIMIT,
     TARGET_RMS,
     balance_gain,
+    convert_track,
     drop_echo,
     load_meeting,
     merge_words,
     mix_tracks,
     repair_wav_header,
     speech_rms,
-    track_to_wav_chunks,
 )
 from nexusvox.transcriber import TranscriptionResult, Word
 
@@ -44,12 +47,23 @@ def tone(seconds: float, amplitude: float, rate: int = 16_000) -> np.ndarray:
     return (amplitude * np.sin(2 * np.pi * 220 * t)).astype(np.int16)
 
 
-def zero_header(path: Path) -> None:
-    """What a killed recorder leaves: the placeholder header `wave` writes at open, never patched."""
+def zero_header(path: Path, *, age_s: float = 3600) -> None:
+    """What a killed recorder leaves: the placeholder header `wave` writes at open, never patched.
+
+    The file is also made `age_s` old: a recording that is still running looks the same but is fresh.
+    """
     raw = bytearray(path.read_bytes())
     struct.pack_into("<I", raw, 4, 36)
     struct.pack_into("<I", raw, 40, 0)
     path.write_bytes(bytes(raw))
+    old = time.time() - age_s
+    os.utime(path, (old, old))
+
+
+def wav16(tmp_path: Path, name: str, samples: np.ndarray) -> Path:
+    path = tmp_path / f"{name}.wav"
+    write_wav(path, samples)
+    return path
 
 
 def write_meeting(folder: Path, mic: np.ndarray, system: np.ndarray, *, ended: bool = True) -> None:
@@ -91,14 +105,49 @@ def test_truncated_header_is_repaired_from_the_file_size(tmp_path):
 def test_partial_last_frame_of_a_killed_recording_is_cut(tmp_path):
     path = tmp_path / "mic.wav"
     write_wav(path, tone(1, 1000))
-    zero_header(path)
     with path.open("ab") as f:
         f.write(b"\x01")  # the process died between the two bytes of a frame
+    zero_header(path)
 
     repair_wav_header(path)
 
     with wave.open(str(path), "rb") as wf:
         assert wf.getnframes() == 16_000
+
+
+def test_header_of_a_file_written_a_moment_ago_is_not_touched(tmp_path):
+    path = tmp_path / "mic.wav"
+    write_wav(path, tone(1, 1000))
+    zero_header(path, age_s=0)  # same header as a recording that is still running
+    before = path.read_bytes()
+
+    with pytest.raises(ValueError, match="still be recording"):
+        repair_wav_header(path)
+
+    assert path.read_bytes() == before
+
+
+def test_meeting_still_recording_is_refused_and_its_files_stay_as_they_are(tmp_path):
+    folder = tmp_path / "live"
+    write_meeting(folder, tone(1, 1000), tone(1, 1000), ended=False)
+    zero_header(folder / "mic.wav", age_s=0)
+    zero_header(folder / "system.wav", age_s=0)
+    before = [(folder / n).read_bytes() for n in ("mic.wav", "system.wav")]
+
+    with pytest.raises(ValueError, match="still be recording"):
+        load_meeting(folder)
+
+    assert [(folder / n).read_bytes() for n in ("mic.wav", "system.wav")] == before
+
+
+def test_valid_file_is_never_opened_for_writing(tmp_path):
+    path = tmp_path / "mic.wav"
+    write_wav(path, tone(1, 1000))
+    path.chmod(0o444)
+    try:
+        assert repair_wav_header(path) is False
+    finally:
+        path.chmod(0o666)
 
 
 def test_interrupted_meeting_is_loaded_with_repaired_tracks(tmp_path):
@@ -148,11 +197,14 @@ def test_track_is_resampled_to_16k_mono_chunks(tmp_path):
     (folder / "meeting.json").write_text(json.dumps(meta))
     track = load_meeting(folder).tracks["mic"]
 
-    chunks, arrays = track_to_wav_chunks(track)
+    out = tmp_path / "mic16k.wav"
+    chunks = convert_track(track, out)
 
-    assert [len(a) for a in arrays] == [960_000, 960_000, 160_000]
-    with wave.open(__import__("io").BytesIO(chunks[0]), "rb") as wf:
-        assert (wf.getframerate(), wf.getnchannels()) == (16_000, 1)
+    assert len(chunks) == 3
+    with wave.open(io.BytesIO(chunks[0]), "rb") as wf:
+        assert (wf.getframerate(), wf.getnchannels(), wf.getnframes()) == (16_000, 1, 960_000)
+    with wave.open(str(out), "rb") as wf:  # the file the mix reads is the same audio
+        assert (wf.getframerate(), wf.getnchannels(), wf.getnframes()) == (16_000, 1, 2_080_000)
 
 
 # ---- Echo filter and merge --------------------------------------------------
@@ -162,29 +214,74 @@ def w(text, start, end=None):
     return Word(text, start, start + 0.3 if end is None else end)
 
 
+def run(words, start, step=0.4):
+    return [w(x, start + i * step) for i, x in enumerate(words)]
+
+
 def test_echo_of_others_is_dropped_from_me():
-    others = [w("let's", 1.0), w("start", 1.4), w("with", 1.8), w("the", 2.1), w("budget", 2.4)]
+    others = run(["let's", "start", "with", "the", "budget"], 1.0)
     # The microphone hears the speakers a moment later, and the engine spells one word slightly differently.
-    echo = [w("lets", 1.2), w("start", 1.55), w("with", 1.95), w("the", 2.25), w("budgets", 2.55)]
-    mine = [w("sounds", 3.5), w("good", 3.9)]
+    echo = run(["lets", "start", "with", "the", "budgets"], 1.2)
+    mine = run(["sounds", "good"], 3.5)
 
     kept = drop_echo(sorted(echo + mine, key=lambda x: x.start), others)
 
     assert [x.word for x in kept] == ["sounds", "good"]
 
 
+def test_german_echo_is_dropped_including_umlauts_and_eszett():
+    others = run(["Das", "Budget", "ist", "größer", "als", "gedacht"], 1.0)
+    echo = run(["das", "Budget", "ist", "grösser", "als", "gedacht."], 1.15)  # casing, ss for ß, a full stop
+
+    assert drop_echo(echo, others) == []
+
+
+def test_german_crosstalk_with_similar_short_words_is_kept():
+    others = run(["dass", "wir", "für", "morgen"], 1.0)
+    mine = run(["das", "mir", "für", "heute"], 1.1)  # das/dass, mir/wir: one or two look-alikes, not a run
+
+    assert drop_echo(mine, others) == mine
+
+
+def test_short_words_said_at_the_same_time_are_kept():
+    others = run(["they", "okay", "yes"], 1.0)
+    mine = run(["the", "okay"], 1.1)  # the/they and okay/okay are alike, but two words are not an echo
+
+    assert len(mine) < ECHO_MIN_RUN
+    assert drop_echo(mine, others) == mine
+
+
+def test_a_run_of_look_alike_words_broken_by_a_real_word_is_kept():
+    others = run(["we", "can", "ship", "it", "today"], 1.0)
+    mine = [w("we", 1.1), w("can", 1.5), w("never", 1.9), w("it", 2.3), w("today", 2.7)]
+
+    assert [x.word for x in drop_echo(mine, others)] == ["we", "can", "never", "it", "today"]
+
+
 def test_speech_over_others_with_other_words_is_kept():
-    others = [w("we", 1.0), w("need", 1.3), w("more", 1.6), w("time", 1.9)]
+    others = run(["we", "need", "more", "time"], 1.0, step=0.3)
     interjection = [w("yes", 1.4), w("agreed", 1.8)]  # talking at the same time, not an echo
 
     assert drop_echo(interjection, others) == interjection
 
 
-def test_same_word_much_later_is_not_an_echo():
-    others = [w("okay", 1.0)]
-    later = [w("okay", 30.0)]
+def test_same_words_much_later_are_not_an_echo():
+    others = run(["okay", "so", "then"], 1.0)
+    later = run(["okay", "so", "then"], 30.0)
 
     assert drop_echo(later, others) == later
+
+
+def test_echo_filter_stays_fast_on_a_long_meeting():
+    words = [f"word{i}" for i in range(8000)]  # about an hour of speech per track
+    others = [w(x, i * 0.45) for i, x in enumerate(words)]
+    me = [w(x, i * 0.45 + 0.2) for i, x in enumerate(words)]
+    started = time.perf_counter()
+
+    kept = drop_echo(me, others)
+
+    assert kept == []
+    assert time.perf_counter() - started < 15
 
 
 def test_merge_orders_by_time_and_labels_me_and_others():
@@ -207,27 +304,33 @@ def test_format_transcript_without_names_is_unchanged():
 # ---- Mix balance ------------------------------------------------------------
 
 
+def read_wav(path: Path) -> np.ndarray:
+    with wave.open(str(path), "rb") as wf:
+        return np.frombuffer(wf.readframes(wf.getnframes()), dtype="<i2")
+
+
 def test_mix_balances_a_quiet_microphone_against_loud_system_audio(tmp_path):
-    quiet = [tone(10, 900)]  # the user's voice, far below the system audio
-    loud = [tone(10, 12_000)]
-    quiet_before, loud_before = quiet[0].copy(), loud[0].copy()
+    quiet = tone(10, 900)  # the user's voice, far below the system audio
+    loud = tone(10, 12_000)
+    quiet_path, loud_path = wav16(tmp_path, "mic", quiet), wav16(tmp_path, "system", loud)
+    quiet_bytes, loud_bytes = quiet_path.read_bytes(), loud_path.read_bytes()
     out = tmp_path / "meeting.wav"
 
-    mix_tracks([quiet, loud], out)
+    mix_tracks([quiet_path, loud_path], out)
 
-    assert np.array_equal(quiet[0], quiet_before) and np.array_equal(loud[0], loud_before)  # inputs unchanged
-    assert balance_gain(quiet) > 3 > balance_gain(loud)
-    assert speech_rms([quiet[0] * balance_gain(quiet)]) == pytest.approx(TARGET_RMS, rel=0.05)
-    with wave.open(str(out), "rb") as wf:
-        mixed = np.frombuffer(wf.readframes(wf.getnframes()), dtype="<i2")
+    assert quiet_path.read_bytes() == quiet_bytes and loud_path.read_bytes() == loud_bytes  # inputs unchanged
+    assert balance_gain([quiet]) > 3 > balance_gain([loud])
+    assert speech_rms([quiet * balance_gain([quiet])]) == pytest.approx(TARGET_RMS, rel=0.05)
+    mixed = read_wav(out)
     assert len(mixed) == 160_000
     assert np.abs(mixed).max() <= PEAK_LIMIT + 1  # does not clip
 
 
-def test_each_track_alone_in_the_mix_reaches_the_target_level():
+def test_each_track_alone_in_the_mix_reaches_the_target_level(tmp_path):
     for amplitude in (900, 3000, 12_000):
-        track = [tone(5, amplitude)]
-        assert speech_rms([track[0].astype(np.float32) * balance_gain(track)]) == pytest.approx(TARGET_RMS, rel=0.05)
+        out = tmp_path / f"m{amplitude}.wav"
+        mix_tracks([wav16(tmp_path, f"t{amplitude}", tone(5, amplitude))], out)
+        assert speech_rms([read_wav(out)]) == pytest.approx(TARGET_RMS, rel=0.05)
 
 
 def test_near_silent_track_is_not_boosted_into_noise():
@@ -247,19 +350,35 @@ def test_pauses_do_not_lower_a_tracks_speech_level():
 
 
 def test_mix_pads_the_shorter_track(tmp_path):
-    out = tmp_path / "m.wav"
-
-    seconds = mix_tracks([[tone(2, 3000)], [tone(3, 3000)]], out)
+    seconds = mix_tracks([wav16(tmp_path, "a", tone(2, 3000)), wav16(tmp_path, "b", tone(3, 3000))], tmp_path / "m.wav")
 
     assert seconds == pytest.approx(3.0)
 
 
 def test_loud_overlapping_tracks_do_not_clip(tmp_path):
     out = tmp_path / "m.wav"
-    mix_tracks([[tone(2, 30_000)], [tone(2, 30_000)]], out)
-    with wave.open(str(out), "rb") as wf:
-        mixed = np.frombuffer(wf.readframes(wf.getnframes()), dtype="<i2")
-    assert np.abs(mixed).max() <= 32_767
+    mix_tracks([wav16(tmp_path, "a", tone(2, 30_000)), wav16(tmp_path, "b", tone(2, 30_000))], out)
+    assert np.abs(read_wav(out)).max() <= PEAK_LIMIT + 1
+
+
+def test_failed_mix_leaves_no_partial_file(tmp_path, monkeypatch):
+    out = tmp_path / "meeting.wav"
+    paths = [wav16(tmp_path, "a", tone(130, 3000)), wav16(tmp_path, "b", tone(130, 3000))]
+    real = np.zeros
+    calls = []
+
+    def failing_zeros(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:  # the second window: the first one is already on disk
+            raise OSError("disk full")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("nexusvox.meeting_transcribe.np.zeros", failing_zeros)
+
+    with pytest.raises(OSError):
+        mix_tracks(paths, out)
+
+    assert not out.exists() and not list(tmp_path.glob("*.tmp"))
 
 
 # ---- The job ----------------------------------------------------------------
@@ -290,6 +409,7 @@ def meeting_api(db, session_factory, tmp_path, monkeypatch):
         calls = getattr(fake_transcribe, "calls", 0)
         fake_transcribe.calls = calls + 1
         result = TranscriptionResult()
+        result.confidence = 0.5 + calls * 0.25
         if calls == 0:
             result.words = [w("sounds", 3.0), w("good", 3.4)]
         else:
@@ -299,6 +419,39 @@ def meeting_api(db, session_factory, tmp_path, monkeypatch):
 
     monkeypatch.setattr(api, "_transcribe_wav_chunks", fake_transcribe)
     return api, hook
+
+
+def test_text_without_timing_is_not_lost_when_only_some_words_are_timed(meeting_api, tmp_path, monkeypatch):
+    api, _ = meeting_api
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    def partly_timed(chunks, **kwargs):
+        result = TranscriptionResult()
+        result.words = [w("hello", 1.0)]  # the server could not time "everyone"
+        result.finalize(text="hello everyone")
+        return result
+
+    monkeypatch.setattr(api, "_transcribe_wav_chunks", partly_timed)
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["ok"]
+    assert result["text"] == "Me: hello everyone\n\nOthers: hello everyone"
+    assert any("incomplete" in n for n in result["notes"])
+
+
+def test_failed_mix_is_a_note_and_the_meeting_is_still_stored(meeting_api, db, tmp_path, monkeypatch):
+    api, _ = meeting_api
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    monkeypatch.setattr("nexusvox.dashboard.api.mix_tracks", lambda paths, out: (_ for _ in ()).throw(OSError("full")))
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["ok"] and any("mix could not be written" in n for n in result["notes"])
+    assert db.get_file_transcription(result["id"]).audio_path is None
+    assert not (folder / "meeting.wav").exists()
 
 
 def test_transcribe_meeting_stores_one_me_others_transcript_and_a_mix(meeting_api, db, tmp_path):
@@ -324,6 +477,7 @@ def test_transcribe_meeting_stores_one_me_others_transcript_and_a_mix(meeting_ap
     assert (folder / "meeting.wav").is_file()
     assert api.get_file_audio_path(row.id) == str((folder / "meeting.wav").resolve())
     assert row.duration_ms == 5000
+    assert row.confidence == pytest.approx(0.625)  # the mean of the two tracks
     assert hook.seen[0].kind == "meeting"
     # The repaired header is the only change the recorded tracks get.
     assert (folder / "mic.wav").read_bytes()[44:] == mic_bytes[44:]

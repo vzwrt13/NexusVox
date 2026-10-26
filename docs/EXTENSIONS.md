@@ -47,7 +47,7 @@ that does not declare one is skipped.
 def on_file_transcribed(self, transcript: FileTranscript) -> dict | None: ...
 ```
 
-Called for every upload in the dashboard's Upload tab once the transcript is stored, with a read-only
+Called for every upload in the dashboard's Upload tab, and for every transcribed meeting recording, once the transcript is stored, with a read-only
 `FileTranscript`:
 
 | Field | Meaning |
@@ -58,6 +58,7 @@ Called for every upload in the dashboard's Upload tab once the transcript is sto
 | `best_text` | `cleaned_text` if there is one, else `text` |
 | `language`, `duration_ms`, `model`, `original_filename`, `created_at` | As stored |
 | `words` | Tuple of `Word(word, start, end, speaker)` (seconds); empty when the engine reported no timing |
+| `kind` | `"upload"` for a file, `"meeting"` for a two-track meeting recording: `text` then has `Me:` / `Others:` paragraphs and `words` carry `speaker` 1 (Me) or 2 (Others). Added later, without an `API_VERSION` change: a hook that ignores it keeps working |
 
 The hook runs on the upload's worker thread, after the save: a slow hook delays the end of the job, a
 failing one cannot lose the transcript. Return a JSON-serialisable `dict` to add it to the job result under

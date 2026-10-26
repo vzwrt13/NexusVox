@@ -56,6 +56,9 @@ class FileTranscript:
     cleaned_text: str | None = None  # the LLM-cleaned version, when text cleanup ran and changed something
     cleanup_level: str | None = None
     words: tuple[Word, ...] = ()  # per-word timing in seconds; empty when the engine reported none
+    # "upload" for a file, "meeting" for a two-track recording (speakers 1 = Me, 2 = Others). Added without
+    # an API_VERSION bump: a hook that ignores it keeps working.
+    kind: str = "upload"
 
     @property
     def best_text(self) -> str:
@@ -84,6 +87,7 @@ def file_transcript_from_record(record: FileTranscription) -> FileTranscript:
         cleaned_text=record.cleaned_text,
         cleanup_level=record.cleanup_level,
         words=tuple(words),
+        kind=record.kind or "upload",
     )
 
 

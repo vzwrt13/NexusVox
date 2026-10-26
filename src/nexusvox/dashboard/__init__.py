@@ -406,6 +406,13 @@ def _create_app(api: DashboardAPI) -> Flask:
         limit = request.args.get("limit", 50, type=int)
         return jsonify(api.get_file_transcriptions(limit))
 
+    @app.route("/api/file-transcriptions/<int:tid>/audio")
+    def file_transcription_audio(tid):
+        path = api.get_file_audio_path(tid)
+        if path is None:
+            return jsonify({"error": "Audio not found"}), 404
+        return send_file(path, mimetype="audio/wav")
+
     @app.route("/api/file-transcriptions/<int:tid>/export/<target_id>")
     def export_file_transcription(tid, target_id):
         result = api.export_file_transcription(tid, target_id)

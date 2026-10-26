@@ -1115,3 +1115,5 @@ canvas { width: 100% !important; max-height: 260px; }
   .charts-grid { grid-template-columns: minmax(0, 1fr); }
   .chart-card.wide { grid-column: auto; }
 }
+
+.upload-audio { width: 100%; max-width: 100%; margin: 8px 0; }

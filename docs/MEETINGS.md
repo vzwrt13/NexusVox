@@ -15,14 +15,14 @@ Dictation keeps working while a meeting is recorded.
 - **Hotkey:** the meeting hotkey (default `Ctrl+Alt+M`, `[meeting]` in `config.toml`, also editable
   in the Meetings tab) starts and stops a meeting from anywhere. It is separate from the dictation
   hotkey and needs a key plus at least one modifier; a binding that would also start dictation is
-  refused. While the consent hint is on, the hotkey opens the Meetings tab to start a meeting, so the
+  refused, and so is a dictation hotkey that the meeting hotkey would also start. While the consent hint is on, the hotkey opens the Meetings tab to start a meeting, so the
   hint is shown first; stopping always works straight from the hotkey. A short beep confirms start
   and stop, an error beep says it failed.
 
 Each meeting is stored in its own folder `audio/meetings/meeting-YYYYMMDD-HHMMSS/` next to the
 database: `mic.wav` and `system.wav` (the two tracks), `meeting.wav` (a playable mix, written after
 the transcription) and `meeting.json`. If another file is still being transcribed when you stop, the
-recording is kept in its folder and the dashboard says so.
+recording is kept in its folder, the dashboard says so and lists it under *Recorded, not yet transcribed*, where you can transcribe or delete it. The same list holds a meeting cut short because NexusVox quit, and one whose transcription failed. The hotkey beeps as for a normal stop.
 
 Pick a microphone and an output device in the Meetings tab if the system defaults are not the ones you
 use for the call. The output device is only *recorded*, never changed: choose the device the call is

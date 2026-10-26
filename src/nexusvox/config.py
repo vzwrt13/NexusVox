@@ -282,6 +282,22 @@ class MeetingConfig:
     consent_hint: bool = True
 
 
+def meeting_hotkey_clash(modifiers: list[str], key: str, dictation: HotkeyConfig) -> str | None:
+    """Why a meeting chord and the dictation hotkey cannot both exist, None when they can.
+
+    The dictation listener fires on any chord that holds at least its modifiers (and its key), so a meeting
+    chord that contains the dictation chord starts dictation as well.
+    """
+    chord, dictation_modifiers = set(modifiers), set(dictation.modifiers)
+    if not dictation_modifiers <= chord:
+        return None
+    if dictation.key and normalize_hotkey_key(key) != dictation.key:
+        return None
+    if chord == dictation_modifiers and normalize_hotkey_key(key) == dictation.key:
+        return "That is the dictation hotkey"
+    return "That chord would also start dictation; change its modifiers or its key"
+
+
 def validate_meeting_hotkey(modifiers: list[str], key: str, dictation: HotkeyConfig) -> str | None:
     """Error message for a meeting binding that is unusable or would also trigger dictation."""
     error = validate_hotkey(modifiers, key)
@@ -291,12 +307,25 @@ def validate_meeting_hotkey(modifiers: list[str], key: str, dictation: HotkeyCon
         return "The meeting hotkey needs a key"
     if not modifiers:
         return "The meeting hotkey needs at least one modifier"
-    chord = set(modifiers)
-    if normalize_hotkey_key(key) == dictation.key and chord == set(dictation.modifiers):
-        return "That is the dictation hotkey"
-    if not dictation.key and set(dictation.modifiers) <= chord:
-        return "That chord would also start dictation; leave out one of its modifiers"
-    return None
+    return meeting_hotkey_clash(modifiers, key, dictation)
+
+
+# Tried in order when a hand-edited file leaves no usable meeting hotkey.
+_MEETING_HOTKEY_FALLBACKS = (
+    (["ctrl", "alt"], "M"),
+    (["ctrl", "shift"], "M"),
+    (["ctrl", "alt"], "F9"),
+    (["ctrl", "shift"], "F9"),
+    (["ctrl", "alt", "win"], "M"),
+)
+
+
+def default_meeting_hotkey(dictation: HotkeyConfig) -> tuple[list[str], str]:
+    """The default meeting hotkey, or the first fallback that does not clash with the dictation hotkey."""
+    for modifiers, key in _MEETING_HOTKEY_FALLBACKS:
+        if validate_meeting_hotkey(modifiers, key, dictation) is None:
+            return list(modifiers), key
+    return ["ctrl", "alt", "win"], "F12"
 
 
 @dataclass
@@ -588,7 +617,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     hotkey_config = HotkeyConfig(modifiers=hotkey_modifiers, key=normalize_hotkey_key(hotkey_key) or "")
     if validate_meeting_hotkey(meeting_modifiers, meeting_key, hotkey_config) is not None:
         # An unusable binding in the file falls back to the default, like the dictation hotkey.
-        meeting_modifiers, meeting_key = ["ctrl", "alt"], "M"
+        meeting_modifiers, meeting_key = default_meeting_hotkey(hotkey_config)
     audio_data = data.get("audio", {})
     inference_data = data.get("inference", {})
     custom_data = inference_data.get("custom", {})

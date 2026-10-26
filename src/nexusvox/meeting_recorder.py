@@ -50,6 +50,27 @@ class AudioSource(Protocol):
     def stop(self) -> None: ...
 
 
+_streams_lock = threading.Lock()
+_mic_streams = 0  # meeting microphone streams open right now
+
+
+def _refresh_devices(sd) -> None:
+    """Make PortAudio notice devices plugged in since it started: it lists them once, at initialisation.
+
+    Re-initialising invalidates open streams, so it only happens while none is open here or in dictation.
+    """
+    from . import audio
+
+    with _streams_lock:
+        if _mic_streams or audio.capture_active():
+            return
+        try:
+            sd._terminate()
+            sd._initialize()
+        except Exception:
+            logger.exception("Refreshing the audio device list failed")
+
+
 def _wasapi_index(sd) -> int | None:
     """Index of the Windows WASAPI host API, whose names are the full ones (MME cuts them at 31 characters)."""
     for index, api in enumerate(sd.query_hostapis()):
@@ -68,6 +89,7 @@ def list_devices() -> dict[str, list[str]]:
     try:
         import sounddevice as sd
 
+        _refresh_devices(sd)
         wasapi = _wasapi_index(sd)
         for dev in sd.query_devices():
             if dev["max_input_channels"] > 0 and (wasapi is None or dev["hostapi"] == wasapi):
@@ -108,6 +130,7 @@ class MicSource:
     def _find(self, sd) -> dict:
         """The named input device (on WASAPI when there is one); the default input when unnamed or gone."""
         if self._name:
+            _refresh_devices(sd)
             wasapi = _wasapi_index(sd)
             for dev in sd.query_devices():
                 if dev["name"] == self._name and dev["max_input_channels"] > 0:
@@ -125,6 +148,7 @@ class MicSource:
         return self._fmt
 
     def start(self, sink: Callable[[bytes], None]) -> None:
+        global _mic_streams
         import sounddevice as sd
 
         fmt = self._fmt or self.describe()
@@ -138,12 +162,17 @@ class MicSource:
             device=self._device, samplerate=fmt.sample_rate, channels=fmt.channels, dtype="int16", callback=callback
         )
         self._stream.start()
+        with _streams_lock:
+            _mic_streams += 1
 
     def stop(self) -> None:
+        global _mic_streams
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+            with _streams_lock:
+                _mic_streams -= 1
 
 
 class LoopbackSource:
@@ -174,7 +203,13 @@ class LoopbackSource:
                 logger.warning("Meeting output %r not found; using the default output", self._output)
         if speakers.get("isLoopbackDevice"):
             return speakers
-        for loopback in pa.get_loopback_device_info_generator():
+        loopbacks = list(pa.get_loopback_device_info_generator())
+        # Loopback devices are named "<output> [Loopback]": the exact name first, so an output whose name
+        # contains another's ("Speakers" / "Speakers 2") is never mistaken for it.
+        for loopback in loopbacks:
+            if loopback["name"] == f"{speakers['name']} [Loopback]":
+                return loopback
+        for loopback in loopbacks:
             if speakers["name"] in loopback["name"]:
                 return loopback
         raise RuntimeError(f"No loopback device for output {speakers['name']!r}")

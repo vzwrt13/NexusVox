@@ -263,6 +263,12 @@ class HotkeyListener:
             self._listener = None
 
 
+def _physical_modifiers() -> set[str]:
+    """The modifiers held right now, asked straight from Win32."""
+    user32 = ctypes.windll.user32
+    return {name for name, vks in _MODIFIER_VKS.items() if user32.GetAsyncKeyState(vks[0]) & 0x8000}
+
+
 class MeetingHotkey:
     """The meeting toggle: one press of modifiers + key calls `on_toggle`, the next press calls it again.
 
@@ -273,9 +279,15 @@ class MeetingHotkey:
     `on_toggle` runs inside the hook: it must hand the work to another thread and return.
     """
 
-    def __init__(self, config: MeetingConfig, on_toggle: Callable[[], None]) -> None:
+    def __init__(
+        self,
+        config: MeetingConfig,
+        on_toggle: Callable[[], None],
+        physical_modifiers: Callable[[], set[str]] | None = None,
+    ) -> None:
         self._config = config
         self._on_toggle = on_toggle
+        self._physical_modifiers = physical_modifiers or _physical_modifiers
         self._pressed_modifiers: set[str] = set()
         self._key_swallowed = False  # the key is held since a swallowed key-down
         self._listener: keyboard.Listener | None = None
@@ -287,8 +299,12 @@ class MeetingHotkey:
             if pressed:
                 if self._key_swallowed:
                     return True  # auto-repeat while held as part of the chord
-                if not set(self._config.modifiers) <= self._pressed_modifiers:
-                    return False  # plain typing
+                # The tracked set is only a hint: a key-up the hook never saw (Ctrl+Alt+Del, a lock screen) would
+                # leave a modifier counted as held, so the physical state decides and heals the set. The chord
+                # must match exactly: with more modifiers down it is another shortcut (dictation's paste-last).
+                self._pressed_modifiers &= self._physical_modifiers()
+                if self._pressed_modifiers != set(self._config.modifiers):
+                    return False  # plain typing or another chord
                 self._key_swallowed = True
                 self._on_toggle()
                 return True

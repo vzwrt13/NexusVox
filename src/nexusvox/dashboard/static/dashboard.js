@@ -1952,6 +1952,7 @@ async function loadFileTranscriptions() {
   await Promise.all([
     renderFileTranscriptions(document.getElementById("upload-list"), "", "No file transcriptions yet."),
     renderFileTranscriptions(document.getElementById("meeting-list"), "meeting", "No meetings yet."),
+    loadPendingMeetings(),
   ]);
 }
 
@@ -2122,7 +2123,8 @@ async function stopMeeting() {
     if (!result.ok && !result.busy) {
       showMeetingStatus("✕ " + result.error, "down");
     } else if (result.busy) {
-      showMeetingStatus("✕ " + result.error + ". The recording is kept in " + result.folder + ".", "down");
+      showMeetingStatus("● " + result.error + ". Transcribe it below once that is done.", "");
+      loadFileTranscriptions();
     } else {
       trackMeetingJob(result.job_id);
     }
@@ -2135,24 +2137,80 @@ async function stopMeeting() {
 function trackMeetingJob(jobId) {
   clearInterval(meetingJobTimer);
   meetingProgress.style.display = "";
-  const poll = async () => {
-    let job;
-    try {
-      job = await fetch(`/api/file-transcribe/${jobId}`).then((r) => r.json());
-    } catch (err) {
-      return; // retried on the next tick
-    }
-    meetingProgressBar.value = Math.round((job.percent || 0) * 100);
-    showMeetingStatus(job.message || "Transcribing...", "");
-    if (job.state === "running") return;
+  const stop = () => {
     clearInterval(meetingJobTimer);
     meetingProgress.style.display = "none";
-    if (job.state === "error") showMeetingStatus("✕ " + job.error, "down");
-    else showMeetingStatus("● Meeting transcribed.", "ok");
     loadFileTranscriptions();
+  };
+  const poll = async () => {
+    let resp;
+    try {
+      resp = await fetch(`/api/file-transcribe/${jobId}`);
+    } catch (err) {
+      return; // no contact for a moment: retried on the next tick
+    }
+    if (!resp.ok) {
+      // The job is gone (the app restarted, or it dropped out of the last ten): nothing says it succeeded.
+      stop();
+      showMeetingStatus("✕ Lost track of the transcription. See below whether the meeting was transcribed.", "down");
+      return;
+    }
+    const job = await resp.json();
+    meetingProgressBar.value = Math.round((job.percent || 0) * 100);
+    if (job.state === "running") {
+      showMeetingStatus(job.message || "Transcribing...", "");
+      return;
+    }
+    stop();
+    if (job.state === "done") showMeetingStatus("● Meeting transcribed.", "ok");
+    else showMeetingStatus("✕ " + (job.error || "Transcription failed"), "down");
   };
   meetingJobTimer = setInterval(poll, 1000);
   poll();
+}
+
+// Recordings without a transcript: transcribe them or delete them (confirmation inside the card).
+async function loadPendingMeetings() {
+  const block = document.getElementById("meeting-pending");
+  const list = document.getElementById("meeting-pending-list");
+  const pending = await fetch("/api/meetings/pending").then((r) => r.json());
+  block.hidden = !pending.length;
+  list.innerHTML = pending.map((p) => `
+    <div class="flagged-card" data-name="${escapeHtml(p.name)}">
+      <div class="flagged-meta"><span>${p.started_at ? new Date(p.started_at).toLocaleString() : ""}</span></div>
+      <div class="upload-filename">${escapeHtml(p.name)}</div>
+      <div class="upload-delete-row">
+        <button type="button" class="period-btn pending-transcribe">Transcribe</button>
+        <button type="button" class="period-btn upload-delete-btn pending-delete">Delete</button>
+      </div>
+      <p class="status-line down pending-error" hidden></p>
+    </div>`).join("");
+  list.querySelectorAll(".flagged-card").forEach((card) => {
+    const name = card.dataset.name;
+    const row = card.querySelector(".upload-delete-row");
+    const error = card.querySelector(".pending-error");
+    const fail = (text) => { error.textContent = "✕ " + text; error.hidden = false; };
+    card.querySelector(".pending-transcribe").addEventListener("click", async () => {
+      error.hidden = true;
+      const resp = await fetch(`/api/meetings/pending/${encodeURIComponent(name)}/transcribe`, { method: "POST" });
+      const result = await resp.json();
+      if (!resp.ok) return fail(result.error || "Could not start the transcription");
+      trackMeetingJob(result.job_id);
+      loadPendingMeetings();
+    });
+    card.querySelector(".pending-delete").addEventListener("click", () => {
+      row.innerHTML = `
+        <span class="upload-delete-ask">Delete this recording and its audio files? This cannot be undone.</span>
+        <button type="button" class="period-btn upload-delete-btn pending-delete-confirm">Delete</button>
+        <button type="button" class="period-btn pending-delete-cancel">Cancel</button>`;
+      row.querySelector(".pending-delete-cancel").addEventListener("click", loadPendingMeetings);
+      row.querySelector(".pending-delete-confirm").addEventListener("click", async () => {
+        const resp = await fetch(`/api/meetings/pending/${encodeURIComponent(name)}`, { method: "DELETE" });
+        if (resp.ok) return loadPendingMeetings();
+        fail((await resp.json()).error || "Delete failed");
+      });
+    });
+  });
 }
 
 meetingToggleBtn.addEventListener("click", () => {

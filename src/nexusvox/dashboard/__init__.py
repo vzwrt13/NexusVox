@@ -195,6 +195,22 @@ def _create_app(api: DashboardAPI) -> Flask:
         result = api.start_meeting()
         return jsonify(result), (200 if result["ok"] else 500)
 
+    @app.route("/api/meetings/pending")
+    def meeting_pending():
+        return jsonify(api.get_pending_meetings())
+
+    @app.route("/api/meetings/pending/<name>/transcribe", methods=["POST"])
+    def meeting_pending_transcribe(name):
+        result = api.transcribe_pending_meeting(name)
+        if result["ok"]:
+            return jsonify(result)
+        return jsonify(result), (409 if result.get("busy") else 404)
+
+    @app.route("/api/meetings/pending/<name>", methods=["DELETE"])
+    def meeting_pending_delete(name):
+        result = api.delete_pending_meeting(name)
+        return jsonify(result), (200 if result["ok"] else 404 if result["error"] == "Unknown meeting" else 500)
+
     @app.route("/api/meetings/stop", methods=["POST"])
     def meeting_stop():
         result = api.stop_meeting()

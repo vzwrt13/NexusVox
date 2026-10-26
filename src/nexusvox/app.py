@@ -128,6 +128,7 @@ class NexusVoxApp:
 
         # Meeting recording has its own toggle hotkey; dictation is untouched while a meeting runs.
         self._meeting_hotkey = MeetingHotkey(config.meeting, self._on_meeting_hotkey)
+        self._meeting_toggle_lock = threading.Lock()
 
         # Mutes other apps' microphone sessions while the hotkey is held. Always built
         # (None only when pycaw is missing); `[mic_guard].enabled` is checked per hold so
@@ -198,22 +199,26 @@ class NexusVoxApp:
 
     def _toggle_meeting(self) -> None:
         """Stop the running meeting, or start one. While the consent hint is on, a start opens the dashboard's
-        Meetings tab instead, where the hint is shown and the recording is started by its button."""
+        Meetings tab instead, where the hint is shown and the recording is started by its button. A press that
+        arrives while the previous one is still being handled (devices opening) is ignored."""
+        if not self._meeting_toggle_lock.acquire(blocking=False):
+            return
         try:
             api = ensure_dashboard_api(self._db, self._config, self)
-            if not api.get_meeting_status()["recording"] and self._config.meeting.consent_hint:
+            result = api.toggle_meeting(ask_consent=True)
+            if result.get("action") == "consent":
                 open_dashboard(self._db, self._config, app=self, tab="meetings")
                 return
-            was_recording = api.get_meeting_status()["recording"]
-            result = api.toggle_meeting()
+            # A stop that only found the transcriber busy still ended the recording: that is no error.
+            if result.get("ok") or result.get("busy"):
+                _play(beep_stop if result.get("action") == "stop" else beep_start)
+            else:
+                _play(beep_error)
         except Exception:
             logger.exception("Meeting hotkey failed")
             _play(beep_error)
-            return
-        if not result.get("ok"):
-            _play(beep_error)
-        else:
-            _play(beep_stop if was_recording else beep_start)
+        finally:
+            self._meeting_toggle_lock.release()
 
     def _on_remote_start(self) -> bool:
         """Called on the loop when a phone starts a recording. False while busy: a cycle

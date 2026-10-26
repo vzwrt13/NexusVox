@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
 
-from nexusvox.config import Config, MeetingConfig, load_config, save_config, validate_meeting_hotkey
+from nexusvox.config import (
+    Config,
+    HotkeyConfig,
+    MeetingConfig,
+    load_config,
+    save_config,
+    validate_meeting_hotkey,
+)
 from nexusvox.dashboard import _create_app
 from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.meeting_recorder import META_FILENAME
@@ -34,6 +42,20 @@ def test_meeting_hotkey_is_rejected_when_unusable(modifiers, key, fragment):
     assert fragment in validate_meeting_hotkey(modifiers, key, Config().hotkey)
 
 
+def test_meeting_chord_containing_a_keyless_dictation_chord_is_refused():
+    dictation = HotkeyConfig(modifiers=["ctrl", "alt"], key="")
+    assert validate_meeting_hotkey(["ctrl", "alt"], "M", dictation)  # starts dictation as well
+    assert validate_meeting_hotkey(["ctrl", "alt", "win"], "M", dictation)
+    assert validate_meeting_hotkey(["ctrl", "shift"], "M", dictation) is None
+
+
+def test_meeting_chord_containing_a_keyed_dictation_chord_is_refused_only_with_that_key():
+    dictation = HotkeyConfig(modifiers=["ctrl", "alt"], key="M")
+    assert validate_meeting_hotkey(["ctrl", "alt", "win"], "M", dictation)
+    assert validate_meeting_hotkey(["ctrl", "alt", "win"], "N", dictation) is None
+    assert validate_meeting_hotkey(["ctrl"], "M", dictation) is None  # not a superset: another chord
+
+
 def test_meeting_hotkey_may_not_equal_a_dictation_hotkey_with_a_key():
     cfg = Config()
     cfg.hotkey.modifiers, cfg.hotkey.key = ["ctrl", "alt"], "M"
@@ -54,6 +76,15 @@ def test_meeting_section_round_trips_and_an_unusable_file_falls_back(tmp_path):
     assert load_config(path).meeting.modifiers == ["ctrl", "alt"]  # would also start dictation
 
 
+def test_a_file_whose_dictation_hotkey_clashes_with_the_default_meeting_hotkey_gets_another_one(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hotkey]\nmodifiers = ["ctrl", "alt"]\nkey = ""\n[meeting]\nmodifiers = ["ctrl", "alt"]\n', encoding="utf-8"
+    )
+    cfg = load_config(path)
+    assert validate_meeting_hotkey(cfg.meeting.modifiers, cfg.meeting.key, cfg.hotkey) is None
+
+
 # -- the meeting hotkey ---------------------------------------------------------------------------
 
 LCTRL, LALT, LSHIFT = 0xA2, 0xA4, 0xA0
@@ -66,7 +97,11 @@ def _hotkey():
 
     toggles: list[int] = []
     config = MeetingConfig()
-    return MeetingHotkey(config, lambda: toggles.append(1)), toggles, config
+    holder: list = []
+    # The physical state is what the hook has seen unless a test says otherwise.
+    hk = MeetingHotkey(config, lambda: toggles.append(1), lambda: set(holder[0]._pressed_modifiers))
+    holder.append(hk)
+    return hk, toggles, config
 
 
 def test_meeting_hotkey_toggles_once_per_press_and_swallows_its_key():
@@ -99,6 +134,36 @@ def test_meeting_hotkey_follows_the_live_config():
     assert hk._handle(VK_M, True) is False  # the old key is plain typing now
     assert hk._handle(0x78, True) is True  # VK_F9
     assert toggles == [1]
+
+
+def test_meeting_hotkey_needs_exactly_its_modifiers():
+    hk, toggles, _ = _hotkey()
+    for vk in (LCTRL, LSHIFT, LALT):  # Ctrl+Shift+Alt+M is dictation's paste-last, not a meeting
+        hk._handle(vk, True)
+    assert hk._handle(VK_M, True) is False
+    assert toggles == []
+
+
+def test_a_meeting_hotkey_inside_the_dictation_chord_does_not_steal_it():
+    # dictation Ctrl+Alt+M, meeting Ctrl+M: pressing the dictation chord must not toggle a meeting or eat the M
+    hk, toggles, config = _hotkey()
+    config.modifiers, config.key = ["ctrl"], "M"
+    hk._handle(LCTRL, True)
+    hk._handle(LALT, True)
+    assert hk._handle(VK_M, True) is False and toggles == []
+    hk._handle(VK_M, False)
+    hk._handle(LALT, False)
+    assert hk._handle(VK_M, True) is True and toggles == [1]  # Ctrl+M alone is the meeting hotkey
+
+
+def test_modifiers_whose_key_up_was_lost_do_not_stay_held():
+    # Ctrl+Alt+Del: the secure desktop eats the key-ups, the hook still counts both as held
+    hk, toggles, _ = _hotkey()
+    hk._handle(LCTRL, True)
+    hk._handle(LALT, True)
+    hk._physical_modifiers = lambda: set()  # but nothing is down any more
+    assert hk._handle(VK_M, True) is False  # a plain "m" is typed, not swallowed
+    assert toggles == [] and hk._pressed_modifiers == set()
 
 
 # -- session --------------------------------------------------------------------------------------
@@ -371,3 +436,238 @@ def test_the_page_has_a_meetings_tab_and_in_page_delete_confirmation():
     assert "Inform all participants before you record" in html
     section = js[js.index("function askDeleteFileTranscription") : js.index("// ── Meetings")]
     assert "confirm(" not in section and "alert(" not in section
+
+
+# -- the dictation hotkey may not clash with the meeting hotkey -----------------------------------
+
+
+def test_dictation_hotkey_cannot_be_set_to_something_the_meeting_hotkey_would_start(env):
+    client, *_ = env
+    resp = client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "alt"], "key": ""})  # meeting: Ctrl+Alt+M
+    assert resp.status_code == 400 and "meeting hotkey" in resp.get_json()["error"]
+    assert client.get("/api/settings").get_json()["hotkey_modifiers"] == ["ctrl", "shift", "alt"]
+    resp = client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "shift"], "key": ""})
+    assert resp.status_code == 200
+
+
+# -- one press at a time, and what the hotkey reports ---------------------------------------------
+
+
+def test_toggle_reports_what_it_did_and_can_ask_for_consent_first(env):
+    _, api, _, _, started = env
+    assert api.toggle_meeting(ask_consent=True)["action"] == "consent"
+    assert not api.get_meeting_status()["recording"]
+    api.set_meeting_consent_hint(False)
+    assert api.toggle_meeting(ask_consent=True)["action"] == "start"
+    assert api.toggle_meeting(ask_consent=True)["action"] == "stop"  # stopping never asks
+    assert len(started) == 1
+
+
+def test_a_stop_that_finds_the_transcriber_busy_says_the_recording_is_saved(env, monkeypatch):
+    _, api, *_ = env
+    monkeypatch.setattr(api, "start_meeting_transcription", lambda f: {"ok": False, "busy": True, "error": "x"})
+    api.start_meeting()
+    result = api.toggle_meeting()
+    assert result["action"] == "stop" and result["busy"] is True and "saved" in result["error"]
+
+
+def test_concurrent_toggles_never_start_two_meetings(env, monkeypatch):
+    import threading
+
+    _, api, *_ = env
+    # Folders are named by the second: give each recorder its own, as a real clock would.
+    count = iter(range(100))
+    monkeypatch.setattr(
+        api._meeting, "_factory", lambda base, cfg: _NamedRecorder(base, f"meeting-20261026-1000{next(count):02d}")
+    )
+    api.set_meeting_consent_hint(False)
+    results: list[dict] = []
+    threads = [threading.Thread(target=lambda: results.append(api.toggle_meeting())) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # strictly alternating start/stop: no call fails with "already being recorded"
+    assert all(r["ok"] for r in results)
+    assert sorted(r["action"] for r in results) == ["start"] * 3 + ["stop"] * 3
+
+
+class _NamedRecorder(FakeRecorder):
+    def __init__(self, base: Path, name: str) -> None:
+        super().__init__(base)
+        self.folder = base / name
+
+
+def _app(monkeypatch, result, beeps, opened):
+    app_module = pytest.importorskip("nexusvox.app", reason="nexusvox.app needs the Windows runtime")
+    app = app_module.NexusVoxApp.__new__(app_module.NexusVoxApp)
+    app._meeting_toggle_lock = threading.Lock()
+    app._db, app._config = None, Config()
+
+    class Api:
+        def toggle_meeting(self, *, ask_consent=False):
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+    monkeypatch.setattr(app_module, "ensure_dashboard_api", lambda db, config, a: Api())
+    monkeypatch.setattr(app_module, "open_dashboard", lambda db, config, app=None, tab="": opened.append(tab))
+    monkeypatch.setattr(app_module, "_play", lambda beep: beeps.append(beep.__name__))
+    return app
+
+
+@pytest.mark.parametrize(
+    ("result", "beeps", "opened"),
+    [
+        ({"ok": True, "action": "start"}, ["beep_start"], []),
+        ({"ok": True, "action": "stop"}, ["beep_stop"], []),
+        # the recording ended, only the transcription has to wait: not an error
+        ({"ok": False, "busy": True, "action": "stop"}, ["beep_stop"], []),
+        ({"ok": False, "action": "start", "error": "no device"}, ["beep_error"], []),
+        ({"ok": True, "action": "consent"}, [], ["meetings"]),
+        (RuntimeError("boom"), ["beep_error"], []),
+    ],
+)
+def test_the_hotkey_beeps_for_what_happened(monkeypatch, result, beeps, opened):
+    got_beeps, got_opened = [], []
+    _app(monkeypatch, result, got_beeps, got_opened)._toggle_meeting()
+    assert (got_beeps, got_opened) == (beeps, opened)
+
+
+def test_a_press_while_the_previous_one_is_handled_is_ignored(monkeypatch):
+    beeps, opened = [], []
+    app = _app(monkeypatch, {"ok": True, "action": "start"}, beeps, opened)
+    app._meeting_toggle_lock.acquire()
+    app._toggle_meeting()
+    assert beeps == [] and opened == []
+
+
+# -- recordings without a transcript --------------------------------------------------------------
+
+
+def test_a_busy_stop_leaves_a_pending_meeting_that_can_be_transcribed_and_deleted(env, monkeypatch):
+    client, api, db, tmp_path, started = env
+    monkeypatch.setattr(api, "start_meeting_transcription", lambda f: {"ok": False, "busy": True, "error": "x"})
+    client.post("/api/meetings/start")
+    assert client.get("/api/meetings/pending").get_json() == []  # still recording
+    client.post("/api/meetings/stop")
+
+    pending = client.get("/api/meetings/pending").get_json()
+    assert [p["name"] for p in pending] == ["meeting-20261026-100000"]
+
+    monkeypatch.setattr(api, "start_meeting_transcription", lambda f: started.append(f) or {"ok": True, "job_id": "j2"})
+    resp = client.post("/api/meetings/pending/meeting-20261026-100000/transcribe")
+    assert resp.status_code == 200 and resp.get_json()["job_id"] == "j2"
+
+    assert client.delete("/api/meetings/pending/meeting-20261026-100000").status_code == 200
+    assert not (tmp_path / "audio" / "meetings" / "meeting-20261026-100000").exists()
+    assert client.get("/api/meetings/pending").get_json() == []
+
+
+def test_a_meeting_left_by_a_quit_shows_up_and_a_transcribed_one_does_not(env):
+    client, api, db, tmp_path, _ = env
+    _meeting_folder(tmp_path, "meeting-20261026-090000")
+    _meeting_folder(tmp_path, "meeting-20261026-080000")
+    db.save_file_transcription("Me: hi", "en", 1000, "meeting-20261026-080000", kind="meeting")
+    api.start_meeting()
+    api.shutdown_meeting()
+    names = [p["name"] for p in client.get("/api/meetings/pending").get_json()]
+    assert "meeting-20261026-100000" in names  # the one the quit closed
+    assert "meeting-20261026-090000" in names and "meeting-20261026-080000" not in names
+
+
+def test_pending_endpoints_refuse_names_that_are_not_pending_meetings(env):
+    client, _, _, tmp_path, _ = env
+    (tmp_path / "audio" / "meetings").mkdir(parents=True)
+    (tmp_path / "keep").mkdir()
+    for name in ("holiday", "meeting-20260101-000000", "meeting-..-keep"):
+        assert client.delete(f"/api/meetings/pending/{name}").status_code == 404
+        assert client.post(f"/api/meetings/pending/{name}/transcribe").status_code == 404
+    assert (tmp_path / "keep").exists()
+
+
+# -- a delete that fails halfway can be retried ---------------------------------------------------
+
+
+def test_a_locked_file_keeps_meeting_json_so_the_delete_can_be_retried(env, monkeypatch):
+    client, _, db, tmp_path, _ = env
+    folder = _meeting_folder(tmp_path)
+    row = db.save_file_transcription("x", "en", 1000, folder.name, kind="meeting", audio_path=None)
+    real_unlink = Path.unlink
+
+    def locked(self, *args, **kwargs):
+        if self.name == "meeting.wav":
+            raise PermissionError("in use")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    resp = client.delete(f"/api/file-transcriptions/{row.id}")
+    assert resp.status_code == 500
+    assert db.get_file_transcription(row.id) is not None  # the row stays: nothing is half deleted
+    assert (folder / META_FILENAME).exists() and (folder / "meeting.wav").exists()
+    assert not (folder / "mic.wav").exists()
+
+    monkeypatch.setattr(Path, "unlink", real_unlink)  # the player let go
+    assert client.delete(f"/api/file-transcriptions/{row.id}").status_code == 200
+    assert not folder.exists()
+
+
+# -- devices ----------------------------------------------------------------------------------------
+
+
+def test_an_output_named_like_another_one_gets_its_own_loopback():
+    from nexusvox.meeting_recorder import LoopbackSource
+
+    outputs = [
+        {"name": "Speakers (Realtek)", "maxOutputChannels": 2, "index": 1},
+        {"name": "Speakers (Realtek) 2", "maxOutputChannels": 2, "index": 2},
+    ]
+    loopbacks = [
+        {"name": "Speakers (Realtek) 2 [Loopback]", "index": 12},  # listed first, but a different device
+        {"name": "Speakers (Realtek) [Loopback]", "index": 11},
+    ]
+
+    class FakePa:
+        def get_host_api_info_by_type(self, kind):
+            return {"defaultOutputDevice": 1, "deviceCount": 2, "index": 0}
+
+        def get_device_info_by_index(self, i):
+            return outputs[i - 1]
+
+        def get_device_info_by_host_api_device_index(self, api, i):
+            return outputs[i]
+
+        def get_loopback_device_info_generator(self):
+            return iter(loopbacks)
+
+    class FakePyAudio:
+        paWASAPI = 13
+
+    assert LoopbackSource("Speakers (Realtek)")._find_device(FakePa(), FakePyAudio)["index"] == 11
+    assert LoopbackSource("Speakers (Realtek) 2")._find_device(FakePa(), FakePyAudio)["index"] == 12
+
+
+def test_portaudio_is_only_refreshed_while_no_stream_is_open(monkeypatch):
+    from nexusvox import audio, meeting_recorder
+
+    calls: list[str] = []
+
+    class FakeSd:
+        @staticmethod
+        def _terminate():
+            calls.append("terminate")
+
+        @staticmethod
+        def _initialize():
+            calls.append("initialize")
+
+    meeting_recorder._refresh_devices(FakeSd)
+    assert calls == ["terminate", "initialize"]
+
+    calls.clear()
+    monkeypatch.setattr(audio, "_active", 1)  # a dictation stream is open
+    meeting_recorder._refresh_devices(FakeSd)
+    monkeypatch.setattr(audio, "_active", 0)
+    monkeypatch.setattr(meeting_recorder, "_mic_streams", 1)  # or a meeting one
+    meeting_recorder._refresh_devices(FakeSd)
+    assert calls == []

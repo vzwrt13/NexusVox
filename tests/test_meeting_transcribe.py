@@ -635,3 +635,13 @@ def test_missing_word_timing_is_noted_when_dictation_cannot_be_left_out(meeting_
     result = api.transcribe_meeting(folder)
 
     assert any("Dictation could not be left out" in n for n in result["notes"])
+
+
+def test_dictation_is_dropped_after_the_echo_filter_so_real_speech_is_not_taken_for_echo():
+    # Two partnered words, a dictated word, two more partnered words: no run reaches ECHO_MIN_RUN on its own.
+    me = [w("alpha", 1.0), w("bravo", 1.4), w("typed", 5.0), w("charlie", 9.0), w("delta", 9.4)]
+    others = [w("alpha", 1.0), w("bravo", 1.4), w("charlie", 9.0), w("delta", 9.4)]
+
+    merged = merge_words(me, others, [(4.9, 5.4)])
+
+    assert [x.word for x in merged if x.speaker == 1] == ["alpha", "bravo", "charlie", "delta"]

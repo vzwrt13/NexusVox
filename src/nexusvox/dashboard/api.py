@@ -907,10 +907,18 @@ class DashboardAPI:
         save_config(self._config)
         return self.get_settings()
 
-    def note_dictation(self, start: float, end: float) -> None:
-        """Tell the running meeting about a dictation take (`time.monotonic()` values); never raises."""
+    def begin_dictation(self, start: float) -> int | None:
+        """A dictation take began (`time.monotonic()`); the token for `end_dictation`. Never raises."""
         try:
-            self._meeting.add_dictation(start, end)
+            return self._meeting.begin_dictation(start)
+        except Exception:
+            logger.exception("Storing the dictation range of the meeting failed")
+            return None
+
+    def end_dictation(self, token: int | None, start: float, end: float) -> None:
+        """A dictation take ended; the running meeting stores its time range. Never raises."""
+        try:
+            self._meeting.end_dictation(token, start, end)
         except Exception:
             logger.exception("Storing the dictation range of the meeting failed")
 

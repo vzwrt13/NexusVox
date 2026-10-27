@@ -396,6 +396,8 @@ class MeetingRecorder:
         self._started_at: datetime | None = None
         self._t0 = 0.0
         self._dictations: list[dict[str, float]] = []
+        self._open_takes: dict[int, float] = {}
+        self._next_take = 0
         self._dictation_lock = threading.Lock()
         self.folder: Path | None = None
 
@@ -434,6 +436,7 @@ class MeetingRecorder:
             t0 = self._clock()
             self._t0 = t0
             self._dictations = []
+            self._open_takes = {}
             for name, source in self._sources.items():
                 writer = TrackWriter(folder / f"{name}.wav", formats[name], t0)
                 tracks[name] = _Track(name, source, writer, self._clock)
@@ -461,22 +464,38 @@ class MeetingRecorder:
         if folder is not None:
             shutil.rmtree(folder, ignore_errors=True)
 
-    def add_dictation(self, start: float, end: float) -> None:
-        """Store a dictation take (recorder clock values) as seconds from the meeting start in `meeting.json`.
+    def begin_dictation(self, start: float) -> int | None:
+        """Note that a dictation take began at `start` (recorder clock); None when no meeting runs.
 
-        Ignored when no meeting runs; a take that began before the meeting is cut at its start. Stored whatever
-        `[meeting].leave_dictation_out` says: the setting is applied when the meeting is transcribed.
+        The take is closed by `end_dictation`, or by `stop()` when the meeting ends first, so a take that is
+        still running when the meeting stops is stored too.
         """
-        if not self.recording:
-            return
         with self._dictation_lock:
-            self._dictations.append(
-                {"start_s": round(max(0.0, start - self._t0), 3), "end_s": round(end - self._t0, 3)}
-            )
+            if not self._tracks:
+                return None
+            self._next_take += 1
+            self._open_takes[self._next_take] = start
+            return self._next_take
+
+    def end_dictation(self, token: int | None, start: float, end: float) -> None:
+        """Store a finished take (recorder clock values) as seconds from the meeting start in `meeting.json`.
+
+        Stored whatever `[meeting].leave_dictation_out` says: the setting is applied when the meeting is
+        transcribed. Ignored when no meeting runs (a take `stop()` already closed included) or when the take
+        ended before this meeting began; a take that began earlier is cut at the meeting start.
+        """
+        with self._dictation_lock:
+            if not self._tracks or end <= self._t0:
+                return
+            self._open_takes.pop(token, None)
+            self._dictations.append(self._dictation_range(start, end))
             try:
                 self._write_meta(ended_at=None)
             except OSError:
                 logger.exception("Storing the dictation range failed")
+
+    def _dictation_range(self, start: float, end: float) -> dict[str, float]:
+        return {"start_s": round(max(0.0, start - self._t0), 3), "end_s": round(end - self._t0, 3)}
 
     def flush(self) -> None:
         """Wait until every block received so far is on disk."""
@@ -496,6 +515,9 @@ class MeetingRecorder:
         finally:
             with self._dictation_lock:
                 self._tracks = {}
+                # A take still running when the meeting ends lasts until the end.
+                self._dictations += [self._dictation_range(start, end) for start in self._open_takes.values()]
+                self._open_takes = {}
                 self._write_meta(ended_at=self._now(), tracks=tracks)
         logger.info("Meeting recording stopped: %s", self.folder)
         assert self.folder is not None

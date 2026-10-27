@@ -392,10 +392,9 @@ def drop_dictation(
 
     The microphone records what the user dictates; that text was typed elsewhere, so it does not belong in the
     meeting. A word is dropped when its time span overlaps a padded range.
+    `dictations` must be sorted by start, as `load_meeting` returns it.
     """
-    if not dictations:
-        return list(me)
-    ranges = sorted((start - margin, end + margin) for start, end in dictations)
+    ranges = [(start - margin, end + margin) for start, end in dictations]  # sorted by start, as stored
     starts = [r[0] for r in ranges]
     # Prefix maximum of the range ends, so the search below can stop at the first range that cannot reach the word.
     reach: list[float] = []
@@ -416,9 +415,10 @@ def merge_words(me: list[Word], others: list[Word], dictations: list[tuple[float
     `dictations` (time ranges of dictation takes) removes the Me words spoken into the dictation; None keeps them.
     """
     others = sorted(others, key=lambda w: (w.start, w.end))
-    if dictations:
-        me = drop_dictation(me, dictations)
     me = drop_echo(sorted(me, key=lambda w: (w.start, w.end)), others)
+    if dictations:
+        # After the echo filter: taking dictated words out first could join two short echo runs into one.
+        me = drop_dictation(me, dictations)
     merged = [Word(w.word, w.start, w.end, SPEAKER_ME) for w in me]
     merged += [Word(w.word, w.start, w.end, SPEAKER_OTHERS) for w in others]
     merged.sort(key=lambda w: (w.start, w.end, w.speaker))

@@ -2241,8 +2241,14 @@ meetingConsentToggle.addEventListener("change", async () => {
 });
 
 meetingDictationToggle.addEventListener("change", async () => {
-  const s = await postSetting("/api/settings/meeting-leave-dictation-out", { enabled: meetingDictationToggle.checked }).then((r) => r.json());
-  meetingDictationToggle.checked = s.meeting_leave_dictation_out;
+  const wanted = meetingDictationToggle.checked;
+  try {
+    const r = await postSetting("/api/settings/meeting-leave-dictation-out", { enabled: wanted });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    meetingDictationToggle.checked = (await r.json()).meeting_leave_dictation_out;
+  } catch (err) {
+    meetingDictationToggle.checked = !wanted; // not saved: show the setting that is still in force
+  }
 });
 
 function renderMeetingHotkey(s) {

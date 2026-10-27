@@ -57,6 +57,8 @@ class _Recording:
 
 
 _CPU_FALLBACK_MODEL = "whisper-large-v3-turbo"
+# A key press older than this before the recording started is not the start of this take.
+MAX_TAKE_LEAD_S = 10.0
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,9 @@ def apply_startup_fallback(inference: InferenceConfig, device: str) -> None:
 
 class NexusVoxApp:
     """Orchestrates the push-to-talk transcription pipeline."""
+
+    # When the hotkey last went down: a take starts here, not when the connection to the server is up.
+    _press_time = 0.0
 
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -179,6 +184,7 @@ class NexusVoxApp:
             # the next dictation, and the phone is not refused as busy meanwhile.
             self._hotkey.cancel()
             return
+        self._press_time = time.monotonic()
         if self._mic_guard is not None and self._config.mic_guard.enabled:
             self._mic_guard.hold_async()
         if self._loop is not None and self._record_start_event is not None:
@@ -405,6 +411,20 @@ class NexusVoxApp:
             wf.writeframes(self._normalize_pcm(pcm_buffer))
         return f"{self._config.database.audio_dir}/{filename}"
 
+    @staticmethod
+    def _begin_take(start: float) -> int | None:
+        """Tell a running meeting that a dictation take began; the microphone records it too, and what happens to
+        it is decided when the meeting is transcribed. Blocking (locks, file write): run it in an executor."""
+        api = running_dashboard_api()
+        return api.begin_dictation(start) if api is not None else None
+
+    @staticmethod
+    def _end_take(token: int | None, start: float, end: float) -> None:
+        """Tell a running meeting that the take ended. Blocking, like `_begin_take`."""
+        api = running_dashboard_api()
+        if api is not None:
+            api.end_dictation(token, start, end)
+
     async def _transcription_cycle(self, remote: bool = False) -> None:
         """Run one full transcription cycle: connect, record, transcribe, inject.
 
@@ -412,6 +432,15 @@ class NexusVoxApp:
         never a command recording and leaves the hotkey state alone.
         """
         recording_stopped = False
+        loop = asyncio.get_running_loop()
+        take: tuple[int | None, float] | None = None  # (meeting token, start) while a take is open
+
+        async def end_take(end: float) -> None:
+            nonlocal take
+            if take is not None:
+                (token, start), take = take, None
+                await loop.run_in_executor(None, self._end_take, token, start, end)
+
         try:
             # Connect to inference server BEFORE signalling readiness so the
             # WebSocket handshake doesn't race against hotkey release.
@@ -445,6 +474,12 @@ class NexusVoxApp:
             # Start audio capture
             audio = self._remote_audio if remote else self._audio
             audio.start()
+            if not remote:
+                # From the key press if the connection took a while, so the first words are inside the range.
+                pressed = (
+                    self._press_time if start_time - MAX_TAKE_LEAD_S <= self._press_time <= start_time else start_time
+                )
+                take = (await loop.run_in_executor(None, self._begin_take, pressed), pressed)
 
             # Stream audio chunks until recording stops
             stream_task = asyncio.create_task(self._stream_audio(audio))
@@ -461,6 +496,7 @@ class NexusVoxApp:
 
             stop_time = time.monotonic()
             duration_ms = int((stop_time - start_time) * 1000)
+            await end_take(stop_time)
             logger.info("Recording stopped (duration=%dms)", duration_ms)
 
             if remote and self._remote_cancelled:
@@ -596,6 +632,7 @@ class NexusVoxApp:
                 await self._hide_os_control()
             await self._transcriber.disconnect()
         finally:
+            await end_take(time.monotonic())  # a take that died before its stop is stored too
             # Key-up already queued a release; this covers a cycle that died mid-hold.
             # Skip it while the hotkey is held again: the user may already be in the
             # next dictation (pressed during transcription), and its hold must stand.

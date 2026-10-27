@@ -49,6 +49,10 @@ output_device = ""
 # Show "Inform all participants before you record" before each recording. The dashboard's
 # "Don't show again" turns it off.
 consent_hint = true
+# Leave text you dictate during a meeting out of the meeting transcript (the microphone records
+# it too, so it would land under "Me"). Applied when the meeting is transcribed; the audio files
+# stay as recorded and the dictation time ranges are always stored in meeting.json.
+leave_dictation_out = true
 
 [audio]
 # Sample rate in Hz (must match model expectation)

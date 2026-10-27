@@ -59,6 +59,9 @@ PEAK_LIMIT = 32000.0
 ECHO_SLACK_S = 0.6
 ECHO_SIMILARITY = 0.8
 ECHO_MIN_RUN = 3
+# A Me word within this many seconds of a dictation take still counts as dictated: the first word may be heard
+# before the key press registers and the last after the key release.
+DICTATION_MARGIN_S = 0.5
 _MAX_WORD_S = 3.0  # no word lasts longer; bounds the search window in the Others list
 
 
@@ -80,6 +83,8 @@ class Meeting:
     started_at: str | None
     interrupted: bool  # `ended_at` is null: the process died before `stop()`
     tracks: dict[str, MeetingTrack] = field(default_factory=dict)
+    # (start, end) seconds from the meeting start of every dictation take, as stored by the recorder.
+    dictations: list[tuple[float, float]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
 
@@ -138,6 +143,19 @@ def _find_header_fix(f) -> tuple[int, int, int] | None:
     raise ValueError("no data chunk")
 
 
+def _parse_dictations(raw) -> list[tuple[float, float]]:
+    """The `dictations` list of `meeting.json` as sorted (start, end) pairs; entries that are not usable are skipped."""
+    ranges: list[tuple[float, float]] = []
+    for item in raw if isinstance(raw, list) else []:
+        try:
+            start, end = float(item["start_s"]), float(item["end_s"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if end >= start:
+            ranges.append((start, end))
+    return sorted(ranges)
+
+
 def load_meeting(folder: str | Path) -> Meeting:
     """Read `meeting.json` and open both tracks, repairing headers first.
 
@@ -156,6 +174,7 @@ def load_meeting(folder: str | Path) -> Meeting:
         meeting.notes.append(
             "The recording was interrupted (the app stopped before the meeting ended); it was recovered."
         )
+    meeting.dictations = _parse_dictations(meta.get("dictations"))
     for name, info in (meta.get("tracks") or {}).items():
         if name not in TRACK_NAMES:
             continue
@@ -366,10 +385,40 @@ def drop_echo(me: list[Word], others: list[Word]) -> list[Word]:
     return [w for w, d in zip(me, drop, strict=True) if not d]
 
 
-def merge_words(me: list[Word], others: list[Word]) -> list[Word]:
-    """Both tracks' words in time order, each labelled Me or Others, with the echo removed from Me."""
+def drop_dictation(
+    me: list[Word], dictations: list[tuple[float, float]], margin: float = DICTATION_MARGIN_S
+) -> list[Word]:
+    """The Me words minus those that touch a dictation take (padded by `margin` seconds on both sides).
+
+    The microphone records what the user dictates; that text was typed elsewhere, so it does not belong in the
+    meeting. A word is dropped when its time span overlaps a padded range.
+    `dictations` must be sorted by start, as `load_meeting` returns it.
+    """
+    ranges = [(start - margin, end + margin) for start, end in dictations]  # sorted by start, as stored
+    starts = [r[0] for r in ranges]
+    # Prefix maximum of the range ends, so the search below can stop at the first range that cannot reach the word.
+    reach: list[float] = []
+    for _, end in ranges:
+        reach.append(max(end, reach[-1]) if reach else end)
+    kept = []
+    for word in me:
+        i = bisect.bisect_right(starts, word.end) - 1  # last range that starts before the word ends
+        if i >= 0 and reach[i] >= word.start:
+            continue
+        kept.append(word)
+    return kept
+
+
+def merge_words(me: list[Word], others: list[Word], dictations: list[tuple[float, float]] | None = None) -> list[Word]:
+    """Both tracks' words in time order, each labelled Me or Others, with the echo removed from Me.
+
+    `dictations` (time ranges of dictation takes) removes the Me words spoken into the dictation; None keeps them.
+    """
     others = sorted(others, key=lambda w: (w.start, w.end))
     me = drop_echo(sorted(me, key=lambda w: (w.start, w.end)), others)
+    if dictations:
+        # After the echo filter: taking dictated words out first could join two short echo runs into one.
+        me = drop_dictation(me, dictations)
     merged = [Word(w.word, w.start, w.end, SPEAKER_ME) for w in me]
     merged += [Word(w.word, w.start, w.end, SPEAKER_OTHERS) for w in others]
     merged.sort(key=lambda w: (w.start, w.end, w.speaker))

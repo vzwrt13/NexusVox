@@ -6,6 +6,7 @@ control flow runs.
 """
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -374,3 +375,29 @@ def test_dictation_skips_extensions_while_they_still_load_or_when_none_is_instal
     assert app._extend_dictation("hi") == "hi"
     monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: ExtensionRegistry())
     assert app._extend_dictation("hi") == "hi"
+
+
+def test_a_dictation_take_is_reported_to_the_meeting_from_the_key_press_to_the_stop(monkeypatch):
+    app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: None)
+    calls = []
+    app._begin_take = lambda start: calls.append(("begin", start)) or 7
+    app._end_take = lambda token, start, end: calls.append(("end", token, start, end))
+    app._press_time = time.monotonic() - 2.0  # the connection took two seconds
+
+    _run_cycle(app)
+
+    assert [c[0] for c in calls] == ["begin", "end"]  # once each, the end after the stop
+    begin, end = calls
+    assert end[1] == 7 and end[2] == begin[1] == app._press_time and end[3] > end[2] + 1.9
+
+
+def test_a_take_is_reported_even_when_the_cycle_fails_after_the_recording_started(monkeypatch):
+    app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: None)
+    calls = []
+    app._begin_take = lambda start: calls.append("begin") or 1
+    app._end_take = lambda token, start, end: calls.append("end")
+    app._stream_audio = AsyncMock(side_effect=RuntimeError("device lost"))
+
+    _run_cycle(app)
+
+    assert calls == ["begin", "end"]

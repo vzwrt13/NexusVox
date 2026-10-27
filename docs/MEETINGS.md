@@ -2,11 +2,11 @@
 
 NexusVox can record a meeting or call without a bot in it: it captures your microphone and the
 system audio (what the other participants say) on your PC, transcribes both and gives you one
-transcript with **Me** and **Others**. Everything stays on your machine; the audio goes only to the
+transcript with numbered speakers, like an upload with speaker detection. Everything stays on your machine; the audio goes only to the
 transcription model you have configured (see the Requirements in the README).
 
 Dictation keeps working while a meeting is recorded. The microphone also records what you dictate, so the
-meeting would show it under **Me**; by default NexusVox leaves it out (see below).
+meeting would show it under your own voice; by default NexusVox leaves it out (see below).
 
 ## Record a meeting
 
@@ -29,12 +29,26 @@ Pick a microphone and an output device in the Meetings tab if the system default
 use for the call. The output device is only *recorded*, never changed: choose the device the call is
 played on.
 
+## Speakers
+
+Your microphone is **Speaker 1**. Set **Meetings: name for your own voice** in the Settings tab
+(`[meeting].own_voice_label`) to use a name instead; empty means `Speaker 1`. The system audio runs through
+the same speaker detection as uploads (Parakeet in its Docker container, up to four voices) and becomes
+**Speaker 2**, **Speaker 3**, ... If speaker detection is unavailable (CPU mode, no GPU container, another
+model) or fails, everyone on the system audio is **Speaker 2** and the transcript still completes; a note says
+why. The labels are stored the same way as for uploads, so the Meetings and Upload tabs, TXT, SRT and VTT
+exports and extensions all show the same names (the name of your own voice is stored with the meeting, so it
+cannot get lost in an edit of the text). A name such as `Speaker 2` is refused, since another participant gets
+that label. Speaker detection sends the whole system audio in one request, so a meeting longer than two hours
+skips it and shows everyone on the system audio as Speaker 2, with a note. The setting is read when a meeting is transcribed: *Transcribe*
+a meeting recorded earlier to get the new labels; nothing is changed automatically.
+
 ## Leave dictation out of the transcript
 
 While a meeting records, NexusVox stores the start and end of every dictation take in `meeting.json`
 (`dictations`, seconds from the meeting start), whatever the setting. The **Leave dictation out of the
 meeting transcript** switch in the Meetings tab (`[meeting].leave_dictation_out`, on by default) decides
-what the transcription does with them: on, the **Me** words that fall inside a take (plus half a second
+what the transcription does with them: on, the words of your own voice that fall inside a take (plus half a second
 on each side) are dropped; off, they stay. The switch is read when the meeting is transcribed, so
 *Transcribe* on a meeting recorded earlier uses the current setting. `mic.wav`, `system.wav` and
 `meeting.wav` are never changed. If the speech engine returns no word timing, nothing can be removed and
@@ -53,7 +67,7 @@ NexusVox shows this reminder before each recording from the dashboard. *Don't sh
 ## Quality: use a headset
 
 - **Headset or earphones.** With speakers, the microphone also picks up the other participants and
-  your transcript gets their words twice. NexusVox removes runs of such echo from *Me*, but a headset
+  your transcript gets their words twice. NexusVox removes runs of such echo from your own voice, but a headset
   avoids it at the source and gives clean separation.
 - **Bluetooth headsets drop in quality** while the microphone is in use: Windows switches them to the
   hands-free profile, which is narrow-band and sounds muffled, and the transcription suffers. Use the

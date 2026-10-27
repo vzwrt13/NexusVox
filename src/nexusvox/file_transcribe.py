@@ -19,6 +19,8 @@ ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".webm"}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
 MAX_CHUNK_MS = 60_000  # 60 seconds per chunk — safe for 16 GB VRAM
 _SEND_CHUNK_BYTES = 4096
+# Ends every note that says why speaker detection gave nothing; a meeting swaps it for what its transcript does.
+NO_SPEAKER_LABELS = "the transcript has no speaker labels."
 # One speaker-detection request at a time from this app: the server runs them one after the other
 # anyway, and a request's timeout must not include the time it waits behind another upload's run.
 _DIARIZE_LOCK = threading.Lock()
@@ -137,6 +139,7 @@ async def transcribe_file(
             offset_s += len(pcm_data) / 2 / 16_000  # PCM16 mono at 16 kHz
 
         text = " ".join(t for t in texts if t).strip()
+        plain_text = text
         if diarize and not wants_speakers:
             notes.append(_unavailable_note(entry, transcriber))
         elif speakers is not None and text:
@@ -160,6 +163,7 @@ async def transcribe_file(
         logger.warning(note)
     combined = TranscriptionResult()
     combined.finalize(text=text)
+    combined.plain_text = plain_text
     combined.words = words
     combined.notes = notes
     return combined
@@ -183,11 +187,11 @@ async def _diarize_file(transcriber: BaseTranscriber, wav_chunks: list[bytes]) -
 
             reason = f"timed out after {timeout:.0f} s" if isinstance(exc, httpx.TimeoutException) else str(exc)
             reason = reason or type(exc).__name__
-            return [], f"Speaker detection failed ({reason}); the transcript has no speaker labels."
+            return [], f"Speaker detection failed ({reason}); {NO_SPEAKER_LABELS}"
     finally:
         _DIARIZE_LOCK.release()
     if not turns:
-        return [], "Speaker detection found no speakers; the transcript has no speaker labels."
+        return [], f"Speaker detection found no speakers; {NO_SPEAKER_LABELS}"
     return turns, ""
 
 
@@ -212,10 +216,10 @@ def _unavailable_note(entry: dict, transcriber: BaseTranscriber) -> str:
     if entry.get("diarization"):
         reason = getattr(transcriber, "no_diarization_reason", "")
         if reason:
-            return reason + "; the transcript has no speaker labels."
-        return "Speaker detection is not available with this server; the transcript has no speaker labels."
+            return f"{reason}; {NO_SPEAKER_LABELS}"
+        return f"Speaker detection is not available with this server; {NO_SPEAKER_LABELS}"
     names = " or ".join(speaker_detection_models()) or "a model with speaker detection"
-    return f"Speaker detection needs {names} as the active model; the transcript has no speaker labels."
+    return f"Speaker detection needs {names} as the active model; {NO_SPEAKER_LABELS}"
 
 
 def _get_extension(filename: str) -> str:

@@ -71,8 +71,11 @@ class FileTranscription(Base):
     # ("light" / "medium"); both NULL when cleanup was not asked for or changed nothing.
     cleaned_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     cleanup_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    # Where the row comes from: "upload" (a file) or "meeting" (a two-track recording; speakers are Me / Others).
+    # Where the row comes from: "upload" (a file) or "meeting" (a two-track recording; speaker 1 is the
+    # microphone, 2 and up the system audio).
     kind: Mapped[str] = mapped_column(String(20), nullable=False, default="upload", server_default="upload")
+    # JSON object {"1": "Alex"}: names that replace "Speaker N" in `text`; NULL when every speaker is numbered.
+    speaker_names: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Playable audio kept for the row (a meeting's mix), relative to the database folder; NULL for uploads.
     audio_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
 

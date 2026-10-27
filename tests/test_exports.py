@@ -93,12 +93,28 @@ def test_a_speaker_turn_split_over_two_cues_is_labelled_once():
     assert all(not t.startswith("Speaker") for t in texts[1:])
 
 
-def test_meeting_speakers_are_named_me_and_others():
+def test_meeting_speakers_are_numbered_and_the_own_voice_keeps_its_stored_name():
     words = spoken("hi", 0.0, speaker=1) + spoken("hello", 1.0, speaker=2)
 
-    cues = build_cues(transcript(words, kind="meeting"))
+    cues = build_cues(transcript(words, text="Alex: hi\n\nSpeaker 2: hello", kind="meeting", speaker_names={1: "Alex"}))
 
-    assert [c[2] for c in cues] == ["Me: hi", "Others: hello"]
+    assert [c[2] for c in cues] == ["Alex: hi", "Speaker 2: hello"]
+
+
+def test_a_changed_text_does_not_lose_the_stored_name():
+    words = spoken("hi", 0.0, speaker=1) + spoken("hello", 1.0, speaker=2)
+
+    cues = build_cues(transcript(words, text="edited", kind="meeting", speaker_names={1: "Alex"}))
+
+    assert [c[2] for c in cues] == ["Alex: hi", "Speaker 2: hello"]
+
+
+def test_meeting_without_stored_names_falls_back_to_numbers():
+    words = spoken("hi", 0.0, speaker=1) + spoken("hello", 1.0, speaker=2)
+
+    cues = build_cues(transcript(words, text="edited", kind="meeting"))
+
+    assert [c[2] for c in cues] == ["Speaker 1: hi", "Speaker 2: hello"]
 
 
 def test_cues_do_not_overlap():
@@ -210,7 +226,7 @@ def test_overlapping_speech_keeps_both_speakers_and_no_empty_cue():
 
     cues = build_cues(transcript(words, kind="meeting"))
 
-    assert sorted(c[2] for c in cues) == ["Me: yeah", "Others: so that works"]
+    assert sorted(c[2] for c in cues) == ["Speaker 1: yeah", "Speaker 2: so that works"]
     assert all(end > start for start, end, _ in cues)
 
 
@@ -221,7 +237,7 @@ def test_crosstalk_does_not_shatter_a_speakers_sentence():
 
     texts = [c[2] for c in build_cues(transcript(words, kind="meeting"))]
 
-    assert "Others: we should ship it on friday" in texts
+    assert "Speaker 2: we should ship it on friday" in texts
 
 
 def test_the_error_names_the_kind_of_item():

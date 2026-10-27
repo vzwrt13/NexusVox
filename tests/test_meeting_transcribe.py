@@ -180,7 +180,7 @@ def test_missing_track_is_left_out_with_a_note(tmp_path):
     meeting = load_meeting(folder)
 
     assert list(meeting.tracks) == ["mic"]
-    assert any("Others" in n for n in meeting.notes)
+    assert any("System audio" in n for n in meeting.notes)
 
 
 # ---- Conversion -------------------------------------------------------------
@@ -285,7 +285,7 @@ def test_echo_filter_stays_fast_on_a_long_meeting():
     assert time.perf_counter() - started < 15
 
 
-def test_merge_orders_by_time_and_labels_me_and_others():
+def test_merge_orders_by_time_and_numbers_the_speakers():
     me = [w("hi", 0.0), w("there", 0.4), w("fine", 5.0), w("thanks", 5.4)]
     others = [w("how", 1.0), w("are", 1.4), w("you", 1.8)]
 
@@ -295,7 +295,17 @@ def test_merge_orders_by_time_and_labels_me_and_others():
     assert [x.speaker for x in merged] == [1, 1, 2, 2, 2, 1, 1]
     from nexusvox.meeting_transcribe import format_meeting
 
-    assert format_meeting(merged) == "Me: hi there\n\nOthers: how are you\n\nMe: fine thanks"
+    assert format_meeting(merged) == "Speaker 1: hi there\n\nSpeaker 2: how are you\n\nSpeaker 1: fine thanks"
+    assert format_meeting(merged, "Alex").startswith("Alex: hi there\n\nSpeaker 2:")
+
+
+def test_system_speakers_from_detection_follow_the_microphone():
+    me = [w("hi", 0.0)]
+    others = [Word("yo", 1.0, 1.3, 1), Word("hey", 2.0, 2.3, 2), Word("ok", 3.0, 3.3, 3), w("plain", 4.0)]
+
+    merged = merge_words(me, others)
+
+    assert [x.speaker for x in merged] == [1, 2, 3, 4, 2]
 
 
 def test_format_transcript_without_names_is_unchanged():
@@ -438,7 +448,7 @@ def test_text_without_timing_is_not_lost_when_only_some_words_are_timed(meeting_
     result = api.transcribe_meeting(folder)
 
     assert result["ok"]
-    assert result["text"] == "Me: hello everyone\n\nOthers: hello everyone"
+    assert result["text"] == "Speaker 1: hello everyone\n\nSpeaker 2: hello everyone"
     assert any("incomplete" in n for n in result["notes"])
 
 
@@ -469,7 +479,7 @@ def test_transcribe_meeting_stores_one_me_others_transcript_and_a_mix(meeting_ap
 
     assert result["ok"], result
     assert result["kind"] == "meeting"
-    assert result["text"] == "Others: hello everyone\n\nMe: sounds good"
+    assert result["text"] == "Speaker 2: hello everyone\n\nSpeaker 1: sounds good"
     assert any("interrupted" in n for n in result["notes"])
     row = db.get_file_transcription(result["id"])
     assert row.kind == "meeting"
@@ -586,8 +596,8 @@ def _dictation_meeting(folder: Path, ranges: list[tuple[float, float]]) -> None:
 @pytest.mark.parametrize(
     ("spoken", "dictated", "kept_text"),
     [
-        (("sounds", "good", "thanks"), ("sounds", "good"), "Me: thanks"),
-        (("klingt", "gut", "danke"), ("klingt", "gut"), "Me: danke"),
+        (("sounds", "good", "thanks"), ("sounds", "good"), "Speaker 1: thanks"),
+        (("klingt", "gut", "danke"), ("klingt", "gut"), "Speaker 1: danke"),
     ],
 )
 def test_switch_decides_whether_dictation_stays_in_the_transcript(meeting_api, tmp_path, spoken, dictated, kept_text):
@@ -610,12 +620,12 @@ def test_switch_decides_whether_dictation_stays_in_the_transcript(meeting_api, t
 
     api._config.meeting.leave_dictation_out = True
     left_out = api.transcribe_meeting(folder)
-    assert left_out["text"] == f"Others: hello\n\n{kept_text}"
+    assert left_out["text"] == f"Speaker 2: hello\n\n{kept_text}"
     assert all(word not in left_out["text"] for word in dictated)
 
     api._config.meeting.leave_dictation_out = False  # applied at transcription time, so the same folder works again
     kept_in = api.transcribe_meeting(folder)
-    assert kept_in["text"] == f"Others: hello\n\nMe: {' '.join(spoken)}"
+    assert kept_in["text"] == f"Speaker 2: hello\n\nSpeaker 1: {' '.join(spoken)}"
 
     assert (folder / "mic.wav").read_bytes() == mic_audio  # the tracks never change
 
@@ -645,3 +655,201 @@ def test_dictation_is_dropped_after_the_echo_filter_so_real_speech_is_not_taken_
     merged = merge_words(me, others, [(4.9, 5.4)])
 
     assert [x.word for x in merged if x.speaker == 1] == ["alpha", "bravo", "charlie", "delta"]
+
+
+# ---- Numbered speakers ------------------------------------------------------
+
+
+def _diarized_system(chunks, **kwargs):
+    """Stands in for `_transcribe_wav_chunks`: the microphone first, then a system track with three speakers."""
+    _diarized_system.calls = getattr(_diarized_system, "calls", 0) + 1
+    result = TranscriptionResult()
+    if _diarized_system.calls % 2:
+        result.words = [w("sounds", 6.0), w("good", 6.4)]
+        result.finalize(text="sounds good")
+    else:
+        assert kwargs["diarize"] is True
+        result.words = [Word("hello", 1.0, 1.3, 1), Word("hi", 2.0, 2.3, 2), Word("hey", 3.0, 3.3, 3)]
+        result.finalize(text="Speaker 1: hello\n\nSpeaker 2: hi\n\nSpeaker 3: hey")
+        result.plain_text = "hello hi hey"
+    return result
+
+
+def test_system_track_speakers_become_speaker_2_and_up(meeting_api, db, tmp_path):
+    api, _ = meeting_api
+    _diarized_system.calls = 0
+    api._transcribe_wav_chunks = _diarized_system
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["text"] == "Speaker 2: hello\n\nSpeaker 3: hi\n\nSpeaker 4: hey\n\nSpeaker 1: sounds good"
+    stored = json.loads(db.get_file_transcription(result["id"]).words)
+    assert [x["speaker"] for x in stored] == [2, 3, 4, 1, 1]
+
+
+def test_custom_own_voice_label_is_used_for_the_microphone(meeting_api, tmp_path):
+    api, _ = meeting_api
+    _diarized_system.calls = 0
+    api._transcribe_wav_chunks = _diarized_system
+    api._config.meeting.own_voice_label = "Alex"
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["text"].endswith("Alex: sounds good")
+    assert "Speaker 1" not in result["text"]
+
+
+def test_without_speaker_detection_the_whole_system_track_is_speaker_2(meeting_api, tmp_path):
+    api, _ = meeting_api
+    fake = api._transcribe_wav_chunks
+
+    def no_detection(chunks, **kwargs):
+        result = fake(chunks, **kwargs)
+        if kwargs["diarize"]:
+            result.notes = [
+                "Speaker detection needs Parakeet as the active model; the transcript has no speaker labels."
+            ]
+        return result
+
+    api._transcribe_wav_chunks = no_detection
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["ok"]
+    assert result["text"] == "Speaker 2: hello everyone\n\nSpeaker 1: sounds good"
+    assert any("shown as Speaker 2" in n for n in result["notes"])
+
+
+def test_own_voice_label_setting_is_saved_and_cleaned(meeting_api):
+    api, _ = meeting_api
+
+    assert api.get_settings()["meeting_own_voice_label"] == "Speaker 1"
+    assert api.set_meeting_own_voice_label("  Alex\n Miller ")["meeting_own_voice_label"] == "Alex Miller"
+    assert api.set_meeting_own_voice_label("   ")["meeting_own_voice_label"] == "Speaker 1"
+
+
+def test_the_own_voice_name_is_stored_with_the_row_and_survives_in_the_hook_view(meeting_api, db, tmp_path):
+    api, hook = meeting_api
+    api._config.meeting.own_voice_label = "Alex"
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert json.loads(db.get_file_transcription(result["id"]).speaker_names) == {"1": "Alex"}
+    assert hook.seen[0].speaker_names == {1: "Alex"}
+
+
+@pytest.mark.parametrize("label", ["Speaker 2", "speaker 3", "SPEAKER   4"])
+def test_a_label_that_another_speaker_gets_is_refused(meeting_api, label):
+    api, _ = meeting_api
+    api._config.meeting.own_voice_label = "Alex"
+
+    resp = api.set_meeting_own_voice_label(label)
+
+    assert "another speaker" in resp["error"]
+    assert api._config.meeting.own_voice_label == "Alex"
+    assert api.set_meeting_own_voice_label("Speaker 1")["meeting_own_voice_label"] == "Speaker 1"
+
+
+def test_a_hand_edited_clashing_label_falls_back_to_the_default(tmp_path):
+    from nexusvox.config import load_config
+
+    path = tmp_path / "config.toml"
+    path.write_text('[meeting]\nown_voice_label = "Speaker 2"\n', encoding="utf-8")
+
+    assert load_config(path).meeting.own_voice_label == "Speaker 1"
+
+
+def test_progress_does_not_fall_back_while_speakers_are_detected(meeting_api, tmp_path):
+    api, _ = meeting_api
+    fake = api._transcribe_wav_chunks
+
+    def with_diarizing(chunks, **kwargs):
+        kwargs["on_progress"]("transcribing", len(chunks), len(chunks))
+        if kwargs["diarize"]:
+            kwargs["on_progress"]("diarizing")
+        return fake(chunks, **kwargs)
+
+    api._transcribe_wav_chunks = with_diarizing
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    seen = []
+
+    class Job:
+        def update(self, stage, current=0, total=0):
+            seen.append((stage, current))
+
+    api.transcribe_meeting(folder, job=Job())
+
+    currents = [c for stage, c in seen if stage in ("transcribing", "diarizing")]
+    assert currents == sorted(currents)
+
+
+def test_a_very_long_system_track_skips_speaker_detection(meeting_api, tmp_path, monkeypatch):
+    api, _ = meeting_api
+    fake = api._transcribe_wav_chunks
+    asked = []
+
+    def spy(chunks, **kwargs):
+        asked.append(kwargs["diarize"])
+        return fake(chunks, **kwargs)
+
+    api._transcribe_wav_chunks = spy
+    monkeypatch.setattr("nexusvox.dashboard.api.MAX_DETECTION_S", 1.0)
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert asked == [False, False]
+    assert any("too long for speaker detection" in n for n in result["notes"])
+
+
+def test_detected_speakers_that_cannot_be_used_are_noted(meeting_api, tmp_path):
+    api, _ = meeting_api
+
+    def partly_timed(chunks, **kwargs):
+        result = TranscriptionResult()
+        if kwargs["diarize"]:
+            result.words = [Word("hello", 1.0, 1.3, 1), Word("hi", 2.0, 2.3, 2)]
+            result.finalize(text="Speaker 1: hello\n\nSpeaker 2: hi")
+            result.plain_text = "hello hi"
+        else:
+            result.words = [w("sounds", 3.0)]  # "good" has no timing
+            result.finalize(text="sounds good")
+        return result
+
+    api._transcribe_wav_chunks = partly_timed
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["text"] == "Speaker 1: sounds good\n\nSpeaker 2: hello hi"
+    assert any("detected speakers could not be used" in n for n in result["notes"])
+
+
+def test_a_skipped_speaker_detection_says_that_everyone_is_speaker_2(meeting_api, tmp_path):
+    api, _ = meeting_api
+    fake = api._transcribe_wav_chunks
+
+    def skipped(chunks, **kwargs):
+        result = fake(chunks, **kwargs)
+        if kwargs["diarize"]:
+            result.notes = ["Speaker detection skipped: some words came back without timing."]
+        return result
+
+    api._transcribe_wav_chunks = skipped
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert any("everyone on it is shown as Speaker 2" in n for n in result["notes"])

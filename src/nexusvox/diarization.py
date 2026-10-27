@@ -7,7 +7,7 @@ whose turn holds its midpoint, and consecutive words of one speaker form a parag
 
 from __future__ import annotations
 
-from .config import MODEL_REGISTRY
+from .config import MODEL_REGISTRY, numbered_speaker_label
 from .transcriber import SpeakerTurn, Word
 
 # Diarization runs once over the whole file: a base for loading (or first downloading) the model,
@@ -71,9 +71,9 @@ def speaker_paragraphs(words: list[Word]) -> list[tuple[int, str]]:
 def format_transcript(words: list[Word], names: dict[int, str] | None = None) -> str:
     """The labelled transcript: "Speaker 1: ..." paragraphs separated by a blank line.
 
-    `names` maps a speaker number to its label (a meeting uses "Me" and "Others").
+    `names` maps a speaker number to its label (a meeting names its first speaker after the own-voice setting).
     """
     names = names or {}
     return "\n\n".join(
-        f"{names.get(speaker, f'Speaker {speaker}')}: {text}" for speaker, text in speaker_paragraphs(words)
+        f"{names.get(speaker, numbered_speaker_label(speaker))}: {text}" for speaker, text in speaker_paragraphs(words)
     )

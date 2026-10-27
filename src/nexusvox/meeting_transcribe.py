@@ -1,9 +1,10 @@
-"""Turn a recorded meeting folder into one Me/Others transcript and a playable mix.
+"""Turn a recorded meeting folder into one transcript with numbered speakers and a playable mix.
 
-The recorder (`meeting_recorder.py`) leaves `mic.wav` (Me), `system.wav` (Others) and `meeting.json`.
-This module loads that folder (repairing the WAV headers of a recording that was killed), converts each
-track to the 16 kHz mono 60 s chunks the upload pipeline takes, merges both tracks' timed words into
-speaker turns and mixes `meeting.wav`. Transcription itself stays in `file_transcribe.transcribe_file`.
+The recorder (`meeting_recorder.py`) leaves `mic.wav` (your voice, speaker 1), `system.wav` (everyone else) and
+`meeting.json`. This module loads that folder (repairing the WAV headers of a recording that was killed),
+converts each track to the 16 kHz mono 60 s chunks the upload pipeline takes, merges both tracks' timed words
+into speaker turns and mixes `meeting.wav`. Speaker detection on the system track gives speakers 2, 3, ...
+(without it, the whole track is speaker 2). Transcription itself stays in `file_transcribe.transcribe_file`.
 
 Memory: audio is read, resampled and mixed one 60 s window at a time. The one thing held in full is the WAV
 chunks of the track being transcribed (`transcribe_file` takes a list), roughly 115 MB per hour of meeting.
@@ -26,6 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .config import DEFAULT_OWN_VOICE_LABEL
 from .diarization import format_transcript
 from .file_transcribe import MAX_CHUNK_MS
 from .meeting_recorder import META_FILENAME
@@ -35,11 +37,11 @@ logger = logging.getLogger(__name__)
 
 TARGET_RATE = 16_000
 MIX_FILENAME = "meeting.wav"
-TRACK_NAMES = {"mic": "Me", "system": "Others"}
-# Speaker numbers stored on the words, in the same format speaker detection uses for uploads.
-SPEAKER_ME = 1
-SPEAKER_OTHERS = 2
-SPEAKER_LABELS = {SPEAKER_ME: "Me", SPEAKER_OTHERS: "Others"}
+TRACK_NAMES = {"mic": "Microphone", "system": "System audio"}
+# Speaker numbers stored on the words, in the same format speaker detection uses for uploads: the microphone
+# is speaker 1, the system track's own speakers (numbered 1, 2, ... by detection) follow from 2.
+SPEAKER_OWN = 1
+SPEAKER_FIRST_SYSTEM = 2
 
 # A track file written to this recently may still be recorded: its header is not touched.
 STALE_AFTER_S = 30.0
@@ -52,17 +54,17 @@ MAX_GAIN = 8.0
 MIN_GAIN = 0.1
 PEAK_LIMIT = 32000.0
 
-# Echo filter: a Me word is the speakers' sound coming back through the microphone when an Others word
-# sounds like it and sits at the same time (the delay through the room and the engines' timing noise). One
+# Echo filter: a microphone word is the speakers' sound coming back through the microphone when a system-track
+# word sounds like it and sits at the same time (the delay through the room and the engines' timing noise). One
 # word proves nothing - "the"/"they", or both people saying "okay" - so only a run of at least
-# `ECHO_MIN_RUN` consecutive Me words that all have such a partner counts as echo.
+# `ECHO_MIN_RUN` consecutive microphone words that all have such a partner counts as echo.
 ECHO_SLACK_S = 0.6
 ECHO_SIMILARITY = 0.8
 ECHO_MIN_RUN = 3
-# A Me word within this many seconds of a dictation take still counts as dictated: the first word may be heard
+# A microphone word within this many seconds of a dictation take still counts as dictated: the first word may be heard
 # before the key press registers and the last after the key release.
 DICTATION_MARGIN_S = 0.5
-_MAX_WORD_S = 3.0  # no word lasts longer; bounds the search window in the Others list
+_MAX_WORD_S = 3.0  # no word lasts longer; bounds the search window in the system-track list
 
 
 # ---- Loading and repairing the folder ---------------------------------------
@@ -345,9 +347,9 @@ def _norm(word: str) -> str:
 
 
 def drop_echo(me: list[Word], others: list[Word]) -> list[Word]:
-    """The Me words minus the runs the microphone picked up from the speakers (heard in Others at the same time).
+    """The microphone words minus the runs it picked up from the speakers (heard on the system track at the same time).
 
-    A Me word has an echo partner when an Others word within `ECHO_SLACK_S` of it is `ECHO_SIMILARITY`
+    A microphone word has an echo partner when a system-track word within `ECHO_SLACK_S` of it is `ECHO_SIMILARITY`
     similar; only runs of `ECHO_MIN_RUN` consecutive Me words that all have one are dropped, so a short
     "yes" or "okay" said at once, or "the"/"they" in crosstalk, stays.
     """
@@ -388,7 +390,7 @@ def drop_echo(me: list[Word], others: list[Word]) -> list[Word]:
 def drop_dictation(
     me: list[Word], dictations: list[tuple[float, float]], margin: float = DICTATION_MARGIN_S
 ) -> list[Word]:
-    """The Me words minus those that touch a dictation take (padded by `margin` seconds on both sides).
+    """The microphone words minus those that touch a dictation take (padded by `margin` seconds on both sides).
 
     The microphone records what the user dictates; that text was typed elsewhere, so it does not belong in the
     meeting. A word is dropped when its time span overlaps a padded range.
@@ -410,21 +412,24 @@ def drop_dictation(
 
 
 def merge_words(me: list[Word], others: list[Word], dictations: list[tuple[float, float]] | None = None) -> list[Word]:
-    """Both tracks' words in time order, each labelled Me or Others, with the echo removed from Me.
+    """Both tracks' words in time order as numbered speakers, with the echo removed from the microphone.
 
-    `dictations` (time ranges of dictation takes) removes the Me words spoken into the dictation; None keeps them.
+    `me` (the microphone) is speaker 1. `others` (the system track) are speakers 2, 3, ...: a word's own
+    `speaker` (detection's 1, 2, ... for that track) is moved up by one, and a word without one is speaker 2.
+    `dictations` (time ranges of dictation takes) removes the microphone words spoken into the dictation;
+    None keeps them.
     """
     others = sorted(others, key=lambda w: (w.start, w.end))
     me = drop_echo(sorted(me, key=lambda w: (w.start, w.end)), others)
     if dictations:
         # After the echo filter: taking dictated words out first could join two short echo runs into one.
         me = drop_dictation(me, dictations)
-    merged = [Word(w.word, w.start, w.end, SPEAKER_ME) for w in me]
-    merged += [Word(w.word, w.start, w.end, SPEAKER_OTHERS) for w in others]
+    merged = [Word(w.word, w.start, w.end, SPEAKER_OWN) for w in me]
+    merged += [Word(w.word, w.start, w.end, SPEAKER_FIRST_SYSTEM - 1 + (w.speaker or 1)) for w in others]
     merged.sort(key=lambda w: (w.start, w.end, w.speaker))
     return merged
 
 
-def format_meeting(words: list[Word]) -> str:
-    """ "Me: ..." / "Others: ..." paragraphs, one per speaker turn."""
-    return format_transcript(words, SPEAKER_LABELS)
+def format_meeting(words: list[Word], own_label: str = DEFAULT_OWN_VOICE_LABEL) -> str:
+    """ "Speaker 1: ..." / "Speaker 2: ..." paragraphs, one per speaker turn; speaker 1 is named `own_label`."""
+    return format_transcript(words, {SPEAKER_OWN: own_label})

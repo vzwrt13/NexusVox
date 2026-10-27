@@ -37,7 +37,7 @@ polish_key = ""
 
 [meeting]
 # Meeting recording: your microphone and the system output (what the other participants say)
-# are recorded to two tracks and transcribed into one "Me" / "Others" transcript. Start and stop
+# are recorded to two tracks and transcribed into one transcript with numbered speakers. Start and stop
 # it from the dashboard's Meetings tab or with this toggle hotkey; dictation keeps working during
 # a meeting. Only record when every participant knows (see docs/MEETINGS.md).
 # The hotkey needs at least one modifier and a key, and must not also be the dictation hotkey.
@@ -50,9 +50,12 @@ output_device = ""
 # "Don't show again" turns it off.
 consent_hint = true
 # Leave text you dictate during a meeting out of the meeting transcript (the microphone records
-# it too, so it would land under "Me"). Applied when the meeting is transcribed; the audio files
+# it too, so it would land under your own voice). Applied when the meeting is transcribed; the audio files
 # stay as recorded and the dictation time ranges are always stored in meeting.json.
 leave_dictation_out = true
+# The name your own voice (the microphone) gets in a meeting transcript. The other participants are
+# numbered on from 2 ("Speaker 2", "Speaker 3", ...). Also editable in the dashboard Settings tab.
+own_voice_label = "Speaker 1"
 
 [audio]
 # Sample rate in Hz (must match model expectation)

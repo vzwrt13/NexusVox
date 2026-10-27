@@ -173,6 +173,17 @@
       </div>
 
       <div class="settings-card" style="margin-top: 12px;">
+        <h4 class="nexus-section-title">Meetings</h4>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Meetings: name for your own voice</h3>
+            <p>How your microphone's speaker is labelled in meeting transcripts (default <code>Speaker 1</code>). The other participants are numbered on from <code>Speaker 2</code>. Applied when a meeting is transcribed.</p>
+          </div>
+          <input type="text" id="meeting-own-label-input" class="dict-input" maxlength="40" placeholder="Speaker 1" style="max-width: 220px;">
+        </div>
+      </div>
+
+      <div class="settings-card" style="margin-top: 12px;">
         <div class="setting-row">
           <div class="setting-info">
             <h3>Compute Device</h3>
@@ -536,7 +547,7 @@
     <!-- Meetings Tab -->
     <section id="tab-meetings" class="tab-content">
       <h2 class="edit-heading">Meetings</h2>
-      <p class="settings-hint">Records your microphone and the system audio (what the other participants say) and turns them into one transcript with <em>Me</em> and <em>Others</em>. Dictation keeps working during a meeting.</p>
+      <p class="settings-hint">Records your microphone and the system audio (what the other participants say) and turns them into one transcript with numbered speakers (<em>Speaker 1</em> is you). Dictation keeps working during a meeting.</p>
 
       <div class="settings-card meeting-card">
         <div class="meeting-controls">

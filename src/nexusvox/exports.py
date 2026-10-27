@@ -10,8 +10,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import partial
 
+from .diarization import speaker_names_from_text
 from .extensions import ExportTarget, FileTranscript
-from .meeting_transcribe import SPEAKER_LABELS
 from .transcriber import Word
 
 # `(transcript, texts) -> texts`, always as many as given: `ExtensionRegistry.display_texts`.
@@ -26,10 +26,16 @@ SUBTITLE_TARGET_IDS = ("srt", "vtt")
 NO_TIMING_HINT = "No word timestamps stored (Parakeet provides them)"
 
 
-def _speaker_label(transcript: FileTranscript, speaker: int) -> str:
-    if transcript.kind == "meeting" and speaker in SPEAKER_LABELS:
-        return SPEAKER_LABELS[speaker]
-    return f"Speaker {speaker}"
+def _speaker_names(transcript: FileTranscript) -> dict[int, str]:
+    """A meeting names its own voice (a Settings entry), so its labels are read back from the stored text;
+    an upload's speakers are always "Speaker N"."""
+    if transcript.kind != "meeting":
+        return {}
+    return speaker_names_from_text(transcript.text, list(transcript.words))
+
+
+def _speaker_label(names: dict[int, str], speaker: int) -> str:
+    return names.get(speaker, f"Speaker {speaker}")
 
 
 def _split_lines(text: str) -> list[str] | None:
@@ -93,6 +99,7 @@ def build_cues(transcript: FileTranscript) -> list[tuple[float, float, str]]:
     turn covered it) belongs to the speaker before it. A cue gets the speaker's label when the cue before it
     (in start order) is from somebody else.
     """
+    names = _speaker_names(transcript)
     words = [w for w in transcript.words if w.word.strip()]
     streams: dict[int | None, list[Word]] = {}
     last: int | None = None
@@ -110,7 +117,7 @@ def build_cues(transcript: FileTranscript) -> list[tuple[float, float, str]]:
     queue = list(cues)
     while queue:
         speaker, cue = queue.pop(0)
-        label = f"{_speaker_label(transcript, speaker)}: " if speaker is not None and speaker != previous else ""
+        label = f"{_speaker_label(names, speaker)}: " if speaker is not None and speaker != previous else ""
         # The label takes room: words that no longer fit move to a cue of their own.
         keep = len(cue)
         while keep > 1 and _split_lines(label + _text(cue[:keep])) is None:

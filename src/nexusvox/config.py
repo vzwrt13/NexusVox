@@ -265,6 +265,16 @@ def validate_hotkey(modifiers: list[str], key: str) -> str | None:
     return None
 
 
+DEFAULT_OWN_VOICE_LABEL = "Speaker 1"
+MAX_SPEAKER_LABEL_CHARS = 40
+
+
+def normalize_speaker_label(label: object) -> str:
+    """A speaker label on one line (whitespace collapsed, at most 40 characters); the default when nothing is left."""
+    text = " ".join(str(label or "").split())[:MAX_SPEAKER_LABEL_CHARS].strip()
+    return text or DEFAULT_OWN_VOICE_LABEL
+
+
 @dataclass
 class MeetingConfig:
     """Meeting recording (microphone + system audio) started from the dashboard or its own hotkey.
@@ -283,6 +293,8 @@ class MeetingConfig:
     # Drop the Me words spoken inside a dictation take from the meeting transcript (the microphone records
     # dictation too). Applied when the meeting is transcribed; the audio files stay as recorded.
     leave_dictation_out: bool = True
+    # The label of the microphone's speaker in a meeting transcript; the other participants are numbered on from 2.
+    own_voice_label: str = DEFAULT_OWN_VOICE_LABEL
 
 
 def meeting_hotkey_clash(modifiers: list[str], key: str, dictation: HotkeyConfig) -> str | None:
@@ -676,6 +688,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             output_device=str(meeting_data.get("output_device", "")),
             consent_hint=bool(meeting_data.get("consent_hint", True)),
             leave_dictation_out=bool(meeting_data.get("leave_dictation_out", True)),
+            own_voice_label=normalize_speaker_label(meeting_data.get("own_voice_label", "")),
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
@@ -779,6 +792,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"output_device = {json.dumps(config.meeting.output_device)}",
             f"consent_hint = {'true' if config.meeting.consent_hint else 'false'}",
             f"leave_dictation_out = {'true' if config.meeting.leave_dictation_out else 'false'}",
+            f"own_voice_label = {json.dumps(config.meeting.own_voice_label)}",
             "",
             "[audio]",
             f"sample_rate = {config.audio.sample_rate}",

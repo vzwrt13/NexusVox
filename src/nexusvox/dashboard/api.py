@@ -28,6 +28,7 @@ from ..config import (
     MeetingConfig,
     meeting_hotkey_clash,
     normalize_hotkey_key,
+    normalize_speaker_label,
     resolve_device,
     save_config,
     validate_hotkey,
@@ -40,13 +41,21 @@ from ..edit_watch import WATCHED_KEYS
 from ..exports import NO_TIMING_HINT, SUBTITLE_TARGET_IDS
 from ..extensions import HOOK_TIMEOUT_S, ExtensionRegistry, file_transcript_from_record
 from ..file_cleanup import clean_transcript
-from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_CHUNK_MS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
+from ..file_transcribe import (
+    ALLOWED_EXTENSIONS,
+    MAX_CHUNK_MS,
+    MAX_UPLOAD_BYTES,
+    NO_SPEAKER_LABELS,
+    convert_to_wav,
+    transcribe_file,
+)
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
 from ..meeting_recorder import META_FILENAME, list_devices
 from ..meeting_session import MeetingSession
 from ..meeting_transcribe import (
     MIX_FILENAME,
+    SPEAKER_FIRST_SYSTEM,
     TRACK_NAMES,
     convert_track,
     format_meeting,
@@ -69,6 +78,14 @@ logger = logging.getLogger(__name__)
 
 # `[hotkey]` fields that hold a marker key, and how an error message names each.
 _MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
+
+
+_SPEAKER_LABEL = re.compile(r"^Speaker \d+: ", re.MULTILINE)
+
+
+def _strip_speaker_labels(text: str) -> str:
+    """Speaker detection's "Speaker N: ..." paragraphs as one run of plain text."""
+    return " ".join(_SPEAKER_LABEL.sub("", text).split())
 
 
 def _remove_folder(folder: Path) -> None:
@@ -243,6 +260,7 @@ class DashboardAPI:
             "meeting_output_device": self._config.meeting.output_device,
             "meeting_consent_hint": self._config.meeting.consent_hint,
             "meeting_leave_dictation_out": self._config.meeting.leave_dictation_out,
+            "meeting_own_voice_label": self._config.meeting.own_voice_label,
         }
 
     def get_translator_status(self) -> dict:
@@ -903,6 +921,12 @@ class DashboardAPI:
         save_config(self._config)
         return self.get_settings()
 
+    def set_meeting_own_voice_label(self, label: str) -> dict:
+        """The name of the microphone's speaker in meeting transcripts; applied when a meeting is transcribed."""
+        self._config.meeting.own_voice_label = normalize_speaker_label(label)
+        save_config(self._config)
+        return self.get_settings()
+
     def set_meeting_leave_dictation_out(self, enabled: bool) -> dict:
         """Applied when a meeting is transcribed, so it also covers a meeting recorded earlier."""
         self._config.meeting.leave_dictation_out = bool(enabled)
@@ -973,7 +997,7 @@ class DashboardAPI:
         return {"ok": True, "job_id": job.id}
 
     def transcribe_meeting(self, folder: str | Path, *, job: FileJob | None = None) -> dict:
-        """Transcribe both tracks of a meeting folder, merge them into one Me/Others transcript, mix
+        """Transcribe both tracks of a meeting folder, merge them into one transcript with numbered speakers, mix
         `meeting.wav` and save the result as a `kind="meeting"` row (blocking). No upload size limit applies.
         """
         folder = Path(folder)
@@ -1012,18 +1036,24 @@ class DashboardAPI:
                         progress(stage, base + current, total_chunks)
 
                 try:
-                    result = self._transcribe_wav_chunks(chunks, word_timestamps=True, on_progress=track_progress)
+                    # The system track holds everyone else, so it runs through speaker detection like an upload.
+                    result = self._transcribe_wav_chunks(
+                        chunks, word_timestamps=True, diarize=name == "system", on_progress=track_progress
+                    )
                 except Exception as exc:
                     logger.error("Transcription failed for meeting %s: %s", folder, exc)
                     return {"ok": False, "error": f"Transcription failed: {exc}"}
                 done_chunks += len(chunks)
                 del chunks  # one track's chunks at a time
-                notes.extend(f"{label}: {n}" for n in result.notes)
-                words[name], plain[name] = list(result.words), result.text
+                alone = f"everyone on it is shown as Speaker {SPEAKER_FIRST_SYSTEM}."
+                notes.extend(f"{label}: {n.replace(NO_SPEAKER_LABELS, alone)}" for n in result.notes)
+                words[name] = list(result.words)
+                # Detection labels the text "Speaker N: ..."; the meeting writes its own labels from the words.
+                plain[name] = _strip_speaker_labels(result.text) if name == "system" else result.text
                 if result.confidence is not None:
                     confidences.append(result.confidence)
                 # The server skips a word whose timing it cannot read; the labelled text is built from timed words.
-                if len(result.words) < len(result.text.split()):
+                if len(result.words) < len(plain[name].split()):
                     incomplete.append(label)
 
             if incomplete:
@@ -1032,7 +1062,12 @@ class DashboardAPI:
                     f"Word timing is missing or incomplete for {' and '.join(incomplete)}, so the meeting is "
                     "not interleaved by time: each track's text follows the other."
                 )
-                text = "\n\n".join(f"{TRACK_NAMES[n]}: {plain[n]}" for n in ("mic", "system") if plain.get(n))
+                own_label = self._config.meeting.own_voice_label
+                text = "\n\n".join(
+                    f"{label}: {plain[n]}"
+                    for n, label in (("mic", own_label), ("system", f"Speaker {SPEAKER_FIRST_SYSTEM}"))
+                    if plain.get(n)
+                )
                 merged = []
                 if self._config.meeting.leave_dictation_out and meeting.dictations:
                     notes.append(
@@ -1043,7 +1078,7 @@ class DashboardAPI:
                 merged = merge_words(
                     words.get("mic", []), words.get("system", []), meeting.dictations if leave_out else None
                 )
-                text = format_meeting(merged)
+                text = format_meeting(merged, self._config.meeting.own_voice_label)
 
             if progress:
                 progress("saving")

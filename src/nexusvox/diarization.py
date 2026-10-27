@@ -71,9 +71,28 @@ def speaker_paragraphs(words: list[Word]) -> list[tuple[int, str]]:
 def format_transcript(words: list[Word], names: dict[int, str] | None = None) -> str:
     """The labelled transcript: "Speaker 1: ..." paragraphs separated by a blank line.
 
-    `names` maps a speaker number to its label (a meeting uses "Me" and "Others").
+    `names` maps a speaker number to its label (a meeting names its first speaker after the own-voice setting).
     """
     names = names or {}
     return "\n\n".join(
         f"{names.get(speaker, f'Speaker {speaker}')}: {text}" for speaker, text in speaker_paragraphs(words)
     )
+
+
+def speaker_names_from_text(text: str, words: list[Word]) -> dict[int, str]:
+    """The label each speaker has in a transcript written by `format_transcript`, read back from its text.
+
+    The text holds one "Label: ..." paragraph per run of one speaker (`speaker_paragraphs`), so the two line
+    up paragraph by paragraph. Empty when they do not (an edited text): callers then fall back to "Speaker N".
+    """
+    paragraphs = speaker_paragraphs(words)
+    chunks = text.split("\n\n")
+    if len(chunks) != len(paragraphs):
+        return {}
+    names: dict[int, str] = {}
+    for chunk, (speaker, body) in zip(chunks, paragraphs, strict=True):
+        suffix = f": {body}"
+        if not chunk.endswith(suffix) or len(chunk) == len(suffix):
+            return {}
+        names.setdefault(speaker, chunk[: -len(suffix)])
+    return names

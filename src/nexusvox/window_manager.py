@@ -129,6 +129,28 @@ def _get_process_exe(pid: int) -> str | None:
         kernel32.CloseHandle(handle)
 
 
+def _window_exe(hwnd: int) -> str | None:
+    """The executable path of the process that owns a window."""
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return _get_process_exe(pid.value) if pid.value else None
+
+
+def _window_title(hwnd: int) -> str:
+    buf = ctypes.create_unicode_buffer(512)
+    user32.GetWindowTextW(hwnd, buf, 512)
+    return buf.value
+
+
+def foreground_app() -> tuple[str, str]:
+    """`(process file name, window title)` of the focused window; empty strings for what cannot be read."""
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return "", ""
+    exe = _window_exe(hwnd)
+    return os.path.basename(exe) if exe else "", _window_title(hwnd)
+
+
 def find_window(app_name: str, exe_path: str | None = None) -> int | None:
     """Find a visible top-level window belonging to an app.
 
@@ -148,9 +170,7 @@ def find_window(app_name: str, exe_path: str | None = None) -> int | None:
             return True  # continue enumeration
 
         # Try matching by process executable
-        pid = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        proc_exe = _get_process_exe(pid.value)
+        proc_exe = _window_exe(hwnd)
         if proc_exe:
             proc_basename = os.path.basename(proc_exe).lower()
             if exe_basename in proc_basename or app_name.lower() in proc_basename:
@@ -158,9 +178,7 @@ def find_window(app_name: str, exe_path: str | None = None) -> int | None:
                 return False  # stop enumeration
 
         # Fallback: match by window title
-        title_buf = ctypes.create_unicode_buffer(256)
-        user32.GetWindowTextW(hwnd, title_buf, 256)
-        title = title_buf.value.lower()
+        title = _window_title(hwnd).lower()
         if app_name.lower() in title:
             result.append(hwnd)
             return False

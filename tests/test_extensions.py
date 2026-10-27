@@ -764,3 +764,164 @@ def test_the_dashboard_lists_upload_actions(db, session_factory, tmp_path):
 
     assert info["api_version"] == API_VERSION
     assert [a["id"] for a in info["upload_actions"]] == ["summarise", "scripted"]
+
+
+# -- Hook 5 and 6: dictation and selected-text commands ------------------------------------------
+
+
+APP = ext.ActiveApp("Code.exe", "main.py - NexusVox")
+
+
+class Suffix(V1Extension):
+    def __init__(self, name, suffix):
+        self.name = name
+        self.suffix = suffix
+        self.seen: list = []
+
+    def on_dictation(self, text, app):
+        self.seen.append((text, app))
+        return text + self.suffix
+
+
+def _registry(*extensions) -> ExtensionRegistry:
+    registry = ExtensionRegistry()
+    for extension in extensions:
+        assert registry.add(extension)
+    return registry
+
+
+def test_dictation_without_an_extension_is_the_same_text():
+    assert ExtensionRegistry().dictation("hello world", APP) == "hello world"
+    assert _registry(DummyExtension(Path("."))).dictation("hi", APP) == "hi"  # a hook-less extension changes nothing
+
+
+def test_dictation_hooks_run_in_load_order_and_chain():
+    first, second = Suffix("a", " [a]"), Suffix("b", " [b]")
+    assert _registry(first, second).dictation("hi", APP) == "hi [a] [b]"
+    assert first.seen == [("hi", APP)]
+    assert second.seen == [("hi [a]", APP)]  # the second one sees the first one's result
+
+
+def test_dictation_load_order_follows_the_entry_point_names():
+    class Point:
+        def __init__(self, name, extension):
+            self.name, self._extension = name, extension
+
+        def load(self):
+            return self._extension
+
+    registry = ExtensionRegistry()
+    registry.load([Point("z", Suffix("late", " z")), Point("a", Suffix("early", " a"))])
+    assert registry.dictation("x", APP) == "x a z"
+
+
+def test_a_failing_dictation_hook_falls_back_to_the_text_before_it():
+    class Boom(V1Extension):
+        name = "boom"
+
+        def on_dictation(self, text, app):
+            raise RuntimeError("nope")
+
+    class NotText(V1Extension):
+        name = "not-text"
+
+        def on_dictation(self, text, app):
+            return 42
+
+    assert _registry(Suffix("a", "!"), Boom(), NotText(), Suffix("b", "?")).dictation("hi", APP) == "hi!?"
+
+
+class Slow(V1Extension):
+    name = "slow"
+
+    def on_dictation(self, text, app):
+        time.sleep(0.5)
+        return "too late"
+
+
+def test_a_slow_dictation_hook_times_out(monkeypatch):
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.05)
+    started = time.monotonic()
+    assert _registry(Slow()).dictation("hi", APP) == "hi"
+    assert time.monotonic() - started < 0.4
+
+
+def test_the_whole_chain_shares_one_deadline_and_a_stuck_hook_is_not_called_again(monkeypatch):
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.1)
+    other = Slow()
+    other.name = "slow2"
+    registry = _registry(Slow(), other, Suffix("b", "!"))
+    started = time.monotonic()
+    assert registry.dictation("hi", APP) == "hi"  # the first one used the deadline up
+    assert time.monotonic() - started < 0.4
+    # The first hook is still busy: it is skipped at once, and the fast one now answers.
+    assert registry.dictation("hi", APP) == "hi"  # "slow2" runs next and uses the budget
+    time.sleep(0.6)  # the slow hooks have ended
+    assert registry._stuck["slow", "on_dictation"].is_alive() is False
+
+
+def test_an_extension_that_exits_is_skipped_like_any_failure():
+    class Quitter(V1Extension):
+        name = "quitter"
+
+        def on_dictation(self, text, app):
+            raise SystemExit(1)
+
+        def on_selection_command(self, selection, command, app):
+            raise KeyboardInterrupt
+
+    registry = _registry(Quitter(), Suffix("b", "!"))
+    assert registry.dictation("hi", APP) == "hi!"
+    assert registry.selection_command("s", "c", APP) is None
+
+
+def test_loaded_extensions_never_waits_for_the_load(monkeypatch):
+    monkeypatch.setattr(ext, "_default_ready", False)
+    assert ext.loaded_extensions() is None
+    monkeypatch.setattr(ext, "_default_ready", True)
+    assert ext.loaded_extensions() is ext._default
+
+
+class Commands(V1Extension):
+    def __init__(self, name, known):
+        self.name = name
+        self.known = known
+        self.seen: list = []
+
+    def on_selection_command(self, selection, command, app):
+        self.seen.append((selection, command, app))
+        return self.known.get(command)
+
+
+def test_selection_command_returns_the_first_replacement():
+    one = Commands("one", {"shout": "SHOUT"})
+    two = Commands("two", {"shout": "never", "whisper": "quiet"})
+    registry = _registry(one, two)
+    assert registry.selection_command("hello", "shout", APP) == "SHOUT"
+    assert two.seen == []  # the first extension handled it
+    assert registry.selection_command("hello", "whisper", APP) == "quiet"
+    assert one.seen[-1] == ("hello", "whisper", APP)
+    assert registry.selection_command("hello", "unknown", APP) is None
+    assert ExtensionRegistry().selection_command("hello", "shout", APP) is None
+
+
+def test_a_failing_selection_command_hook_is_skipped():
+    class Boom(V1Extension):
+        name = "boom"
+
+        def on_selection_command(self, selection, command, app):
+            raise RuntimeError("nope")
+
+    class NotText(V1Extension):
+        name = "not-text"
+
+        def on_selection_command(self, selection, command, app):
+            return ["x"]
+
+    assert _registry(Boom(), NotText(), Commands("ok", {"go": "done"})).selection_command("s", "go", APP) == "done"
+    assert _registry(Boom(), NotText()).selection_command("s", "go", APP) is None
+
+
+def test_the_new_hooks_keep_the_api_version_and_old_extensions_loading():
+    assert API_VERSION == 1
+    assert _registry(DummyExtension(Path("."))).selection_command("s", "c", APP) is None

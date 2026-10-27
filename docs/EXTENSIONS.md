@@ -36,7 +36,7 @@ is logged and skipped (a hook failure only skips that call).
 
 `nexusvox.extensions.API_VERSION` is an integer. It is bumped when a change breaks existing extensions
 (a hook renamed, a field removed or retyped); adding a hook, an optional field or a keyword with a default
-keeps it. NexusVox loads an extension only when its `api_version` equals the core's, so an extension built
+keeps it. The dictation and selected-text hooks below were added this way: the version stays at 1 and every extension built before them loads and behaves as before. NexusVox loads an extension only when its `api_version` equals the core's, so an extension built
 for another version is skipped with a log line instead of misbehaving. Every extension must set
 `api_version` itself, as a literal (`api_version = 1`, not `API_VERSION`): there is no default, and an extension
 that does not declare one is skipped.
@@ -153,3 +153,67 @@ Each action adds a button to the result card of every stored upload in the Uploa
 | `panel` | Instead of `endpoint`: the id of one of the same extension's own panels (any other id drops the action). Its script, loaded on the first click, calls `NexusVoxExt.registerUploadAction("<action id>", (upload, button) => ...)`; `upload` is the upload as listed by `GET /api/file-transcriptions` |
 
 Set exactly one of `endpoint` and `panel`; anything else drops the action.
+
+## Hook 5: change a dictation before it is typed
+
+```python
+def on_dictation(self, text: str, app: ActiveApp) -> str | None: ...
+```
+
+Called for every dictation that is about to be typed at the cursor, as the last step of the text pipeline:
+the dictionary, snippets, voice commands, cleanup and translation are done and snippets are expanded. Return the
+text to type instead, or `None` to leave it.
+
+| `ActiveApp` field | Meaning |
+|-------------------|---------|
+| `process` | The focused app's executable file name, e.g. `Code.exe`; empty when it could not be read |
+| `title` | The focused window's title; empty when it could not be read |
+
+- **Order.** Extensions run in the order of their entry-point names (alphabetical); each sees the previous
+  one's result.
+- **Fallback.** An extension that raises, returns something that is not a string, or does not answer in time is logged and skipped (an `exit` call counts as a failure): the text stays as the step before it left it. All extensions share one budget of 3 seconds per dictation (`nexusvox.extensions.HOOK_TIMEOUT_S`). A timed-out hook keeps running in the background, its result is dropped, and it is not called again until it has returned.
+- **Startup.** While the extensions are still loading right after NexusVox starts, a dictation is typed without them.
+- **Empty text.** A dictation that types nothing (only "press enter") does not call the hook.
+- **What is saved.** The stored transcript is the text as spoken; only what is typed (and what the paste key
+  repeats) changes. An edit made by an extension keeps that dictation out of "learn from edits".
+- **Not for the phone.** A remote-mic dictation is inserted by the phone, so there is no active app and the hook is not called.
+- With no extension installed, dictation is exactly as before.
+
+```python
+class AppModes(Extension):
+    name = "app-modes"
+    api_version = 1
+
+    def on_dictation(self, text, app):
+        if app.process.lower() == "slack.exe":
+            return text.rstrip(".")  # no full stop at the end of a chat message
+        return None
+```
+
+## Hook 6: commands on the selected text
+
+```python
+def on_selection_command(self, selection: str, command: str, app: ActiveApp) -> str | None: ...
+```
+
+Runs on the polish key (`[hotkey].polish_key`): the user selects text, holds the hotkey, taps the polish key and
+speaks a command. The core reads the selection (as for polish) and offers the selection and the spoken
+`command` (what was said, possibly empty) to the extensions in entry-point order. The first one that returns a
+string wins: the core pastes it over the selection, as polish does (Ctrl+Z in the app undoes it), saves the
+recording as `[extension] <command>` and the paste key can repeat it. Return `None` for a command the extension
+does not know; when no extension answers, the language-model polish runs as before.
+
+The same rules as Hook 5 apply to errors and the timeout (an extension that fails is skipped). The core owns
+everything around it: nothing selected, a terminal without `[polish].in_terminals`, a password field and a
+focus change while the hook worked behave as for polish. Spoken commands must work in English and German; matching them is the extension's job.
+
+```python
+class Shout(Extension):
+    name = "shout"
+    api_version = 1
+
+    def on_selection_command(self, selection, command, app):
+        if command.strip().lower() in {"shout", "schrei"}:
+            return selection.upper()
+        return None
+```

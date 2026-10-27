@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
@@ -36,6 +37,8 @@ logger = logging.getLogger(__name__)
 # Bumped on a change that breaks existing extensions; an additive change keeps it.
 API_VERSION = 1
 ENTRY_POINT_GROUP = "nexusvox.extensions"
+# How long a dictation or selection hook may take before its result is dropped and the text stays as it was.
+HOOK_TIMEOUT_S = 3.0
 
 _ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
 _SUFFIX_PATTERN = re.compile(r"\.[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -89,6 +92,14 @@ def file_transcript_from_record(record: FileTranscription) -> FileTranscript:
         words=tuple(words),
         kind=record.kind or "upload",
     )
+
+
+@dataclass(frozen=True)
+class ActiveApp:
+    """The app that has the focus: where a dictation is about to be typed, or whose selection is rewritten."""
+
+    process: str = ""  # executable file name, e.g. `Code.exe`; empty when it could not be read
+    title: str = ""  # the window title; empty when it could not be read
 
 
 @dataclass(frozen=True)
@@ -154,6 +165,25 @@ class Extension:
         """
         return None
 
+    def on_dictation(self, text: str, app: ActiveApp) -> str | None:
+        """Change a dictation just before it is typed into *app*.
+
+        *text* is what would be typed (dictionary, snippets, voice commands, cleanup and translation are
+        done). Return the text to type instead, or None to leave it. Blocking is fine (it runs off the UI and
+        hotkey threads) but a hook that takes longer than `HOOK_TIMEOUT_S` is ignored. Several extensions run
+        in the order of their entry-point names, each seeing the previous one's result.
+        """
+        return None
+
+    def on_selection_command(self, selection: str, command: str, app: ActiveApp) -> str | None:
+        """Handle a spoken command on the selected text (the polish key, see docs/EXTENSIONS.md).
+
+        Return the replacement for *selection*, or None when this extension does not know *command*; the
+        first extension that returns text wins and the core pastes it over the selection. When none does,
+        the built-in language-model polish runs as before.
+        """
+        return None
+
     def dashboard_panels(self) -> list[DashboardPanel]:
         """Extra dashboard tabs."""
         return []
@@ -165,6 +195,27 @@ class Extension:
     def upload_actions(self) -> list[UploadAction]:
         """Extra buttons on an upload's result card."""
         return []
+
+
+def _start_call(fn: Callable[..., Any], *args: Any) -> tuple[threading.Thread, list[tuple[bool, Any]]]:
+    """Start *fn* on a helper thread; the list gets `(True, result)` or `(False, exception)` when it ends.
+
+    Anything the hook raises, `SystemExit` included, comes back as an ordinary exception: a misbehaving
+    extension must never end the caller's thread or the app.
+    """
+    outcome: list[tuple[bool, Any]] = []
+
+    def run() -> None:
+        try:
+            outcome.append((True, fn(*args)))
+        except Exception as exc:
+            outcome.append((False, exc))
+        except BaseException as exc:  # SystemExit, KeyboardInterrupt, ...
+            outcome.append((False, RuntimeError(f"{type(exc).__name__}: {exc}")))
+
+    worker = threading.Thread(target=run, name="extension-hook", daemon=True)
+    worker.start()
+    return worker, outcome
 
 
 def _valid_id(value: object) -> bool:
@@ -227,6 +278,7 @@ class ExtensionRegistry:
     _panels: dict[str, DashboardPanel] = field(default_factory=dict)
     _targets: dict[str, ExportTarget] = field(default_factory=dict)
     _actions: dict[str, UploadAction] = field(default_factory=dict)
+    _stuck: dict[tuple[str, str], threading.Thread] = field(default_factory=dict)
 
     # ---- Loading -----------------------------------------------------------
 
@@ -337,6 +389,66 @@ class ExtensionRegistry:
                 notes.append(result["note"])
         return results, notes
 
+    # ---- Hooks: dictation and selection commands -----------------------------
+
+    def dictation(self, text: str, app: ActiveApp) -> str:
+        """*text* as every extension's `on_dictation` leaves it, in load order.
+
+        An extension that raises, returns something that is not a string, or does not answer in time is
+        skipped: the text stays as the previous step left it. The whole chain shares one `HOOK_TIMEOUT_S`. With
+        no extension this returns *text* itself.
+        """
+        deadline = time.monotonic() + HOOK_TIMEOUT_S
+        for extension in self.extensions:
+            result = self._text_hook(extension, "on_dictation", deadline, text, app)
+            if result is not None:
+                text = result
+        return text
+
+    def selection_command(self, selection: str, command: str, app: ActiveApp) -> str | None:
+        """The replacement for *selection* from the first extension that handles *command*, else None."""
+        deadline = time.monotonic() + HOOK_TIMEOUT_S
+        for extension in self.extensions:
+            result = self._text_hook(extension, "on_selection_command", deadline, selection, command, app)
+            if result is not None:
+                logger.info("Extension %s handled the selection command %r", extension.name, command)
+                return result
+        return None
+
+    def _text_hook(self, extension: Extension, hook: str, deadline: float, *args: Any) -> str | None:
+        """What one extension's text hook answered, or None: nothing to say, or it failed (logged).
+
+        A hook still running from an earlier timeout is not called again, so a hanging extension costs one
+        thread, not one per dictation.
+        """
+        key = (extension.name, hook)
+        stuck = self._stuck.get(key)
+        if stuck is not None:
+            if stuck.is_alive():
+                logger.warning("Extension %s is still busy in %s; skipped", extension.name, hook)
+                return None
+            self._stuck.pop(key, None)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            logger.error("Extension %s: no time left for %s; skipped", extension.name, hook)
+            return None
+        worker, outcome = _start_call(getattr(extension, hook), *args)
+        worker.join(remaining)
+        if not outcome:
+            self._stuck[key] = worker
+            logger.error("Extension %s did not answer %s in time; skipped", extension.name, hook)
+            return None
+        ok, value = outcome[0]
+        if not ok:
+            logger.error("Extension %s failed in %s; skipped", extension.name, hook, exc_info=value)
+            return None
+        if value is not None and not isinstance(value, str):
+            logger.error(
+                "Extension %s returned %s from %s, not a string; ignored", extension.name, type(value).__name__, hook
+            )
+            return None
+        return value
+
     # ---- Hooks: dashboard panels and export targets --------------------------
 
     def panels(self) -> list[DashboardPanel]:
@@ -394,15 +506,23 @@ class ExtensionRegistry:
 
 
 _default = ExtensionRegistry()
-_default_loaded = False
+_default_loaded = False  # loading has started
+_default_ready = False  # loading has finished
 _default_lock = threading.RLock()
 
 
 def load_extensions() -> ExtensionRegistry:
     """The process-wide registry, filled from the installed entry points on the first call."""
-    global _default_loaded
+    global _default_loaded, _default_ready
     with _default_lock:  # reentrant: an extension calling this while it loads gets the registry as filled so far
         if not _default_loaded:
             _default_loaded = True
             _default.load()
+            _default_ready = True
     return _default
+
+
+def loaded_extensions() -> ExtensionRegistry | None:
+    """The registry once the entry points are loaded, else None. Never waits: the dictation path uses it so a
+    heavy package still loading cannot delay a dictation (which is then typed without extensions)."""
+    return _default if _default_ready else None

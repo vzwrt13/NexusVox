@@ -63,6 +63,17 @@ class MeetingSession:
             recorder, self._recorder, self._started = self._recorder, None, None
             return recorder.stop()
 
+    def begin_dictation(self, start: float) -> int | None:
+        """A dictation take began (`time.monotonic()`); the token for `end_dictation`, None when no meeting runs."""
+        with self._lock:
+            return self._recorder.begin_dictation(start) if self._recorder is not None else None
+
+    def end_dictation(self, token: int | None, start: float, end: float) -> None:
+        """A dictation take ended. Under the session lock, so it never interleaves with `stop()`."""
+        with self._lock:
+            if self._recorder is not None:
+                self._recorder.end_dictation(token, start, end)
+
     def status(self) -> dict:
         """`{recording, elapsed_s, folder}` for the dashboard's timer."""
         with self._lock:

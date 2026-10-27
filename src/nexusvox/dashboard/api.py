@@ -240,6 +240,7 @@ class DashboardAPI:
             "meeting_mic_device": self._config.meeting.mic_device,
             "meeting_output_device": self._config.meeting.output_device,
             "meeting_consent_hint": self._config.meeting.consent_hint,
+            "meeting_leave_dictation_out": self._config.meeting.leave_dictation_out,
         }
 
     def get_translator_status(self) -> dict:
@@ -900,6 +901,27 @@ class DashboardAPI:
         save_config(self._config)
         return self.get_settings()
 
+    def set_meeting_leave_dictation_out(self, enabled: bool) -> dict:
+        """Applied when a meeting is transcribed, so it also covers a meeting recorded earlier."""
+        self._config.meeting.leave_dictation_out = bool(enabled)
+        save_config(self._config)
+        return self.get_settings()
+
+    def begin_dictation(self, start: float) -> int | None:
+        """A dictation take began (`time.monotonic()`); the token for `end_dictation`. Never raises."""
+        try:
+            return self._meeting.begin_dictation(start)
+        except Exception:
+            logger.exception("Storing the dictation range of the meeting failed")
+            return None
+
+    def end_dictation(self, token: int | None, start: float, end: float) -> None:
+        """A dictation take ended; the running meeting stores its time range. Never raises."""
+        try:
+            self._meeting.end_dictation(token, start, end)
+        except Exception:
+            logger.exception("Storing the dictation range of the meeting failed")
+
     def shutdown_meeting(self) -> None:
         """Close a running recording when the app quits, so its WAV files get proper headers."""
         if self._meeting.recording:
@@ -1010,8 +1032,15 @@ class DashboardAPI:
                 )
                 text = "\n\n".join(f"{TRACK_NAMES[n]}: {plain[n]}" for n in ("mic", "system") if plain.get(n))
                 merged = []
+                if self._config.meeting.leave_dictation_out and meeting.dictations:
+                    notes.append(
+                        "Dictation could not be left out of the transcript because the word timing is missing."
+                    )
             else:
-                merged = merge_words(words.get("mic", []), words.get("system", []))
+                leave_out = self._config.meeting.leave_dictation_out
+                merged = merge_words(
+                    words.get("mic", []), words.get("system", []), meeting.dictations if leave_out else None
+                )
                 text = format_meeting(merged)
 
             if progress:

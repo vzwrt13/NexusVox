@@ -180,6 +180,11 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_meeting_consent_hint(bool(data.get("enabled", True))))
 
+    @app.route("/api/settings/meeting-leave-dictation-out", methods=["POST"])
+    def set_meeting_leave_dictation_out():
+        data = request.get_json(force=True)
+        return jsonify(api.set_meeting_leave_dictation_out(bool(data.get("enabled", True))))
+
     # ---- Meeting recording ---------------------------------------------------
 
     @app.route("/api/meetings/status")

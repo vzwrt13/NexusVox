@@ -24,6 +24,7 @@ from nexusvox.meeting_transcribe import (
     TARGET_RMS,
     balance_gain,
     convert_track,
+    drop_dictation,
     drop_echo,
     load_meeting,
     merge_words,
@@ -513,3 +514,134 @@ def test_meeting_without_readable_tracks_is_an_error(meeting_api, tmp_path):
 def test_uploads_keep_kind_upload(db):
     row = db.save_file_transcription(text="x", language="en", duration_ms=1, original_filename="a.wav")
     assert (row.kind, row.audio_path) == ("upload", None)
+
+
+# ---- Leaving dictation out --------------------------------------------------
+
+
+def test_words_touching_a_dictation_take_are_dropped_with_a_margin():
+    me = [w("before", 1.0), w("near", 4.2), w("inside", 6.0), w("after", 9.0), w("late", 12.0)]
+
+    kept = drop_dictation(me, [(5.0, 8.0)])
+
+    # "near" ends at 4.5, inside the 0.5 s margin before the take; "after" starts at 9.0, beyond the one after it.
+    assert [x.word for x in kept] == ["before", "after", "late"]
+
+
+def test_german_and_english_dictation_words_are_dropped_alike():
+    for words, keep in ((["send", "the", "report", "now"], "thanks"), (["schick", "den", "Bericht", "jetzt"], "danke")):
+        me = run(words, 10.0) + [w(keep, 30.0)]
+        assert [x.word for x in drop_dictation(me, [(10.0, 11.6)])] == [keep]
+
+
+def test_dictation_ranges_that_overlap_or_nest_all_count():
+    me = [w("a", 1.0), w("b", 5.0), w("c", 9.0), w("d", 20.0)]
+
+    kept = drop_dictation(me, [(0.0, 10.0), (4.0, 5.0), (8.5, 9.5)])
+
+    assert [x.word for x in kept] == ["d"]
+
+
+def test_no_dictation_ranges_keeps_every_word():
+    me = run(["one", "two"], 1.0)
+    assert drop_dictation(me, []) == me
+
+
+def test_merge_words_only_drops_dictation_when_given_ranges():
+    me = run(["note", "this"], 5.0) + [w("later", 20.0)]
+    others = run(["hello"], 1.0)
+
+    assert [x.word for x in merge_words(me, others)] == ["hello", "note", "this", "later"]
+    assert [x.word for x in merge_words(me, others, [(5.0, 6.0)])] == ["hello", "later"]
+
+
+def test_load_meeting_reads_dictation_ranges_and_skips_broken_entries(tmp_path):
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    meta = json.loads((folder / "meeting.json").read_text())
+    meta["dictations"] = [
+        {"start_s": 5, "end_s": 6.5},
+        {"start_s": "x"},
+        {"start_s": 9, "end_s": 8},
+        {"start_s": 1, "end_s": 2},
+    ]
+    (folder / "meeting.json").write_text(json.dumps(meta))
+
+    assert load_meeting(folder).dictations == [(1.0, 2.0), (5.0, 6.5)]
+
+
+def test_meeting_without_dictation_ranges_loads_as_before(tmp_path):
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    assert load_meeting(folder).dictations == []
+
+
+def _dictation_meeting(folder: Path, ranges: list[tuple[float, float]]) -> None:
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    meta = json.loads((folder / "meeting.json").read_text())
+    meta["dictations"] = [{"start_s": s, "end_s": e} for s, e in ranges]
+    (folder / "meeting.json").write_text(json.dumps(meta))
+
+
+@pytest.mark.parametrize(
+    ("spoken", "dictated", "kept_text"),
+    [
+        (("sounds", "good", "thanks"), ("sounds", "good"), "Me: thanks"),
+        (("klingt", "gut", "danke"), ("klingt", "gut"), "Me: danke"),
+    ],
+)
+def test_switch_decides_whether_dictation_stays_in_the_transcript(meeting_api, tmp_path, spoken, dictated, kept_text):
+    api, _ = meeting_api
+    folder = tmp_path / "m"
+    _dictation_meeting(folder, [(2.9, 3.6)])
+    mic_audio = (folder / "mic.wav").read_bytes()
+
+    def fake(chunks, **kwargs):
+        fake.calls = getattr(fake, "calls", 0) + 1
+        result = TranscriptionResult()
+        if fake.calls % 2:  # microphone first
+            result.words = [w(spoken[0], 3.0), w(spoken[1], 3.4), w(spoken[2], 10.0)]
+        else:
+            result.words = [w("hello", 1.0)]
+        result.finalize(text=" ".join(x.word for x in result.words))
+        return result
+
+    api._transcribe_wav_chunks = fake
+
+    api._config.meeting.leave_dictation_out = True
+    left_out = api.transcribe_meeting(folder)
+    assert left_out["text"] == f"Others: hello\n\n{kept_text}"
+    assert all(word not in left_out["text"] for word in dictated)
+
+    api._config.meeting.leave_dictation_out = False  # applied at transcription time, so the same folder works again
+    kept_in = api.transcribe_meeting(folder)
+    assert kept_in["text"] == f"Others: hello\n\nMe: {' '.join(spoken)}"
+
+    assert (folder / "mic.wav").read_bytes() == mic_audio  # the tracks never change
+
+
+def test_missing_word_timing_is_noted_when_dictation_cannot_be_left_out(meeting_api, tmp_path):
+    api, _ = meeting_api
+    folder = tmp_path / "m"
+    _dictation_meeting(folder, [(0.5, 1.0)])
+
+    def untimed(chunks, **kwargs):
+        result = TranscriptionResult()
+        result.finalize(text="hello there")
+        return result
+
+    api._transcribe_wav_chunks = untimed
+
+    result = api.transcribe_meeting(folder)
+
+    assert any("Dictation could not be left out" in n for n in result["notes"])
+
+
+def test_dictation_is_dropped_after_the_echo_filter_so_real_speech_is_not_taken_for_echo():
+    # Two partnered words, a dictated word, two more partnered words: no run reaches ECHO_MIN_RUN on its own.
+    me = [w("alpha", 1.0), w("bravo", 1.4), w("typed", 5.0), w("charlie", 9.0), w("delta", 9.4)]
+    others = [w("alpha", 1.0), w("bravo", 1.4), w("charlie", 9.0), w("delta", 9.4)]
+
+    merged = merge_words(me, others, [(4.9, 5.4)])
+
+    assert [x.word for x in merged if x.speaker == 1] == ["alpha", "bravo", "charlie", "delta"]

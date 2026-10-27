@@ -5,7 +5,8 @@ system audio (what the other participants say) on your PC, transcribes both and 
 transcript with **Me** and **Others**. Everything stays on your machine; the audio goes only to the
 transcription model you have configured (see the Requirements in the README).
 
-Dictation keeps working while a meeting is recorded.
+Dictation keeps working while a meeting is recorded. The microphone also records what you dictate, so the
+meeting would show it under **Me**; by default NexusVox leaves it out (see below).
 
 ## Record a meeting
 
@@ -27,6 +28,17 @@ recording is kept in its folder, the dashboard says so and lists it under *Recor
 Pick a microphone and an output device in the Meetings tab if the system defaults are not the ones you
 use for the call. The output device is only *recorded*, never changed: choose the device the call is
 played on.
+
+## Leave dictation out of the transcript
+
+While a meeting records, NexusVox stores the start and end of every dictation take in `meeting.json`
+(`dictations`, seconds from the meeting start), whatever the setting. The **Leave dictation out of the
+meeting transcript** switch in the Meetings tab (`[meeting].leave_dictation_out`, on by default) decides
+what the transcription does with them: on, the **Me** words that fall inside a take (plus half a second
+on each side) are dropped; off, they stay. The switch is read when the meeting is transcribed, so
+*Transcribe* on a meeting recorded earlier uses the current setting. `mic.wav`, `system.wav` and
+`meeting.wav` are never changed. If the speech engine returns no word timing, nothing can be removed and
+the transcript says so in a note.
 
 ## Consent: tell everyone before you record
 

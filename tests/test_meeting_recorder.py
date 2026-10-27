@@ -261,3 +261,85 @@ def test_format_from_describe_is_what_gets_written(tmp_path):
     rec.start()
     rec.stop()
     assert calls == [1]  # describe() once per start; start() does not resolve the device again
+
+
+def test_dictation_takes_are_stored_as_seconds_from_the_meeting_start(tmp_path):
+    rec, mic, system, clock = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    assert rec.begin_dictation(clock()) is None  # no meeting yet
+    rec.end_dictation(None, clock() + 1, clock() + 2)  # ignored
+    folder = rec.start()
+    clock.advance(5.0)
+    token = rec.begin_dictation(clock() - 1.25)
+    rec.end_dictation(token, clock() - 1.25, clock() + 0.5)
+    mid = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))
+    assert mid["ended_at"] is None and mid["dictations"] == [{"start_s": 3.75, "end_s": 5.5}]
+    clock.advance(10.0)
+    rec.stop()
+    rec.end_dictation(None, clock(), clock() + 1)  # after the stop: ignored
+
+    meta = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))
+    assert meta["ended_at"] is not None
+    assert meta["dictations"] == [{"start_s": 3.75, "end_s": 5.5}]
+    assert set(meta["tracks"]) == {"mic", "system"}
+
+
+def test_a_take_that_ends_after_the_stop_never_rewrites_the_finished_meta(tmp_path):
+    rec, mic, system, clock = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    folder = rec.start()
+    token = rec.begin_dictation(clock())
+    clock.advance(3.0)
+    rec.stop()
+    before = (folder / "meeting.json").read_text(encoding="utf-8")
+
+    rec.end_dictation(token, clock() - 3.0, clock())
+
+    assert (folder / "meeting.json").read_text(encoding="utf-8") == before
+    assert set(json.loads(before)["tracks"]) == {"mic", "system"}
+
+
+def test_a_take_still_running_when_the_meeting_stops_lasts_until_the_stop(tmp_path):
+    rec, mic, system, clock = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    folder = rec.start()
+    clock.advance(4.0)
+    rec.begin_dictation(clock())
+    clock.advance(2.5)
+    rec.stop()
+
+    meta = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))
+    assert meta["dictations"] == [{"start_s": 4.0, "end_s": 6.5}]
+
+
+def test_a_take_from_an_earlier_meeting_is_not_stored_in_the_next_one(tmp_path):
+    rec, mic, system, clock = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    rec.start()
+    old_start = clock()
+    token = rec.begin_dictation(old_start)
+    clock.advance(1.0)
+    rec.stop()
+    clock.advance(1.0)
+    folder = rec.start()
+    clock.advance(1.0)
+
+    rec.end_dictation(token, old_start, old_start + 1.0)  # ended before this meeting began
+
+    rec.stop()
+    assert json.loads((folder / "meeting.json").read_text(encoding="utf-8"))["dictations"] == []
+
+
+def test_a_dictation_that_began_before_the_meeting_is_cut_at_its_start(tmp_path):
+    rec, *_, clock = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    start = clock() - 4
+    folder = rec.start()
+    clock.advance(2.0)
+    rec.end_dictation(None, start, clock())
+    rec.stop()
+
+    meta = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))
+    assert meta["dictations"] == [{"start_s": 0.0, "end_s": 2.0}]
+
+
+def test_a_meeting_without_dictation_stores_an_empty_list(tmp_path):
+    rec, *_ = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    folder = rec.start()
+    rec.stop()
+    assert json.loads((folder / "meeting.json").read_text(encoding="utf-8"))["dictations"] == []

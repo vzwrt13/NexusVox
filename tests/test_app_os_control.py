@@ -12,6 +12,7 @@ import pytest
 
 try:
     from nexusvox.app import NexusVoxApp
+    from nexusvox.extensions import API_VERSION, ActiveApp, Extension, ExtensionRegistry
     from nexusvox.hotkey import COMMAND, PASTE_LAST, POLISH
 except Exception:  # Windows-only imports (pynput hook, tray, SendInput) on other platforms
     pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
@@ -132,6 +133,8 @@ def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows
     focus = iter(windows)
     monkeypatch.setattr(app_module, "foreground_window", lambda: next(focus))
     monkeypatch.setattr(app_module, "polish", fake_polish)
+    monkeypatch.setattr(NexusVoxApp, "_active_app", staticmethod(lambda: ActiveApp("Code.exe", "main.py")))
+    monkeypatch.setattr(app_module, "load_extensions", lambda: ExtensionRegistry())
     monkeypatch.setattr(app_module, "inject_text", lambda text, delay: calls["pasted"].append(text))
     monkeypatch.setattr(app_module, "beep_error", lambda: calls["beeps"].append("error"))
     monkeypatch.setattr(app_module, "_play", lambda beep: beep())
@@ -316,3 +319,31 @@ def test_latency_ends_when_the_text_is_in_not_after_the_clipboard_restore(monkey
     app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: time.monotonic() + 60)
     _run_cycle(app)
     assert app._db.save_transcription.call_args.kwargs["latency_ms"] >= 60_000
+
+
+def test_polish_lets_an_extension_handle_the_spoken_command(monkeypatch):
+    class Upper(Extension):
+        name = "upper"
+        api_version = API_VERSION
+
+        def on_selection_command(self, selection, command, app):
+            seen.append((selection, command, app))
+            return selection.upper() if command == "shout" else None
+
+    seen: list = []
+    app, calls = _polish_app(monkeypatch, "hi leute", RuntimeError("the model must not run"))
+    registry = ExtensionRegistry()
+    registry.add(Upper())
+    monkeypatch.setattr("nexusvox.app.load_extensions", lambda: registry)
+
+    asyncio.run(app._polish_selection("shout", MagicMock()))
+    assert calls["pasted"] == ["HI LEUTE"]
+    assert seen == [("hi leute", "shout", ActiveApp("Code.exe", "main.py"))]
+    assert app._last_typed == "HI LEUTE"
+    assert app._save_command.call_args.args[1] == "[extension] shout"
+
+    # A command the extension does not know falls through to the language model.
+    app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
+    monkeypatch.setattr("nexusvox.app.load_extensions", lambda: registry)
+    asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
+    assert calls["pasted"] == ["Hallo zusammen"]

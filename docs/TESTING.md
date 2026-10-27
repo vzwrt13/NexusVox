@@ -112,7 +112,7 @@ tests/
 | `test_file_transcribe.py` | `file_transcribe.py` | Extension detection, WAV passthrough, audio conversion, chunking |
 | `test_file_cleanup.py` | `file_cleanup.py` | Chunking at paragraphs and sentences (English and German), speaker labels kept, per-passage fallback, giving up on a dead model, progress |
 | `test_file_jobs.py` | `dashboard/file_jobs.py` | Upload job stages and progress, done/error mapping, one running job at a time, pruning, unread finished job |
-| `test_extensions.py` | `extensions.py` | Entry-point loading, a failing / mis-versioned / badly named extension skipped, the upload hook with a dummy extension, panel static files and blueprint, export download |
+| `test_extensions.py` | `extensions.py` | Entry-point loading, a failing / mis-versioned / badly named extension skipped, the upload hook with a dummy extension, the dictation hook (order, chaining, failure and timeout fallback) and the selected-text command hook, panel static files and blueprint, export download |
 | `test_os_commands.py` | `os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
 | `test_hotkey.py` | `hotkey.py` | Hold/toggle modes, key bindings and swallowing, the command key and the paste key (first marker wins, typed normally outside a recording) |
 | `test_app_os_control.py` | `app.py` | The cycle's control flow with mocked collaborators: `::hide` after a skipped or failed command recording, pasting the last text |

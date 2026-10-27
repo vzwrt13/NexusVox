@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 # Bumped on a change that breaks existing extensions; an additive change keeps it.
 API_VERSION = 1
 ENTRY_POINT_GROUP = "nexusvox.extensions"
+# How long a dictation or selection hook may take before its result is dropped and the text stays as it was.
+HOOK_TIMEOUT_S = 3.0
 
 _ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
 _SUFFIX_PATTERN = re.compile(r"\.[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -89,6 +91,14 @@ def file_transcript_from_record(record: FileTranscription) -> FileTranscript:
         words=tuple(words),
         kind=record.kind or "upload",
     )
+
+
+@dataclass(frozen=True)
+class ActiveApp:
+    """The app that has the focus: where a dictation is about to be typed, or whose selection is rewritten."""
+
+    process: str = ""  # executable file name, e.g. `Code.exe`; empty when it could not be read
+    title: str = ""  # the window title; empty when it could not be read
 
 
 @dataclass(frozen=True)
@@ -154,6 +164,25 @@ class Extension:
         """
         return None
 
+    def on_dictation(self, text: str, app: ActiveApp) -> str | None:
+        """Change a dictation just before it is typed into *app*.
+
+        *text* is what would be typed (dictionary, snippets, voice commands, cleanup and translation are
+        done). Return the text to type instead, or None to leave it. Blocking is fine (it runs off the UI and
+        hotkey threads) but a hook that takes longer than `HOOK_TIMEOUT_S` is ignored. Several extensions run
+        in the order of their entry-point names, each seeing the previous one's result.
+        """
+        return None
+
+    def on_selection_command(self, selection: str, command: str, app: ActiveApp) -> str | None:
+        """Handle a spoken command on the selected text (the polish key, see docs/EXTENSIONS.md).
+
+        Return the replacement for *selection*, or None when this extension does not know *command*; the
+        first extension that returns text wins and the core pastes it over the selection. When none does,
+        the built-in language-model polish runs as before.
+        """
+        return None
+
     def dashboard_panels(self) -> list[DashboardPanel]:
         """Extra dashboard tabs."""
         return []
@@ -165,6 +194,28 @@ class Extension:
     def upload_actions(self) -> list[UploadAction]:
         """Extra buttons on an upload's result card."""
         return []
+
+
+def _call_with_timeout(fn: Callable[..., Any], *args: Any) -> Any:
+    """Call *fn* on a helper thread and give up after `HOOK_TIMEOUT_S` (TimeoutError). A call that is
+    still running then carries on in the background; its result is dropped."""
+    outcome: list[Any] = []
+
+    def run() -> None:
+        try:
+            outcome.append((True, fn(*args)))
+        except BaseException as exc:  # handed to the caller
+            outcome.append((False, exc))
+
+    worker = threading.Thread(target=run, name="extension-hook", daemon=True)
+    worker.start()
+    worker.join(HOOK_TIMEOUT_S)
+    if not outcome:
+        raise TimeoutError(f"no answer within {HOOK_TIMEOUT_S:g} s")
+    ok, value = outcome[0]
+    if not ok:
+        raise value
+    return value
 
 
 def _valid_id(value: object) -> bool:
@@ -336,6 +387,53 @@ class ExtensionRegistry:
             if isinstance(result.get("note"), str) and result["note"]:
                 notes.append(result["note"])
         return results, notes
+
+    # ---- Hooks: dictation and selection commands -----------------------------
+
+    def dictation(self, text: str, app: ActiveApp) -> str:
+        """*text* as every extension's `on_dictation` leaves it, in load order.
+
+        An extension that raises, times out or returns something that is not a string is skipped: the text
+        stays as the previous step left it. With no extension this returns *text* itself.
+        """
+        for extension in self.extensions:
+            try:
+                result = _call_with_timeout(extension.on_dictation, text, app)
+            except Exception:
+                logger.exception("Extension %s failed on a dictation; typing the text unchanged by it", extension.name)
+                continue
+            if result is None:
+                continue
+            if not isinstance(result, str):
+                logger.error(
+                    "Extension %s returned %s from on_dictation, not a string; ignored",
+                    extension.name,
+                    type(result).__name__,
+                )
+                continue
+            text = result
+        return text
+
+    def selection_command(self, selection: str, command: str, app: ActiveApp) -> str | None:
+        """The replacement for *selection* from the first extension that handles *command*, else None."""
+        for extension in self.extensions:
+            try:
+                result = _call_with_timeout(extension.on_selection_command, selection, command, app)
+            except Exception:
+                logger.exception("Extension %s failed on a selection command; skipped", extension.name)
+                continue
+            if result is None:
+                continue
+            if not isinstance(result, str):
+                logger.error(
+                    "Extension %s returned %s from on_selection_command, not a string; ignored",
+                    extension.name,
+                    type(result).__name__,
+                )
+                continue
+            logger.info("Extension %s handled the selection command %r", extension.name, command)
+            return result
+        return None
 
     # ---- Hooks: dashboard panels and export targets --------------------------
 

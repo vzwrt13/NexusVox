@@ -129,6 +129,19 @@ def _get_process_exe(pid: int) -> str | None:
         kernel32.CloseHandle(handle)
 
 
+def foreground_app() -> tuple[str, str]:
+    """`(process file name, window title)` of the focused window; empty strings for what cannot be read."""
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return "", ""
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    exe = _get_process_exe(pid.value) if pid.value else None
+    title_buf = ctypes.create_unicode_buffer(512)
+    user32.GetWindowTextW(hwnd, title_buf, 512)
+    return os.path.basename(exe) if exe else "", title_buf.value
+
+
 def find_window(app_name: str, exe_path: str | None = None) -> int | None:
     """Find a visible top-level window belonging to an app.
 

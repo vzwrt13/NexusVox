@@ -23,7 +23,7 @@ from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker,
 from .dashboard import ensure_dashboard_api, open_dashboard, running_dashboard_api
 from .db import Database
 from .edit_watch import EditWatcher
-from .extensions import load_extensions
+from .extensions import ActiveApp, load_extensions
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, MeetingHotkey, describe_hotkey
 from .injector import foreground_window, inject_text
@@ -537,6 +537,7 @@ class NexusVoxApp:
                     self._db.get_dictionary_entries(),
                     snippets,
                     remote=remote,
+                    extend_fn=None if remote else self._extend_dictation,
                 ),
             )
             done_at = None  # when the text was in place; the clipboard restore after it is not latency
@@ -601,6 +602,21 @@ class NexusVoxApp:
             if self._mic_guard is not None and not self._hotkey.active:
                 self._mic_guard.release_async()
 
+    @staticmethod
+    def _active_app() -> ActiveApp:
+        try:
+            from .window_manager import foreground_app  # lazy, like the other window_manager uses here
+
+            process, title = foreground_app()
+        except Exception:
+            logger.exception("Could not read the active app")
+            return ActiveApp()
+        return ActiveApp(process, title)
+
+    def _extend_dictation(self, text: str) -> str:
+        """The extensions' say on a dictation about to be typed (runs in the executor with the pipeline)."""
+        return load_extensions().dictation(text, self._active_app())
+
     def _language_of(self, spoken: str) -> str:
         return detect_language(spoken) if self._config.auto_language_detection else self._config.language
 
@@ -652,6 +668,13 @@ class NexusVoxApp:
             _play(beep_error)
             return
         spoken = instruction
+        app = self._active_app()
+        handled = await loop.run_in_executor(None, load_extensions().selection_command, selection, spoken, app)
+        if handled is not None:
+            await self._paste_over_selection(
+                handled, foreground_window(), f"[extension] {spoken}", spoken or selection, recording
+            )
+            return
         instruction, preset = resolve_instruction(spoken, self._db.get_polish_presets())
         if preset:
             logger.info("Polish: preset %r", preset)
@@ -662,6 +685,14 @@ class NexusVoxApp:
             logger.warning("Polish: model at %s failed (%s); the selection stays as it was", self._config.llm.url, exc)
             _play(beep_error)
             return
+        await self._paste_over_selection(
+            rewritten, window, f"[polish] {preset or spoken or 'default'}", spoken or selection, recording
+        )
+
+    async def _paste_over_selection(
+        self, rewritten: str, window: int, label: str, spoken: str, recording: _Recording | None
+    ) -> None:
+        """Paste *rewritten* over the still-selected text, unless the focus left *window*; save *label*."""
         self._last_typed = rewritten
         if foreground_window() != window:
             logger.info("Polish: the focus moved to another window, not pasting (the paste key pastes it)")
@@ -669,12 +700,12 @@ class NexusVoxApp:
         else:
             # The selection is still selected, so pasting replaces it; Ctrl+Z in the app undoes it.
             try:
-                await loop.run_in_executor(None, inject_text, rewritten, 0)
+                await asyncio.get_running_loop().run_in_executor(None, inject_text, rewritten, 0)
             except ClipboardError as exc:
                 logger.warning("Polish: could not paste the reply (%s); the paste key pastes it", exc)
                 _play(beep_error)
         if recording is not None:
-            self._save_command(recording, f"[polish] {preset or spoken or 'default'}", spoken or selection)
+            self._save_command(recording, label, spoken)
 
     def _flag_last_transcription(self) -> None:
         """ "nexus flag" - always available, flags the most recent transcription for review."""

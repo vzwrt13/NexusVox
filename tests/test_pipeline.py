@@ -151,3 +151,36 @@ def test_english_passed_through_by_the_translator_stays_learnable():
 
     result = _run("Hello world", translate_fn=passthrough)
     assert (result.typed, result.learnable) == ("Hello world", True)
+
+
+def test_extend_fn_changes_what_is_typed_but_not_what_is_saved():
+    from nexusvox.pipeline import process_text
+
+    result = process_text(
+        "hello world",
+        _config(),
+        [],
+        [],
+        translate_fn=no_translation,
+        cleanup_fn=no_cleanup,
+        extend_fn=lambda text: text.upper(),
+    )
+    assert (result.typed, result.saved, result.learnable) == ("HELLO WORLD", "hello world", False)
+
+
+def test_extend_fn_sees_expanded_snippets():
+    seen = []
+    result = process_text(
+        "meine Signatur",
+        _config(),
+        [],
+        [SIGNATURE],
+        translate_fn=no_translation,
+        cleanup_fn=no_cleanup,
+        extend_fn=lambda text: seen.append(text) or text,
+    )
+    assert seen == ["Viele Grüße\nVincent"] and result.learnable
+
+
+def test_without_extend_fn_nothing_changes():
+    assert _run("hello world").typed == "hello world"

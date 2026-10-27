@@ -10,6 +10,7 @@ here is the path of a dictation that gets typed. The steps, in order:
 5. auto cleanup through the [llm] model (`[cleanup].level`), for typing only
 6. translation into English for typing only; a translator that loses a placeholder is ignored
 7. snippet placeholders are expanded again
+8. extensions' `on_dictation` hooks change the final text (not for the phone: there is no active app)
 
 The result says what to type, what to save (as spoken, before cleanup and translation),
 whether Enter follows the paste, and what learning from the user's edits needs: whether
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 Translate = Callable[[str, TranslatorConfig], TranslateResult]
 Cleanup = Callable[[str, CleanupConfig, LlmConfig], CleanupResult]
+Extend = Callable[[str], str]  # the extensions' on_dictation chain, already bound to the active app
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,7 @@ def process_text(
     remote: bool = False,
     translate_fn: Translate = translate,
     cleanup_fn: Cleanup = cleanup,
+    extend_fn: Extend | None = None,
 ) -> ProcessedText:
     """Run the pipeline. Blocking (cleanup and the translator are HTTP), so callers run it in an executor."""
     corrected = apply_dictionary(raw, dictionary)
@@ -91,10 +94,11 @@ def process_text(
         logger.warning("Translator dropped a snippet placeholder; typing the original text")
         translation = TranslateResult(cleaned.text, error="snippet placeholder lost")
     typed = expand_snippets(translation.text, expansions)
+    extended = extend_fn(typed) if extend_fn is not None else typed
     saved = expand_snippets(processed, expansions)
 
     return ProcessedText(
-        typed=typed,
+        typed=extended,
         # A dictation that was only "press enter" leaves no text to save.
         saved="[press enter]" if press_enter and not saved else saved,
         press_enter=press_enter,
@@ -102,6 +106,6 @@ def process_text(
         translation=translation,
         # The translator passes English through byte for byte (translated=True all the same):
         # only a dictation whose words it actually changed is not learnable.
-        learnable=not cleaned.cleaned and translation.text == cleaned.text,
+        learnable=not cleaned.cleaned and translation.text == cleaned.text and extended == typed,
         spoken=marked,
     )

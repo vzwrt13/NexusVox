@@ -109,7 +109,7 @@ is affected. The link points at `GET /api/file-transcriptions/<id>/export/<targe
 
 ## Listing what is loaded
 
-`GET /api/extensions` returns `{api_version, extensions, panels, exports, upload_actions}` for the dashboard.
+`GET /api/extensions` (the built-in `txt`, `srt` and `vtt` exports are always in `exports`) returns `{api_version, extensions, panels, exports, upload_actions}` for the dashboard.
 
 ## Availability and upload actions
 

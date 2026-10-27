@@ -165,3 +165,84 @@ def test_srt_without_word_timing_answers_with_a_message(client, db):
 
     assert resp.status_code == 500
     assert "word timestamps" in resp.get_json()["error"]
+
+
+def test_a_gap_in_speaker_labels_does_not_split_the_cue_or_repeat_the_label():
+    words = spoken("one two", 0.0, speaker=1) + spoken("three", 0.8, speaker=None) + spoken("four five", 1.2, speaker=1)
+
+    cues = build_cues(transcript(words))
+
+    assert [c[2] for c in cues] == ["Speaker 1: one two three four five"]
+
+
+def test_a_continuation_cue_may_use_the_whole_two_lines():
+    words = spoken("abcdefghi " * 20, step=0.4, speaker=1)  # 10-char tokens: 4 per line
+
+    cues = build_cues(transcript(words))
+
+    assert cues[0][2].startswith("Speaker 1: ")
+    assert max(len(line) for _, _, t in cues for line in t.split("\n")) <= MAX_LINE_CHARS
+    assert len(cues[1][2].replace("\n", " ")) > 73  # not capped by room for a label it does not print
+
+
+def test_wrapping_keeps_every_line_within_the_limit_without_a_balanced_split():
+    tokens = ["a" * 40, "bb", "c" * 40]
+    cues = build_cues(transcript([Word(t, i * 0.5, i * 0.5 + 0.4) for i, t in enumerate(tokens)]))
+
+    for _, _, text in cues:
+        assert len(text.split("\n")) <= MAX_LINES
+        assert all(len(line) <= MAX_LINE_CHARS for line in text.split("\n"))
+
+
+def test_a_word_longer_than_a_line_is_cut():
+    cues = build_cues(transcript([Word("x" * 60, 0.0, 1.0)]))
+
+    assert all(len(line) <= MAX_LINE_CHARS for line in cues[0][2].split("\n"))
+
+
+def test_overlapping_speech_keeps_both_speakers_and_no_empty_cue():
+    words = [
+        Word("yeah", 0.0, 0.5, 1),
+        Word("so", 0.0, 0.4, 2),
+        Word("that", 0.4, 0.8, 2),
+        Word("works", 0.8, 1.2, 2),
+    ]
+
+    cues = build_cues(transcript(words, kind="meeting"))
+
+    assert sorted(c[2] for c in cues) == ["Me: yeah", "Others: so that works"]
+    assert all(end > start for start, end, _ in cues)
+
+
+def test_crosstalk_does_not_shatter_a_speakers_sentence():
+    words = [Word(t, i * 0.4, i * 0.4 + 0.3, 2) for i, t in enumerate("we should ship it on friday".split())]
+    words.insert(2, Word("mm", 0.8, 0.9, 1))
+    words.sort(key=lambda w: w.start)
+
+    texts = [c[2] for c in build_cues(transcript(words, kind="meeting"))]
+
+    assert "Others: we should ship it on friday" in texts
+
+
+def test_the_error_names_the_kind_of_item():
+    with pytest.raises(ValueError, match="this meeting"):
+        to_srt(transcript([], kind="meeting"))
+
+
+def test_a_failing_builtin_registration_does_not_break_loading(monkeypatch):
+    monkeypatch.setattr("nexusvox.exports.builtin_export_targets", lambda: 1 / 0)
+    registry = ExtensionRegistry()
+
+    registry.add_builtin_exports()  # logs, does not raise
+
+    assert registry.export_targets() == []
+
+
+def test_srt_and_vtt_are_greyed_out_for_an_upload_without_word_timing(client, db):
+    plain = db.save_file_transcription("hello", "en", 1000, "a.wav")
+    timed = db.save_file_transcription("hello", "en", 1000, "b.wav", words=[Word("hello", 0.0, 0.4)])
+
+    rows = {r["id"]: r for r in client.get("/api/file-transcriptions").get_json()}
+
+    assert set(rows[plain.id]["exports_unavailable"]) == {"srt", "vtt"}
+    assert rows[timed.id]["exports_unavailable"] == {}

@@ -365,9 +365,12 @@ class ExtensionRegistry:
 
     def add_builtin_exports(self) -> None:
         """Register the export targets NexusVox ships (TXT, SRT, VTT) before the extensions, so their ids stay ours."""
-        from .exports import builtin_export_targets  # imported here: exports.py imports this module
+        try:
+            from .exports import builtin_export_targets  # imported here: exports.py imports this module
 
-        self._targets.update({t.id: t for t in builtin_export_targets()})
+            self._targets.update({t.id: t for t in builtin_export_targets()})
+        except Exception:
+            logger.exception("The built-in export targets could not be registered; continuing without them")
 
     # ---- Hook: file upload transcribed ---------------------------------------
 

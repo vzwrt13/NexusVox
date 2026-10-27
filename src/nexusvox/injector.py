@@ -25,6 +25,7 @@ VK_LWIN = 0x5B
 VK_V = 0x56
 VK_C = 0x43
 VK_RETURN = 0x0D
+VK_MENU_MASK = 0xE8  # unassigned virtual key, the one AutoHotkey uses as its menu mask key
 
 # Hardware scan codes — required for apps that ignore virtual-key-only input
 SCAN_CONTROL = 0x1D
@@ -103,15 +104,37 @@ def _make_key_input(vk: int, scan: int = 0, flags: int = 0) -> INPUT:
     return inp
 
 
-def _release_all_modifiers() -> None:
-    """Release all modifier keys to clear stale state from the push-to-talk hotkey."""
-    mods = [
+def menu_mask_inputs() -> list[INPUT]:
+    """A keystroke on a neutral key. Sent while Alt is down, it tells Windows the Alt press was part of a
+    chord, so the later Alt release does not count as a lone Alt tap that opens the app's menu."""
+    return [_make_key_input(VK_MENU_MASK), _make_key_input(VK_MENU_MASK, 0, KEYEVENTF_KEYUP)]
+
+
+def send_menu_mask() -> None:
+    """Send the menu mask keystroke now (see `menu_mask_inputs`)."""
+    inputs = menu_mask_inputs()
+    array = (INPUT * len(inputs))(*inputs)
+    user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
+
+
+def _release_inputs(alt_down: bool) -> list[INPUT]:
+    """Key-ups for every modifier; with Alt still down, the menu mask goes in before its key-up."""
+    inputs: list[INPUT] = []
+    for vk, sc in (
         (VK_CONTROL, SCAN_CONTROL),
         (VK_SHIFT, SCAN_SHIFT),
         (VK_MENU, SCAN_ALT),
         (VK_LWIN, SCAN_LWIN),
-    ]
-    inputs = [_make_key_input(vk, sc, KEYEVENTF_KEYUP) for vk, sc in mods]
+    ):
+        if vk == VK_MENU and alt_down:
+            inputs.extend(menu_mask_inputs())
+        inputs.append(_make_key_input(vk, sc, KEYEVENTF_KEYUP))
+    return inputs
+
+
+def _release_all_modifiers() -> None:
+    """Release all modifier keys to clear stale state from the push-to-talk hotkey."""
+    inputs = _release_inputs(bool(user32.GetAsyncKeyState(VK_MENU) & 0x8000))
     array = (INPUT * len(inputs))(*inputs)
     user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
 

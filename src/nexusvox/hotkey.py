@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 from collections.abc import Callable
 
 from pynput import keyboard
 
 from .config import COMMAND_KEY_VKS, HOTKEY_KEY_VKS, HotkeyConfig, MeetingConfig, OsControlConfig
+
+logger = logging.getLogger(__name__)
 
 # What a marker key pressed during a recording turns that recording into.
 COMMAND = "command"
@@ -79,6 +82,7 @@ class HotkeyListener:
         self._pressed_modifiers: set[str] = set()
         self._combo_down = False  # complete combo currently pressed (edge detection)
         self._key_swallowed = False  # trigger key is held since a swallowed key-down
+        self._mask_alt = False  # Alt is held as part of a completed combo: mask its release
         self._sync_binding()
 
         self._active = False
@@ -122,6 +126,8 @@ class HotkeyListener:
 
     def _complete_press(self) -> None:
         self._combo_down = True
+        if "alt" in self._modifiers:
+            self._mask_alt = True
         if self._active:
             if self.mode == "toggle":
                 self._active = False
@@ -208,9 +214,24 @@ class HotkeyListener:
                 self._complete_press()
             return False
         self._pressed_modifiers.discard(modifier)
+        if modifier == "alt" and self._mask_alt:
+            # Windows opens the app's menu when Alt goes up without another key in between, which
+            # is what releasing Ctrl and Shift first leaves behind. A neutral keystroke before the
+            # release turns it into an ordinary chord release (AutoHotkey's menu mask key).
+            self._mask_alt = False
+            self._send_menu_mask()
         if self._combo_down:
             self._combo_broken()
         return False
+
+    def _send_menu_mask(self) -> None:
+        # Imported here: injector binds Win32 at import time.
+        from .injector import send_menu_mask
+
+        try:
+            send_menu_mask()
+        except Exception:
+            logger.exception("Could not send the menu mask key")
 
     def _win32_event_filter(self, msg: int, data) -> None:
         """pynput hook callback, runs synchronously inside WH_KEYBOARD_LL."""

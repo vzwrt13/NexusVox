@@ -396,3 +396,61 @@ def test_polish_key_off_by_default_types_normally():
     assert hk._handle(VK_P, True) is False
     _release_combo(hk)
     assert hk.mark is None
+
+
+# -- Alt menu mask ----------------------------------------------------------------
+
+
+def _mask_counter(hk):
+    sent: list[str] = []
+    hk._send_menu_mask = lambda: sent.append("mask")
+    return sent
+
+
+@pytest.mark.parametrize("release_order", [(LCTRL, LALT), (LALT, LCTRL)])
+def test_alt_release_sends_mask_once_in_any_order(release_order):
+    hk, _, _ = _listener("hold")
+    sent = _mask_counter(hk)
+    _press_combo(hk)
+    for vk in release_order:
+        hk._handle(vk, False)
+    assert sent == ["mask"]
+
+
+def test_alt_release_mask_covers_three_modifier_default():
+    hk, _, _ = _listener("hold", modifiers=("ctrl", "shift", "alt"))
+    sent = _mask_counter(hk)
+    for vk in (LCTRL, LSHIFT, LALT):
+        hk._handle(vk, True)
+    for vk in (LCTRL, LSHIFT, LALT):
+        hk._handle(vk, False)
+    assert sent == ["mask"]
+
+
+def test_no_mask_without_alt_in_binding():
+    hk, _, _ = _listener("hold", modifiers=("ctrl", "shift"))
+    sent = _mask_counter(hk)
+    hk._handle(LCTRL, True)
+    hk._handle(LSHIFT, True)
+    hk._handle(LCTRL, False)
+    hk._handle(LSHIFT, False)
+    assert sent == []
+
+
+def test_lone_alt_tap_is_not_masked():
+    hk, _, _ = _listener("hold", modifiers=("ctrl", "shift", "alt"))
+    sent = _mask_counter(hk)
+    hk._handle(LALT, True)
+    hk._handle(LALT, False)
+    assert sent == []
+
+
+def test_key_binding_with_alt_masks_release():
+    hk, _, _ = _listener("hold", modifiers=("ctrl", "alt"), key="A")
+    sent = _mask_counter(hk)
+    _press_combo(hk)
+    hk._handle(VK_A, True)
+    hk._handle(VK_A, False)
+    hk._handle(LALT, False)
+    hk._handle(LCTRL, False)
+    assert sent == ["mask"]

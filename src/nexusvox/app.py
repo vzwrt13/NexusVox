@@ -23,7 +23,7 @@ from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker,
 from .dashboard import ensure_dashboard_api, open_dashboard, running_dashboard_api
 from .db import Database
 from .edit_watch import EditWatcher
-from .extensions import ActiveApp, load_extensions
+from .extensions import ActiveApp, load_extensions, loaded_extensions
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, MeetingHotkey, describe_hotkey
 from .injector import foreground_window, inject_text
@@ -615,7 +615,10 @@ class NexusVoxApp:
 
     def _extend_dictation(self, text: str) -> str:
         """The extensions' say on a dictation about to be typed (runs in the executor with the pipeline)."""
-        return load_extensions().dictation(text, self._active_app())
+        registry = loaded_extensions()  # None while the packages still load: type without them, never wait
+        if registry is None or not registry.extensions:
+            return text
+        return registry.dictation(text, self._active_app())
 
     def _language_of(self, spoken: str) -> str:
         return detect_language(spoken) if self._config.auto_language_detection else self._config.language
@@ -668,17 +671,20 @@ class NexusVoxApp:
             _play(beep_error)
             return
         spoken = instruction
-        app = self._active_app()
-        handled = await loop.run_in_executor(None, load_extensions().selection_command, selection, spoken, app)
-        if handled is not None:
-            await self._paste_over_selection(
-                handled, foreground_window(), f"[extension] {spoken}", spoken or selection, recording
+        window = foreground_window()  # before any hook runs: the paste checks the focus did not move meanwhile
+        registry = loaded_extensions()
+        if registry is not None and registry.extensions:
+            handled = await loop.run_in_executor(
+                None, registry.selection_command, selection, spoken, self._active_app()
             )
-            return
+            if handled is not None:
+                await self._paste_over_selection(
+                    handled, window, f"[extension] {spoken}", spoken or selection, recording
+                )
+                return
         instruction, preset = resolve_instruction(spoken, self._db.get_polish_presets())
         if preset:
             logger.info("Polish: preset %r", preset)
-        window = foreground_window()
         try:
             rewritten = await loop.run_in_executor(None, polish, selection, instruction, self._config.llm)
         except LlmError as exc:

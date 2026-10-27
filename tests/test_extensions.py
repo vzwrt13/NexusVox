@@ -831,19 +831,55 @@ def test_a_failing_dictation_hook_falls_back_to_the_text_before_it():
     assert _registry(Suffix("a", "!"), Boom(), NotText(), Suffix("b", "?")).dictation("hi", APP) == "hi!?"
 
 
+class Slow(V1Extension):
+    name = "slow"
+
+    def on_dictation(self, text, app):
+        time.sleep(0.5)
+        return "too late"
+
+
 def test_a_slow_dictation_hook_times_out(monkeypatch):
     monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.05)
+    started = time.monotonic()
+    assert _registry(Slow()).dictation("hi", APP) == "hi"
+    assert time.monotonic() - started < 0.4
 
-    class Slow(V1Extension):
-        name = "slow"
+
+def test_the_whole_chain_shares_one_deadline_and_a_stuck_hook_is_not_called_again(monkeypatch):
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.1)
+    other = Slow()
+    other.name = "slow2"
+    registry = _registry(Slow(), other, Suffix("b", "!"))
+    started = time.monotonic()
+    assert registry.dictation("hi", APP) == "hi"  # the first one used the deadline up
+    assert time.monotonic() - started < 0.4
+    # The first hook is still busy: it is skipped at once, and the fast one now answers.
+    assert registry.dictation("hi", APP) == "hi"  # "slow2" runs next and uses the budget
+    time.sleep(0.6)  # the slow hooks have ended
+    assert registry._stuck["slow", "on_dictation"].is_alive() is False
+
+
+def test_an_extension_that_exits_is_skipped_like_any_failure():
+    class Quitter(V1Extension):
+        name = "quitter"
 
         def on_dictation(self, text, app):
-            time.sleep(1)
-            return "too late"
+            raise SystemExit(1)
 
-    started = time.monotonic()
-    assert _registry(Slow(), Suffix("b", "!")).dictation("hi", APP) == "hi!"
-    assert time.monotonic() - started < 0.9
+        def on_selection_command(self, selection, command, app):
+            raise KeyboardInterrupt
+
+    registry = _registry(Quitter(), Suffix("b", "!"))
+    assert registry.dictation("hi", APP) == "hi!"
+    assert registry.selection_command("s", "c", APP) is None
+
+
+def test_loaded_extensions_never_waits_for_the_load(monkeypatch):
+    monkeypatch.setattr(ext, "_default_ready", False)
+    assert ext.loaded_extensions() is None
+    monkeypatch.setattr(ext, "_default_ready", True)
+    assert ext.loaded_extensions() is ext._default
 
 
 class Commands(V1Extension):

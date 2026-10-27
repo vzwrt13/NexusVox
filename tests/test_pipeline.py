@@ -184,3 +184,27 @@ def test_extend_fn_sees_expanded_snippets():
 
 def test_without_extend_fn_nothing_changes():
     assert _run("hello world").typed == "hello world"
+
+
+def test_a_failing_extend_fn_types_the_text_unchanged():
+    def boom(_text):
+        raise RuntimeError("nope")
+
+    result = process_text(
+        "hello world", _config(), [], [], translate_fn=no_translation, cleanup_fn=no_cleanup, extend_fn=boom
+    )
+    assert (result.typed, result.learnable) == ("hello world", True)
+
+
+def test_extend_fn_is_not_called_for_an_enter_only_dictation():
+    calls = []
+    result = process_text(
+        "press enter",
+        _config(press_enter=True),
+        [],
+        [],
+        translate_fn=no_translation,
+        cleanup_fn=no_cleanup,
+        extend_fn=lambda text: calls.append(text) or text + "!",
+    )
+    assert (result.typed, result.press_enter, calls) == ("", True, [])

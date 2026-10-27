@@ -171,9 +171,9 @@ text to type instead, or `None` to leave it.
 
 - **Order.** Extensions run in the order of their entry-point names (alphabetical); each sees the previous
   one's result.
-- **Fallback.** An extension that raises, returns something that is not a string, or does not answer within
-  3 seconds (`nexusvox.extensions.HOOK_TIMEOUT_S`) is logged and skipped: the text stays as the step before it left it.
-  A timed-out hook keeps running in the background and its result is dropped.
+- **Fallback.** An extension that raises, returns something that is not a string, or does not answer in time is logged and skipped (an `exit` call counts as a failure): the text stays as the step before it left it. All extensions share one budget of 3 seconds per dictation (`nexusvox.extensions.HOOK_TIMEOUT_S`). A timed-out hook keeps running in the background, its result is dropped, and it is not called again until it has returned.
+- **Startup.** While the extensions are still loading right after NexusVox starts, a dictation is typed without them.
+- **Empty text.** A dictation that types nothing (only "press enter") does not call the hook.
 - **What is saved.** The stored transcript is the text as spoken; only what is typed (and what the paste key
   repeats) changes. An edit made by an extension keeps that dictation out of "learn from edits".
 - **Not for the phone.** A remote-mic dictation is inserted by the phone, so there is no active app and the hook is not called.

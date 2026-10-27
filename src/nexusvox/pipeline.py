@@ -94,7 +94,12 @@ def process_text(
         logger.warning("Translator dropped a snippet placeholder; typing the original text")
         translation = TranslateResult(cleaned.text, error="snippet placeholder lost")
     typed = expand_snippets(translation.text, expansions)
-    extended = extend_fn(typed) if extend_fn is not None else typed
+    extended = typed
+    if extend_fn is not None and typed:  # an Enter-only dictation has no text for an extension to change
+        try:
+            extended = extend_fn(typed)
+        except Exception:
+            logger.exception("The extension step failed; typing the text unchanged by it")
     saved = expand_snippets(processed, expansions)
 
     return ProcessedText(

@@ -36,6 +36,7 @@ from ..db import Database
 from ..diarization import speaker_detection_models
 from ..dictionary import suggest_entries
 from ..edit_watch import WATCHED_KEYS
+from ..exports import NO_TIMING_HINT, SUBTITLE_TARGET_IDS
 from ..extensions import ExtensionRegistry, file_transcript_from_record
 from ..file_cleanup import clean_transcript
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_CHUNK_MS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
@@ -1125,13 +1126,23 @@ class DashboardAPI:
                 "has_audio": bool(r.audio_path),
                 "confidence": r.confidence,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
-                "exports_unavailable": self.extensions.unavailable_exports(r.id),
+                "exports_unavailable": self._unavailable_exports(r),
             }
             for r in rows
         ]
 
+    def _unavailable_exports(self, record) -> dict[str, str]:
+        """`{target id: reason}` for the export targets that cannot export this row: the extensions' own checks,
+        plus the built-in subtitle targets when no word timing is stored."""
+        unavailable = self.extensions.unavailable_exports(record.id)
+        if not record.words or record.words.strip() == "[]":
+            for target_id in SUBTITLE_TARGET_IDS:
+                if self.extensions.export_target(target_id) is not None:
+                    unavailable.setdefault(target_id, NO_TIMING_HINT)
+        return unavailable
+
     def export_file_transcription(self, transcription_id: int, target_id: str) -> dict:
-        """Export a stored file transcription with an extension's export target.
+        """Export a stored file transcription with an export target (built in or an extension's).
 
         `{"ok": True, "filename", "mimetype", "data": bytes}`; `status` says which HTTP error fits a failure.
         """

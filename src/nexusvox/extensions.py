@@ -363,6 +363,15 @@ class ExtensionRegistry:
                 claimed.append(item)
         return claimed
 
+    def add_builtin_exports(self) -> None:
+        """Register the export targets NexusVox ships (TXT, SRT, VTT) before the extensions, so their ids stay ours."""
+        try:
+            from .exports import builtin_export_targets  # imported here: exports.py imports this module
+
+            self._targets.update({t.id: t for t in builtin_export_targets()})
+        except Exception:
+            logger.exception("The built-in export targets could not be registered; continuing without them")
+
     # ---- Hook: file upload transcribed ---------------------------------------
 
     def file_transcribed(self, transcript: FileTranscript) -> tuple[dict[str, Any], list[str]]:
@@ -517,6 +526,7 @@ def load_extensions() -> ExtensionRegistry:
     with _default_lock:  # reentrant: an extension calling this while it loads gets the registry as filled so far
         if not _default_loaded:
             _default_loaded = True
+            _default.add_builtin_exports()
             _default.load()
             _default_ready = True
     return _default

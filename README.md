@@ -166,7 +166,7 @@ Open `http://localhost:47392` while NexusVox is running:
 | Analytics | Word count, session stats, usage charts |
 | Settings | Model switcher, config editor, voice command toggles |
 | Edit | Correct transcriptions in-line |
-| Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg); optional speaker detection with Parakeet; optional text cleanup with the local language model |
+| Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg); optional speaker detection with Parakeet; optional text cleanup with the local language model; download as TXT, SRT or VTT (subtitles need Parakeet's word timing) |
 | Review | Flag and replay recordings |
 
 ![The NexusVox settings tab: toggles for automatic language detection, a compute device selector resolved to GPU (CUDA), a transcription model selector set to Parakeet TDT 0.6B, and a model overview listing architecture, parameter count, protocol, runtime, supported languages and VRAM.](docs/images/settings.png)
@@ -200,7 +200,7 @@ Windows 11 only. NexusVox uses Win32 APIs (`SendInput`, `WM_PASTE`) for text inj
 
 ## Free and Pro (coming soon)
 
-The **core of NexusVox stays free and open source under the AGPL-3.0-or-later**. That includes dictation, polish, auto cleanup, file upload transcription and speaker detection. Basic export is planned as a free feature. Nothing listed here is going to become paid.
+The **core of NexusVox stays free and open source under the AGPL-3.0-or-later**. That includes dictation, polish, auto cleanup, file upload transcription and speaker detection. Basic export (TXT, SRT, VTT) is free. Nothing listed here is going to become paid.
 
 **Pro** is a separate, commercial extension that sits next to the core. It adds on top of NexusVox and does not take anything away from it.
 

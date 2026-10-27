@@ -102,14 +102,14 @@ def export_targets(self) -> list[ExportTarget]:
     return [ExportTarget("my-csv", "CSV", ".csv", "text/csv", self._to_csv)]
 ```
 
-Each target adds a download link to every stored upload in the Upload tab. `export(transcript)` receives a
+NexusVox itself ships the targets `txt`, `srt` and `vtt`; they are registered first, so an extension cannot reuse those ids. Each target adds a download link to every stored upload in the Upload tab. `export(transcript)` receives a
 `FileTranscript` and returns `bytes` or `str`; the file is named after the uploaded file plus `extension`.
 `id` follows the same rules as a panel id; `extension` must be a file name suffix such as `.docx` or `.tar.gz` (no slash, no spaces) and `mimetype` a media type, or the target is dropped. The link downloads through the page, so a failing export shows its message in the Upload tab instead of saving an error file. A failing export answers with a 500 and its message; nothing else
 is affected. The link points at `GET /api/file-transcriptions/<id>/export/<target id>`.
 
 ## Listing what is loaded
 
-`GET /api/extensions` returns `{api_version, extensions, panels, exports, upload_actions}` for the dashboard.
+`GET /api/extensions` (the built-in `txt`, `srt` and `vtt` exports are always in `exports`) returns `{api_version, extensions, panels, exports, upload_actions}` for the dashboard.
 
 ## Availability and upload actions
 

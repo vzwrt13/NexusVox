@@ -28,3 +28,12 @@ def test_no_mask_when_alt_is_up():
     from nexusvox import injector
 
     assert all(vk != injector.VK_MENU_MASK for vk, _ in _sequence(False))
+
+
+def test_win_held_also_gets_the_mask_before_alt_key_up():
+    from nexusvox import injector
+
+    seq = [
+        (i._input.ki.wVk, bool(i._input.ki.dwFlags & injector.KEYEVENTF_KEYUP)) for i in injector._release_inputs(True)
+    ]
+    assert seq.index((injector.VK_MENU_MASK, True)) < seq.index((injector.VK_LWIN, True))

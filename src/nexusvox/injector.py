@@ -110,15 +110,22 @@ def menu_mask_inputs() -> list[INPUT]:
     return [_make_key_input(VK_MENU_MASK), _make_key_input(VK_MENU_MASK, 0, KEYEVENTF_KEYUP)]
 
 
-def send_menu_mask() -> None:
-    """Send the menu mask keystroke now (see `menu_mask_inputs`)."""
-    inputs = menu_mask_inputs()
+def _send_inputs(inputs: list[INPUT], name: str) -> bool:
+    """SendInput a batch; logs when Windows injects fewer events than asked (UIPI, elevated target)."""
     array = (INPUT * len(inputs))(*inputs)
-    user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
+    sent = user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
+    if sent != len(inputs):
+        logger.error("SendInput %s: sent %d/%d events (blocked by UIPI?)", name, sent, len(inputs))
+    return sent == len(inputs)
 
 
-def _release_inputs(alt_down: bool) -> list[INPUT]:
-    """Key-ups for every modifier; with Alt still down, the menu mask goes in before its key-up."""
+def send_menu_mask() -> bool:
+    """Send the menu mask keystroke now (see `menu_mask_inputs`)."""
+    return _send_inputs(menu_mask_inputs(), "menu mask")
+
+
+def _release_inputs(menu_key_down: bool) -> list[INPUT]:
+    """Key-ups for every modifier; with Alt or Win still down, the menu mask goes in before the Alt key-up."""
     inputs: list[INPUT] = []
     for vk, sc in (
         (VK_CONTROL, SCAN_CONTROL),
@@ -126,7 +133,7 @@ def _release_inputs(alt_down: bool) -> list[INPUT]:
         (VK_MENU, SCAN_ALT),
         (VK_LWIN, SCAN_LWIN),
     ):
-        if vk == VK_MENU and alt_down:
+        if vk == VK_MENU and menu_key_down:
             inputs.extend(menu_mask_inputs())
         inputs.append(_make_key_input(vk, sc, KEYEVENTF_KEYUP))
     return inputs
@@ -134,9 +141,8 @@ def _release_inputs(alt_down: bool) -> list[INPUT]:
 
 def _release_all_modifiers() -> None:
     """Release all modifier keys to clear stale state from the push-to-talk hotkey."""
-    inputs = _release_inputs(bool(user32.GetAsyncKeyState(VK_MENU) & 0x8000))
-    array = (INPUT * len(inputs))(*inputs)
-    user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
+    inputs = _release_inputs(any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in (VK_MENU, VK_LWIN, VK_RWIN)))
+    _send_inputs(inputs, "modifier release")
 
 
 def _wait_for_physical_release(timeout_s: float = 1.5) -> bool:

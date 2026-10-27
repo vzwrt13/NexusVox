@@ -398,59 +398,89 @@ def test_polish_key_off_by_default_types_normally():
     assert hk.mark is None
 
 
-# -- Alt menu mask ----------------------------------------------------------------
+# -- Alt/Win menu mask -----------------------------------------------------------
+#
+# The mask must reach the app while Alt/Win is certainly down, i.e. when the combo completes and
+# never at the release: sent from inside the hook it would queue behind the key-up it must precede.
 
 
-def _mask_counter(hk):
-    sent: list[str] = []
-    hk._send_menu_mask = lambda: sent.append("mask")
-    return sent
+def _masked(modifiers, key: str = ""):
+    hk, events, _ = _listener("hold", modifiers=modifiers, key=key)
+    log: list[str] = []
+    hk._mask_sender = lambda: log.append("mask")
+    return hk, log
 
 
-@pytest.mark.parametrize("release_order", [(LCTRL, LALT), (LALT, LCTRL)])
-def test_alt_release_sends_mask_once_in_any_order(release_order):
-    hk, _, _ = _listener("hold")
-    sent = _mask_counter(hk)
-    _press_combo(hk)
+RWIN, LALT_VK, RALT = 0x5C, LALT, 0xA5
+
+
+@pytest.mark.parametrize("release_order", [(LCTRL, LSHIFT, LALT), (LALT, LSHIFT, LCTRL), (LSHIFT, LALT, LCTRL)])
+def test_mask_is_sent_once_at_completion_not_at_release(release_order):
+    hk, log = _masked(("ctrl", "shift", "alt"))
+    for vk in (LCTRL, LSHIFT):
+        hk._handle(vk, True)
+    assert log == []
+    hk._handle(LALT, True)
+    assert log == ["mask"]
     for vk in release_order:
         hk._handle(vk, False)
-    assert sent == ["mask"]
+    assert log == ["mask"]
 
 
-def test_alt_release_mask_covers_three_modifier_default():
-    hk, _, _ = _listener("hold", modifiers=("ctrl", "shift", "alt"))
-    sent = _mask_counter(hk)
-    for vk in (LCTRL, LSHIFT, LALT):
-        hk._handle(vk, True)
-    for vk in (LCTRL, LSHIFT, LALT):
-        hk._handle(vk, False)
-    assert sent == ["mask"]
-
-
-def test_no_mask_without_alt_in_binding():
-    hk, _, _ = _listener("hold", modifiers=("ctrl", "shift"))
-    sent = _mask_counter(hk)
+def test_no_mask_without_alt_or_win_in_binding():
+    hk, log = _masked(("ctrl", "shift"))
     hk._handle(LCTRL, True)
     hk._handle(LSHIFT, True)
-    hk._handle(LCTRL, False)
     hk._handle(LSHIFT, False)
-    assert sent == []
+    hk._handle(LCTRL, False)
+    assert log == []
+
+
+def test_win_binding_is_masked_too():
+    hk, log = _masked(("ctrl", "win"))
+    hk._handle(LCTRL, True)
+    hk._handle(0x5B, True)
+    assert log == ["mask"]
 
 
 def test_lone_alt_tap_is_not_masked():
-    hk, _, _ = _listener("hold", modifiers=("ctrl", "shift", "alt"))
-    sent = _mask_counter(hk)
+    hk, log = _masked(("ctrl", "shift", "alt"))
     hk._handle(LALT, True)
     hk._handle(LALT, False)
-    assert sent == []
+    assert log == []
 
 
-def test_key_binding_with_alt_masks_release():
-    hk, _, _ = _listener("hold", modifiers=("ctrl", "alt"), key="A")
-    sent = _mask_counter(hk)
+def test_key_binding_with_alt_masks_when_the_key_completes_it():
+    hk, log = _masked(("ctrl", "alt"), key="A")
     _press_combo(hk)
+    assert log == []
     hk._handle(VK_A, True)
-    hk._handle(VK_A, False)
+    assert log == ["mask"]
+
+
+def test_second_alt_pressed_during_the_combo_is_masked_again():
+    hk, log = _masked(("ctrl", "alt"))
+    _press_combo(hk)
+    hk._handle(RALT, True)
+    assert log == ["mask", "mask"]
     hk._handle(LALT, False)
-    hk._handle(LCTRL, False)
-    assert sent == ["mask"]
+    hk._handle(RALT, False)
+    assert log == ["mask", "mask"]
+
+
+def test_failing_mask_sender_does_not_break_the_hook():
+    hk, events, _ = _listener("hold")
+
+    def boom():
+        raise OSError("blocked")
+
+    hk._mask_sender = boom
+    _press_combo(hk)
+    assert events == ["start"]
+
+
+def test_no_sender_means_no_injection_in_unit_tests():
+    hk, events, _ = _listener("hold")
+    assert hk._mask_sender is None
+    _press_combo(hk)
+    assert events == ["start"]

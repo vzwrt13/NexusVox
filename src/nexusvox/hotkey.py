@@ -31,6 +31,9 @@ _VK_TO_MODIFIER: dict[int, str] = {vk: name for name, vks in _MODIFIER_VKS.items
 _WM_KEYDOWN, _WM_KEYUP, _WM_SYSKEYDOWN, _WM_SYSKEYUP = 0x0100, 0x0101, 0x0104, 0x0105
 _PRESS_MESSAGES = (_WM_KEYDOWN, _WM_SYSKEYDOWN)
 
+# Modifiers whose lone release opens a menu (the app's for Alt, Start for Win)
+_MENU_MODIFIERS = frozenset({"alt", "win"})
+
 
 class HotkeyListener:
     """Listens for a modifier combo, optionally completed by one ordinary key.
@@ -82,7 +85,7 @@ class HotkeyListener:
         self._pressed_modifiers: set[str] = set()
         self._combo_down = False  # complete combo currently pressed (edge detection)
         self._key_swallowed = False  # trigger key is held since a swallowed key-down
-        self._mask_alt = False  # Alt is held as part of a completed combo: mask its release
+        self._mask_sender: Callable[[], None] | None = None  # set by start(); tests leave it unset
         self._sync_binding()
 
         self._active = False
@@ -126,8 +129,7 @@ class HotkeyListener:
 
     def _complete_press(self) -> None:
         self._combo_down = True
-        if "alt" in self._modifiers:
-            self._mask_alt = True
+        self._mask_menu_keys()
         if self._active:
             if self.mode == "toggle":
                 self._active = False
@@ -208,28 +210,31 @@ class HotkeyListener:
             return False
         if pressed:
             self._pressed_modifiers.add(modifier)
+            if self._combo_down:
+                self._mask_menu_keys()  # a second Alt/Win pressed during the combo
             # A modifier-only binding completes on its last modifier. With a key, the key
             # has to come last, otherwise "hold A, then press Ctrl" would start recording.
             if self._key_vk is None and not self._combo_down and self._modifiers <= self._pressed_modifiers:
                 self._complete_press()
             return False
         self._pressed_modifiers.discard(modifier)
-        if modifier == "alt" and self._mask_alt:
-            # Windows opens the app's menu when Alt goes up without another key in between, which
-            # is what releasing Ctrl and Shift first leaves behind. A neutral keystroke before the
-            # release turns it into an ordinary chord release (AutoHotkey's menu mask key).
-            self._mask_alt = False
-            self._send_menu_mask()
         if self._combo_down:
             self._combo_broken()
         return False
 
-    def _send_menu_mask(self) -> None:
-        # Imported here: injector binds Win32 at import time.
-        from .injector import send_menu_mask
+    def _mask_menu_keys(self) -> None:
+        """Type a neutral key while Alt or Win is certainly down.
 
+        Windows opens the app's menu (Alt) or the Start menu (Win) when such a key goes up with no other
+        key pressed since it went down, which is what releasing Ctrl and Shift first leaves behind. A
+        keystroke in between turns the release into an ordinary chord release (AutoHotkey's menu mask
+        key). It is sent when the combo completes, not at the release: from inside the hook it would
+        queue behind the very key-up it must precede.
+        """
+        if not self._modifiers & _MENU_MODIFIERS or self._mask_sender is None:
+            return
         try:
-            send_menu_mask()
+            self._mask_sender()
         except Exception:
             logger.exception("Could not send the menu mask key")
 
@@ -273,6 +278,13 @@ class HotkeyListener:
 
     def start(self) -> None:
         """Start listening for the hotkey. Runs the listener in a daemon thread."""
+        try:
+            # Imported here (injector binds Win32 at import) and outside the hook, which has a tight timeout.
+            from .injector import send_menu_mask
+
+            self._mask_sender = send_menu_mask
+        except Exception:
+            logger.exception("Menu mask key unavailable; releasing Alt or Win last may open a menu")
         self._listener = keyboard.Listener(win32_event_filter=self._win32_event_filter)
         self._listener.daemon = True
         self._listener.start()

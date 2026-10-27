@@ -1979,7 +1979,11 @@ async function renderFileTranscriptions(container, kind, emptyText) {
           if (reason !== undefined) return `<a class="upload-export disabled" aria-disabled="true" title="${escapeHtml(reason)}">${escapeHtml(t.label)}</a>`;
           return `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}">${escapeHtml(t.label)}</a>`;
         }).join("")}
-        ${extensionUploadActions.map((a) => `<button type="button" class="upload-action" data-action="${escapeHtml(a.id)}" data-index="${index}"${runningUploadActions.has(`${a.id}:${item.id}`) ? " disabled" : ""}>${escapeHtml(a.label)}</button>`).join("")}
+        ${extensionUploadActions.map((a) => {
+          const reason = (item.actions_unavailable || {})[a.id];
+          const off = reason !== undefined || runningUploadActions.has(`${a.id}:${item.id}`);
+          return `<button type="button" class="upload-action" data-action="${escapeHtml(a.id)}" data-index="${index}"${off ? " disabled" : ""}${reason !== undefined ? ` title="${escapeHtml(reason)}"` : ""}>${escapeHtml(a.label)}</button>`;
+        }).join("")}
       </div>
       <div class="upload-filename">${escapeHtml(item.original_filename)}${item.kind === "meeting" ? " (meeting)" : ""}</div>
       ${item.has_audio ? `<audio class="upload-audio" controls preload="none" src="/api/file-transcriptions/${item.id}/audio"></audio>` : ""}

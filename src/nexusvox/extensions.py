@@ -145,6 +145,9 @@ class UploadAction:
     label: str
     endpoint: str = ""  # an absolute path on this server, e.g. `/api/ext/my-tab/summarise/{id}`
     panel: str = ""
+    # Optional, per upload, with the same answers as `ExportTarget.available`: a falsy answer or a string greys the
+    # button out (the string is its tooltip). Called while the Upload list is built, so keep it cheap.
+    available: Callable[[int], bool | str | None] | None = None
 
 
 class Extension:
@@ -181,6 +184,17 @@ class Extension:
         Return the replacement for *selection*, or None when this extension does not know *command*; the
         first extension that returns text wins and the core pastes it over the selection. When none does,
         the built-in language-model polish runs as before.
+        """
+        return None
+
+    def display_text(self, transcript: FileTranscript, text: str) -> str | None:
+        """Change a transcript text the core shows or exports for a stored upload or meeting.
+
+        *text* is the upload's transcript, its cleaned version, or a subtitle cue (`Speaker 1: ...`); it is
+        called once per text, for the Upload tab and the built-in TXT, SRT and VTT exports. Return the text to
+        show instead (e.g. with `Speaker 1` replaced by a name), or None to leave it. The stored transcript
+        never changes. Several extensions run in entry-point order, each seeing the previous result; one that
+        raises, answers with something that is not a string, or is too slow (`HOOK_TIMEOUT_S`) is skipped.
         """
         return None
 
@@ -267,6 +281,8 @@ def _problem_with_action(action: UploadAction, own_panels: set[str]) -> str:
         return f"endpoint {action.endpoint!r} is not an absolute path on this server"
     if action.panel and action.panel not in own_panels:
         return f"panel {action.panel!r} is not one of the extension's own panels"
+    if action.available is not None and not callable(action.available):
+        return "available is not callable"
     return ""
 
 
@@ -368,7 +384,7 @@ class ExtensionRegistry:
         try:
             from .exports import builtin_export_targets  # imported here: exports.py imports this module
 
-            self._targets.update({t.id: t for t in builtin_export_targets()})
+            self._targets.update({t.id: t for t in builtin_export_targets(self.display_texts)})
         except Exception:
             logger.exception("The built-in export targets could not be registered; continuing without them")
 
@@ -413,6 +429,25 @@ class ExtensionRegistry:
             if result is not None:
                 text = result
         return text
+
+    def display_texts(self, transcript: FileTranscript, texts: list[str]) -> list[str]:
+        """*texts* as every extension's `display_text` leaves them, in load order.
+
+        All texts of one call share one `HOOK_TIMEOUT_S` budget. A failing, slow or non-string answer, and an
+        empty answer for a text that was not empty, leave that text as it was; with no extension the texts come
+        back unchanged.
+        """
+        if not self.extensions:
+            return list(texts)
+        deadline = time.monotonic() + HOOK_TIMEOUT_S
+        out = []
+        for text in texts:
+            for extension in self.extensions:
+                result = self._text_hook(extension, "display_text", deadline, transcript, text)
+                if result is not None and (result or not text):
+                    text = result
+            out.append(text)
+        return out
 
     def selection_command(self, selection: str, command: str, app: ActiveApp) -> str | None:
         """The replacement for *selection* from the first extension that handles *command*, else None."""
@@ -481,19 +516,27 @@ class ExtensionRegistry:
         A target without `available` is always offered; one whose check raises is offered too, so the export
         itself reports what is wrong.
         """
+        return self._unavailable(self._targets.values(), transcription_id, "Export target")
+
+    def unavailable_actions(self, transcription_id: int) -> dict[str, str]:
+        """The upload actions that are greyed out for this upload, `{action id: reason}` (same rules)."""
+        return self._unavailable(self._actions.values(), transcription_id, "Upload action")
+
+    @staticmethod
+    def _unavailable(items, transcription_id: int, what: str) -> dict[str, str]:
         unavailable: dict[str, str] = {}
-        for target in self._targets.values():
-            if target.available is None:
+        for item in items:
+            if item.available is None:
                 continue
             try:
-                answer = target.available(transcription_id)
+                answer = item.available(transcription_id)
             except Exception:
-                logger.exception("Export target %s failed its availability check for %s", target.id, transcription_id)
+                logger.exception("%s %s failed its availability check for %s", what, item.id, transcription_id)
                 continue
             if isinstance(answer, str):
-                unavailable[target.id] = answer or "Not available"
+                unavailable[item.id] = answer or "Not available"
             elif answer is not None and not answer:
-                unavailable[target.id] = "Not available"
+                unavailable[item.id] = "Not available"
         return unavailable
 
     def describe(self) -> dict:

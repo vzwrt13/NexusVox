@@ -1115,8 +1115,8 @@ class DashboardAPI:
         return [
             {
                 "id": r.id,
-                "text": r.text,
-                "cleaned_text": r.cleaned_text,
+                "text": self._displayed(r, r.text),
+                "cleaned_text": self._displayed(r, r.cleaned_text) if r.cleaned_text else r.cleaned_text,
                 "cleanup_level": r.cleanup_level,
                 "language": r.language,
                 "duration_ms": r.duration_ms,
@@ -1127,9 +1127,16 @@ class DashboardAPI:
                 "confidence": r.confidence,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "exports_unavailable": self._unavailable_exports(r),
+                "actions_unavailable": self.extensions.unavailable_actions(r.id),
             }
             for r in rows
         ]
+
+    def _displayed(self, record, text: str) -> str:
+        """*text* of a stored row as the extensions' `display_text` hook shows it (unchanged without one)."""
+        if not self.extensions.extensions:
+            return text
+        return self.extensions.display_texts(file_transcript_from_record(record), [text])[0]
 
     def _unavailable_exports(self, record) -> dict[str, str]:
         """`{target id: reason}` for the export targets that cannot export this row: the extensions' own checks,

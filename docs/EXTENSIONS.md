@@ -154,6 +154,21 @@ Each action adds a button to the result card of every stored upload in the Uploa
 
 Set exactly one of `endpoint` and `panel`; anything else drops the action.
 
+`UploadAction` also takes an optional `available(transcription_id) -> bool | str | None`, with the same answers
+as `ExportTarget.available`: `True` or `None` keeps the button, any other falsy answer greys it out, and a string
+greys it out with that text as the tooltip. The answers come with the upload list (`actions_unavailable`, an
+`{action id: reason}` object per upload), so a button never fails on click for a reason you already know. Keep
+the check cheap; one that raises leaves the button on.
+
+```python
+UploadAction(
+    "speakers",
+    "Speakers",
+    endpoint="/api/ext/my-tab/speakers/{id}",
+    available=lambda tid: True if self._licensed() else "Needs a licence",
+)
+```
+
 ## Hook 5: change a dictation before it is typed
 
 ```python
@@ -216,4 +231,41 @@ class Shout(Extension):
         if command.strip().lower() in {"shout", "schrei"}:
             return selection.upper()
         return None
+```
+
+## Hook 7: change the text shown and exported for an upload
+
+```python
+def display_text(self, transcript: FileTranscript, text: str) -> str | None: ...
+```
+
+Called for the transcript texts the core shows or writes for a stored upload or meeting: the transcript and its
+cleaned version in the Upload and Meetings lists, the text of the built-in TXT export, and every cue of the
+built-in SRT and VTT exports (cue text includes its `Speaker N:` / `Me:` label). `transcript` is the stored row
+as for Hook 1; *text* is the one text to change. Return the text to show instead, or `None` to leave it.
+
+- **Stored data is untouched.** Only what is displayed or exported changes; `on_file_transcribed` and other
+  extensions' export targets still receive the transcript as stored.
+- **Order and fallback.** Extensions run in entry-point order, each seeing the previous result. An extension
+  that raises, returns something that is not a string, returns an empty string for a non-empty text, or is not
+  done in time is logged and skipped, so the raw text is used. All texts of one list row or one export share
+  one budget of 3 seconds (`HOOK_TIMEOUT_S`). With no extension installed nothing is called.
+- **Cheap.** The Upload list calls it for the transcript and the cleaned text of each of up to 50 rows, and an
+  SRT export for every cue. Keep it a lookup, not a model call.
+- **Not covered.** Extension export targets build their own files from the stored transcript.
+
+Added without an `API_VERSION` change: an extension without the hook loads and behaves as before.
+
+```python
+class SpeakerNames(Extension):
+    name = "speaker-names"
+    api_version = 1
+
+    def display_text(self, transcript, text):
+        names = self._names.get(transcript.id)  # {1: "Alice", 2: "Bob"}
+        if not names:
+            return None
+        for number, name in names.items():
+            text = text.replace(f"Speaker {number}:", f"{name}:")
+        return text
 ```

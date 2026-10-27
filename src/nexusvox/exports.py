@@ -14,7 +14,7 @@ from .extensions import ExportTarget, FileTranscript
 from .meeting_transcribe import SPEAKER_LABELS
 from .transcriber import Word
 
-# `(transcript, texts) -> texts` of the same length: `ExtensionRegistry.display_texts`.
+# `(transcript, texts) -> texts`, always as many as given: `ExtensionRegistry.display_texts`.
 TextTransform = Callable[[FileTranscript, list[str]], list[str]]
 
 MAX_CUE_S = 7.0  # a cue stays on screen for at most this long
@@ -153,14 +153,21 @@ def _require_words(transcript: FileTranscript) -> None:
         raise ValueError(f"No readable word timestamps are stored for this {transcript.kind} (Parakeet provides them)")
 
 
+def _displayed_cue(original: str, shown: str) -> str:
+    """A cue text an extension changed, made safe for a subtitle file: re-wrapped to the line width, and the
+    cue as it was when the answer would break the format (a `-->` or nothing left)."""
+    shown = " ".join(shown.split())
+    if not shown or "-->" in shown:
+        return original
+    return _wrap(shown)
+
+
 def _displayed_cues(transcript: FileTranscript, transform: TextTransform | None) -> list[tuple[float, float, str]]:
     cues = build_cues(transcript)
     if transform is None:
         return cues
     texts = transform(transcript, [text for _, _, text in cues])
-    if len(texts) != len(cues):  # a transform that loses cues is not trusted
-        return cues
-    return [(start, end, text) for (start, end, _), text in zip(cues, texts, strict=True)]
+    return [(start, end, _displayed_cue(text, shown)) for (start, end, text), shown in zip(cues, texts, strict=True)]
 
 
 def to_txt(transcript: FileTranscript, transform: TextTransform | None = None) -> str:

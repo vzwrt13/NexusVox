@@ -1939,12 +1939,13 @@ async function runUploadAction(button, item) {
       if (!handler) throw new Error("its script did not register a handler");
       await handler(item, button);
     }
-    loadFileTranscriptions();
   } catch (err) {
     showUploadError(`${action.label} failed: ${err.message}`);
   } finally {
     runningUploadActions.delete(key);
     button.disabled = false;
+    // Also after a failure: the action may just have become unavailable (an expired licence).
+    loadFileTranscriptions();
   }
 }
 

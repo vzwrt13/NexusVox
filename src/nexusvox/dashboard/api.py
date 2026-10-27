@@ -9,6 +9,7 @@ import re
 import subprocess
 import tempfile
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -37,7 +38,7 @@ from ..diarization import speaker_detection_models
 from ..dictionary import suggest_entries
 from ..edit_watch import WATCHED_KEYS
 from ..exports import NO_TIMING_HINT, SUBTITLE_TARGET_IDS
-from ..extensions import ExtensionRegistry, file_transcript_from_record
+from ..extensions import HOOK_TIMEOUT_S, ExtensionRegistry, file_transcript_from_record
 from ..file_cleanup import clean_transcript
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_CHUNK_MS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..llm import is_reachable as llm_reachable
@@ -1112,36 +1113,43 @@ class DashboardAPI:
         if self._db is None:
             return []
         rows = self._db.get_file_transcriptions(limit, kind)
-        return [
-            {
-                "id": r.id,
-                "text": self._displayed(r, r.text),
-                "cleaned_text": self._displayed(r, r.cleaned_text) if r.cleaned_text else r.cleaned_text,
-                "cleanup_level": r.cleanup_level,
-                "language": r.language,
-                "duration_ms": r.duration_ms,
-                "model": r.model,
-                "original_filename": r.original_filename,
-                "kind": r.kind or "upload",
-                "has_audio": bool(r.audio_path),
-                "confidence": r.confidence,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "exports_unavailable": self._unavailable_exports(r),
-                "actions_unavailable": self.extensions.unavailable_actions(r.id),
-            }
-            for r in rows
-        ]
+        # One budget for the whole list, so a slow extension delays it by one timeout, not one per row.
+        deadline = time.monotonic() + HOOK_TIMEOUT_S
+        out = []
+        for r in rows:
+            text, cleaned_text = self._displayed(r, deadline)
+            out.append(
+                {
+                    "id": r.id,
+                    "text": text,
+                    "cleaned_text": cleaned_text,
+                    "cleanup_level": r.cleanup_level,
+                    "language": r.language,
+                    "duration_ms": r.duration_ms,
+                    "model": r.model,
+                    "original_filename": r.original_filename,
+                    "kind": r.kind or "upload",
+                    "has_audio": bool(r.audio_path),
+                    "confidence": r.confidence,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "exports_unavailable": self._unavailable_exports(r, deadline),
+                    "actions_unavailable": self.extensions.unavailable_actions(r.id, deadline=deadline),
+                }
+            )
+        return out
 
-    def _displayed(self, record, text: str) -> str:
-        """*text* of a stored row as the extensions' `display_text` hook shows it (unchanged without one)."""
-        if not self.extensions.extensions:
-            return text
-        return self.extensions.display_texts(file_transcript_from_record(record), [text])[0]
+    def _displayed(self, record, deadline: float) -> tuple[str, str | None]:
+        """A row's `text` and `cleaned_text` as the extensions' `display_text` hook shows them, in one call."""
+        if not self.extensions.extensions:  # nothing to ask: skip building the hook view (parses the word timings)
+            return record.text, record.cleaned_text
+        texts = [record.text, *([record.cleaned_text] if record.cleaned_text else [])]
+        shown = self.extensions.display_texts(file_transcript_from_record(record), texts, deadline=deadline)
+        return shown[0], shown[1] if len(shown) > 1 else record.cleaned_text
 
-    def _unavailable_exports(self, record) -> dict[str, str]:
+    def _unavailable_exports(self, record, deadline: float | None = None) -> dict[str, str]:
         """`{target id: reason}` for the export targets that cannot export this row: the extensions' own checks,
         plus the built-in subtitle targets when no word timing is stored."""
-        unavailable = self.extensions.unavailable_exports(record.id)
+        unavailable = self.extensions.unavailable_exports(record.id, deadline=deadline)
         if not record.words or record.words.strip() == "[]":
             for target_id in SUBTITLE_TARGET_IDS:
                 if self.extensions.export_target(target_id) is not None:

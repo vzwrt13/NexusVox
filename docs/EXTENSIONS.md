@@ -158,7 +158,7 @@ Set exactly one of `endpoint` and `panel`; anything else drops the action.
 as `ExportTarget.available`: `True` or `None` keeps the button, any other falsy answer greys it out, and a string
 greys it out with that text as the tooltip. The answers come with the upload list (`actions_unavailable`, an
 `{action id: reason}` object per upload), so a button never fails on click for a reason you already know. Keep
-the check cheap; one that raises leaves the button on.
+the check cheap; one that raises, or does not answer within the 3 second budget of a list, leaves the button on.
 
 ```python
 UploadAction(
@@ -246,12 +246,17 @@ as for Hook 1; *text* is the one text to change. Return the text to show instead
 
 - **Stored data is untouched.** Only what is displayed or exported changes; `on_file_transcribed` and other
   extensions' export targets still receive the transcript as stored.
-- **Order and fallback.** Extensions run in entry-point order, each seeing the previous result. An extension
-  that raises, returns something that is not a string, returns an empty string for a non-empty text, or is not
-  done in time is logged and skipped, so the raw text is used. All texts of one list row or one export share
-  one budget of 3 seconds (`HOOK_TIMEOUT_S`). With no extension installed nothing is called.
+- **Order and fallback.** Extensions run in entry-point order, each seeing the previous result. All texts of one
+  list row or one export are handled by an extension in a single call sequence on one helper thread. A text
+  your hook raises on, answers with something that is not a string, or answers empty for a non-empty text keeps
+  its wording. An extension that is not done in time is skipped for all texts of that call (never for some), and
+  until it returns it is not called again, so exports in that window also write the raw text; this is logged.
+  The budget is 3 seconds (`HOOK_TIMEOUT_S`) plus 10 ms per text, shared by the whole Upload list and per
+  export.
 - **Cheap.** The Upload list calls it for the transcript and the cleaned text of each of up to 50 rows, and an
   SRT export for every cue. Keep it a lookup, not a model call.
+- **Subtitles.** A changed cue is re-wrapped to the subtitle line width (42 characters); an answer containing
+  `-->`, or only whitespace, is dropped and the cue keeps its text. Line breaks you add are not kept.
 - **Not covered.** Extension export targets build their own files from the stored transcript.
 
 Added without an `API_VERSION` change: an extension without the hook loads and behaves as before.

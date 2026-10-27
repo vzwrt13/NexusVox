@@ -210,3 +210,137 @@ def test_the_upload_list_marks_unavailable_actions(db, session_factory):
 @pytest.mark.parametrize("registry", [ExtensionRegistry()])
 def test_an_empty_registry_greys_nothing_out(registry):
     assert registry.unavailable_actions(1) == {}
+
+
+# ---- Review fixes: budgets, batching, cue safety ---------------------------
+
+
+def test_each_extension_gets_all_texts_in_one_thread():
+    threads = set()
+
+    class Spy(Extension):
+        name = "spy"
+        api_version = 1
+
+        def display_text(self, transcript, text):
+            import threading
+
+            threads.add(threading.get_ident())
+            return text
+
+    make_registry(Spy()).display_texts(transcript(), [f"t{i}" for i in range(200)])
+
+    assert len(threads) == 1
+
+
+def test_a_hook_that_runs_out_of_time_leaves_every_text_raw(monkeypatch):
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(ext, "DISPLAY_TEXT_S", 0.0)
+
+    class Half(Extension):
+        name = "half"
+        api_version = 1
+
+        def display_text(self, transcript, text):
+            time.sleep(0.03)
+            return text.upper()
+
+    texts = [f"t{i}" for i in range(10)]
+
+    assert make_registry(Half()).display_texts(transcript(), texts) == texts
+
+
+def test_one_failing_text_does_not_spoil_the_others():
+    class Picky(Extension):
+        name = "picky"
+        api_version = 1
+
+        def display_text(self, transcript, text):
+            if text == "bad":
+                raise ValueError("no")
+            return text.upper()
+
+    assert make_registry(Picky()).display_texts(transcript(), ["a", "bad", "c"]) == ["A", "bad", "C"]
+
+
+def test_a_slow_extension_costs_the_list_one_budget_not_one_per_row(db, session_factory, monkeypatch):
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.2)
+    monkeypatch.setattr("nexusvox.dashboard.api.HOOK_TIMEOUT_S", 0.2)
+
+    class Slow(Extension):
+        name = "slow"
+        api_version = 1
+
+        def display_text(self, transcript, text):
+            time.sleep(0.1)
+            return "x"
+
+    for i in range(10):
+        db.save_file_transcription("t", "en", 1, f"{i}.wav", cleaned_text="c")
+    started = time.monotonic()
+    rows = client_for(db, session_factory, make_registry(Slow())).get("/api/file-transcriptions").get_json()
+
+    assert time.monotonic() - started < 1.5
+    assert len(rows) == 10
+
+
+def test_a_row_gets_text_and_cleaned_text_in_one_call(db, session_factory):
+    calls = []
+
+    class Count(Extension):
+        name = "count"
+        api_version = 1
+
+        def display_text(self, transcript, text):
+            calls.append(text)
+            return text
+
+    db.save_file_transcription("raw", "en", 1, "a.wav", cleaned_text="clean")
+    client_for(db, session_factory, make_registry(Count())).get("/api/file-transcriptions")
+
+    assert calls == ["raw", "clean"]
+
+
+def test_changed_cues_are_rewrapped_and_a_cue_that_would_break_the_file_stays(db, session_factory):
+    record = spoken_upload(db)
+
+    class Longname(Extension):
+        name = "longname"
+        api_version = 1
+
+        def display_text(self, transcript, text):
+            if text.startswith("Speaker 1"):
+                return text.replace("Speaker 1", "Dr. Alexandra Montgomery-Smith the Third")
+            return text.replace("Speaker 2", "A\n\nB --> C")
+
+    srt = client_for(db, session_factory, make_registry(Longname())).get(
+        f"/api/file-transcriptions/{record.id}/export/srt"
+    )
+    body = srt.data.decode()
+
+    assert all(len(line) <= 42 for line in body.splitlines())
+    assert "-->" not in body.replace(" --> ", "")  # only the timing lines carry an arrow
+    assert "Speaker 2: hi" in body  # the unsafe answer was dropped
+    assert "\n\n\n" not in body
+
+
+def test_a_hanging_availability_check_does_not_hang_the_list(db, session_factory, monkeypatch):
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.1)
+    monkeypatch.setattr("nexusvox.dashboard.api.HOOK_TIMEOUT_S", 0.1)
+    release = []
+
+    def hang(tid):
+        while not release:
+            time.sleep(0.01)
+        return "never"
+
+    for i in range(5):
+        db.save_file_transcription("t", "en", 1, f"{i}.wav")
+    started = time.monotonic()
+    try:
+        rows = client_for(db, session_factory, action_registry(hang)).get("/api/file-transcriptions").get_json()
+    finally:
+        release.append(True)
+
+    assert time.monotonic() - started < 1.5
+    assert all(row["actions_unavailable"] == {} for row in rows)  # offered: the click reports the problem

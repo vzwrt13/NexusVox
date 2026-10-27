@@ -39,6 +39,8 @@ API_VERSION = 1
 ENTRY_POINT_GROUP = "nexusvox.extensions"
 # How long a dictation or selection hook may take before its result is dropped and the text stays as it was.
 HOOK_TIMEOUT_S = 3.0
+# Extra time per text for `display_text`, which is called for every cue of a subtitle export.
+DISPLAY_TEXT_S = 0.01
 
 _ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]*")
 _SUFFIX_PATTERN = re.compile(r"\.[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -295,6 +297,7 @@ class ExtensionRegistry:
     _targets: dict[str, ExportTarget] = field(default_factory=dict)
     _actions: dict[str, UploadAction] = field(default_factory=dict)
     _stuck: dict[tuple[str, str], threading.Thread] = field(default_factory=dict)
+    _stuck_lock: threading.Lock = field(default_factory=threading.Lock)  # the dashboard calls hooks from many threads
 
     # ---- Loading -----------------------------------------------------------
 
@@ -430,22 +433,56 @@ class ExtensionRegistry:
                 text = result
         return text
 
-    def display_texts(self, transcript: FileTranscript, texts: list[str]) -> list[str]:
-        """*texts* as every extension's `display_text` leaves them, in load order.
+    def display_texts(
+        self, transcript: FileTranscript, texts: list[str], *, deadline: float | None = None
+    ) -> list[str]:
+        """*texts* as every extension's `display_text` leaves them, in load order; always the same number.
 
-        All texts of one call share one `HOOK_TIMEOUT_S` budget. A failing, slow or non-string answer, and an
-        empty answer for a text that was not empty, leave that text as it was; with no extension the texts come
-        back unchanged.
+        Each extension gets all texts in one helper thread and one budget (`deadline`, a `time.monotonic()`
+        value; by default `HOOK_TIMEOUT_S` from now plus `DISPLAY_TEXT_S` per text, so a long subtitle file is not
+        cut off half way). An extension that does not finish in time is skipped for all texts, never for some. A
+        text whose call raises, answers something that is not a string, or answers empty for a non-empty text
+        stays as it was; with no extension the texts come back unchanged.
         """
-        if not self.extensions:
-            return list(texts)
-        deadline = time.monotonic() + HOOK_TIMEOUT_S
+        out = list(texts)
+        if not self.extensions or not out:
+            return out
+        if deadline is None:
+            deadline = time.monotonic() + HOOK_TIMEOUT_S + DISPLAY_TEXT_S * len(out)
+        for extension in self.extensions:
+            current = list(out)
+            answers = self._guarded(
+                (extension.name, "display_text"),
+                f"Extension {extension.name}",
+                "display_text",
+                deadline,
+                self._display_all,
+                extension,
+                transcript,
+                current,
+            )
+            if answers is not None:
+                out = answers
+        return out
+
+    @staticmethod
+    def _display_all(extension: Extension, transcript: FileTranscript, texts: list[str]) -> list[str]:
+        """One extension's `display_text` over *texts*; a text it fails on keeps its wording."""
         out = []
         for text in texts:
-            for extension in self.extensions:
-                result = self._text_hook(extension, "display_text", deadline, transcript, text)
-                if result is not None and (result or not text):
-                    text = result
+            try:
+                result = extension.display_text(transcript, text)
+            except Exception as exc:
+                logger.warning("Extension %s failed in display_text: %s", extension.name, exc)
+                result = None
+            if isinstance(result, str) and (result or not text):
+                text = result
+            elif result is not None and not isinstance(result, str):
+                logger.error(
+                    "Extension %s returned %s from display_text, not a string; ignored",
+                    extension.name,
+                    type(result).__name__,
+                )
             out.append(text)
         return out
 
@@ -460,36 +497,45 @@ class ExtensionRegistry:
         return None
 
     def _text_hook(self, extension: Extension, hook: str, deadline: float, *args: Any) -> str | None:
-        """What one extension's text hook answered, or None: nothing to say, or it failed (logged).
-
-        A hook still running from an earlier timeout is not called again, so a hanging extension costs one
-        thread, not one per dictation.
-        """
-        key = (extension.name, hook)
-        stuck = self._stuck.get(key)
-        if stuck is not None:
-            if stuck.is_alive():
-                logger.warning("Extension %s is still busy in %s; skipped", extension.name, hook)
-                return None
-            self._stuck.pop(key, None)
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            logger.error("Extension %s: no time left for %s; skipped", extension.name, hook)
-            return None
-        worker, outcome = _start_call(getattr(extension, hook), *args)
-        worker.join(remaining)
-        if not outcome:
-            self._stuck[key] = worker
-            logger.error("Extension %s did not answer %s in time; skipped", extension.name, hook)
-            return None
-        ok, value = outcome[0]
-        if not ok:
-            logger.error("Extension %s failed in %s; skipped", extension.name, hook, exc_info=value)
-            return None
+        """What one extension's text hook answered, or None: nothing to say, or it failed (logged)."""
+        value = self._guarded(
+            (extension.name, hook), f"Extension {extension.name}", hook, deadline, getattr(extension, hook), *args
+        )
         if value is not None and not isinstance(value, str):
             logger.error(
                 "Extension %s returned %s from %s, not a string; ignored", extension.name, type(value).__name__, hook
             )
+            return None
+        return value
+
+    def _guarded(self, key: tuple[str, str], who: str, hook: str, deadline: float, fn: Callable, *args: Any) -> Any:
+        """`fn(*args)` on a helper thread, waiting until *deadline*; None when it failed or was too slow (logged).
+
+        A call still running from an earlier timeout (same *key*) is not started again, so a hanging extension
+        costs one thread, not one per dictation.
+        """
+        with self._stuck_lock:
+            stuck = self._stuck.get(key)
+            if stuck is not None and not stuck.is_alive():
+                del self._stuck[key]
+                stuck = None
+        if stuck is not None:
+            logger.warning("%s is still busy in %s; skipped", who, hook)
+            return None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            logger.error("%s: no time left for %s; skipped", who, hook)
+            return None
+        worker, outcome = _start_call(fn, *args)
+        worker.join(remaining)
+        if not outcome:
+            with self._stuck_lock:
+                self._stuck.setdefault(key, worker)
+            logger.error("%s did not answer %s in time; skipped", who, hook)
+            return None
+        ok, value = outcome[0]
+        if not ok:
+            logger.error("%s failed in %s; skipped", who, hook, exc_info=value)
             return None
         return value
 
@@ -510,28 +556,32 @@ class ExtensionRegistry:
     def upload_actions(self) -> list[UploadAction]:
         return list(self._actions.values())
 
-    def unavailable_exports(self, transcription_id: int) -> dict[str, str]:
+    def unavailable_exports(self, transcription_id: int, *, deadline: float | None = None) -> dict[str, str]:
         """The export targets that cannot export this upload, `{target id: reason}`.
 
-        A target without `available` is always offered; one whose check raises is offered too, so the export
-        itself reports what is wrong.
+        A target without `available` is always offered; one whose check raises or is too slow is offered too, so
+        the export itself reports what is wrong. *deadline* (`time.monotonic()`) bounds all checks of a list.
         """
-        return self._unavailable(self._targets.values(), transcription_id, "Export target")
+        return self._unavailable(self._targets.values(), transcription_id, "Export target", deadline)
 
-    def unavailable_actions(self, transcription_id: int) -> dict[str, str]:
+    def unavailable_actions(self, transcription_id: int, *, deadline: float | None = None) -> dict[str, str]:
         """The upload actions that are greyed out for this upload, `{action id: reason}` (same rules)."""
-        return self._unavailable(self._actions.values(), transcription_id, "Upload action")
+        return self._unavailable(self._actions.values(), transcription_id, "Upload action", deadline)
 
-    @staticmethod
-    def _unavailable(items, transcription_id: int, what: str) -> dict[str, str]:
+    def _unavailable(self, items, transcription_id: int, what: str, deadline: float | None) -> dict[str, str]:
+        if deadline is None:
+            deadline = time.monotonic() + HOOK_TIMEOUT_S
         unavailable: dict[str, str] = {}
         for item in items:
             if item.available is None:
                 continue
+            who = f"{what} {item.id}"
             try:
-                answer = item.available(transcription_id)
-            except Exception:
-                logger.exception("%s %s failed its availability check for %s", what, item.id, transcription_id)
+                answer = self._guarded(
+                    (who, "available"), who, "its availability check", deadline, item.available, transcription_id
+                )
+            except Exception:  # _guarded never raises; kept so one odd item cannot hide the others
+                logger.exception("%s failed its availability check", who)
                 continue
             if isinstance(answer, str):
                 unavailable[item.id] = answer or "Not available"

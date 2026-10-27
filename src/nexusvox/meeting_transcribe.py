@@ -46,6 +46,10 @@ SPEAKER_FIRST_SYSTEM = 2
 # A track file written to this recently may still be recorded: its header is not touched.
 STALE_AFTER_S = 30.0
 
+# Speaker detection sends the whole system track to the server in one request and holds it once more as one WAV
+# (about 115 MB per hour on top of the chunks), so a longer meeting skips it.
+MAX_DETECTION_S = 2 * 3600.0
+
 # Mix balance: each track's speech is brought to this RMS (about -20 dBFS). A gain cap keeps a track that
 # is nearly silent (a muted device, room noise only) from being boosted into noise.
 TARGET_RMS = 3000.0
@@ -350,7 +354,7 @@ def drop_echo(me: list[Word], others: list[Word]) -> list[Word]:
     """The microphone words minus the runs it picked up from the speakers (heard on the system track at the same time).
 
     A microphone word has an echo partner when a system-track word within `ECHO_SLACK_S` of it is `ECHO_SIMILARITY`
-    similar; only runs of `ECHO_MIN_RUN` consecutive Me words that all have one are dropped, so a short
+    similar; only runs of `ECHO_MIN_RUN` consecutive microphone words that all have one are dropped, so a short
     "yes" or "okay" said at once, or "the"/"they" in crosstalk, stays.
     """
     others = sorted(others, key=lambda w: w.start)

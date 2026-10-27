@@ -265,14 +265,34 @@ def validate_hotkey(modifiers: list[str], key: str) -> str | None:
     return None
 
 
-DEFAULT_OWN_VOICE_LABEL = "Speaker 1"
 MAX_SPEAKER_LABEL_CHARS = 40
+
+
+def numbered_speaker_label(number: int) -> str:
+    """The label a speaker has when nobody named them: "Speaker 1", "Speaker 2", ..."""
+    return f"Speaker {number}"
+
+
+DEFAULT_OWN_VOICE_LABEL = numbered_speaker_label(1)
 
 
 def normalize_speaker_label(label: object) -> str:
     """A speaker label on one line (whitespace collapsed, at most 40 characters); the default when nothing is left."""
     text = " ".join(str(label or "").split())[:MAX_SPEAKER_LABEL_CHARS].strip()
     return text or DEFAULT_OWN_VOICE_LABEL
+
+
+def own_voice_label_problem(label: str) -> str | None:
+    """Why `label` cannot name the microphone's speaker, None when it can.
+
+    "Speaker 2", "Speaker 3", ... are the labels the other participants get, so using one would write two
+    people under one name.
+    """
+    folded = label.casefold()
+    for number in range(2, 100):
+        if folded == numbered_speaker_label(number).casefold():
+            return f"{label!r} is the label of another speaker; pick a different name"
+    return None
 
 
 @dataclass
@@ -607,6 +627,12 @@ def _polish_key(hotkey_data: dict) -> str:
     return "" if polish and polish == paste else polish
 
 
+def _own_voice_label(raw: object) -> str:
+    """The configured own-voice label; the default when a hand-edited file uses another speaker's label."""
+    label = normalize_speaker_label(raw)
+    return DEFAULT_OWN_VOICE_LABEL if own_voice_label_problem(label) else label
+
+
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     """Load configuration from a TOML file. Creates from example if missing."""
     if not path.exists():
@@ -688,7 +714,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             output_device=str(meeting_data.get("output_device", "")),
             consent_hint=bool(meeting_data.get("consent_hint", True)),
             leave_dictation_out=bool(meeting_data.get("leave_dictation_out", True)),
-            own_voice_label=normalize_speaker_label(meeting_data.get("own_voice_label", "")),
+            own_voice_label=_own_voice_label(meeting_data.get("own_voice_label", "")),
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),

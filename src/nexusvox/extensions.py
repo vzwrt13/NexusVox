@@ -64,11 +64,20 @@ class FileTranscript:
     # "upload" for a file, "meeting" for a two-track recording (speaker 1 is the microphone, 2 and up the system
     # audio). Added without an API_VERSION bump: a hook that ignores it keeps working.
     kind: str = "upload"
+    # Names that replace "Speaker N" in `text`, by speaker number (a meeting names its own voice). Also additive.
+    speaker_names: dict[int, str] = field(default_factory=dict)
 
     @property
     def best_text(self) -> str:
         """The cleaned text when there is one, else the transcript as transcribed."""
         return self.cleaned_text or self.text
+
+
+def _speaker_names_from_json(raw: str | None) -> dict[int, str]:
+    try:
+        return {int(number): str(name) for number, name in json.loads(raw or "{}").items()}
+    except (ValueError, TypeError, AttributeError):
+        return {}
 
 
 def file_transcript_from_record(record: FileTranscription) -> FileTranscript:
@@ -93,6 +102,7 @@ def file_transcript_from_record(record: FileTranscription) -> FileTranscript:
         cleanup_level=record.cleanup_level,
         words=tuple(words),
         kind=record.kind or "upload",
+        speaker_names=_speaker_names_from_json(record.speaker_names),
     )
 
 

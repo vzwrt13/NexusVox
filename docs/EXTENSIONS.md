@@ -58,7 +58,7 @@ Called for every upload in the dashboard's Upload tab, and for every transcribed
 | `best_text` | `cleaned_text` if there is one, else `text` |
 | `language`, `duration_ms`, `model`, `original_filename`, `created_at` | As stored |
 | `words` | Tuple of `Word(word, start, end, speaker)` (seconds); empty when the engine reported no timing |
-| `kind` | `"upload"` for a file, `"meeting"` for a two-track meeting recording: `text` then has numbered `Speaker N:` paragraphs, like an upload with speaker detection (speaker 1 is the microphone and may carry the name set under `[meeting].own_voice_label` instead of `Speaker 1`; the system audio is speaker 2 and up), and `words` carry `speaker` 1, 2, ...; a hook that renames speakers reads each speaker's label from the `text` paragraphs. Added later, without an `API_VERSION` change: a hook that ignores it keeps working |
+| `kind` | `"upload"` for a file, `"meeting"` for a two-track meeting recording: `text` then has numbered `Speaker N:` paragraphs, like an upload with speaker detection (speaker 1 is the microphone and may carry the name set under `[meeting].own_voice_label` instead of `Speaker 1`; the system audio is speaker 2 and up), and `words` carry `speaker` 1, 2, ...; `speaker_names` maps a speaker number to the name used in `text` instead of `Speaker N` (a meeting stores `{1: <own voice name>}`; empty for an upload). Added later, without an `API_VERSION` change: a hook that ignores it keeps working |
 
 The hook runs on the upload's worker thread, after the save: a slow hook delays the end of the job, a
 failing one cannot lose the transcript. Return a JSON-serialisable `dict` to add it to the job result under

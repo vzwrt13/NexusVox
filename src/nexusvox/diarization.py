@@ -7,7 +7,7 @@ whose turn holds its midpoint, and consecutive words of one speaker form a parag
 
 from __future__ import annotations
 
-from .config import MODEL_REGISTRY
+from .config import MODEL_REGISTRY, numbered_speaker_label
 from .transcriber import SpeakerTurn, Word
 
 # Diarization runs once over the whole file: a base for loading (or first downloading) the model,
@@ -75,24 +75,5 @@ def format_transcript(words: list[Word], names: dict[int, str] | None = None) ->
     """
     names = names or {}
     return "\n\n".join(
-        f"{names.get(speaker, f'Speaker {speaker}')}: {text}" for speaker, text in speaker_paragraphs(words)
+        f"{names.get(speaker, numbered_speaker_label(speaker))}: {text}" for speaker, text in speaker_paragraphs(words)
     )
-
-
-def speaker_names_from_text(text: str, words: list[Word]) -> dict[int, str]:
-    """The label each speaker has in a transcript written by `format_transcript`, read back from its text.
-
-    The text holds one "Label: ..." paragraph per run of one speaker (`speaker_paragraphs`), so the two line
-    up paragraph by paragraph. Empty when they do not (an edited text): callers then fall back to "Speaker N".
-    """
-    paragraphs = speaker_paragraphs(words)
-    chunks = text.split("\n\n")
-    if len(chunks) != len(paragraphs):
-        return {}
-    names: dict[int, str] = {}
-    for chunk, (speaker, body) in zip(chunks, paragraphs, strict=True):
-        suffix = f": {body}"
-        if not chunk.endswith(suffix) or len(chunk) == len(suffix):
-            return {}
-        names.setdefault(speaker, chunk[: -len(suffix)])
-    return names

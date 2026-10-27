@@ -29,6 +29,8 @@ from ..config import (
     meeting_hotkey_clash,
     normalize_hotkey_key,
     normalize_speaker_label,
+    numbered_speaker_label,
+    own_voice_label_problem,
     resolve_device,
     save_config,
     validate_hotkey,
@@ -54,8 +56,10 @@ from ..llm import warm_up as llm_warm_up
 from ..meeting_recorder import META_FILENAME, list_devices
 from ..meeting_session import MeetingSession
 from ..meeting_transcribe import (
+    MAX_DETECTION_S,
     MIX_FILENAME,
     SPEAKER_FIRST_SYSTEM,
+    SPEAKER_OWN,
     TRACK_NAMES,
     convert_track,
     format_meeting,
@@ -78,14 +82,6 @@ logger = logging.getLogger(__name__)
 
 # `[hotkey]` fields that hold a marker key, and how an error message names each.
 _MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
-
-
-_SPEAKER_LABEL = re.compile(r"^Speaker \d+: ", re.MULTILINE)
-
-
-def _strip_speaker_labels(text: str) -> str:
-    """Speaker detection's "Speaker N: ..." paragraphs as one run of plain text."""
-    return " ".join(_SPEAKER_LABEL.sub("", text).split())
 
 
 def _remove_folder(folder: Path) -> None:
@@ -923,7 +919,11 @@ class DashboardAPI:
 
     def set_meeting_own_voice_label(self, label: str) -> dict:
         """The name of the microphone's speaker in meeting transcripts; applied when a meeting is transcribed."""
-        self._config.meeting.own_voice_label = normalize_speaker_label(label)
+        label = normalize_speaker_label(label)
+        problem = own_voice_label_problem(label)
+        if problem:
+            return {"error": problem, **self.get_settings()}
+        self._config.meeting.own_voice_label = label
         save_config(self._config)
         return self.get_settings()
 
@@ -1031,25 +1031,40 @@ class DashboardAPI:
                     return {"ok": False, "error": f"Audio conversion failed: {exc}"}
                 tracks_16k.append(Path(tmp) / f"{name}.wav")
 
-                def track_progress(stage, current=0, total=0, base=done_chunks):
+                own_chunks = len(chunks)
+
+                def track_progress(stage, current=0, total=0, base=done_chunks, own_chunks=own_chunks):
                     if progress:
-                        progress(stage, base + current, total_chunks)
+                        # Speaker detection starts once the track's chunks are done: the bar stays where it was.
+                        progress(stage, base + (own_chunks if stage == "diarizing" else current), total_chunks)
+
+                # The system track holds everyone else, so it runs through speaker detection like an upload.
+                # The whole track goes to the server in one request and is held a second time as one WAV, so a
+                # very long meeting skips it (everyone on the system audio is then one speaker).
+                detect_speakers = name == "system" and track.frames / track.sample_rate <= MAX_DETECTION_S
+                if name == "system" and not detect_speakers:
+                    notes.append(
+                        f"{label}: The recording is too long for speaker detection; everyone on it is shown as "
+                        f"{numbered_speaker_label(SPEAKER_FIRST_SYSTEM)}."
+                    )
 
                 try:
-                    # The system track holds everyone else, so it runs through speaker detection like an upload.
                     result = self._transcribe_wav_chunks(
-                        chunks, word_timestamps=True, diarize=name == "system", on_progress=track_progress
+                        chunks, word_timestamps=True, diarize=detect_speakers, on_progress=track_progress
                     )
                 except Exception as exc:
                     logger.error("Transcription failed for meeting %s: %s", folder, exc)
                     return {"ok": False, "error": f"Transcription failed: {exc}"}
                 done_chunks += len(chunks)
                 del chunks  # one track's chunks at a time
-                alone = f"everyone on it is shown as Speaker {SPEAKER_FIRST_SYSTEM}."
+                alone = f"everyone on it is shown as {numbered_speaker_label(SPEAKER_FIRST_SYSTEM)}."
                 notes.extend(f"{label}: {n.replace(NO_SPEAKER_LABELS, alone)}" for n in result.notes)
                 words[name] = list(result.words)
-                # Detection labels the text "Speaker N: ..."; the meeting writes its own labels from the words.
-                plain[name] = _strip_speaker_labels(result.text) if name == "system" else result.text
+                detected = any(w.speaker is not None for w in result.words)
+                if detect_speakers and not detected and not any(alone in n for n in notes):
+                    notes.append(f"{label}: Speaker detection gave no speakers; {alone}")
+                # Detection labels `text` "Speaker N: ..."; the meeting writes its own labels from the words.
+                plain[name] = result.plain_text or result.text
                 if result.confidence is not None:
                     confidences.append(result.confidence)
                 # The server skips a word whose timing it cannot read; the labelled text is built from timed words.
@@ -1062,10 +1077,15 @@ class DashboardAPI:
                     f"Word timing is missing or incomplete for {' and '.join(incomplete)}, so the meeting is "
                     "not interleaved by time: each track's text follows the other."
                 )
+                if any(w.speaker is not None for w in words.get("system", [])):
+                    notes.append(
+                        "The detected speakers could not be used without the word timing; everyone on the system "
+                        f"audio is shown as {numbered_speaker_label(SPEAKER_FIRST_SYSTEM)}."
+                    )
                 own_label = self._config.meeting.own_voice_label
                 text = "\n\n".join(
                     f"{label}: {plain[n]}"
-                    for n, label in (("mic", own_label), ("system", f"Speaker {SPEAKER_FIRST_SYSTEM}"))
+                    for n, label in (("mic", own_label), ("system", numbered_speaker_label(SPEAKER_FIRST_SYSTEM)))
                     if plain.get(n)
                 )
                 merged = []
@@ -1098,6 +1118,7 @@ class DashboardAPI:
             duration_ms=round(seconds * 1000),
             confidence=sum(confidences) / len(confidences) if confidences else None,
             words=merged,
+            speaker_names={SPEAKER_OWN: self._config.meeting.own_voice_label},
             kind="meeting",
             audio_path=self._stored_audio_path(mix_path) if mix_path else None,
         )

@@ -139,6 +139,7 @@ async def transcribe_file(
             offset_s += len(pcm_data) / 2 / 16_000  # PCM16 mono at 16 kHz
 
         text = " ".join(t for t in texts if t).strip()
+        plain_text = text
         if diarize and not wants_speakers:
             notes.append(_unavailable_note(entry, transcriber))
         elif speakers is not None and text:
@@ -162,6 +163,7 @@ async def transcribe_file(
         logger.warning(note)
     combined = TranscriptionResult()
     combined.finalize(text=text)
+    combined.plain_text = plain_text
     combined.words = words
     combined.notes = notes
     return combined

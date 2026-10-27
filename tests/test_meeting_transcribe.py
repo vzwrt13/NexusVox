@@ -671,6 +671,7 @@ def _diarized_system(chunks, **kwargs):
         assert kwargs["diarize"] is True
         result.words = [Word("hello", 1.0, 1.3, 1), Word("hi", 2.0, 2.3, 2), Word("hey", 3.0, 3.3, 3)]
         result.finalize(text="Speaker 1: hello\n\nSpeaker 2: hi\n\nSpeaker 3: hey")
+        result.plain_text = "hello hi hey"
     return result
 
 
@@ -731,3 +732,124 @@ def test_own_voice_label_setting_is_saved_and_cleaned(meeting_api):
     assert api.get_settings()["meeting_own_voice_label"] == "Speaker 1"
     assert api.set_meeting_own_voice_label("  Alex\n Miller ")["meeting_own_voice_label"] == "Alex Miller"
     assert api.set_meeting_own_voice_label("   ")["meeting_own_voice_label"] == "Speaker 1"
+
+
+def test_the_own_voice_name_is_stored_with_the_row_and_survives_in_the_hook_view(meeting_api, db, tmp_path):
+    api, hook = meeting_api
+    api._config.meeting.own_voice_label = "Alex"
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert json.loads(db.get_file_transcription(result["id"]).speaker_names) == {"1": "Alex"}
+    assert hook.seen[0].speaker_names == {1: "Alex"}
+
+
+@pytest.mark.parametrize("label", ["Speaker 2", "speaker 3", "SPEAKER   4"])
+def test_a_label_that_another_speaker_gets_is_refused(meeting_api, label):
+    api, _ = meeting_api
+    api._config.meeting.own_voice_label = "Alex"
+
+    resp = api.set_meeting_own_voice_label(label)
+
+    assert "another speaker" in resp["error"]
+    assert api._config.meeting.own_voice_label == "Alex"
+    assert api.set_meeting_own_voice_label("Speaker 1")["meeting_own_voice_label"] == "Speaker 1"
+
+
+def test_a_hand_edited_clashing_label_falls_back_to_the_default(tmp_path):
+    from nexusvox.config import load_config
+
+    path = tmp_path / "config.toml"
+    path.write_text('[meeting]\nown_voice_label = "Speaker 2"\n', encoding="utf-8")
+
+    assert load_config(path).meeting.own_voice_label == "Speaker 1"
+
+
+def test_progress_does_not_fall_back_while_speakers_are_detected(meeting_api, tmp_path):
+    api, _ = meeting_api
+    fake = api._transcribe_wav_chunks
+
+    def with_diarizing(chunks, **kwargs):
+        kwargs["on_progress"]("transcribing", len(chunks), len(chunks))
+        if kwargs["diarize"]:
+            kwargs["on_progress"]("diarizing")
+        return fake(chunks, **kwargs)
+
+    api._transcribe_wav_chunks = with_diarizing
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    seen = []
+
+    class Job:
+        def update(self, stage, current=0, total=0):
+            seen.append((stage, current))
+
+    api.transcribe_meeting(folder, job=Job())
+
+    currents = [c for stage, c in seen if stage in ("transcribing", "diarizing")]
+    assert currents == sorted(currents)
+
+
+def test_a_very_long_system_track_skips_speaker_detection(meeting_api, tmp_path, monkeypatch):
+    api, _ = meeting_api
+    fake = api._transcribe_wav_chunks
+    asked = []
+
+    def spy(chunks, **kwargs):
+        asked.append(kwargs["diarize"])
+        return fake(chunks, **kwargs)
+
+    api._transcribe_wav_chunks = spy
+    monkeypatch.setattr("nexusvox.dashboard.api.MAX_DETECTION_S", 1.0)
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert asked == [False, False]
+    assert any("too long for speaker detection" in n for n in result["notes"])
+
+
+def test_detected_speakers_that_cannot_be_used_are_noted(meeting_api, tmp_path):
+    api, _ = meeting_api
+
+    def partly_timed(chunks, **kwargs):
+        result = TranscriptionResult()
+        if kwargs["diarize"]:
+            result.words = [Word("hello", 1.0, 1.3, 1), Word("hi", 2.0, 2.3, 2)]
+            result.finalize(text="Speaker 1: hello\n\nSpeaker 2: hi")
+            result.plain_text = "hello hi"
+        else:
+            result.words = [w("sounds", 3.0)]  # "good" has no timing
+            result.finalize(text="sounds good")
+        return result
+
+    api._transcribe_wav_chunks = partly_timed
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["text"] == "Speaker 1: sounds good\n\nSpeaker 2: hello hi"
+    assert any("detected speakers could not be used" in n for n in result["notes"])
+
+
+def test_a_skipped_speaker_detection_says_that_everyone_is_speaker_2(meeting_api, tmp_path):
+    api, _ = meeting_api
+    fake = api._transcribe_wav_chunks
+
+    def skipped(chunks, **kwargs):
+        result = fake(chunks, **kwargs)
+        if kwargs["diarize"]:
+            result.notes = ["Speaker detection skipped: some words came back without timing."]
+        return result
+
+    api._transcribe_wav_chunks = skipped
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert any("everyone on it is shown as Speaker 2" in n for n in result["notes"])

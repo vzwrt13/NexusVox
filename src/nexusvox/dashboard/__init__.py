@@ -183,7 +183,8 @@ def _create_app(api: DashboardAPI) -> Flask:
     @app.route("/api/settings/meeting-own-voice-label", methods=["POST"])
     def set_meeting_own_voice_label():
         data = request.get_json(force=True)
-        return jsonify(api.set_meeting_own_voice_label(data.get("label", "")))
+        resp = api.set_meeting_own_voice_label(data.get("label", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
 
     @app.route("/api/settings/meeting-leave-dictation-out", methods=["POST"])
     def set_meeting_leave_dictation_out():

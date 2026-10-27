@@ -91,6 +91,8 @@ class TranscriptionResult:
 
     def __init__(self) -> None:
         self.text = ""
+        # `text` without speaker labels, when speaker detection turned it into "Speaker N: ..." paragraphs.
+        self.plain_text = ""
         self.done = False
         self.usage: dict | None = None
         self.confidence: float | None = None

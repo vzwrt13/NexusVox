@@ -37,7 +37,10 @@ the same speaker detection as uploads (Parakeet in its Docker container, up to f
 **Speaker 2**, **Speaker 3**, ... If speaker detection is unavailable (CPU mode, no GPU container, another
 model) or fails, everyone on the system audio is **Speaker 2** and the transcript still completes; a note says
 why. The labels are stored the same way as for uploads, so the Meetings and Upload tabs, TXT, SRT and VTT
-exports and extensions all show the same names. The setting is read when a meeting is transcribed: *Transcribe*
+exports and extensions all show the same names (the name of your own voice is stored with the meeting, so it
+cannot get lost in an edit of the text). A name such as `Speaker 2` is refused, since another participant gets
+that label. Speaker detection sends the whole system audio in one request, so a meeting longer than two hours
+skips it and shows everyone on the system audio as Speaker 2, with a note. The setting is read when a meeting is transcribed: *Transcribe*
 a meeting recorded earlier to get the new labels; nothing is changed automatically.
 
 ## Leave dictation out of the transcript

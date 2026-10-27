@@ -229,6 +229,7 @@ const polishKeySelect = document.getElementById("polish-key-select");
 const polishTerminalsToggle = document.getElementById("polish-terminals-toggle");
 const llmModelInput = document.getElementById("llm-model-input");
 const meetingOwnLabelInput = document.getElementById("meeting-own-label-input");
+let meetingOwnLabelSaved = "";
 const cleanupLevelSelect = document.getElementById("cleanup-level-select");
 const llmStatus = document.getElementById("llm-status");
 
@@ -464,8 +465,15 @@ llmModelInput.addEventListener("change", async () => {
   loadLlmStatus();
 });
 meetingOwnLabelInput.addEventListener("change", async () => {
-  const resp = await postSetting("/api/settings/meeting-own-voice-label", { label: meetingOwnLabelInput.value });
-  meetingOwnLabelInput.value = (await resp.json()).meeting_own_voice_label;
+  try {
+    const resp = await postSetting("/api/settings/meeting-own-voice-label", { label: meetingOwnLabelInput.value });
+    const s = await resp.json();
+    if (s.error) alert(s.error);
+    meetingOwnLabelInput.value = meetingOwnLabelSaved = s.meeting_own_voice_label;
+  } catch (err) {
+    alert("The name could not be saved.");
+    meetingOwnLabelInput.value = meetingOwnLabelSaved;
+  }
 });
 cleanupLevelSelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/cleanup-level", { level: cleanupLevelSelect.value });
@@ -504,7 +512,7 @@ async function loadSettings() {
   }
   polishKeySelect.value = s.polish_key;
   llmModelInput.value = s.llm_model;
-  meetingOwnLabelInput.value = s.meeting_own_voice_label;
+  meetingOwnLabelInput.value = meetingOwnLabelSaved = s.meeting_own_voice_label;
   cleanupLevelSelect.value = s.cleanup_level;
   loadLlmStatus();
   micGuardToggle.checked = s.mic_guard_enabled;

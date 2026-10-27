@@ -7,9 +7,15 @@ per-word timing (`FileTranscript.words`); an upload without it cannot be exporte
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import partial
+
 from .extensions import ExportTarget, FileTranscript
 from .meeting_transcribe import SPEAKER_LABELS
 from .transcriber import Word
+
+# `(transcript, texts) -> texts`, always as many as given: `ExtensionRegistry.display_texts`.
+TextTransform = Callable[[FileTranscript, list[str]], list[str]]
 
 MAX_CUE_S = 7.0  # a cue stays on screen for at most this long
 MAX_LINE_CHARS = 42  # the usual subtitle line width
@@ -147,32 +153,53 @@ def _require_words(transcript: FileTranscript) -> None:
         raise ValueError(f"No readable word timestamps are stored for this {transcript.kind} (Parakeet provides them)")
 
 
-def to_txt(transcript: FileTranscript) -> str:
+def _displayed_cue(original: str, shown: str) -> str:
+    """A cue text an extension changed, made safe for a subtitle file: re-wrapped to the line width, and the
+    cue as it was when the answer would break the format (a `-->` or nothing left)."""
+    shown = " ".join(shown.split())
+    if not shown or "-->" in shown:
+        return original
+    return _wrap(shown)
+
+
+def _displayed_cues(transcript: FileTranscript, transform: TextTransform | None) -> list[tuple[float, float, str]]:
+    cues = build_cues(transcript)
+    if transform is None:
+        return cues
+    texts = transform(transcript, [text for _, _, text in cues])
+    return [(start, end, _displayed_cue(text, shown)) for (start, end, text), shown in zip(cues, texts, strict=True)]
+
+
+def to_txt(transcript: FileTranscript, transform: TextTransform | None = None) -> str:
     """The transcript as shown: cleaned when cleanup ran, with `Speaker N:` paragraphs when speakers were detected."""
-    return transcript.best_text.rstrip() + "\n"
+    text = transcript.best_text
+    if transform is not None:
+        text = transform(transcript, [text])[0]
+    return text.rstrip() + "\n"
 
 
-def to_srt(transcript: FileTranscript) -> str:
+def to_srt(transcript: FileTranscript, transform: TextTransform | None = None) -> str:
     _require_words(transcript)
     blocks = [
         f"{n}\n{_timestamp(start, ',')} --> {_timestamp(end, ',')}\n{text}"
-        for n, (start, end, text) in enumerate(build_cues(transcript), 1)
+        for n, (start, end, text) in enumerate(_displayed_cues(transcript, transform), 1)
     ]
     return "\n\n".join(blocks) + "\n"
 
 
-def to_vtt(transcript: FileTranscript) -> str:
+def to_vtt(transcript: FileTranscript, transform: TextTransform | None = None) -> str:
     _require_words(transcript)
     blocks = [
         f"{_timestamp(start, '.')} --> {_timestamp(end, '.')}\n{text.replace('&', '&amp;').replace('<', '&lt;')}"
-        for start, end, text in build_cues(transcript)
+        for start, end, text in _displayed_cues(transcript, transform)
     ]
     return "WEBVTT\n\n" + "\n\n".join(blocks) + "\n"
 
 
-def builtin_export_targets() -> list[ExportTarget]:
+def builtin_export_targets(transform: TextTransform | None = None) -> list[ExportTarget]:
+    """TXT, SRT and VTT; *transform* (the registry's `display_texts`) changes the texts they write."""
     return [
-        ExportTarget("txt", "TXT", ".txt", "text/plain; charset=utf-8", to_txt),
-        ExportTarget("srt", "SRT", ".srt", "application/x-subrip; charset=utf-8", to_srt),
-        ExportTarget("vtt", "VTT", ".vtt", "text/vtt; charset=utf-8", to_vtt),
+        ExportTarget("txt", "TXT", ".txt", "text/plain; charset=utf-8", partial(to_txt, transform=transform)),
+        ExportTarget("srt", "SRT", ".srt", "application/x-subrip; charset=utf-8", partial(to_srt, transform=transform)),
+        ExportTarget("vtt", "VTT", ".vtt", "text/vtt; charset=utf-8", partial(to_vtt, transform=transform)),
     ]

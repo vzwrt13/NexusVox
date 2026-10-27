@@ -280,6 +280,9 @@ class MeetingConfig:
     output_device: str = ""
     # Show "Inform all participants before you record" before each recording; off after "don't show again".
     consent_hint: bool = True
+    # Drop the Me words spoken inside a dictation take from the meeting transcript (the microphone records
+    # dictation too). Applied when the meeting is transcribed; the audio files stay as recorded.
+    leave_dictation_out: bool = True
 
 
 def meeting_hotkey_clash(modifiers: list[str], key: str, dictation: HotkeyConfig) -> str | None:
@@ -672,6 +675,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             mic_device=str(meeting_data.get("mic_device", "")),
             output_device=str(meeting_data.get("output_device", "")),
             consent_hint=bool(meeting_data.get("consent_hint", True)),
+            leave_dictation_out=bool(meeting_data.get("leave_dictation_out", True)),
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
@@ -774,6 +778,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"mic_device = {json.dumps(config.meeting.mic_device)}",
             f"output_device = {json.dumps(config.meeting.output_device)}",
             f"consent_hint = {'true' if config.meeting.consent_hint else 'false'}",
+            f"leave_dictation_out = {'true' if config.meeting.leave_dictation_out else 'false'}",
             "",
             "[audio]",
             f"sample_rate = {config.audio.sample_rate}",

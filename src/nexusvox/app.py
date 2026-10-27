@@ -405,6 +405,14 @@ class NexusVoxApp:
             wf.writeframes(self._normalize_pcm(pcm_buffer))
         return f"{self._config.database.audio_dir}/{filename}"
 
+    @staticmethod
+    def _note_dictation(start: float, end: float) -> None:
+        """Hand the take's time range to a running meeting; the microphone recorded it, and what happens to it
+        is decided when the meeting is transcribed."""
+        api = running_dashboard_api()
+        if api is not None:
+            api.note_dictation(start, end)
+
     async def _transcription_cycle(self, remote: bool = False) -> None:
         """Run one full transcription cycle: connect, record, transcribe, inject.
 
@@ -461,6 +469,8 @@ class NexusVoxApp:
 
             stop_time = time.monotonic()
             duration_ms = int((stop_time - start_time) * 1000)
+            if not remote:
+                self._note_dictation(start_time, stop_time)
             logger.info("Recording stopped (duration=%dms)", duration_ms)
 
             if remote and self._remote_cancelled:

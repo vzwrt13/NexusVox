@@ -2051,6 +2051,7 @@ const meetingProgress = document.getElementById("meeting-progress");
 const meetingProgressBar = document.getElementById("meeting-progress-bar");
 const meetingConsent = document.getElementById("meeting-consent");
 const meetingConsentToggle = document.getElementById("meeting-consent-toggle");
+const meetingDictationToggle = document.getElementById("meeting-dictation-toggle");
 const meetingHotkeyMods = Array.from(document.querySelectorAll("#meeting-hotkey-mods input"));
 const meetingHotkeyKey = document.getElementById("meeting-hotkey-key");
 const meetingHotkeyStatus = document.getElementById("meeting-hotkey-status");
@@ -2239,6 +2240,11 @@ meetingConsentToggle.addEventListener("change", async () => {
   meetingConsentHint = s.meeting_consent_hint;
 });
 
+meetingDictationToggle.addEventListener("change", async () => {
+  const s = await postSetting("/api/settings/meeting-leave-dictation-out", { enabled: meetingDictationToggle.checked }).then((r) => r.json());
+  meetingDictationToggle.checked = s.meeting_leave_dictation_out;
+});
+
 function renderMeetingHotkey(s) {
   const keycaps = document.getElementById("meeting-hotkey-keycaps");
   keycaps.replaceChildren();
@@ -2290,6 +2296,7 @@ async function openMeetingsTab() {
   ]);
   meetingConsentHint = settings.meeting_consent_hint;
   meetingConsentToggle.checked = meetingConsentHint;
+  meetingDictationToggle.checked = settings.meeting_leave_dictation_out;
   renderMeetingHotkey(settings);
   fillDeviceSelect(meetingMicSelect, devices.inputs, devices.mic_device);
   fillDeviceSelect(meetingOutputSelect, devices.outputs, devices.output_device);

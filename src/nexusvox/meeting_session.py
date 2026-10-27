@@ -63,6 +63,13 @@ class MeetingSession:
             recorder, self._recorder, self._started = self._recorder, None, None
             return recorder.stop()
 
+    def add_dictation(self, start: float, end: float) -> None:
+        """Hand a dictation take (`time.monotonic()` values) to the running meeting; nothing when none runs."""
+        with self._lock:
+            recorder = self._recorder
+        if recorder is not None:
+            recorder.add_dictation(start, end)
+
     def status(self) -> dict:
         """`{recording, elapsed_s, folder}` for the dashboard's timer."""
         with self._lock:

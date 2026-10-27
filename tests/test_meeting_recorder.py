@@ -261,3 +261,40 @@ def test_format_from_describe_is_what_gets_written(tmp_path):
     rec.start()
     rec.stop()
     assert calls == [1]  # describe() once per start; start() does not resolve the device again
+
+
+def test_dictation_takes_are_stored_as_seconds_from_the_meeting_start(tmp_path):
+    rec, mic, system, clock = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    rec.add_dictation(clock() + 1, clock() + 2)  # no meeting yet: ignored
+    folder = rec.start()
+    clock.advance(5.0)
+    rec.add_dictation(clock() - 1.25, clock() + 0.5)
+    mid = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))
+    assert mid["ended_at"] is None and mid["dictations"] == [{"start_s": 3.75, "end_s": 5.5}]
+    clock.advance(10.0)
+    rec.stop()
+    rec.add_dictation(clock(), clock() + 1)  # after the stop: ignored
+
+    meta = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))
+    assert meta["ended_at"] is not None
+    assert meta["dictations"] == [{"start_s": 3.75, "end_s": 5.5}]
+    assert "dictations" in meta and meta["tracks"]["mic"]["frames"] >= 0
+
+
+def test_a_dictation_that_began_before_the_meeting_is_cut_at_its_start(tmp_path):
+    rec, *_, clock = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    start = clock() - 4
+    folder = rec.start()
+    clock.advance(2.0)
+    rec.add_dictation(start, clock())
+    rec.stop()
+
+    meta = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))
+    assert meta["dictations"] == [{"start_s": 0.0, "end_s": 2.0}]
+
+
+def test_a_meeting_without_dictation_stores_an_empty_list(tmp_path):
+    rec, *_ = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    folder = rec.start()
+    rec.stop()
+    assert json.loads((folder / "meeting.json").read_text(encoding="utf-8"))["dictations"] == []

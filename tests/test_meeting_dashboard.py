@@ -66,7 +66,12 @@ def test_meeting_section_round_trips_and_an_unusable_file_falls_back(tmp_path):
     path = tmp_path / "config.toml"
     cfg = Config()
     cfg.meeting = MeetingConfig(
-        modifiers=["ctrl", "win"], key="F8", mic_device='Mic "A"', output_device="Speakers", consent_hint=False
+        modifiers=["ctrl", "win"],
+        key="F8",
+        mic_device='Mic "A"',
+        output_device="Speakers",
+        consent_hint=False,
+        leave_dictation_out=False,
     )
     save_config(cfg, path)
     loaded = load_config(path).meeting
@@ -297,6 +302,9 @@ def test_meeting_settings_endpoints(env):
     settings = client.get("/api/settings").get_json()
     assert settings["meeting_modifiers"] == ["ctrl", "alt"] and settings["meeting_key"] == "M"
     assert settings["meeting_consent_hint"] is True
+    assert settings["meeting_leave_dictation_out"] is True
+    resp = client.post("/api/settings/meeting-leave-dictation-out", json={"enabled": False})
+    assert resp.get_json()["meeting_leave_dictation_out"] is False
 
     resp = client.post("/api/settings/meeting-hotkey", json={"modifiers": ["shift", "ctrl"], "key": "f8"})
     assert resp.status_code == 200

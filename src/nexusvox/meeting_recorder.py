@@ -394,6 +394,9 @@ class MeetingRecorder:
         self._now = now
         self._tracks: dict[str, _Track] = {}
         self._started_at: datetime | None = None
+        self._t0 = 0.0
+        self._dictations: list[dict[str, float]] = []
+        self._dictation_lock = threading.Lock()
         self.folder: Path | None = None
 
     @property
@@ -429,6 +432,8 @@ class MeetingRecorder:
             self._started_at = self._now()
             folder = self._new_folder(self._started_at)
             t0 = self._clock()
+            self._t0 = t0
+            self._dictations = []
             for name, source in self._sources.items():
                 writer = TrackWriter(folder / f"{name}.wav", formats[name], t0)
                 tracks[name] = _Track(name, source, writer, self._clock)
@@ -456,6 +461,23 @@ class MeetingRecorder:
         if folder is not None:
             shutil.rmtree(folder, ignore_errors=True)
 
+    def add_dictation(self, start: float, end: float) -> None:
+        """Store a dictation take (recorder clock values) as seconds from the meeting start in `meeting.json`.
+
+        Ignored when no meeting runs; a take that began before the meeting is cut at its start. Stored whatever
+        `[meeting].leave_dictation_out` says: the setting is applied when the meeting is transcribed.
+        """
+        if not self.recording:
+            return
+        with self._dictation_lock:
+            self._dictations.append(
+                {"start_s": round(max(0.0, start - self._t0), 3), "end_s": round(end - self._t0, 3)}
+            )
+            try:
+                self._write_meta(ended_at=None)
+            except OSError:
+                logger.exception("Storing the dictation range failed")
+
     def flush(self) -> None:
         """Wait until every block received so far is on disk."""
         for track in self._tracks.values():
@@ -472,8 +494,9 @@ class MeetingRecorder:
             for track in tracks.values():
                 track.end(end)
         finally:
-            self._tracks = {}
-            self._write_meta(ended_at=self._now(), tracks=tracks)
+            with self._dictation_lock:
+                self._tracks = {}
+                self._write_meta(ended_at=self._now(), tracks=tracks)
         logger.info("Meeting recording stopped: %s", self.folder)
         assert self.folder is not None
         return self.folder
@@ -502,6 +525,7 @@ class MeetingRecorder:
             "started_at": self._started_at.isoformat(),
             "ended_at": ended_at.isoformat() if ended_at else None,
             "tracks": info,
+            "dictations": list(self._dictations),
         }
         tmp = self.folder / (META_FILENAME + ".tmp")
         tmp.write_text(json.dumps(meta, indent=2), encoding="utf-8")

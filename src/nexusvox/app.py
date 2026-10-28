@@ -38,6 +38,7 @@ from .injector import foreground_window, inject_text
 from .lang_detect import detect_language
 from .llm import LlmError
 from .llm import warm_up as llm_warm_up
+from .logsetup import Text
 from .mic_guard import MicGuard, create_mic_guard
 from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
 from .overlay import CONFIRMED, ERROR, PROCESSING, RECORDING, Overlay, level_from_rms
@@ -294,7 +295,7 @@ class NexusVoxApp:
         except OSError as exc:
             logger.warning("os-control not reachable (%s)", exc)
             return None
-        logger.info("os-control command %r -> %s", text, reply or "(no reply)")
+        logger.info("os-control command %r -> %s", Text(text), reply or "(no reply)")
         return reply
 
     def get_learn_status(self) -> dict:

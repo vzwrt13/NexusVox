@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 
 from ..config import MODEL_REGISTRY, InferenceConfig
+from ..logsetup import Text
 from ..transcriber import SPEAKERS_NEED_GPU, BaseTranscriber, TranscriptionResult, Word
 
 logger = logging.getLogger(__name__)
@@ -255,7 +256,7 @@ class LocalParakeetTranscriber(BaseTranscriber):
             )
             result.finalize(text=text)
             result.words = words
-            logger.info("Transcription done: %s", result.text)
+            logger.info("Transcription done: %s", Text(result.text))
         except TimeoutError:
             logger.warning("In-process transcription timed out after %.0fs", timeout)
         finally:

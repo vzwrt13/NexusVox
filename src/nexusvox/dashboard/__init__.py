@@ -162,6 +162,16 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_mic_guard_enabled(data.get("enabled", False)))
 
+    @app.route("/api/settings/log-full-text", methods=["POST"])
+    def set_log_full_text():
+        data = request.get_json(force=True)
+        return jsonify(api.set_log_full_text(bool(data.get("enabled", False))))
+
+    @app.route("/api/log-folder/open", methods=["POST"])
+    def open_log_folder():
+        resp = api.open_log_folder()
+        return jsonify(resp), (500 if "error" in resp else 200)
+
     @app.route("/api/settings/store-audio", methods=["POST"])
     def set_store_audio():
         data = request.get_json(force=True)

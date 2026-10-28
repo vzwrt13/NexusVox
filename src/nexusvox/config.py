@@ -611,6 +611,8 @@ class Config:
     injection_delay_ms: int = 500
     auto_language_detection: bool = False
     log_level: str = "INFO"
+    # Dictated text goes into the log file in full; off shortens it there (the console always shows it).
+    log_full_text: bool = False
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
     meeting: MeetingConfig = field(default_factory=MeetingConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
@@ -720,6 +722,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         injection_delay_ms=general.get("injection_delay_ms", 500),
         auto_language_detection=general.get("auto_language_detection", False),
         log_level=_log_level(general.get("log_level", "INFO")),
+        log_full_text=bool(general.get("log_full_text", False)),
         hotkey=HotkeyConfig(
             modifiers=hotkey_modifiers,
             key=normalize_hotkey_key(hotkey_key) or "",
@@ -830,6 +833,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
             f"injection_delay_ms = {config.injection_delay_ms}",
             f"auto_language_detection = {'true' if config.auto_language_detection else 'false'}",
             f'log_level = "{config.log_level}"',
+            f"log_full_text = {'true' if config.log_full_text else 'false'}",
             "",
             "[hotkey]",
             "modifiers = [{}]".format(", ".join(f'"{m}"' for m in config.hotkey.modifiers)),

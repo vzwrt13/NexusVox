@@ -17,6 +17,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from .config import TranslatorConfig
+from .logsetup import Text
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ def translate(text: str, config: TranslatorConfig) -> TranslateResult:
         return TranslateResult(text, error=f"{type(exc).__name__}: {exc}"[:_ERROR_LIMIT])
     source = result.get("source")
     ms = result.get("ms")
-    logger.info("Translated (%s, %s ms): %r -> %r", source, ms, text, translated)
+    logger.info("Translated (%s, %s ms): %r -> %r", source, ms, Text(text), Text(translated))
     return TranslateResult(
         translated,
         translated=True,

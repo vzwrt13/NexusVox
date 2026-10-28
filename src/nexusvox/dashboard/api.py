@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import subprocess
 import tempfile
@@ -54,6 +55,7 @@ from ..file_transcribe import (
 )
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
+from ..logsetup import log_dir
 from ..meeting_live import LIVE_OTHERS_LABEL, LiveTranscriber, WindowTranscriber
 from ..meeting_recorder import META_FILENAME, list_devices
 from ..meeting_session import MeetingSession
@@ -257,6 +259,8 @@ class DashboardAPI:
             "feedback_mode": self._config.feedback.mode,
             "feedback_modes": list(FEEDBACK_MODES),
             "store_audio": self._config.database.store_audio,
+            "log_full_text": self._config.log_full_text,
+            "log_dir": str(log_dir()),
             "learn_from_edits": self._config.learn_from_edits.enabled,
             "polish_in_terminals": self._config.polish.in_terminals,
             "cleanup_level": self._config.cleanup.level,
@@ -406,6 +410,23 @@ class DashboardAPI:
         if self._get_learn_status is None:
             return {"counts": {}, "watched": list(WATCHED_KEYS), "last": None}
         return self._get_learn_status()
+
+    def set_log_full_text(self, enabled: bool) -> dict:
+        """The file log's filter reads the config on every record, so this is live."""
+        self._config.log_full_text = bool(enabled)
+        save_config(self._config)
+        return self.get_settings()
+
+    def open_log_folder(self) -> dict:
+        """Opens the log folder in Explorer, creating it first when nothing has been logged yet."""
+        folder = log_dir()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            os.startfile(folder)  # noqa: S606 - Windows-only app; the path is ours, not user input
+        except OSError as exc:
+            logger.error("Could not open the log folder %s: %s", folder, exc)
+            return {"error": f"Could not open {folder}: {exc}"}
+        return {"ok": True, "path": str(folder)}
 
     def set_store_audio(self, enabled: bool) -> dict:
         """Checked by the app on every recording, so this is live."""

@@ -10,6 +10,10 @@ auto_language_detection = false
 # DEBUG applies to NexusVox's own messages; other libraries stay at INFO.
 # Takes effect on the next start.
 log_level = "INFO"
+# The log is also written to %LOCALAPPDATA%\NexusVox\logs (one file per day, kept for 7 days).
+# Dictated text appears there shortened (first 20 characters and the length). true logs it in full,
+# for debugging; the log may then contain what you said. The console always shows full text.
+log_full_text = false
 [hotkey]
 # Press all listed modifiers simultaneously to record
 # Modifier options: ctrl, shift, alt, win (may be empty when a key is set)

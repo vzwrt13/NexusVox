@@ -220,6 +220,10 @@ const languageSelect = document.getElementById("language-select");
 const hotkeyModeSelect = document.getElementById("hotkey-mode-select");
 const micGuardToggle = document.getElementById("mic-guard-toggle");
 const storeAudioToggle = document.getElementById("store-audio-toggle");
+const logFullTextToggle = document.getElementById("log-full-text-toggle");
+const openLogFolderButton = document.getElementById("open-log-folder");
+const logOpenError = document.getElementById("log-open-error");
+const logDirLabel = document.getElementById("log-dir");
 const learnFromEditsToggle = document.getElementById("learn-from-edits-toggle");
 const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
 const hotkeyMods = Array.from(document.querySelectorAll("#hotkey-mods input"));
@@ -398,6 +402,17 @@ async function loadTranslatorStatus() {
 languageSelect.addEventListener("change", () => postSetting("/api/settings/language", { language: languageSelect.value }));
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 storeAudioToggle.addEventListener("change", () => postSetting("/api/settings/store-audio", { enabled: storeAudioToggle.checked }));
+logFullTextToggle.addEventListener("change", () => postSetting("/api/settings/log-full-text", { enabled: logFullTextToggle.checked }));
+openLogFolderButton.addEventListener("click", async () => {
+  logOpenError.hidden = true;
+  try {
+    const r = await fetch("/api/log-folder/open", { method: "POST" });
+    if (!r.ok) throw new Error((await r.json()).error || "The log folder could not be opened.");
+  } catch (e) {
+    logOpenError.textContent = e.message;
+    logOpenError.hidden = false;
+  }
+});
 learnFromEditsToggle.addEventListener("change", async () => {
   await postSetting("/api/settings/learn-from-edits", { enabled: learnFromEditsToggle.checked });
   loadLearnStatus();
@@ -525,6 +540,8 @@ async function loadSettings() {
   loadLlmStatus();
   micGuardToggle.checked = s.mic_guard_enabled;
   storeAudioToggle.checked = s.store_audio;
+  logFullTextToggle.checked = s.log_full_text;
+  logDirLabel.textContent = s.log_dir;
   learnFromEditsToggle.checked = s.learn_from_edits;
   loadLearnStatus();
   polishTerminalsToggle.checked = s.polish_in_terminals;

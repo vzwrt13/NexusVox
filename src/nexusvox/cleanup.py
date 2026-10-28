@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from .config import CleanupConfig, LlmConfig
 from .llm import LlmError, clean_reply, complete
+from .logsetup import Text
 
 logger = logging.getLogger(__name__)
 
@@ -159,11 +160,11 @@ def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = M
         reply = _TRAILING_MARK_RE.sub("", reply.strip())  # "my address." types the address without a period
     if not plausible(text, reply, config.level):
         logger.warning("Cleanup: the reply does not look like the dictation cleaned up; typing it unchanged")
-        logger.debug("Cleanup rejected: %r -> %r", text, reply)
+        logger.debug("Cleanup rejected: %r -> %r", Text(text), Text(reply))
         return CleanupResult(text, ms=ms, error=IMPLAUSIBLE)
     # Keep the dictation's own edges: the model trims, a dictation may end in a line break.
     core = text.strip()
     start = text.find(core)
     cleaned = text[:start] + reply.strip() + text[start + len(core) :]
-    logger.info("Cleanup (%s, %d ms): %r -> %r", config.level, ms, text, cleaned)
+    logger.info("Cleanup (%s, %d ms): %r -> %r", config.level, ms, Text(text), Text(cleaned))
     return CleanupResult(cleaned, cleaned=cleaned != text, ms=ms)

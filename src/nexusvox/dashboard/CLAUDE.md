@@ -51,6 +51,8 @@ Aurora Precision theme, shared with the website. Tokens are the `:root` variable
 | POST | `/api/settings/hotkey-mode` | Set `hold` or `toggle` (400 on anything else) |
 | POST | `/api/settings/feedback-mode` | Set dictation feedback `{mode}`: `sound`, `visual`, `both` (400 otherwise) |
 | POST | `/api/settings/mic-guard` | Toggle muting other apps' microphone sessions while recording |
+| POST | `/api/settings/log-full-text` | Toggle full dictated text in the file log `{enabled}` (`[general].log_full_text`, live) |
+| POST | `/api/log-folder/open` | Open the log folder in Explorer (`{ok, path}`, 500 with `error`) |
 | POST | `/api/settings/store-audio` | Toggle keeping a WAV per recording (`[database].store_audio`) |
 | GET | `/api/models` | List available models (filtered: GPU-only hidden on CPU systems) |
 | GET | `/api/models/current` | Active model, `diarization` (whether it can detect speakers in uploads: the model has it and the running transcriber supports it, so false for Parakeet in-process on CPU), `diarization_models` (display names of the models that can) and `diarization_hint` ("Speaker detection needs the GPU container" when only the CPU engine is the reason, else empty; the upload toggle shows it) |

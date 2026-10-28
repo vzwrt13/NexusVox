@@ -18,6 +18,7 @@ import websockets
 from websockets.connection import State
 
 from .config import CUSTOM_PROTOCOLS, MODEL_REGISTRY, InferenceConfig, resolve_compute_type, resolve_device
+from .logsetup import Text
 
 logger = logging.getLogger(__name__)
 
@@ -281,16 +282,16 @@ class VoxtralRealtimeTranscriber(BaseTranscriber):
                     delta = msg.get("delta", "")
                     logprob = msg.get("logprob")
                     result.append(delta, logprob=logprob)
-                    logger.debug("Delta: %s (logprob=%s)", delta, logprob)
+                    logger.debug("Delta: %s (logprob=%s)", Text(delta), logprob)
 
                 elif msg_type == "transcription.done":
-                    logger.debug("transcription.done payload: %s", json.dumps(msg))
+                    logger.debug("transcription.done payload: %s", Text(json.dumps(msg)))
                     result.finalize(
                         text=msg.get("text", result.text),
                         usage=msg.get("usage"),
                         logprobs=msg.get("logprobs"),
                     )
-                    logger.info("Transcription done: %s", result.text)
+                    logger.info("Transcription done: %s", Text(result.text))
 
                 elif msg_type == "error":
                     error = msg.get("error", "Unknown error")
@@ -383,11 +384,11 @@ class OpenAIHttpTranscriber(BaseTranscriber):
             result.finalize(text=text)
             if self.word_timestamps:
                 result.words = parse_words(data.get("words"))
-            logger.info("Transcription done: %s", result.text)
+            logger.info("Transcription done: %s", Text(result.text))
         except httpx.TimeoutException:
             logger.warning("Transcription timed out after %.0fs", timeout)
         except httpx.HTTPStatusError as exc:
-            logger.error("Server error: %s %s", exc.response.status_code, exc.response.text)
+            logger.error("Server error: %s %s", exc.response.status_code, Text(exc.response.text))
             raise RuntimeError(f"Transcription error: {exc.response.status_code}") from exc
 
         self._connected = False

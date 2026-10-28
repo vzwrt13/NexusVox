@@ -24,7 +24,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .cleanup import CleanupResult, cleanup
+from .cleanup import MIN_WORDS, CleanupResult, cleanup
 from .config import CleanupConfig, Config, LlmConfig, TranslatorConfig, VoiceCommandsConfig
 from .dictionary import DictionaryEntry, apply_dictionary
 from .snippets import Snippet, expand_snippets, mark_snippets, placeholders_intact
@@ -88,6 +88,10 @@ def process_text(
 
     # Cleanup keeps every placeholder and line break or is not used (cleanup.plausible).
     cleaned = cleanup_fn(processed, config.cleanup, config.llm)
+    if config.cleanup.level == "off":
+        logger.debug("Cleanup: off, typing the dictation as it is")
+    elif cleaned.status is None:  # the model was not asked: every other outcome logs its own line
+        logger.info("Cleanup (%s): skipped, the dictation is shorter than %d words", config.cleanup.level, MIN_WORDS)
 
     translation = translate_fn(cleaned.text, config.translator)
     if translation.translated and not placeholders_intact(translation.text, expansions):

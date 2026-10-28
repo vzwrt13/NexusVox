@@ -2,9 +2,10 @@
 
 import logging
 import sys
+from pathlib import Path
 
 from .app import NexusVoxApp
-from .config import load_config
+from .config import DEFAULT_CONFIG_PATH, load_config
 
 
 def main() -> None:
@@ -18,6 +19,15 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
     logging.getLogger("nexusvox").setLevel(level)
+
+    # Which config and database this process runs on: a config.toml in the wrong working directory is
+    # otherwise only noticed as a setting that does nothing.
+    logging.getLogger(__name__).info(
+        "Config: %s, database: %s, cleanup: %s",
+        DEFAULT_CONFIG_PATH.resolve(),
+        Path(config.database.path).resolve(),
+        config.cleanup.level,
+    )
 
     app = NexusVoxApp(config)
 

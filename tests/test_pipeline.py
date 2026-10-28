@@ -208,3 +208,17 @@ def test_extend_fn_is_not_called_for_an_enter_only_dictation():
         extend_fn=lambda text: calls.append(text) or text + "!",
     )
     assert (result.typed, result.press_enter, calls) == ("", True, [])
+
+
+def test_a_skipped_cleanup_logs_why(caplog):
+    config = _config()
+    config.cleanup = CleanupConfig(level="light")
+    with caplog.at_level("INFO", logger="nexusvox.pipeline"):
+        _run("hello there", config=config)
+    assert "Cleanup (light): skipped" in caplog.text
+
+
+def test_cleanup_off_is_not_logged_at_info(caplog):
+    with caplog.at_level("INFO", logger="nexusvox.pipeline"):
+        _run("hello there my friend")
+    assert "Cleanup" not in caplog.text

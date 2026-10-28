@@ -558,3 +558,19 @@ def test_migration_adds_the_stats_columns_to_an_old_database(tmp_path):
     assert dictation.cleanup_status is None and dictation.cleanup_ms is None
     old.save_transcription("new", "en", 1, cleanup_status="applied", cleanup_ms=120)
     assert old.get_recent(1)[0].cleanup_status == "applied"
+
+
+def test_migration_is_idempotent_on_a_database_that_already_has_the_columns(tmp_path):
+    """Starting twice, or on a database another branch already migrated, must not fail or lose rows."""
+    from nexusvox.config import DatabaseConfig
+    from nexusvox.db import Database
+
+    config = DatabaseConfig(path=str(tmp_path / "again.db"))
+    first = Database(config)
+    first.save_transcription("kept", "en", 1, cleanup_status="applied", cleanup_ms=5)
+    first.save_file_transcription("kept", "en", 1, "a.wav", processing_ms=7)
+
+    second = Database(config)
+
+    assert second.get_recent(1)[0].cleanup_ms == 5
+    assert second.get_file_transcriptions(limit=1)[0].processing_ms == 7

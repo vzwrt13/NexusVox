@@ -13,6 +13,14 @@ from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.db import Database
 
 
+@pytest.fixture(autouse=True)
+def _isolated_cwd(tmp_path, monkeypatch):
+    """Run every test in its own folder: ``save_config`` and ``load_config`` default to ``config.toml`` in the
+    working directory, and a test that saved there left a config (with a throw-away database path) in the
+    checkout that the app then loaded."""
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def db(tmp_path):
     """Fresh SQLite database for each test.

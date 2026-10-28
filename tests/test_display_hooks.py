@@ -344,3 +344,16 @@ def test_a_hanging_availability_check_does_not_hang_the_list(db, session_factory
 
     assert time.monotonic() - started < 1.5
     assert all(row["actions_unavailable"] == {} for row in rows)  # offered: the click reports the problem
+
+
+def test_the_upload_list_carries_pending_and_failed_states(db, session_factory):
+    first = db.save_file_transcription("one", "en", 1000, "a.wav")
+    second = db.save_file_transcription("two", "en", 1000, "b.wav")
+    registry = action_registry(
+        lambda tid: {"pending": "Summarising"} if tid == first.id else {"error": "Offline", "retry": "speakers"}
+    )
+
+    rows = {r["id"]: r for r in client_for(db, session_factory, registry).get("/api/file-transcriptions").get_json()}
+
+    assert rows[first.id]["actions_unavailable"] == {"speakers": {"pending": "Summarising"}}
+    assert rows[second.id]["actions_unavailable"] == {"speakers": {"error": "Offline", "retry": "speakers"}}

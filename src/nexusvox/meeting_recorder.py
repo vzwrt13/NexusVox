@@ -491,12 +491,18 @@ class MeetingRecorder:
                 track.begin()
             for track in tracks.values():
                 track.source.start(track.sink)
-            for track in tracks.values():
-                track.read_latency()
-            self._write_meta(ended_at=None)
         except BaseException:
             self._abort(tracks, folder)
             raise
+        # The recording runs from here: storing the latencies must not stop it. Under the lock, like the dictation
+        # takes that rewrite the same file.
+        for track in tracks.values():
+            track.read_latency()
+        with self._dictation_lock:
+            try:
+                self._write_meta(ended_at=None)
+            except OSError:
+                logger.exception("Storing the meeting stream latencies failed")
         logger.info("Meeting recording started: %s", folder)
         return folder
 

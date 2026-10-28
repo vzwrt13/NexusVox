@@ -278,6 +278,30 @@ def test_reported_stream_latency_is_stored_from_the_start(tmp_path):
     assert "latency_s" not in meta["tracks"]["system"]
 
 
+def test_failing_to_store_the_latency_never_stops_a_running_recording(tmp_path):
+    rec, mic, _system, clock = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    mic.latency = lambda: 0.02
+    real = rec._write_meta
+    calls = []
+
+    def flaky(**kwargs):
+        calls.append(1)
+        if len(calls) == 2:  # the write after the sources started: meeting.json locked by a scanner
+            raise PermissionError("locked")
+        real(**kwargs)
+
+    rec._write_meta = flaky
+
+    folder = rec.start()
+
+    assert rec.recording and folder.is_dir() and mic.sink is not None
+    clock.advance(1.0)
+    mic.push(1.0)
+    rec.stop()
+    meta = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))
+    assert meta["tracks"]["mic"]["latency_s"] == 0.02  # the stop writes it after all
+
+
 def test_a_source_without_latency_stores_none(tmp_path):
     rec, *_ = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
     folder = rec.start()

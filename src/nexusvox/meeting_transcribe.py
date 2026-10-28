@@ -16,6 +16,7 @@ import bisect
 import difflib
 import json
 import logging
+import math
 import os
 import re
 import struct
@@ -76,15 +77,17 @@ _MAX_WORD_S = 3.0  # no word lasts longer; bounds the search window in the syste
 # the other track's next word; no word moves further than this from its time order.
 TURN_SLACK_S = 0.5
 
-# Track offset: the system track is shifted onto the microphone's timeline. Where the microphone picks up the
-# speakers, the lag of that echo is the offset as the user hears it (playback latency included): the two tracks'
-# loudness envelopes (`OFFSET_HOP_S` steps) are correlated over `OFFSET_MIN_LAG_S`..`OFFSET_MAX_LAG_S`, and a
-# peak of at least `OFFSET_MIN_CORRELATION` counts. Without one (a headset), the difference of the input latencies
-# the two streams reported is used.
+# Track offset: the tracks are lined up before they are merged. Where the microphone picks up the speakers, the lag
+# of that echo is the offset as the user hears it (playback latency included): the two tracks' loudness envelopes
+# (`OFFSET_HOP_S` steps) are correlated over `OFFSET_MIN_LAG_S`..`OFFSET_MAX_LAG_S`, and a peak of at least
+# `OFFSET_MIN_CORRELATION` counts. Without one (a headset), the difference of the input latencies the two streams
+# reported is used; that covers the capture side only, a playback delay (a Bluetooth headset) is not in it.
 OFFSET_HOP_S = 0.01
 OFFSET_MIN_LAG_S = -0.05
 OFFSET_MAX_LAG_S = 0.5
 OFFSET_MIN_CORRELATION = 0.3
+# A reported latency outside 0..this many seconds is not believed (a broken driver value or a hand-edited file).
+MAX_LATENCY_S = 2.0
 
 
 # ---- Loading and repairing the folder ---------------------------------------
@@ -206,8 +209,10 @@ def load_meeting(folder: str | Path) -> Meeting:
         if info.get("error"):
             meeting.notes.append(f"The {label} track reported an error while recording: {info['error']}")
         path = folder / str(info.get("file") or f"{name}.wav")
-        if isinstance(info.get("latency_s"), int | float):
-            meeting.latency[name] = float(info["latency_s"])
+        latency = info.get("latency_s")
+        if isinstance(latency, int | float) and not isinstance(latency, bool) and math.isfinite(latency):
+            if 0 <= latency <= MAX_LATENCY_S:
+                meeting.latency[name] = float(latency)
         try:
             if repair_wav_header(path):
                 meeting.notes.append(f"The {label} track's header was repaired from the file size.")
@@ -275,9 +280,15 @@ def _resample(samples: np.ndarray, rate: int) -> np.ndarray:
     return np.clip(np.rint(samples), -32768, 32767).astype(np.int16)
 
 
-def convert_track(track: MeetingTrack, out_path: Path) -> list[bytes]:
+def loudness_steps(samples: np.ndarray, hop_s: float = OFFSET_HOP_S) -> np.ndarray:
+    """RMS of each whole `hop_s` step of 16 kHz samples: the envelope `echo_lag` correlates."""
+    return np.sqrt(block_power(samples, max(1, round(TARGET_RATE * hop_s))))
+
+
+def convert_track(track: MeetingTrack, out_path: Path, levels: list[np.ndarray] | None = None) -> list[bytes]:
     """The 60 s 16 kHz mono WAV chunks `transcribe_file` takes; the same audio is also written to `out_path`
-    (one 16 kHz mono WAV) for the mix, so the arrays never have to be kept."""
+    (one 16 kHz mono WAV) for the mix, so the arrays never have to be kept. `levels` receives the track's
+    `loudness_steps` window by window, so lining the tracks up needs no pass of its own."""
     chunks: list[bytes] = []
     with wave.open(str(out_path), "wb") as wf:
         wf.setnchannels(1)
@@ -286,6 +297,8 @@ def convert_track(track: MeetingTrack, out_path: Path) -> list[bytes]:
         for array in iter_track_chunks(track):
             chunks.append(_wav_bytes(array))
             wf.writeframes(array.tobytes())
+            if levels is not None:
+                levels.append(loudness_steps(array))
     return chunks
 
 
@@ -334,15 +347,15 @@ def balance_gain(chunks: Iterable[np.ndarray]) -> float:
 
 
 def _shifted(path: Path, frames: int) -> Iterator[np.ndarray]:
-    """`_read_windows(path)` moved by `frames`: later behind leading silence when positive, earlier by dropping its
-    start. The windows keep their size, so the mix adds up the same stretch of time from every track."""
+    """`_read_windows(path)` behind `frames` of leading silence. The windows keep their size, so the mix adds up the
+    same stretch of time from every track."""
+    if frames <= 0:
+        yield from _read_windows(path)
+        return
     size = TARGET_RATE * (MAX_CHUNK_MS // 1000)
-    pending = np.zeros(max(0, frames), dtype=np.int16)
-    skip = max(0, -frames)
+    pending = np.zeros(frames, dtype=np.int16)
     for window in _read_windows(path):
-        cut = min(skip, len(window))
-        skip -= cut
-        pending = np.concatenate([pending, window[cut:]])
+        pending = np.concatenate([pending, window])
         while len(pending) >= size:
             yield pending[:size]
             pending = pending[size:]
@@ -356,7 +369,7 @@ def mix_tracks(paths: list[Path], out_path: Path, offsets: list[float] | None = 
     Each track is first brought to the same speech level (`balance_gain`), so a loud system track cannot
     drown the microphone. The sum is scaled so that even coinciding peaks stay under `PEAK_LIMIT`: the bound
     is the sum of the tracks' gained peaks, known from the analysis pass, so the mix itself is a single pass.
-    The tracks start together, each moved by its entry in `offsets` (seconds, positive = later: the shift the
+    The tracks start together, each delayed by its entry in `offsets` (seconds, 0 or more: the shift the
     transcript gave that track's words); the shorter one is padded with silence. The inputs are not changed.
     The mix is written to a temporary file and moved into place, so a failure leaves no partial `out_path`.
     """
@@ -395,18 +408,6 @@ def mix_tracks(paths: list[Path], out_path: Path, offsets: list[float] | None = 
 # ---- Track offset -----------------------------------------------------------
 
 
-def envelope(path: Path, hop_s: float = OFFSET_HOP_S) -> np.ndarray:
-    """RMS of each `hop_s` step of a 16 kHz mono WAV, read window by window (100 values per second by default)."""
-    block = max(1, round(TARGET_RATE * hop_s))
-    parts, rest = [], np.zeros(0, dtype=np.float32)
-    for window in _read_windows(path):
-        samples = np.concatenate([rest, window.astype(np.float32)])
-        whole = len(samples) // block * block
-        parts.append(np.sqrt(block_power(samples[:whole], block)))
-        rest = samples[whole:]
-    return np.concatenate(parts) if parts else np.zeros(0, dtype=np.float32)
-
-
 def echo_lag(mic: np.ndarray, system: np.ndarray, hop_s: float = OFFSET_HOP_S) -> float | None:
     """Seconds the system audio reaches the microphone after the system track has it, or None without an echo.
 
@@ -434,20 +435,29 @@ def echo_lag(mic: np.ndarray, system: np.ndarray, hop_s: float = OFFSET_HOP_S) -
     return best_lag * hop_s if best >= OFFSET_MIN_CORRELATION else None
 
 
-def track_offset(meeting: Meeting, mic_16k: Path | None, system_16k: Path | None) -> tuple[float, str]:
-    """(seconds to shift the system track by onto the microphone's timeline, how it was found).
+def track_offset(
+    meeting: Meeting, mic_levels: list[np.ndarray] | None = None, system_levels: list[np.ndarray] | None = None
+) -> tuple[float, str]:
+    """(seconds the system track is late against the microphone's timeline, how it was found).
 
-    The echo lag when the microphone hears the speakers ("echo"), else the difference of the reported input
-    latencies ("latency": each track's audio was captured that long before the recorder placed it), else 0
-    ("none"). Positive moves the system track later.
+    The echo lag when the microphone hears the speakers ("echo"; the levels are `convert_track`'s), else the
+    difference of the reported input latencies ("latency": each track's audio was captured that long before the
+    recorder placed it), else 0 ("none"). Positive means the system track moves later; `track_shifts` turns it
+    into the delay of each track.
     """
-    if mic_16k is not None and system_16k is not None:
-        lag = echo_lag(envelope(mic_16k), envelope(system_16k))
+    if mic_levels and system_levels:
+        lag = echo_lag(np.concatenate(mic_levels), np.concatenate(system_levels))
         if lag is not None:
             return lag, "echo"
     if "mic" in meeting.latency and "system" in meeting.latency:
         return meeting.latency["mic"] - meeting.latency["system"], "latency"
     return 0.0, "none"
+
+
+def track_shifts(offset: float) -> tuple[float, float]:
+    """(microphone delay, system delay) in seconds for `offset`: one track is delayed, never one moved earlier, so
+    no word gets a time before the meeting start and the mix never loses the start of a track."""
+    return max(0.0, -offset), max(0.0, offset)
 
 
 # ---- Merging ----------------------------------------------------------------
@@ -523,8 +533,9 @@ def drop_dictation(
 
 
 def interleave(me: list[Word], others: list[Word], slack: float = TURN_SLACK_S) -> list[Word]:
-    """Two time-sorted word lists as one, in time order except at a near tie: the track whose word came last keeps
-    the turn while its next word starts no later than `slack` after the other track's next word."""
+    """Two time-sorted word lists as one, in time order except at a turn change: the track whose word came last
+    keeps the turn while it is still speaking - its last word ended no more than `slack` before the other track's
+    next word - and its next word starts no later than `slack` after that one."""
     merged: list[Word] = []
     i = j = 0
     mine: bool | None = None  # which track has the turn; nobody before the first word
@@ -533,9 +544,9 @@ def interleave(me: list[Word], others: list[Word], slack: float = TURN_SLACK_S) 
         if mine is None:
             mine = a <= b
         elif mine:
-            mine = a <= b + slack
+            mine = a <= b or (a <= b + slack and me[i - 1].end >= b - slack)
         else:
-            mine = a + slack < b
+            mine = a < b and not (b <= a + slack and others[j - 1].end >= a - slack)
         if mine:
             merged.append(me[i])
             i += 1
@@ -556,21 +567,25 @@ def merge_words(
 
     `me` (the microphone) is speaker 1. `others` (the system track) are speakers 2, 3, ...: a word's own
     `speaker` (detection's 1, 2, ... for that track) is moved up by one, and a word without one is speaker 2.
-    `system_offset` (seconds, from `track_offset`) first moves the system words onto the microphone's timeline.
-    `dictations` (time ranges of dictation takes) removes the microphone words spoken into the dictation;
-    None keeps them. The tracks are joined by `interleave`, so timing noise cannot split a turn change.
+    `system_offset` (seconds, from `track_offset`) first lines the tracks up (`track_shifts`; the dictation ranges
+    move with the microphone). `dictations` (time ranges of dictation takes) removes the microphone words spoken
+    into the dictation; None keeps them. Each track keeps the engine's own word order (one transcript, so it is
+    the spoken order, also where detection changes the speaker); the two tracks are joined by `interleave`, so
+    timing noise cannot split a turn change between them.
     """
+    mic_shift, system_shift = track_shifts(system_offset)
     others = sorted(
         (
-            Word(w.word, w.start + system_offset, w.end + system_offset, SPEAKER_FIRST_SYSTEM - 1 + (w.speaker or 1))
+            Word(w.word, w.start + system_shift, w.end + system_shift, SPEAKER_FIRST_SYSTEM - 1 + (w.speaker or 1))
             for w in others
         ),
-        key=lambda w: (w.start, w.end, w.speaker),
+        key=lambda w: w.start,
     )
-    me = drop_echo(sorted(me, key=lambda w: (w.start, w.end)), others)
+    me = sorted((Word(w.word, w.start + mic_shift, w.end + mic_shift) for w in me), key=lambda w: w.start)
+    me = drop_echo(me, others)
     if dictations:
         # After the echo filter: taking dictated words out first could join two short echo runs into one.
-        me = drop_dictation(me, dictations)
+        me = drop_dictation(me, [(start + mic_shift, end + mic_shift) for start, end in dictations])
     return interleave([Word(w.word, w.start, w.end, SPEAKER_OWN) for w in me], others)
 
 

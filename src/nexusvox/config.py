@@ -411,6 +411,11 @@ def resolve_device(requested: str) -> str:
         return "cpu"
 
 
+def cuda_available() -> bool:
+    """True when a CUDA GPU is usable: the gate for features that need the local language model."""
+    return resolve_device("auto") == "cuda"
+
+
 def resolve_compute_type(device: str, override: str | None) -> str:
     if override:
         return override

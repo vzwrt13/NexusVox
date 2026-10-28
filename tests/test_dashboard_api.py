@@ -929,7 +929,9 @@ def test_cleanup_level_setting(flask_client, monkeypatch):
 
     warmed = []
     monkeypatch.setattr(api_module, "llm_warm_up", warmed.append)
+    monkeypatch.setattr(api_module, "cuda_available", lambda: True)
     settings = flask_client.get("/api/settings").get_json()
+    assert settings["cleanup_needs_cuda"] is False
     assert (settings["cleanup_level"], settings["cleanup_levels"]) == ("off", ["off", "light", "medium"])
 
     def post(level):
@@ -945,6 +947,21 @@ def test_cleanup_level_setting(flask_client, monkeypatch):
         "/api/settings/llm-model", data=json.dumps({"model": "qwen3.5:4b"}), content_type="application/json"
     )
     assert len(warmed) == 2  # a new model is loaded while cleanup is on
+
+
+def test_cleanup_level_is_refused_without_cuda(flask_client, monkeypatch):
+    import nexusvox.dashboard.api as api_module
+
+    monkeypatch.setattr(api_module, "cuda_available", lambda: False)
+    assert flask_client.get("/api/settings").get_json()["cleanup_needs_cuda"] is True
+    resp = flask_client.post(
+        "/api/settings/cleanup-level", data=json.dumps({"level": "light"}), content_type="application/json"
+    )
+    assert resp.status_code == 400 and resp.get_json()["cleanup_level"] == "off"
+    off = flask_client.post(
+        "/api/settings/cleanup-level", data=json.dumps({"level": "off"}), content_type="application/json"
+    )
+    assert off.status_code == 200
 
 
 def test_polish_in_terminals_setting(flask_client):

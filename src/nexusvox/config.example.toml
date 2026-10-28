@@ -243,6 +243,7 @@ keep_alive = "10m"
 # Adds ~0.6 s per dictation with gemma4:e4b. The transcript is saved as spoken. A reply that
 # does not look like the dictation cleaned up (an answer, a translation, a lost line break or
 # snippet) is ignored, and dictations under 3 words are not sent. Also in the dashboard.
+# Needs a CUDA GPU: without one the dashboard greys it out and cleanup is skipped.
 level = "off"
 # A model still loading (10-50 s after [llm].keep_alive ran out) must not hold the dictation
 # up: after this many seconds it is typed unchanged. NexusVox loads the model at start and

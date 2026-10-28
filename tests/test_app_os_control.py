@@ -350,6 +350,42 @@ def test_polish_lets_an_extension_handle_the_spoken_command(monkeypatch):
     assert calls["pasted"] == ["Hallo zusammen"]
 
 
+def test_a_slow_extension_answer_is_pasted_without_a_second_polish(monkeypatch):
+    class Slow(Extension):
+        name = "slow"
+        api_version = API_VERSION
+
+        def on_selection_command(self, selection, command, app):
+            time.sleep(0.2)  # longer than HOOK_TIMEOUT_S below, shorter than the selection command budget
+            return "LATE"
+
+    monkeypatch.setattr("nexusvox.extensions.HOOK_TIMEOUT_S", 0.05)
+    app, calls = _polish_app(monkeypatch, "hi leute", RuntimeError("the model must not run"))
+    registry = ExtensionRegistry()
+    registry.add(Slow())
+    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: registry)
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["LATE"]
+
+
+def test_a_selection_hook_over_its_budget_falls_back_to_the_core_polish(monkeypatch):
+    class Slow(Extension):
+        name = "slow"
+        api_version = API_VERSION
+
+        def on_selection_command(self, selection, command, app):
+            time.sleep(0.3)
+            return "LATE"
+
+    monkeypatch.setattr("nexusvox.extensions.SELECTION_COMMAND_TIMEOUT_S", 0.05)
+    app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
+    registry = ExtensionRegistry()
+    registry.add(Slow())
+    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: registry)
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["Hallo zusammen"]
+
+
 def test_an_extension_paste_is_dropped_when_the_focus_moved_during_the_hook(monkeypatch):
     class Slow(Extension):
         name = "slow"

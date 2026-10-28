@@ -39,6 +39,8 @@ API_VERSION = 1
 ENTRY_POINT_GROUP = "nexusvox.extensions"
 # How long a dictation or selection hook may take before its result is dropped and the text stays as it was.
 HOOK_TIMEOUT_S = 3.0
+# A selection command may wait for a local language model; nobody types meanwhile and the core polish allows longer.
+SELECTION_COMMAND_TIMEOUT_S = 15.0
 # Extra time per text for `display_text`, which is called for every cue of a subtitle export.
 DISPLAY_TEXT_S = 0.01
 
@@ -498,7 +500,7 @@ class ExtensionRegistry:
 
     def selection_command(self, selection: str, command: str, app: ActiveApp) -> str | None:
         """The replacement for *selection* from the first extension that handles *command*, else None."""
-        deadline = time.monotonic() + HOOK_TIMEOUT_S
+        deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
         for extension in self.extensions:
             result = self._text_hook(extension, "on_selection_command", deadline, selection, command, app)
             if result is not None:

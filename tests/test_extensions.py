@@ -905,6 +905,26 @@ def test_selection_command_returns_the_first_replacement():
     assert ExtensionRegistry().selection_command("hello", "shout", APP) is None
 
 
+class SlowCommand(V1Extension):
+    name = "slow-command"
+
+    def on_selection_command(self, selection, command, app):
+        time.sleep(0.3)
+        return "late"
+
+
+def test_a_selection_command_hook_has_its_own_longer_budget(monkeypatch):
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(ext, "SELECTION_COMMAND_TIMEOUT_S", 1.0)
+    assert _registry(SlowCommand()).selection_command("s", "c", APP) == "late"
+
+
+def test_a_selection_command_hook_over_its_budget_is_skipped(monkeypatch):
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(ext, "SELECTION_COMMAND_TIMEOUT_S", 0.05)
+    assert _registry(SlowCommand()).selection_command("s", "c", APP) is None
+
+
 def test_a_failing_selection_command_hook_is_skipped():
     class Boom(V1Extension):
         name = "boom"

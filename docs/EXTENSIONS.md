@@ -218,7 +218,9 @@ string wins: the core pastes it over the selection, as polish does (Ctrl+Z in th
 recording as `[extension] <command>` and the paste key can repeat it. Return `None` for a command the extension
 does not know; when no extension answers, the language-model polish runs as before.
 
-The same rules as Hook 5 apply to errors and the timeout (an extension that fails is skipped). The core owns
+The same rules as Hook 5 apply to errors (an extension that fails is skipped). The timeout differs: nobody types
+during a selection command, so the hook gets 15 seconds (`SELECTION_COMMAND_TIMEOUT_S`, shared by all extensions)
+instead of 3, enough for a local language model. An extension that is slower is skipped and the core polish runs. The core owns
 everything around it: nothing selected, a terminal without `[polish].in_terminals`, a password field and a
 focus change while the hook worked behave as for polish. Spoken commands must work in English and German; matching them is the extension's job.
 

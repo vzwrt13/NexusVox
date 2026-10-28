@@ -290,7 +290,8 @@ def test_app_breakdown_endpoint(flask_client, sample_transcriptions):
 
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data == [{"app": "Unknown", "count": len(sample_transcriptions), "words": data[0]["words"]}]
+    words = sum(len(t.text.split()) for t in sample_transcriptions)
+    assert data == [{"app": "Unknown", "count": len(sample_transcriptions), "words": words}]
 
 
 # ── Model endpoints ──────────────────────────────────────────────────

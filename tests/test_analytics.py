@@ -19,7 +19,7 @@ from nexusvox.dashboard.analytics import (
     get_unreviewed_transcriptions,
     get_upload_overview,
 )
-from nexusvox.models import FileTranscription, Transcription
+from nexusvox.models import COMMAND_APP, FileTranscription, Transcription
 
 
 def _seed(session_factory, records):
@@ -687,7 +687,7 @@ def test_app_breakdown_groups_by_friendly_name(session_factory):
         session_factory,
         [
             _dictation("outlook.exe"),
-            _dictation("OLK.EXE", "a b c"),
+            _dictation("olk.exe", "a b c"),
             _dictation("code.exe"),
             _dictation("somethingelse.exe"),
             _dictation("another.exe"),
@@ -717,6 +717,12 @@ def test_app_breakdown_respects_the_date_range(session_factory):
     result = get_app_breakdown(session_factory, start="2026-03-10", end="2026-03-31")
 
     assert [g["app"] for g in result] == ["Chrome"]
+
+
+def test_app_breakdown_leaves_out_command_rows(session_factory):
+    _seed(session_factory, [_dictation("code.exe"), _dictation(COMMAND_APP, "[nexus] open github")])
+
+    assert get_app_breakdown(session_factory) == [{"app": "VS Code", "count": 1, "words": 2}]
 
 
 def test_app_breakdown_empty(session_factory):

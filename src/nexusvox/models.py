@@ -5,6 +5,9 @@ from datetime import UTC, datetime
 from sqlalchemy import Boolean, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+# Stored in `Transcription.app` by rows that ran a command instead of typing text, so analytics can skip them.
+COMMAND_APP = "<command>"
+
 
 def utc_now() -> datetime:
     """Return the current UTC time as a naive datetime.
@@ -56,7 +59,8 @@ class Transcription(Base):
     cleanup_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
     cleanup_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # The process file name of the app the text was typed into ("outlook.exe"), read at paste time.
-    # Never a window title; NULL for older rows, phone dictations and texts that were not typed.
+    # Never a window title; NULL for older rows, phone dictations and texts the clipboard refused;
+    # COMMAND_APP for rows that ran a command.
     app: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
 

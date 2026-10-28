@@ -209,7 +209,7 @@
         </div>
       </div>
 
-      <div class="settings-card" style="margin-top: 12px;">
+      <div class="settings-card" id="meeting-settings-card" style="margin-top: 12px;">
         <h4 class="nexus-section-title">Meetings</h4>
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
@@ -217,6 +217,51 @@
             <p>How your microphone's speaker is labelled in meeting transcripts (default <code>Speaker 1</code>). The other participants are numbered on from <code>Speaker 2</code>. Applied when a meeting is transcribed.</p>
           </div>
           <input type="text" id="meeting-own-label-input" class="dict-input" maxlength="40" placeholder="Speaker 1" style="max-width: 220px;">
+        </div>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Meeting hotkey</h3>
+            <p>Starts and stops a meeting from anywhere. It needs a key and at least one modifier, and must not be the dictation hotkey. Documentation: <code>docs/MEETINGS.md</code>.</p>
+            <p id="meeting-hotkey-status" class="status-line" hidden></p>
+          </div>
+          <div class="hotkey-editor">
+            <div class="hotkey-mods" id="meeting-hotkey-mods">
+              <label class="hotkey-mod"><input type="checkbox" value="ctrl"> Ctrl</label>
+              <label class="hotkey-mod"><input type="checkbox" value="shift"> Shift</label>
+              <label class="hotkey-mod"><input type="checkbox" value="alt"> Alt</label>
+              <label class="hotkey-mod"><input type="checkbox" value="win"> Win</label>
+              <span class="hotkey-plus">+</span>
+              <select id="meeting-hotkey-key" class="select-input hotkey-key" aria-label="Meeting hotkey key"></select>
+            </div>
+          </div>
+        </div>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Microphone</h3>
+            <p>Your side of the conversation. Applies from the next meeting.</p>
+          </div>
+          <select id="meeting-mic-select" class="select-input" aria-label="Meeting microphone"></select>
+        </div>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Output device</h3>
+            <p>The device the other participants are played on (it is recorded, not changed). Applies from the next meeting.</p>
+          </div>
+          <select id="meeting-output-select" class="select-input" aria-label="Meeting output device"></select>
+        </div>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Show the consent hint</h3>
+            <p>Reminds you to inform all participants before each recording. With it on, the meeting hotkey opens this tab so you can confirm.</p>
+          </div>
+          <label class="toggle"><input type="checkbox" id="meeting-consent-toggle"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Leave dictation out of the meeting transcript</h3>
+            <p>Text you dictate during a meeting is also picked up by the microphone. With this on, those words are dropped from the Me part when the meeting is transcribed; the recorded audio stays as it is.</p>
+          </div>
+          <label class="toggle"><input type="checkbox" id="meeting-dictation-toggle"><span class="toggle-slider"></span></label>
         </div>
       </div>
 
@@ -710,52 +755,7 @@
       </div>
 
       <div class="settings-card meeting-card">
-        <h4 class="nexus-section-title">Meeting settings</h4>
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Meeting hotkey</h3>
-            <p>Starts and stops a meeting from anywhere. It needs a key and at least one modifier, and must not be the dictation hotkey. Documentation: <code>docs/MEETINGS.md</code>.</p>
-            <p id="meeting-hotkey-status" class="status-line" hidden></p>
-          </div>
-          <div class="hotkey-editor">
-            <div class="hotkey-mods" id="meeting-hotkey-mods">
-              <label class="hotkey-mod"><input type="checkbox" value="ctrl"> Ctrl</label>
-              <label class="hotkey-mod"><input type="checkbox" value="shift"> Shift</label>
-              <label class="hotkey-mod"><input type="checkbox" value="alt"> Alt</label>
-              <label class="hotkey-mod"><input type="checkbox" value="win"> Win</label>
-              <span class="hotkey-plus">+</span>
-              <select id="meeting-hotkey-key" class="select-input hotkey-key" aria-label="Meeting hotkey key"></select>
-            </div>
-          </div>
-        </div>
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Microphone</h3>
-            <p>Your side of the conversation. Applies from the next meeting.</p>
-          </div>
-          <select id="meeting-mic-select" class="select-input" aria-label="Meeting microphone"></select>
-        </div>
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Output device</h3>
-            <p>The device the other participants are played on (it is recorded, not changed). Applies from the next meeting.</p>
-          </div>
-          <select id="meeting-output-select" class="select-input" aria-label="Meeting output device"></select>
-        </div>
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Show the consent hint</h3>
-            <p>Reminds you to inform all participants before each recording. With it on, the meeting hotkey opens this tab so you can confirm.</p>
-          </div>
-          <label class="toggle"><input type="checkbox" id="meeting-consent-toggle"><span class="toggle-slider"></span></label>
-        </div>
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Leave dictation out of the meeting transcript</h3>
-            <p>Text you dictate during a meeting is also picked up by the microphone. With this on, those words are dropped from the Me part when the meeting is transcribed; the recorded audio stays as it is.</p>
-          </div>
-          <label class="toggle"><input type="checkbox" id="meeting-dictation-toggle"><span class="toggle-slider"></span></label>
-        </div>
+        <p class="settings-hint" id="meeting-devices-info">Microphone: <strong id="meeting-info-mic">System default</strong> &middot; Output: <strong id="meeting-info-output">System default</strong> &middot; <a href="#settings" id="meeting-settings-link">Meeting settings</a></p>
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
             <h3>Show a live transcript while recording</h3>

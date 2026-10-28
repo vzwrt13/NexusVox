@@ -1214,3 +1214,9 @@ canvas { width: 100% !important; max-height: 260px; }
 .upload-delete-ask { font-size: 13px; color: var(--text-dim); }
 .upload-delete-btn { color: var(--red); }
 .upload-delete-btn:hover { border-color: var(--red); color: var(--red); }
+
+.flash-highlight { animation: flash-highlight 2s ease-out; }
+@keyframes flash-highlight {
+  0%, 40% { box-shadow: 0 0 0 2px var(--accent-light); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}

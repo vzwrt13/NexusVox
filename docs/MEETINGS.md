@@ -14,7 +14,7 @@ meeting would show it under your own voice; by default NexusVox leaves it out (s
   show that it runs. **Stop recording** ends it and starts the transcription; the progress shows in
   the same tab and the finished meeting appears under *Previous Meetings*.
 - **Hotkey:** the meeting hotkey (default `Ctrl+Alt+M`, `[meeting]` in `config.toml`, also editable
-  in the Meetings tab) starts and stops a meeting from anywhere. It is separate from the dictation
+  in the Settings tab's Meetings card) starts and stops a meeting from anywhere. It is separate from the dictation
   hotkey and needs a key plus at least one modifier; a binding that would also start dictation is
   refused, and so is a dictation hotkey that the meeting hotkey would also start. While the consent hint is on, the hotkey opens the Meetings tab to start a meeting, so the
   hint is shown first; stopping always works straight from the hotkey. A short beep confirms start
@@ -25,7 +25,7 @@ database: `mic.wav` and `system.wav` (the two tracks), `meeting.wav` (a playable
 the transcription) and `meeting.json`. If another file is still being transcribed when you stop, the
 recording is kept in its folder, the dashboard says so and lists it under *Recorded, not yet transcribed*, where you can transcribe or delete it. The same list holds a meeting cut short because NexusVox quit, and one whose transcription failed. The hotkey beeps as for a normal stop.
 
-Pick a microphone and an output device in the Meetings tab if the system defaults are not the ones you
+Pick a microphone and an output device in the Settings tab (Meetings card) if the system defaults are not the ones you
 use for the call. The output device is only *recorded*, never changed: choose the device the call is
 played on.
 
@@ -78,7 +78,7 @@ Two things keep that order right:
 
 While a meeting records, NexusVox stores the start and end of every dictation take in `meeting.json`
 (`dictations`, seconds from the meeting start), whatever the setting. The **Leave dictation out of the
-meeting transcript** switch in the Meetings tab (`[meeting].leave_dictation_out`, on by default) decides
+meeting transcript** switch in the Settings tab's Meetings card (`[meeting].leave_dictation_out`, on by default) decides
 what the transcription does with them: on, the words of your own voice that fall inside a take (plus half a second
 on each side) are dropped; off, they stay. The switch is read when the meeting is transcribed, so
 *Transcribe* on a meeting recorded earlier uses the current setting. `mic.wav`, `system.wav` and
@@ -93,7 +93,7 @@ spoken word), and other countries have comparable rules, some of them requiring 
 This is not legal advice; you are responsible for using the feature lawfully.
 
 NexusVox shows this reminder before each recording from the dashboard. *Don't show this again* (or the
-*Show the consent hint* toggle in the Meetings tab, `[meeting].consent_hint`) turns it off.
+*Show the consent hint* toggle in the Settings tab's Meetings card, `[meeting].consent_hint`) turns it off.
 
 ## Quality: use a headset
 

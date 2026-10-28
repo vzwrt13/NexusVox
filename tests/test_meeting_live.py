@@ -56,7 +56,7 @@ def test_each_track_is_sent_in_windows_and_labelled_with_speaker_numbers():
     assert _wait(lambda: len(live.segments_since()) == 2)
     live.stop()
     by_speaker = {s["speaker"]: s for s in live.segments_since()}
-    assert by_speaker["mic"]["label"] == "Speaker 1" and by_speaker["system"]["label"] == "Speaker 2"
+    assert by_speaker["mic"]["label"] == "Speaker 1" and by_speaker["system"]["label"] == "Others"
     assert all(0.66 < s <= 1.0 + 1e-6 for s in sent)  # cut at or before the window length, at a quiet block
     assert [s["n"] for s in live.segments_since()] == [0, 1]
     assert live.segments_since(1)[0]["n"] == 1
@@ -235,13 +235,13 @@ def test_config_round_trips_live_transcript(tmp_path, enabled):
 
 
 def test_labels_follow_the_own_voice_setting_and_never_say_me_or_others():
-    live = LiveTranscriber(lambda wav: "hi", window_s=1.0, labels=lambda: {"mic": "Vincent", "system": "Speaker 2"})
+    live = LiveTranscriber(lambda wav: "hi", window_s=1.0, labels=lambda: {"mic": "Vincent", "system": "Others"})
     live.start()
     live.feed("mic", AudioFormat(RATE, 1), _tone(1.2))
     live.feed("system", AudioFormat(RATE, 1), _tone(1.2))
     assert _wait(lambda: len(live.segments_since()) == 2)
     live.stop()
-    assert {s["label"] for s in live.segments_since()} == {"Vincent", "Speaker 2"}
+    assert {s["label"] for s in live.segments_since()} == {"Vincent", "Others"}
 
 
 # -- review fixes ---------------------------------------------------------------------------------
@@ -405,3 +405,15 @@ def test_the_shipped_config_template_leaves_it_off():
 
     template = Path(nexusvox.__file__).parent / "config.example.toml"
     assert tomllib.loads(template.read_text(encoding="utf-8"))["meeting"]["live_transcript"] is False
+
+
+def test_the_dashboard_labels_the_live_system_track_others_but_the_stored_one_stays_numbered(tmp_path):
+    from nexusvox.config import Config
+    from nexusvox.dashboard.api import DashboardAPI
+    from nexusvox.meeting_transcribe import SPEAKER_FIRST_SYSTEM
+
+    config = Config()
+    config.meeting.own_voice_label = "Vincent"
+    api = DashboardAPI(None, config)
+    assert api._live_labels() == {"mic": "Vincent", "system": "Others"}
+    assert SPEAKER_FIRST_SYSTEM == 2  # the stored transcript still numbers the system track from Speaker 2

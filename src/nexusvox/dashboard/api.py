@@ -54,7 +54,7 @@ from ..file_transcribe import (
 )
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
-from ..meeting_live import LiveTranscriber, WindowTranscriber
+from ..meeting_live import LIVE_OTHERS_LABEL, LiveTranscriber, WindowTranscriber
 from ..meeting_recorder import META_FILENAME, list_devices
 from ..meeting_session import MeetingSession
 from ..meeting_transcribe import (
@@ -968,10 +968,10 @@ class DashboardAPI:
 
     def _live_labels(self) -> dict[str, str]:
         """Live speaker labels: the microphone is named after the Settings label, everyone on the system track is
-        the first system speaker (no speaker detection while recording)."""
+        `Others` (no speaker detection while recording; the stored transcript numbers them)."""
         return {
             "mic": self._config.meeting.own_voice_label,
-            "system": numbered_speaker_label(SPEAKER_FIRST_SYSTEM),
+            "system": LIVE_OTHERS_LABEL,
         }
 
     def _make_live_transcriber(self) -> BaseTranscriber:

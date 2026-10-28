@@ -23,9 +23,9 @@ from collections.abc import Callable
 
 import numpy as np
 
-from .config import DEFAULT_OWN_VOICE_LABEL, numbered_speaker_label
+from .config import DEFAULT_OWN_VOICE_LABEL
 from .meeting_recorder import AudioFormat
-from .meeting_transcribe import SPEAKER_FIRST_SYSTEM, _resample, _wav_bytes, block_power, downmix
+from .meeting_transcribe import _resample, _wav_bytes, block_power, downmix
 from .transcriber import BaseTranscriber
 
 logger = logging.getLogger(__name__)
@@ -40,10 +40,14 @@ LIVE_TIMEOUT_S = 20.0  # a live window the server has not answered by then is lo
 _SEND_CHUNK_BYTES = 4096
 
 
+# Live only: the system track has no speaker detection while recording and may hold several people, so it gets one
+# neutral label. The stored transcript made after Stop numbers them (Speaker 2, 3, ...).
+LIVE_OTHERS_LABEL = "Others"
+
+
 def default_labels() -> dict[str, str]:
-    """The microphone is the own voice (Speaker 1 unless named); the system track has no speaker detection live,
-    so everyone on it is the first system speaker, numbered like the stored transcript does without detection."""
-    return {"mic": DEFAULT_OWN_VOICE_LABEL, "system": numbered_speaker_label(SPEAKER_FIRST_SYSTEM)}
+    """The microphone is the own voice (Speaker 1 unless named), everyone on the system track is `Others`."""
+    return {"mic": DEFAULT_OWN_VOICE_LABEL, "system": LIVE_OTHERS_LABEL}
 
 
 def _block_rms(samples: np.ndarray, block: int) -> np.ndarray:

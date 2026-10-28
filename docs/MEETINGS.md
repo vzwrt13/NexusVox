@@ -32,9 +32,9 @@ played on.
 ## Live transcript
 
 While a meeting records, the Meetings tab shows a live transcript: what you say under your own-voice label
-(default `Speaker 1`), what everyone else says under `Speaker 2`, a few seconds behind the call. It is a preview. Both tracks are
+(default `Speaker 1`), what everyone else says under `Others`, a few seconds behind the call. It is a preview. Both tracks are
 cut into windows of about six seconds (at a pause where possible) and sent to the transcription model one
-window at a time; silent windows are not sent. The live text has no speaker detection, no echo filter and no
+window at a time; silent windows are not sent. The live text cannot tell the other participants apart (so they are all `Others`; the stored transcript numbers them `Speaker 2`, `Speaker 3`, ...), and has no echo filter and no
 dictation filter, so your microphone may repeat what the speakers play and your dictation shows up under your own-voice label.
 
 The transcript made after **Stop** is the stored one and does not depend on the live view. If the model

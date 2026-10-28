@@ -56,7 +56,7 @@ leave_dictation_out = true
 # The name your own voice (the microphone) gets in a meeting transcript. The other participants are
 # numbered on from 2 ("Speaker 2", "Speaker 3", ...). Also editable in the dashboard Settings tab.
 own_voice_label = "Speaker 1"
-# Show a rough live transcript (your voice and "Speaker 2") in the dashboard while a meeting records. The audio
+# Show a rough live transcript (your voice and "Others"; the stored transcript numbers the speakers) in the dashboard while a meeting records. The audio
 # is sent to the transcription model in windows of about 6 seconds for the whole meeting, which costs GPU or CPU
 # time, so it is off by default; also switchable in the dashboard Meetings tab. The transcript made after Stop
 # is the one that is stored either way.

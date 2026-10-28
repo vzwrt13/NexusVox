@@ -283,6 +283,21 @@ def test_stop_without_a_meeting_and_a_second_start_are_errors(env):
     assert client.post("/api/meetings/start").status_code == 500
 
 
+def test_live_endpoint_and_setting(env):
+    client, api, *_ = env
+    assert client.get("/api/meetings/live?after=x").get_json() == {
+        "enabled": False,
+        "recording": False,
+        "segments": [],
+        "status": None,
+    }
+    assert client.get("/api/settings").get_json()["meeting_live_transcript"] is False  # off until switched on
+    resp = client.post("/api/settings/meeting-live-transcript", json={"enabled": True})
+    assert resp.get_json()["meeting_live_transcript"] is True and api._config.meeting.live_transcript is True
+    resp = client.post("/api/settings/meeting-live-transcript", json={"enabled": False})
+    assert resp.get_json()["meeting_live_transcript"] is False and api._config.meeting.live_transcript is False
+
+
 def test_toggle_is_what_the_hotkey_calls(env):
     _, api, _, _, started = env
     assert api.toggle_meeting()["recording"] is True
@@ -444,6 +459,24 @@ def test_the_page_has_a_meetings_tab_and_in_page_delete_confirmation():
     assert "Inform all participants before you record" in html
     section = js[js.index("function askDeleteFileTranscription") : js.index("// ── Meetings")]
     assert "confirm(" not in section and "alert(" not in section
+
+
+def test_the_upload_tab_shows_the_selected_file_and_lets_it_be_removed():
+    static = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static"
+    html = (static / "index.html").read_text(encoding="utf-8")
+    js = (static / "dashboard.js").read_text(encoding="utf-8")
+    css = (static / "style.css").read_text(encoding="utf-8")
+    for element_id in ("upload-selected-name", "upload-selected-meta", "upload-remove", "upload-zone-ready"):
+        assert f'id="{element_id}"' in html
+    assert "Ready to transcribe" in html
+    section = js[js.index("function selectUploadFile") : js.index("uploadBrowse.addEventListener")]
+    assert 'classList.toggle("has-file"' in section and "formatFileSize(file.size)" in section
+    handler = js[js.index("uploadRemoveBtn.addEventListener") :]
+    handler = handler[: handler.index("});")]
+    assert "selectUploadFile(null)" in handler and "uploadBrowse.focus()" in handler
+    assert "#upload-transcribe:disabled" in css and ".upload-zone.has-file.drag-over" in css
+    assert ".flagged-save-btn:disabled { opacity: 0.6;" in css  # shared button look is untouched
+    assert "--green-fill" not in css[css.index(".upload-zone.has-file") :][:400]
 
 
 # -- the dictation hotkey may not clash with the meeting hotkey -----------------------------------

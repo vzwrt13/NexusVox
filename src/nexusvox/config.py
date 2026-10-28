@@ -315,6 +315,10 @@ class MeetingConfig:
     leave_dictation_out: bool = True
     # The label of the microphone's speaker in a meeting transcript; the other participants are numbered on from 2.
     own_voice_label: str = DEFAULT_OWN_VOICE_LABEL
+    # Show a rough transcript of both tracks (your voice and "Others") in the dashboard while the meeting
+    # records. It sends the audio to the transcription model in 6 s windows all meeting long, and that load is not
+    # measured yet, so it is off until switched on (dashboard Meetings tab).
+    live_transcript: bool = False
 
 
 def meeting_hotkey_clash(modifiers: list[str], key: str, dictation: HotkeyConfig) -> str | None:
@@ -485,6 +489,17 @@ class MicGuardConfig:
     watchdog_s: float = 30.0
 
 
+FEEDBACK_MODES = ("sound", "visual", "both")
+
+
+@dataclass
+class FeedbackConfig:
+    """How a dictation signals its state: the start/stop chimes (`sound`), a small waveform at the bottom
+    centre of the screen (`visual`), or `both`. Read on every cue, so a change applies without a restart."""
+
+    mode: str = "sound"
+
+
 LLM_PROTOCOLS = ("ollama", "openai")
 
 
@@ -607,6 +622,7 @@ class Config:
     os_control: OsControlConfig = field(default_factory=OsControlConfig)
     translator: TranslatorConfig = field(default_factory=TranslatorConfig)
     mic_guard: MicGuardConfig = field(default_factory=MicGuardConfig)
+    feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     learn_from_edits: LearnFromEditsConfig = field(default_factory=LearnFromEditsConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     polish: PolishConfig = field(default_factory=PolishConfig)
@@ -671,6 +687,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     command_key = str(switcher_data.get("command_key", "Y")).upper()
     translator_data = data.get("translator", {})
     mic_guard_data = data.get("mic_guard", {})
+    feedback_data = data.get("feedback", {})
     learn_data = data.get("learn_from_edits", {})
     llm_data = data.get("llm", {})
     polish_data = data.get("polish", {})
@@ -715,6 +732,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             consent_hint=bool(meeting_data.get("consent_hint", True)),
             leave_dictation_out=bool(meeting_data.get("leave_dictation_out", True)),
             own_voice_label=_own_voice_label(meeting_data.get("own_voice_label", "")),
+            live_transcript=bool(meeting_data.get("live_transcript", False)),
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
@@ -765,6 +783,9 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         mic_guard=MicGuardConfig(
             enabled=mic_guard_data.get("enabled", False),
             watchdog_s=float(mic_guard_data.get("watchdog_s", 30.0)),
+        ),
+        feedback=FeedbackConfig(
+            mode=feedback_data.get("mode") if feedback_data.get("mode") in FEEDBACK_MODES else "sound",
         ),
         llm=LlmConfig(
             url=str(llm_data.get("url", LlmConfig.url)),
@@ -819,6 +840,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"consent_hint = {'true' if config.meeting.consent_hint else 'false'}",
             f"leave_dictation_out = {'true' if config.meeting.leave_dictation_out else 'false'}",
             f"own_voice_label = {json.dumps(config.meeting.own_voice_label)}",
+            f"live_transcript = {'true' if config.meeting.live_transcript else 'false'}",
             "",
             "[audio]",
             f"sample_rate = {config.audio.sample_rate}",
@@ -879,6 +901,9 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             "[mic_guard]",
             f"enabled = {'true' if config.mic_guard.enabled else 'false'}",
             f"watchdog_s = {config.mic_guard.watchdog_s}",
+            "",
+            "[feedback]",
+            f'mode = "{config.feedback.mode}"',
             "",
             "[llm]",
             f"url = {json.dumps(config.llm.url)}",

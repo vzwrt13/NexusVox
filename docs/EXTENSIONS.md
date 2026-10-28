@@ -169,6 +169,36 @@ UploadAction(
 )
 ```
 
+### Showing a pending or failed state
+
+Besides the answers above, `available` may return a small dict. It works the same for `ExportTarget` and
+`UploadAction`, and it is additive: the extension API version stays 1, and the old answers keep working.
+
+| Answer | Shown on the row |
+|---|---|
+| `{"pending": "<label>"}` | The label with a spinner; the export or button stays greyed out. While any row is pending, the dashboard re-fetches the Meetings and Upload lists every few seconds and stops when none is, so a finished export becomes active without a page reload |
+| `{"error": "<reason>", "retry": "<action id>"}` | The reason in red and a Retry button that runs the named `UploadAction`. `retry` must be an action your own extension registered; any other id is dropped with a log warning and only the reason is shown. Retry is also hidden while that action is itself greyed out for the row, and disabled while it runs |
+
+```python
+def _summary_state(self, tid: int):
+    if self._summaries.has(tid):
+        return True
+    if self._jobs.running(tid):
+        return {"pending": "Summarising…"}
+    if (reason := self._jobs.failure(tid)) is not None:
+        return {"error": reason, "retry": "summarise"}
+    return "No summary yet"
+
+
+ExportTarget("summary", "Summary (Markdown)", ".md", "text/markdown", self._export, available=self._summary_state)
+UploadAction("summarise", "Summarise", endpoint="/api/ext/my-tab/summarise/{id}")
+```
+
+A dict with neither key greys the row out like `False`. The check is still called once per listed row on each
+refresh, so keep it cheap. A refresh in which the check raises or is too slow keeps showing the last `pending`
+answer, so a running job never looks finished because of one missed answer; a plain answer (or `True`) ends it.
+The dashboard refreshes only the list that has a pending row, and only while the page and that tab are shown.
+
 ## Hook 5: change a dictation before it is typed
 
 ```python
@@ -218,7 +248,9 @@ string wins: the core pastes it over the selection, as polish does (Ctrl+Z in th
 recording as `[extension] <command>` and the paste key can repeat it. Return `None` for a command the extension
 does not know; when no extension answers, the language-model polish runs as before.
 
-The same rules as Hook 5 apply to errors and the timeout (an extension that fails is skipped). The core owns
+The same rules as Hook 5 apply to errors (an extension that fails is skipped). The timeout differs: nobody types
+during a selection command, so the hook gets 15 seconds (`SELECTION_COMMAND_TIMEOUT_S`, shared by all extensions)
+instead of 3, enough for a local language model. An extension that is slower is skipped and the core polish runs. The core owns
 everything around it: nothing selected, a terminal without `[polish].in_terminals`, a password field and a
 focus change while the hook worked behave as for polish. Spoken commands must work in English and German; matching them is the extension's job.
 

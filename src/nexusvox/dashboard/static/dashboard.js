@@ -230,6 +230,7 @@ const polishTerminalsToggle = document.getElementById("polish-terminals-toggle")
 const llmModelInput = document.getElementById("llm-model-input");
 const meetingOwnLabelInput = document.getElementById("meeting-own-label-input");
 let meetingOwnLabelSaved = "";
+const feedbackModeSelect = document.getElementById("feedback-mode-select");
 const cleanupLevelSelect = document.getElementById("cleanup-level-select");
 const llmStatus = document.getElementById("llm-status");
 
@@ -475,6 +476,12 @@ meetingOwnLabelInput.addEventListener("change", async () => {
     meetingOwnLabelInput.value = meetingOwnLabelSaved;
   }
 });
+feedbackModeSelect.addEventListener("change", async () => {
+  const resp = await postSetting("/api/settings/feedback-mode", { mode: feedbackModeSelect.value });
+  const s = await resp.json();
+  if (s.error) alert(s.error);
+  feedbackModeSelect.value = s.feedback_mode;
+});
 cleanupLevelSelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/cleanup-level", { level: cleanupLevelSelect.value });
   const s = await resp.json();
@@ -514,6 +521,7 @@ async function loadSettings() {
   llmModelInput.value = s.llm_model;
   meetingOwnLabelInput.value = meetingOwnLabelSaved = s.meeting_own_voice_label;
   cleanupLevelSelect.value = s.cleanup_level;
+  feedbackModeSelect.value = s.feedback_mode;
   loadLlmStatus();
   micGuardToggle.checked = s.mic_guard_enabled;
   storeAudioToggle.checked = s.store_audio;
@@ -1664,18 +1672,71 @@ const uploadZone = document.getElementById("upload-zone");
 const uploadInput = document.getElementById("upload-input");
 const uploadBrowse = document.getElementById("upload-browse");
 const uploadSelected = document.getElementById("upload-selected");
+const uploadSelectedName = document.getElementById("upload-selected-name");
+const uploadSelectedMeta = document.getElementById("upload-selected-meta");
+const uploadRemoveBtn = document.getElementById("upload-remove");
+const uploadZoneText = document.getElementById("upload-zone-text");
+const uploadZoneReady = document.getElementById("upload-zone-ready");
 const transcribeBtn = document.getElementById("upload-transcribe");
 let selectedUploadFile = null;
 let uploadRunning = false;
 
 function updateTranscribeButton() {
   transcribeBtn.disabled = !selectedUploadFile || uploadRunning;
+  uploadRemoveBtn.disabled = uploadRunning;
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  const kb = Math.round(bytes / 1024);
+  if (kb < 1024) return kb + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function formatClock(seconds) {
+  const s = Math.round(seconds);
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+// Reads the duration from the file's metadata; best effort, the row simply stays without it.
+// Only one probe lives at a time: a new selection or a removal cancels the running one.
+let cancelUploadProbe = null;
+function showUploadDuration(file, sizeText) {
+  if (cancelUploadProbe) cancelUploadProbe();
+  const url = URL.createObjectURL(file);
+  const probe = new Audio();
+  let timer = null;
+  const done = () => {
+    clearTimeout(timer);
+    probe.removeAttribute("src");
+    probe.load(); // drops the media resource; removing src alone does not abort the load
+    URL.revokeObjectURL(url);
+    if (cancelUploadProbe === done) cancelUploadProbe = null;
+  };
+  cancelUploadProbe = done;
+  timer = setTimeout(done, 10000); // a stalled probe must not hold the blob forever
+  probe.preload = "metadata";
+  probe.addEventListener("loadedmetadata", () => {
+    if (selectedUploadFile === file && Number.isFinite(probe.duration)) {
+      uploadSelectedMeta.textContent = sizeText + " · " + formatClock(probe.duration);
+    }
+    done();
+  });
+  probe.addEventListener("error", done);
+  probe.src = url;
 }
 
 function selectUploadFile(file) {
   selectedUploadFile = file;
-  uploadSelected.textContent = file ? "Selected: " + file.name : "No file selected.";
-  uploadSelected.classList.toggle("has-file", Boolean(file));
+  uploadSelected.hidden = !file;
+  uploadSelectedName.textContent = file ? file.name : "";
+  const sizeText = file ? formatFileSize(file.size) : "";
+  uploadSelectedMeta.textContent = sizeText;
+  uploadZone.classList.toggle("has-file", Boolean(file));
+  uploadZoneText.hidden = Boolean(file);
+  uploadZoneReady.hidden = !file;
+  if (file) showUploadDuration(file, sizeText);
+  else if (cancelUploadProbe) cancelUploadProbe();
   document.getElementById("upload-error").style.display = "none";
   document.getElementById("upload-note").style.display = "none";
   updateTranscribeButton();
@@ -1686,8 +1747,19 @@ uploadBrowse.addEventListener("click", (e) => {
   uploadInput.click();
 });
 
+document.getElementById("upload-browse-again").addEventListener("click", (e) => {
+  e.preventDefault();
+  uploadInput.click();
+});
+
+uploadRemoveBtn.addEventListener("click", () => {
+  if (uploadRunning) return;
+  selectUploadFile(null);
+  uploadBrowse.focus(); // the row, and the button with it, is gone; keep keyboard focus nearby
+});
+
 uploadInput.addEventListener("change", () => {
-  if (uploadInput.files.length) selectUploadFile(uploadInput.files[0]);
+  if (uploadInput.files.length && !uploadRunning) selectUploadFile(uploadInput.files[0]);
   uploadInput.value = ""; // so choosing the same file again still counts as a choice
 });
 
@@ -1707,7 +1779,7 @@ uploadZone.addEventListener("dragleave", () => {
 uploadZone.addEventListener("drop", (e) => {
   e.preventDefault();
   uploadZone.classList.remove("drag-over");
-  if (e.dataTransfer.files.length) selectUploadFile(e.dataTransfer.files[0]);
+  if (e.dataTransfer.files.length && !uploadRunning) selectUploadFile(e.dataTransfer.files[0]);
 });
 
 const cleanupToggle = document.getElementById("upload-cleanup-toggle");
@@ -1949,7 +2021,11 @@ async function runUploadAction(button, item) {
   runningUploadActions.add(key);
   uploadErrorEl.style.display = "none";
   uploadNoteEl.style.display = "none";
-  button.disabled = true;
+  // The row's main button and its Retry run the same action: both go quiet meanwhile.
+  const card = button.closest(".flagged-card");
+  const siblings = (card ? [...card.querySelectorAll(".upload-action, .upload-retry")] : [button])
+    .filter((b) => b.dataset.action === action.id && !b.disabled);
+  siblings.forEach((b) => { b.disabled = true; });
   try {
     if (action.endpoint) {
       const res = await fetch(action.endpoint.replaceAll("{id}", item.id), { method: "POST" });
@@ -1975,57 +2051,139 @@ async function runUploadAction(button, item) {
     showUploadError(`${action.label} failed: ${err.message}`);
   } finally {
     runningUploadActions.delete(key);
-    button.disabled = false;
+    siblings.forEach((b) => { b.disabled = false; });
     // Also after a failure: the action may just have become unavailable (an expired licence).
     loadFileTranscriptions();
   }
 }
 
-async function loadFileTranscriptions() {
-  await Promise.all([
-    renderFileTranscriptions(document.getElementById("upload-list"), "", "No file transcriptions yet."),
-    renderFileTranscriptions(document.getElementById("meeting-list"), "meeting", "No meetings yet."),
-    loadPendingMeetings(),
-  ]);
+// ── Pending and failed states ────────────────────────────────────────
+// An extension's `available` check may answer a string (greyed out, the text is the tooltip) or a dict:
+// `{pending: label}` (spinner, the list keeps refreshing) or `{error: reason, retry: action id}`.
+const PENDING_POLL_MS = 4000;
+
+function availabilityState(reason) {
+  if (reason && typeof reason === "object") {
+    if (typeof reason.pending === "string") return { kind: "pending", text: reason.pending };
+    if (typeof reason.error === "string") return { kind: "error", text: reason.error, retry: reason.retry || "" };
+    return { kind: "off", text: "Not available" };
+  }
+  return { kind: "off", text: String(reason) };
 }
 
-// One history list: `kind` "" shows every entry, "meeting" only meetings. Each card can be deleted, with
-// the confirmation inside the card (never a browser dialog).
-async function renderFileTranscriptions(container, kind, emptyText) {
-  const data = await fetch("/api/file-transcriptions" + (kind ? `?kind=${kind}` : "")).then((r) => r.json());
+function rowsHavePending(rows) {
+  return rows.some((row) => [row.exports_unavailable, row.actions_unavailable].some(
+    (states) => Object.values(states || {}).some((reason) => availabilityState(reason).kind === "pending")));
+}
 
+// Reloads the lists after `intervalMs` while the last load had a pending row: one timer at most, none once nothing is pending.
+function createPendingPoller(reload, intervalMs, timers = { set: setTimeout, clear: clearTimeout }) {
+  let handle = null;
+  return {
+    update(pending) {
+      if (!pending) {
+        if (handle !== null) timers.clear(handle);
+        handle = null;
+      } else if (handle === null) {
+        handle = timers.set(() => { handle = null; reload(); }, intervalMs);
+      }
+    },
+    get active() { return handle !== null; },
+  };
+}
+// ── end of pending and failed states ──────────────────────────────────
+
+// The history lists. A poll fetches only the lists that last had a pending row and are on screen, and a render
+// touches only the cards that changed, so audio playback, an open delete confirmation or "Show original" on
+// the other cards survive it.
+const FILE_LISTS = [
+  { id: "upload-list", kind: "", empty: "No file transcriptions yet." },
+  { id: "meeting-list", kind: "meeting", empty: "No meetings yet." },
+];
+const pendingLists = new Set(); // ids of the lists whose last load had a pending row
+let loadGeneration = 0; // a load that is no longer the newest drops its answer, so an old snapshot never wins
+
+const pendingPoller = createPendingPoller(() => {
+  if (document.hidden) return; // the visibilitychange handler below picks it up again
+  loadFileTranscriptions(true);
+}, PENDING_POLL_MS);
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && pendingLists.size && !pendingPoller.active) loadFileTranscriptions(true);
+});
+
+function listIsShown(list) {
+  const el = document.getElementById(list.id);
+  return !!el && !!el.closest(".tab-content.active");
+}
+
+// Never rejects: a failed refresh keeps the polling going (or leaves it off) as it was.
+async function loadFileTranscriptions(poll = false) {
+  const generation = ++loadGeneration;
+  const lists = poll ? FILE_LISTS.filter((l) => pendingLists.has(l.id) && listIsShown(l)) : FILE_LISTS;
+  try {
+    const [rows] = await Promise.all([
+      Promise.all(lists.map((l) => fetch("/api/file-transcriptions" + (l.kind ? `?kind=${l.kind}` : "")).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }))),
+      poll ? null : loadPendingMeetings(),
+    ]);
+    if (generation !== loadGeneration) return;
+    lists.forEach((list, i) => {
+      renderFileTranscriptions(document.getElementById(list.id), rows[i], list.empty, poll);
+      if (rowsHavePending(rows[i])) pendingLists.add(list.id);
+      else pendingLists.delete(list.id);
+    });
+  } catch (err) {
+    console.error("Failed to load file transcriptions:", err);
+  }
+  if (generation === loadGeneration) pendingPoller.update(pendingLists.size > 0);
+}
+
+// One history list: `kind` "" shows every entry, "meeting" only meetings. Each card can be deleted, with the
+// confirmation inside the card (never a browser dialog). A `poll` keeps every card whose data did not change.
+function renderFileTranscriptions(container, data, emptyText, poll) {
   if (!data.length) {
     container.innerHTML = `<p class="empty-state">${escapeHtml(emptyText)}</p>`;
     return;
   }
+  container.querySelectorAll(":scope > :not(.flagged-card)").forEach((el) => el.remove());
+  const existing = new Map([...container.querySelectorAll(":scope > .flagged-card")].map((c) => [c.dataset.id, c]));
+  const wanted = new Set();
+  data.forEach((item, i) => {
+    const signature = cardSignature(item);
+    let card = existing.get(String(item.id));
+    if (card && poll && card._signature === signature) {
+      card._item = item;
+    } else {
+      const fresh = buildFileCard(item, signature);
+      if (card) card.replaceWith(fresh);
+      card = fresh;
+    }
+    wanted.add(card);
+    if (container.children[i] !== card) container.insertBefore(card, container.children[i] || null);
+  });
+  container.querySelectorAll(":scope > .flagged-card").forEach((c) => {
+    if (!wanted.has(c)) c.remove();
+  });
+}
 
-  container.innerHTML = data.map((item, index) => `
-    <div class="flagged-card" data-id="${item.id}">
-      <div class="flagged-meta">
-        <span>${item.created_at ? new Date(item.created_at).toLocaleString() : ""}</span>
-        <span class="flagged-lang">${(item.language || "").toUpperCase()}</span>
-        <span class="upload-model">${escapeHtml(item.model || "")}</span>
-        <span class="upload-duration">${formatDuration(item.duration_ms)}</span>
-        ${item.cleaned_text ? `<button type="button" class="upload-view-switch" data-index="${index}">Show original</button>` : ""}
-        ${extensionExports.map((t) => {
-          const reason = (item.exports_unavailable || {})[t.id];
-          if (reason !== undefined) return `<a class="upload-export disabled" aria-disabled="true" title="${escapeHtml(reason)}">${escapeHtml(t.label)}</a>`;
-          return `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}">${escapeHtml(t.label)}</a>`;
-        }).join("")}
-        ${extensionUploadActions.map((a) => {
-          const reason = (item.actions_unavailable || {})[a.id];
-          const off = reason !== undefined || runningUploadActions.has(`${a.id}:${item.id}`);
-          return `<button type="button" class="upload-action" data-action="${escapeHtml(a.id)}" data-index="${index}"${off ? " disabled" : ""}${reason !== undefined ? ` title="${escapeHtml(reason)}"` : ""}>${escapeHtml(a.label)}</button>`;
-        }).join("")}
-      </div>
-      <div class="upload-filename">${escapeHtml(item.original_filename)}${item.kind === "meeting" ? " (meeting)" : ""}</div>
-      ${item.has_audio ? `<audio class="upload-audio" controls preload="none" src="/api/file-transcriptions/${item.id}/audio"></audio>` : ""}
-      <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>
-      <div class="upload-delete-row"><button type="button" class="period-btn upload-delete-btn">Delete</button></div>
-    </div>
-  `).join("");
+// What a card shows besides the (large) transcript text, whose length stands in for it.
+function cardSignature(item) {
+  const running = extensionUploadActions.filter((a) => runningUploadActions.has(`${a.id}:${item.id}`)).map((a) => a.id);
+  return JSON.stringify([item.id, item.exports_unavailable, item.actions_unavailable, running, item.has_audio,
+    item.original_filename, item.language, item.model, (item.text || "").length, (item.cleaned_text || "").length]);
+}
 
-  container.querySelectorAll(".upload-export").forEach((link) => {
+function buildFileCard(item, signature) {
+  const template = document.createElement("template");
+  template.innerHTML = fileCardHtml(item).trim();
+  const card = template.content.firstElementChild;
+  card._item = item;
+  card._signature = signature;
+
+  card.querySelectorAll(".upload-export").forEach((link) => {
     link.addEventListener("click", (event) => {
       event.preventDefault();
       if (link.classList.contains("disabled")) return;
@@ -2033,23 +2191,79 @@ async function renderFileTranscriptions(container, kind, emptyText) {
     });
   });
 
-  container.querySelectorAll(".upload-action").forEach((button) => {
-    button.addEventListener("click", () => runUploadAction(button, data[Number(button.dataset.index)]));
+  card.querySelectorAll(".upload-action, .upload-retry").forEach((button) => {
+    button.addEventListener("click", () => runUploadAction(button, card._item));
   });
 
   // A cleaned upload opens on the cleaned text; the button flips it to the transcript as transcribed.
-  container.querySelectorAll(".upload-view-switch").forEach((button) => {
+  card.querySelectorAll(".upload-view-switch").forEach((button) => {
     button.addEventListener("click", () => {
-      const item = data[Number(button.dataset.index)];
       const showingOriginal = button.textContent === "Show cleaned";
       button.textContent = showingOriginal ? "Show original" : "Show cleaned";
-      button.closest(".flagged-card").querySelector(".upload-text").textContent = showingOriginal ? item.cleaned_text : item.text;
+      card.querySelector(".upload-text").textContent = showingOriginal ? card._item.cleaned_text : card._item.text;
     });
   });
 
-  container.querySelectorAll(".upload-delete-btn").forEach((button) => {
+  card.querySelectorAll(".upload-delete-btn").forEach((button) => {
     button.addEventListener("click", () => askDeleteFileTranscription(button.closest(".upload-delete-row")));
   });
+  return card;
+}
+
+function fileCardHtml(item) {
+  return `
+    <div class="flagged-card" data-id="${item.id}">
+      <div class="flagged-meta">
+        <span>${item.created_at ? new Date(item.created_at).toLocaleString() : ""}</span>
+        <span class="flagged-lang">${(item.language || "").toUpperCase()}</span>
+        <span class="upload-model">${escapeHtml(item.model || "")}</span>
+        <span class="upload-duration">${formatDuration(item.duration_ms)}</span>
+        ${item.cleaned_text ? `<button type="button" class="upload-view-switch">Show original</button>` : ""}
+        ${extensionExports.map((t) => {
+          const reason = (item.exports_unavailable || {})[t.id];
+          if (reason !== undefined) return `<a class="upload-export disabled" aria-disabled="true" title="${escapeHtml(availabilityState(reason).text)}">${escapeHtml(t.label)}</a>`;
+          return `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}">${escapeHtml(t.label)}</a>`;
+        }).join("")}
+        ${extensionUploadActions.map((a) => {
+          const reason = (item.actions_unavailable || {})[a.id];
+          const off = reason !== undefined || runningUploadActions.has(`${a.id}:${item.id}`);
+          return `<button type="button" class="upload-action" data-action="${escapeHtml(a.id)}"${off ? " disabled" : ""}${reason !== undefined ? ` title="${escapeHtml(availabilityState(reason).text)}"` : ""}>${escapeHtml(a.label)}</button>`;
+        }).join("")}
+      </div>
+      ${renderRowStates(item)}
+      <div class="upload-filename">${escapeHtml(item.original_filename)}${item.kind === "meeting" ? " (meeting)" : ""}</div>
+      ${item.has_audio ? `<audio class="upload-audio" controls preload="none" src="/api/file-transcriptions/${item.id}/audio"></audio>` : ""}
+      <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>
+      <div class="upload-delete-row"><button type="button" class="period-btn upload-delete-btn">Delete</button></div>
+    </div>
+  `;
+}
+
+// The pending labels (spinner) and failure reasons (with Retry) of a row, one line each. Retry is offered only
+// when the action it names is on this page and not greyed out for this row (its own failure, naming itself, is
+// the one exception: that is how it is run again); while it runs, the button is disabled.
+function renderRowStates(item) {
+  const lines = [];
+  const states = [
+    ...extensionExports.map((t) => ({ label: t.label, reason: (item.exports_unavailable || {})[t.id] })),
+    ...extensionUploadActions.map((a) => ({ label: a.label, reason: (item.actions_unavailable || {})[a.id], actionId: a.id })),
+  ];
+  for (const { label, reason, actionId } of states) {
+    if (reason === undefined) continue;
+    const state = availabilityState(reason);
+    if (state.kind === "pending") {
+      lines.push(`<div class="upload-state" role="status"><span class="model-status-spinner"></span><span>${escapeHtml(label)}: ${escapeHtml(state.text)}</span></div>`);
+    } else if (state.kind === "error") {
+      const own = (item.actions_unavailable || {})[state.retry];
+      const offered = extensionUploadActions.some((a) => a.id === state.retry)
+        && (own === undefined || (actionId === state.retry && availabilityState(own).kind === "error"));
+      const busy = runningUploadActions.has(`${state.retry}:${item.id}`);
+      const retry = offered
+        ? ` <button type="button" class="upload-retry" data-action="${escapeHtml(state.retry)}"${busy ? " disabled" : ""}>Retry</button>` : "";
+      lines.push(`<div class="upload-state down"><span>✕ ${escapeHtml(label)}: ${escapeHtml(state.text)}</span>${retry}</div>`);
+    }
+  }
+  return lines.join("");
 }
 
 function askDeleteFileTranscription(row) {
@@ -2089,6 +2303,14 @@ const meetingProgressBar = document.getElementById("meeting-progress-bar");
 const meetingConsent = document.getElementById("meeting-consent");
 const meetingConsentToggle = document.getElementById("meeting-consent-toggle");
 const meetingDictationToggle = document.getElementById("meeting-dictation-toggle");
+const meetingLiveToggle = document.getElementById("meeting-live-toggle");
+const meetingLiveBox = document.getElementById("meeting-live");
+const meetingLiveText = document.getElementById("meeting-live-text");
+const meetingLiveStatus = document.getElementById("meeting-live-status");
+let meetingLiveTimer = null;
+let meetingLiveAfter = 0;
+let meetingLiveBusy = false;
+let meetingLiveGeneration = 0;
 const meetingHotkeyMods = Array.from(document.querySelectorAll("#meeting-hotkey-mods input"));
 const meetingHotkeyKey = document.getElementById("meeting-hotkey-key");
 const meetingHotkeyStatus = document.getElementById("meeting-hotkey-status");
@@ -2114,8 +2336,68 @@ function showMeetingStatus(text, cls) {
   meetingStatus.textContent = text;
 }
 
+// Live transcript: poll the new segments every 2 s while a meeting records. Text goes in with textContent only.
+function appendLiveSegments(segments) {
+  const atBottom = meetingLiveText.scrollTop + meetingLiveText.clientHeight >= meetingLiveText.scrollHeight - 8;
+  for (const seg of segments) {
+    if (seg.n < meetingLiveAfter) continue; // already shown (overlapping polls)
+    const p = document.createElement("p");
+    const who = document.createElement("span");
+    who.className = "who " + (seg.speaker === "mic" ? "me" : "system");
+    who.textContent = seg.label + ":";
+    p.append(who, document.createTextNode(seg.text));
+    meetingLiveText.append(p);
+    meetingLiveAfter = seg.n + 1;
+  }
+  if (atBottom) meetingLiveText.scrollTop = meetingLiveText.scrollHeight;
+}
+
+async function pollMeetingLive() {
+  if (meetingLiveBusy) return; // one request at a time: two in flight would both append the same segments
+  meetingLiveBusy = true;
+  const generation = meetingLiveGeneration;
+  try {
+    const live = await fetch("/api/meetings/live?after=" + meetingLiveAfter).then((r) => r.json());
+    if (generation !== meetingLiveGeneration) return; // a new meeting started while this was in flight
+    // A meeting stopped from the hotkey while another tab is shown never reaches renderMeetingState.
+    // The poll runs on until the worker has ended too: a window in flight at Stop still adds its text.
+    if (!live.recording && !(live.status && live.status.active) && meetingLiveTimer) {
+      clearInterval(meetingLiveTimer);
+      meetingLiveTimer = null;
+    }
+    meetingLiveBox.hidden = !live.status;
+    appendLiveSegments(live.segments);
+    if (live.status) {
+      const st = live.status;
+      meetingLiveStatus.textContent = st.error
+        ? "Live transcription failed for the last window: " + st.error
+        : st.skipped_s > 0
+          ? `Model load ${Math.round(st.load * 100)}%. The live view skipped ${st.skipped_s} s of audio to keep up; the saved transcript is complete.`
+          : `Model load ${Math.round(st.load * 100)}%.`;
+    }
+  } catch (err) {
+    console.error("Live transcript failed:", err);
+  } finally {
+    meetingLiveBusy = false;
+  }
+}
+
+function setMeetingLivePolling(on) {
+  if (on && !meetingLiveTimer) {
+    meetingLiveAfter = 0;
+    meetingLiveGeneration += 1;
+    meetingLiveBusy = false;
+    meetingLiveText.textContent = "";
+    pollMeetingLive();
+    meetingLiveTimer = setInterval(pollMeetingLive, 2000);
+  } else if (!on && meetingLiveTimer) {
+    pollMeetingLive(); // the timer stops itself once the worker has ended (see pollMeetingLive)
+  }
+}
+
 function renderMeetingState(status) {
   meetingRecording = !!status.recording;
+  setMeetingLivePolling(meetingRecording);
   meetingElapsed = status.elapsed_s || 0;
   meetingIndicator.classList.toggle("recording", meetingRecording);
   meetingTimer.textContent = formatClock(meetingElapsed);
@@ -2332,6 +2614,17 @@ async function saveMeetingDevices() {
 meetingMicSelect.addEventListener("change", saveMeetingDevices);
 meetingOutputSelect.addEventListener("change", saveMeetingDevices);
 
+meetingLiveToggle.addEventListener("change", async () => {
+  const wanted = meetingLiveToggle.checked;
+  try {
+    const r = await postSetting("/api/settings/meeting-live-transcript", { enabled: wanted });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    meetingLiveToggle.checked = (await r.json()).meeting_live_transcript;
+  } catch (err) {
+    meetingLiveToggle.checked = !wanted; // not saved: show the setting that is still in force
+  }
+});
+
 async function openMeetingsTab() {
   const [settings, devices] = await Promise.all([
     fetch("/api/settings").then((r) => r.json()),
@@ -2340,6 +2633,7 @@ async function openMeetingsTab() {
   meetingConsentHint = settings.meeting_consent_hint;
   meetingConsentToggle.checked = meetingConsentHint;
   meetingDictationToggle.checked = settings.meeting_leave_dictation_out;
+  meetingLiveToggle.checked = settings.meeting_live_transcript;
   renderMeetingHotkey(settings);
   fillDeviceSelect(meetingMicSelect, devices.inputs, devices.mic_device);
   fillDeviceSelect(meetingOutputSelect, devices.outputs, devices.output_device);

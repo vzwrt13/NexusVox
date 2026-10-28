@@ -257,7 +257,7 @@ A system tray icon also appears, where you can toggle the language or quit the a
 
 ## 5. Usage
 
-1. **Hold** `Ctrl + Shift + Alt` — recording starts (you'll hear a beep)
+1. **Hold** `Ctrl + Shift + Alt` — recording starts (you'll hear a beep, or see a small waveform at the bottom of the screen if you chose visual feedback)
 2. **Speak** into your microphone
 3. **Release** any of the modifier keys — recording stops (second beep)
 4. The transcribed text is automatically pasted at your cursor position
@@ -347,6 +347,7 @@ NexusVox/
     ├── docker_ctl.py           # Docker Compose profile control (start/stop/health-check)
     ├── edit_watch.py           # Learn from edits: UI Automation field watcher
     ├── feedback.py             # Audio beep feedback
+    ├── overlay.py              # Visual feedback: live waveform at the bottom centre
     ├── file_transcribe.py      # Audio file upload conversion and transcription
     ├── hotkey.py               # Global push-to-talk hotkey listener
     ├── injector.py             # Text injection via clipboard + SendInput

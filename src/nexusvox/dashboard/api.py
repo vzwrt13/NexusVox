@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from ..config import (
     CLEANUP_LEVELS,
     CUSTOM_PROTOCOLS,
+    FEEDBACK_MODES,
     HOTKEY_KEY_VKS,
     HOTKEY_MODES,
     HOTKEY_MODIFIERS,
@@ -53,6 +54,7 @@ from ..file_transcribe import (
 )
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
+from ..meeting_live import LIVE_OTHERS_LABEL, LiveTranscriber, WindowTranscriber
 from ..meeting_recorder import META_FILENAME, list_devices
 from ..meeting_session import MeetingSession
 from ..meeting_transcribe import (
@@ -70,7 +72,7 @@ from ..meeting_transcribe import (
 from ..os_commands import NEXUS_ACTIONS
 from ..polish_presets import PolishPreset
 from ..snippets import Snippet, SnippetOption
-from ..transcriber import BaseTranscriber
+from ..transcriber import BaseTranscriber, create_transcriber
 from ..translator import is_reachable
 from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
 from . import analytics
@@ -115,6 +117,7 @@ class DashboardAPI:
         get_switch_status: Callable[[], dict] | None = None,
         get_learn_status: Callable[[], dict] | None = None,
         get_transcriber: Callable[[], BaseTranscriber] | None = None,
+        on_feedback_mode: Callable[[str], None] | None = None,
         benchmarks_dir: Path | None = None,
         extensions: ExtensionRegistry | None = None,
         meeting: MeetingSession | None = None,
@@ -126,10 +129,17 @@ class DashboardAPI:
         self._get_switch_status = get_switch_status
         self._get_learn_status = get_learn_status
         self._get_transcriber = get_transcriber
+        self._on_feedback_mode = on_feedback_mode
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
         self._file_jobs = FileJobs()
         self.extensions = extensions if extensions is not None else ExtensionRegistry()
-        self._meeting = meeting or MeetingSession(config.meeting, self._meetings_dir)
+        self._meeting = meeting or MeetingSession(
+            config.meeting,
+            self._meetings_dir,
+            live_factory=lambda: LiveTranscriber(
+                WindowTranscriber(self._make_live_transcriber), labels=self._live_labels
+            ),
+        )
         # The dashboard and the hotkey both start and stop meetings: one at a time, and a press that arrives
         # while another is being handled sees its outcome.
         self._meeting_lock = threading.RLock()
@@ -244,6 +254,8 @@ class DashboardAPI:
             "hotkey_modifier_options": list(HOTKEY_MODIFIERS),
             "hotkey_key_options": list(HOTKEY_KEY_VKS),
             "mic_guard_enabled": self._config.mic_guard.enabled,
+            "feedback_mode": self._config.feedback.mode,
+            "feedback_modes": list(FEEDBACK_MODES),
             "store_audio": self._config.database.store_audio,
             "learn_from_edits": self._config.learn_from_edits.enabled,
             "polish_in_terminals": self._config.polish.in_terminals,
@@ -257,6 +269,7 @@ class DashboardAPI:
             "meeting_consent_hint": self._config.meeting.consent_hint,
             "meeting_leave_dictation_out": self._config.meeting.leave_dictation_out,
             "meeting_own_voice_label": self._config.meeting.own_voice_label,
+            "meeting_live_transcript": self._config.meeting.live_transcript,
         }
 
     def get_translator_status(self) -> dict:
@@ -354,6 +367,16 @@ class DashboardAPI:
         """Checked by the app on every hold, so this is live."""
         self._config.mic_guard.enabled = enabled
         save_config(self._config)
+        return self.get_settings()
+
+    def set_feedback_mode(self, mode: str) -> dict:
+        """Read by the app on every cue, so this is live."""
+        if mode not in FEEDBACK_MODES:
+            return {"error": f"Unsupported feedback mode: {mode}", **self.get_settings()}
+        self._config.feedback.mode = mode
+        save_config(self._config)
+        if self._on_feedback_mode:
+            self._on_feedback_mode(mode)  # builds the overlay window now, not in the middle of a dictation
         return self.get_settings()
 
     def set_cleanup_level(self, level: str) -> dict:
@@ -938,6 +961,33 @@ class DashboardAPI:
         save_config(self._config)
         return self.get_settings()
 
+    def set_meeting_live_transcript(self, enabled: bool) -> dict:
+        """Applied from the next meeting on; the running one keeps what it started with."""
+        self._config.meeting.live_transcript = bool(enabled)
+        save_config(self._config)
+        return self.get_settings()
+
+    def get_meeting_live(self, after: int = 0) -> dict:
+        """Live transcript segments from `after` on (the Meetings tab polls this while a meeting records)."""
+        return self._meeting.live(after)
+
+    def _live_labels(self) -> dict[str, str]:
+        """Live speaker labels: the microphone is named after the Settings label, everyone on the system track is
+        `Others` (no speaker detection while recording; the stored transcript numbers them)."""
+        return {
+            "mic": self._config.meeting.own_voice_label,
+            "system": LIVE_OTHERS_LABEL,
+        }
+
+    def _make_live_transcriber(self) -> BaseTranscriber:
+        """The transcriber one live transcript uses for all its windows (current model and language)."""
+        return create_transcriber(
+            self._config.inference,
+            device=None,
+            language=self._config.language,
+            auto_detect_language=self._config.auto_language_detection,
+        )
+
     def begin_dictation(self, start: float) -> int | None:
         """A dictation take began (`time.monotonic()`); the token for `end_dictation`. Never raises."""
         try:
@@ -1207,7 +1257,7 @@ class DashboardAPI:
         shown = self.extensions.display_texts(file_transcript_from_record(record), texts, deadline=deadline)
         return shown[0], shown[1] if len(shown) > 1 else record.cleaned_text
 
-    def _unavailable_exports(self, record, deadline: float | None = None) -> dict[str, str]:
+    def _unavailable_exports(self, record, deadline: float | None = None) -> dict[str, str | dict]:
         """`{target id: reason}` for the export targets that cannot export this row: the extensions' own checks,
         plus the built-in subtitle targets when no word timing is stored."""
         unavailable = self.extensions.unavailable_exports(record.id, deadline=deadline)

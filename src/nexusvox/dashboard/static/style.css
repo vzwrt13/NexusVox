@@ -34,6 +34,7 @@
   --accent-fill: rgba(108, 92, 231, 0.2);
   --green-fill: rgba(0, 210, 160, 0.15);
   --green: #00d2a0;
+  --green-soft: rgba(0, 210, 160, 0.1);
   --red: #ff6b6b;
   --orange: #ffa94d;
   --radius: 18px;
@@ -498,6 +499,7 @@ canvas { width: 100% !important; max-height: 260px; }
 }
 .flagged-save-btn:hover { filter: brightness(1.15); }
 .flagged-save-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+#upload-transcribe:disabled { opacity: 0.35; filter: grayscale(0.6); }
 
 /* Model switch status */
 .model-status {
@@ -603,8 +605,46 @@ canvas { width: 100% !important; max-height: 260px; }
 }
 
 .upload-option { margin-bottom: 16px; }
-.upload-selected { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
-.upload-selected.has-file { color: var(--text); }
+.upload-zone.has-file {
+  border-style: solid;
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+.upload-zone.has-file:hover, .upload-zone.has-file.drag-over {
+  border-color: var(--accent-light);
+  background: var(--accent-glow);
+}
+.upload-zone-ready { color: var(--text); font-weight: 600; }
+.upload-selected {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  background: var(--surface2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.upload-selected[hidden] { display: none; }
+.upload-selected-info { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+.upload-selected-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.upload-selected-meta { font-size: 13px; color: var(--text-dim); font-family: var(--mono); }
+.upload-selected-remove {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  line-height: 1;
+  font-size: 20px;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.upload-selected-remove:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
+.upload-selected-remove:disabled { opacity: 0.4; cursor: not-allowed; }
 .upload-actions { margin-bottom: 16px; }
 
 /* Speaker-labelled transcripts are paragraphs separated by blank lines. */
@@ -648,6 +688,29 @@ canvas { width: 100% !important; max-height: 260px; }
 }
 .upload-action:hover { text-decoration: underline; }
 .upload-action:disabled { opacity: 0.5; cursor: progress; }
+
+/* A pending (spinner) or failed (reason and Retry) state an extension reports for a row. */
+.upload-state {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+.upload-state.down { color: var(--red); }
+.upload-retry {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent-light);
+  cursor: pointer;
+}
+.upload-retry:hover { text-decoration: underline; }
+.upload-retry:disabled { opacity: 0.5; cursor: progress; }
 
 .upload-filename {
   font-size: 13px;
@@ -1120,6 +1183,14 @@ canvas { width: 100% !important; max-height: 260px; }
 
 /* Meetings */
 .meeting-card { margin-bottom: 16px; }
+.meeting-live { margin-top: 16px; }
+.meeting-live h3 { margin: 0 0 4px; }
+.meeting-live-text { max-height: 260px; overflow-y: auto; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2, var(--surface)); }
+.meeting-live-text p { margin: 0 0 6px; }
+.meeting-live-text .who { font-weight: 600; margin-right: 6px; }
+.meeting-live-text .who.me { color: var(--accent-light); }
+.meeting-live-text .who.system { color: var(--green); }
+.meeting-live-text:empty::before { content: "Waiting for speech..."; color: var(--text-muted, inherit); opacity: 0.7; }
 .meeting-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 .meeting-timer { font-family: var(--mono); font-size: 28px; font-variant-numeric: tabular-nums; }
 .meeting-indicator { width: 12px; height: 12px; border-radius: 50%; background: var(--surface3); flex-shrink: 0; }

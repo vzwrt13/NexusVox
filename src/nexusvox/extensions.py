@@ -39,6 +39,8 @@ API_VERSION = 1
 ENTRY_POINT_GROUP = "nexusvox.extensions"
 # How long a dictation or selection hook may take before its result is dropped and the text stays as it was.
 HOOK_TIMEOUT_S = 3.0
+# A selection command may wait for a local language model; nobody types meanwhile and the core polish allows longer.
+SELECTION_COMMAND_TIMEOUT_S = 15.0
 # Extra time per text for `display_text`, which is called for every cue of a subtitle export.
 DISPLAY_TEXT_S = 0.01
 
@@ -140,8 +142,11 @@ class ExportTarget:
     mimetype: str
     export: Callable[[FileTranscript], bytes | str]
     # Optional, per upload: True/None offers the link; any other falsy answer (False, 0, ...) greys it out;
-    # a string greys it out with that text as the tooltip. Called while the Upload list is built, so keep it cheap.
-    available: Callable[[int], bool | str | None] | None = None
+    # a string greys it out with that text as the tooltip. A dict shows a state instead: `{"pending": "<label>"}`
+    # (label with a spinner; the dashboard keeps refreshing until it is gone) or `{"error": "<reason>", "retry":
+    # "<upload action id>"}` (the reason plus a Retry button that runs that action). Called while the Upload list
+    # is built, so keep it cheap.
+    available: Callable[[int], bool | str | dict | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -158,8 +163,9 @@ class UploadAction:
     endpoint: str = ""  # an absolute path on this server, e.g. `/api/ext/my-tab/summarise/{id}`
     panel: str = ""
     # Optional, per upload, with the same answers as `ExportTarget.available`: a falsy answer or a string greys the
-    # button out (the string is its tooltip). Called while the Upload list is built, so keep it cheap.
-    available: Callable[[int], bool | str | None] | None = None
+    # button out (the string is its tooltip); a dict shows a pending or failed state. Called while the Upload list
+    # is built, so keep it cheap.
+    available: Callable[[int], bool | str | dict | None] | None = None
 
 
 class Extension:
@@ -283,6 +289,18 @@ def _problem_with_target(target: ExportTarget) -> str:
     return ""
 
 
+def _availability_state(answer: dict) -> str | dict:
+    """A pending or failed state from an `available` check, cleaned for the dashboard; anything else greys out."""
+    if isinstance(answer.get("pending"), str):
+        return {"pending": answer["pending"] or "Working"}
+    if isinstance(answer.get("error"), str):
+        state = {"error": answer["error"] or "Failed"}
+        if isinstance(answer.get("retry"), str) and answer["retry"]:
+            state["retry"] = answer["retry"]
+        return state
+    return "Not available"
+
+
 def _problem_with_action(action: UploadAction, own_panels: set[str]) -> str:
     """Why an upload action cannot be offered, or an empty string."""
     if not isinstance(action.label, str) or not action.label:
@@ -306,6 +324,11 @@ class ExtensionRegistry:
     _panels: dict[str, DashboardPanel] = field(default_factory=dict)
     _targets: dict[str, ExportTarget] = field(default_factory=dict)
     _actions: dict[str, UploadAction] = field(default_factory=dict)
+    _target_owner: dict[str, str] = field(default_factory=dict)  # id -> the name of the extension that registered it
+    _action_owner: dict[str, str] = field(default_factory=dict)
+    # The last pending state each check answered, `{(kind, item id, upload id): state}`: a check that is skipped or too
+    # slow on a later refresh keeps showing it, so a running job never looks finished (and the polling never stops).
+    _last_pending: dict[tuple[str, str, int], dict] = field(default_factory=dict)
     _stuck: dict[tuple[str, str], threading.Thread] = field(default_factory=dict)
     _stuck_lock: threading.Lock = field(default_factory=threading.Lock)  # the dashboard calls hooks from many threads
 
@@ -373,6 +396,8 @@ class ExtensionRegistry:
         self._panels.update({p.id: p for p in panels})
         self._targets.update({t.id: t for t in targets})
         self._actions.update({a.id: a for a in actions})
+        self._target_owner.update({t.id: extension.name for t in targets})
+        self._action_owner.update({a.id: extension.name for a in actions})
         self.extensions.append(extension)
         logger.info("Loaded extension %s %s", extension.name, extension.version)
         return True
@@ -498,7 +523,7 @@ class ExtensionRegistry:
 
     def selection_command(self, selection: str, command: str, app: ActiveApp) -> str | None:
         """The replacement for *selection* from the first extension that handles *command*, else None."""
-        deadline = time.monotonic() + HOOK_TIMEOUT_S
+        deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
         for extension in self.extensions:
             result = self._text_hook(extension, "on_selection_command", deadline, selection, command, app)
             if result is not None:
@@ -566,34 +591,69 @@ class ExtensionRegistry:
     def upload_actions(self) -> list[UploadAction]:
         return list(self._actions.values())
 
-    def unavailable_exports(self, transcription_id: int, *, deadline: float | None = None) -> dict[str, str]:
+    def unavailable_exports(self, transcription_id: int, *, deadline: float | None = None) -> dict[str, str | dict]:
         """The export targets that cannot export this upload, `{target id: reason}`.
+
+        A reason is a string, or a state dict: `{"pending": label}` / `{"error": reason, "retry": action id}`.
 
         A target without `available` is always offered; one whose check raises or is too slow is offered too, so
         the export itself reports what is wrong. *deadline* (`time.monotonic()`) bounds all checks of a list.
         """
-        return self._unavailable(self._targets.values(), transcription_id, "Export target", deadline)
+        return self._unavailable(
+            self._targets.values(), transcription_id, "Export target", deadline, self._target_owner
+        )
 
-    def unavailable_actions(self, transcription_id: int, *, deadline: float | None = None) -> dict[str, str]:
+    def unavailable_actions(self, transcription_id: int, *, deadline: float | None = None) -> dict[str, str | dict]:
         """The upload actions that are greyed out for this upload, `{action id: reason}` (same rules)."""
-        return self._unavailable(self._actions.values(), transcription_id, "Upload action", deadline)
+        return self._unavailable(
+            self._actions.values(), transcription_id, "Upload action", deadline, self._action_owner
+        )
 
-    def _unavailable(self, items, transcription_id: int, what: str, deadline: float | None) -> dict[str, str]:
+    def _unavailable(
+        self, items, transcription_id: int, what: str, deadline: float | None, owners: dict[str, str]
+    ) -> dict[str, str | dict]:
         if deadline is None:
             deadline = time.monotonic() + HOOK_TIMEOUT_S
-        unavailable: dict[str, str] = {}
+        unavailable: dict[str, str | dict] = {}
         for item in items:
             if item.available is None:
                 continue
             who = f"{what} {item.id}"
+            memo = (what, item.id, transcription_id)
             try:
-                answer = self._guarded(
-                    (who, "available"), who, "its availability check", deadline, item.available, transcription_id
+                # Wrapped in a tuple, so "the check was skipped or failed" (None) differs from "it answered None".
+                outcome = self._guarded(
+                    (who, "available"),
+                    who,
+                    "its availability check",
+                    deadline,
+                    lambda tid, check=item.available: (check(tid),),
+                    transcription_id,
                 )
             except Exception:  # _guarded never raises; kept so one odd item cannot hide the others
                 logger.exception("%s failed its availability check", who)
                 continue
-            if isinstance(answer, str):
+            if outcome is None:
+                if memo in self._last_pending:
+                    unavailable[item.id] = self._last_pending[memo]
+                continue
+            answer = outcome[0]
+            self._last_pending.pop(memo, None)
+            if isinstance(answer, dict):
+                state = _availability_state(answer)
+                if isinstance(state, dict) and "retry" in state:
+                    owner = owners.get(item.id)
+                    if state["retry"] not in self._action_owner or self._action_owner[state["retry"]] != owner:
+                        logger.warning(
+                            "%s answers retry=%r, which is not an upload action of its extension; Retry dropped",
+                            who,
+                            state["retry"],
+                        )
+                        del state["retry"]
+                if isinstance(state, dict) and "pending" in state:
+                    self._last_pending[memo] = state
+                unavailable[item.id] = state
+            elif isinstance(answer, str):
                 unavailable[item.id] = answer or "Not available"
             elif answer is not None and not answer:
                 unavailable[item.id] = "Not available"

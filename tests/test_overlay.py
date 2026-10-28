@@ -5,9 +5,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nexusvox import app as app_module
-from nexusvox.app import NexusVoxApp
 from nexusvox.overlay import ERROR, ERROR_S, HIDDEN, PROCESSING, RECORDING, OverlayModel, level_from_rms
+
+try:
+    from nexusvox import app as app_module
+    from nexusvox.app import NexusVoxApp
+except Exception:  # Windows-only imports (PortAudio, pynput hook, tray) on other platforms
+    app_module = NexusVoxApp = None
+
+needs_app = pytest.mark.skipif(NexusVoxApp is None, reason="nexusvox.app needs the Windows runtime")
 
 
 class Clock:
@@ -81,6 +87,7 @@ def _app(mode):
     return app
 
 
+@needs_app
 @pytest.mark.parametrize(
     ("mode", "sound", "visual"), [("sound", True, False), ("visual", False, True), ("both", True, True)]
 )
@@ -94,6 +101,7 @@ def test_cue_follows_the_feedback_mode(monkeypatch, mode, sound, visual):
     assert app._overlay.show.called is visual
 
 
+@needs_app
 def test_cue_without_a_config_keeps_the_sound_only_behaviour(monkeypatch):
     played = []
     monkeypatch.setattr(app_module, "_play", played.append)
@@ -102,6 +110,7 @@ def test_cue_without_a_config_keeps_the_sound_only_behaviour(monkeypatch):
     assert played == ["beep"]
 
 
+@needs_app
 def test_visual_error_without_a_sound(monkeypatch):
     played = []
     monkeypatch.setattr(app_module, "_play", played.append)
@@ -111,6 +120,7 @@ def test_visual_error_without_a_sound(monkeypatch):
     app._overlay.show.assert_called_once_with(ERROR)
 
 
+@needs_app
 def test_microphone_level_reaches_the_overlay():
     app = _app("visual")
     app._on_rms(0.1)

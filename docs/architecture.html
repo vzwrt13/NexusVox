@@ -5776,6 +5776,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <li>Controller TCP: send &lt;service&gt; &lt;text&gt; for assistant and os-control</li>
           <li>Polish: the selection is read through UI Automation (uia.py), Ctrl+C only for controls that report none and in a terminal only with [polish].in_terminals (then pasted at the prompt); the [llm] server (Ollama /api/chat or OpenAI-compatible) rewrites it by the spoken instruction and the reply is pasted over it unless the focus moved meanwhile (then the paste key pastes it); a quick polish-key tap uses the default instruction; nothing selected or a model error beeps</li>
           <li>Dashboard probes the model server live: GET /api/settings/llm-status</li>
+          <li>Dictation feedback (<code>overlay.py</code>, <code>[feedback].mode</code>): the start/stop chimes, a click-through live waveform at the bottom centre of the screen, or both; read on every cue</li>
           <li>Translator, mic guard, learn-from-edits and remote mic are off by default</li>
         </ul>
       </div>

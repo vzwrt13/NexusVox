@@ -485,6 +485,17 @@ class MicGuardConfig:
     watchdog_s: float = 30.0
 
 
+FEEDBACK_MODES = ("sound", "visual", "both")
+
+
+@dataclass
+class FeedbackConfig:
+    """How a dictation signals its state: the start/stop chimes (`sound`), a small waveform at the bottom
+    centre of the screen (`visual`), or `both`. Read on every cue, so a change applies without a restart."""
+
+    mode: str = "sound"
+
+
 LLM_PROTOCOLS = ("ollama", "openai")
 
 
@@ -607,6 +618,7 @@ class Config:
     os_control: OsControlConfig = field(default_factory=OsControlConfig)
     translator: TranslatorConfig = field(default_factory=TranslatorConfig)
     mic_guard: MicGuardConfig = field(default_factory=MicGuardConfig)
+    feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     learn_from_edits: LearnFromEditsConfig = field(default_factory=LearnFromEditsConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     polish: PolishConfig = field(default_factory=PolishConfig)
@@ -671,6 +683,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     command_key = str(switcher_data.get("command_key", "Y")).upper()
     translator_data = data.get("translator", {})
     mic_guard_data = data.get("mic_guard", {})
+    feedback_data = data.get("feedback", {})
     learn_data = data.get("learn_from_edits", {})
     llm_data = data.get("llm", {})
     polish_data = data.get("polish", {})
@@ -765,6 +778,9 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         mic_guard=MicGuardConfig(
             enabled=mic_guard_data.get("enabled", False),
             watchdog_s=float(mic_guard_data.get("watchdog_s", 30.0)),
+        ),
+        feedback=FeedbackConfig(
+            mode=feedback_data.get("mode") if feedback_data.get("mode") in FEEDBACK_MODES else "sound",
         ),
         llm=LlmConfig(
             url=str(llm_data.get("url", LlmConfig.url)),
@@ -879,6 +895,9 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             "[mic_guard]",
             f"enabled = {'true' if config.mic_guard.enabled else 'false'}",
             f"watchdog_s = {config.mic_guard.watchdog_s}",
+            "",
+            "[feedback]",
+            f'mode = "{config.feedback.mode}"',
             "",
             "[llm]",
             f"url = {json.dumps(config.llm.url)}",

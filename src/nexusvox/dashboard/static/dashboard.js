@@ -230,6 +230,7 @@ const polishTerminalsToggle = document.getElementById("polish-terminals-toggle")
 const llmModelInput = document.getElementById("llm-model-input");
 const meetingOwnLabelInput = document.getElementById("meeting-own-label-input");
 let meetingOwnLabelSaved = "";
+const feedbackModeSelect = document.getElementById("feedback-mode-select");
 const cleanupLevelSelect = document.getElementById("cleanup-level-select");
 const llmStatus = document.getElementById("llm-status");
 
@@ -475,6 +476,12 @@ meetingOwnLabelInput.addEventListener("change", async () => {
     meetingOwnLabelInput.value = meetingOwnLabelSaved;
   }
 });
+feedbackModeSelect.addEventListener("change", async () => {
+  const resp = await postSetting("/api/settings/feedback-mode", { mode: feedbackModeSelect.value });
+  const s = await resp.json();
+  if (s.error) alert(s.error);
+  feedbackModeSelect.value = s.feedback_mode;
+});
 cleanupLevelSelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/cleanup-level", { level: cleanupLevelSelect.value });
   const s = await resp.json();
@@ -514,6 +521,7 @@ async function loadSettings() {
   llmModelInput.value = s.llm_model;
   meetingOwnLabelInput.value = meetingOwnLabelSaved = s.meeting_own_voice_label;
   cleanupLevelSelect.value = s.cleanup_level;
+  feedbackModeSelect.value = s.feedback_mode;
   loadLlmStatus();
   micGuardToggle.checked = s.mic_guard_enabled;
   storeAudioToggle.checked = s.store_audio;

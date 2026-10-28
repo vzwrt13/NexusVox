@@ -189,6 +189,7 @@ def _summary_state(self, tid: int):
         return {"error": reason, "retry": "summarise"}
     return "No summary yet"
 
+
 ExportTarget("summary", "Summary (Markdown)", ".md", "text/markdown", self._export, available=self._summary_state)
 UploadAction("summarise", "Summarise", endpoint="/api/ext/my-tab/summarise/{id}")
 ```

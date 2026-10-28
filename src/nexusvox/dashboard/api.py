@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from ..config import (
     CLEANUP_LEVELS,
     CUSTOM_PROTOCOLS,
+    FEEDBACK_MODES,
     HOTKEY_KEY_VKS,
     HOTKEY_MODES,
     HOTKEY_MODIFIERS,
@@ -244,6 +245,8 @@ class DashboardAPI:
             "hotkey_modifier_options": list(HOTKEY_MODIFIERS),
             "hotkey_key_options": list(HOTKEY_KEY_VKS),
             "mic_guard_enabled": self._config.mic_guard.enabled,
+            "feedback_mode": self._config.feedback.mode,
+            "feedback_modes": list(FEEDBACK_MODES),
             "store_audio": self._config.database.store_audio,
             "learn_from_edits": self._config.learn_from_edits.enabled,
             "polish_in_terminals": self._config.polish.in_terminals,
@@ -353,6 +356,14 @@ class DashboardAPI:
     def set_mic_guard_enabled(self, enabled: bool) -> dict:
         """Checked by the app on every hold, so this is live."""
         self._config.mic_guard.enabled = enabled
+        save_config(self._config)
+        return self.get_settings()
+
+    def set_feedback_mode(self, mode: str) -> dict:
+        """Read by the app on every cue, so this is live."""
+        if mode not in FEEDBACK_MODES:
+            return {"error": f"Unsupported feedback mode: {mode}", **self.get_settings()}
+        self._config.feedback.mode = mode
         save_config(self._config)
         return self.get_settings()
 

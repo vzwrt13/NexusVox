@@ -608,3 +608,18 @@ def test_polish_key_equal_to_the_paste_key_is_dropped(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[hotkey]\npaste_key = "V"\npolish_key = "v"\n', encoding="utf-8")
     assert load_config(path).hotkey.polish_key == ""
+
+
+def test_feedback_mode_defaults_to_sound_and_round_trips(tmp_path):
+    path = tmp_path / "config.toml"
+    cfg = load_config(path)
+    assert cfg.feedback.mode == "sound"
+    cfg.feedback.mode = "both"
+    save_config(cfg, path)
+    assert load_config(path).feedback.mode == "both"
+
+
+def test_unknown_feedback_mode_falls_back_to_sound(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[feedback]\nmode = "disco"\n', encoding="utf-8")
+    assert load_config(path).feedback.mode == "sound"

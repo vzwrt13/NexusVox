@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 import numpy as np
 import sounddevice as sd
@@ -27,6 +27,8 @@ class AudioCapture:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._chunk_count = 0
         self._log_interval = 0  # set in start()
+        # Called from the audio thread with each chunk's RMS (0..1); must return at once.
+        self.on_rms: Callable[[float], None] | None = None
 
     def _audio_callback(
         self,
@@ -42,6 +44,9 @@ class AudioCapture:
         samples = indata[:, 0]
         clipped = np.clip(samples, -1.0, 1.0)
         pcm_bytes = (clipped * 32767).astype(np.int16).tobytes()
+
+        if self.on_rms is not None:
+            self.on_rms(float(np.sqrt(np.mean(samples**2))))
 
         self._chunk_count += 1
         if self._log_interval > 0 and self._chunk_count % self._log_interval == 0:

@@ -202,6 +202,13 @@ timeout_s = 8.0
 enabled = false
 watchdog_s = 30.0
 
+[feedback]
+# How a dictation shows that it is recording and typing: "sound" (the start and stop
+# chimes), "visual" (a small live waveform at the bottom centre of the screen, which
+# never takes focus and ignores the mouse) or "both". Also switchable in the dashboard
+# Settings tab, without a restart. Meeting recordings never show the waveform.
+mode = "sound"
+
 [llm]
 # The language model server polish uses. NexusVox does not ship a model: run Ollama
 # (https://ollama.com, then `ollama pull gemma4:e4b`) or any OpenAI-compatible server.

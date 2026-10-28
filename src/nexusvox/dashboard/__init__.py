@@ -130,6 +130,12 @@ def _create_app(api: DashboardAPI) -> Flask:
         resp = api.set_polish_key(data.get("key", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
+    @app.route("/api/settings/feedback-mode", methods=["POST"])
+    def set_feedback_mode():
+        data = request.get_json(force=True)
+        resp = api.set_feedback_mode(data.get("mode", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
     @app.route("/api/settings/cleanup-level", methods=["POST"])
     def set_cleanup_level():
         data = request.get_json(force=True)

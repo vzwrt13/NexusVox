@@ -1242,3 +1242,17 @@ def test_upload_without_a_valid_cleanup_level_asks_no_model(flask_client, db, sa
 
     assert job["state"] == "done"
     assert job["result"]["cleaned_text"] is None
+
+
+def test_feedback_mode_setting(flask_client):
+    settings = flask_client.get("/api/settings").get_json()
+    assert (settings["feedback_mode"], settings["feedback_modes"]) == ("sound", ["sound", "visual", "both"])
+
+    def post(mode):
+        return flask_client.post(
+            "/api/settings/feedback-mode", data=json.dumps({"mode": mode}), content_type="application/json"
+        )
+
+    assert post("both").get_json()["feedback_mode"] == "both"
+    bad = post("flashy")
+    assert bad.status_code == 400 and bad.get_json()["feedback_mode"] == "both"

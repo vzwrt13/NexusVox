@@ -931,7 +931,7 @@ def test_the_new_hooks_keep_the_api_version_and_old_extensions_loading():
     ("answer", "expected"),
     [
         ({"pending": "Summarising"}, {"pending": "Summarising"}),
-        ({"error": "Model offline", "retry": "summarise"}, {"error": "Model offline", "retry": "summarise"}),
+        ({"error": "Model offline", "retry": "nonexistent"}, {"error": "Model offline"}),
         ({"error": "Model offline"}, {"error": "Model offline"}),
         ({"pending": ""}, {"pending": "Working"}),
         ({"pending": "Summarising", "junk": 1}, {"pending": "Summarising"}),
@@ -942,3 +942,61 @@ def test_the_new_hooks_keep_the_api_version_and_old_extensions_loading():
 )
 def test_unavailable_exports_accept_pending_and_failed_states(answer, expected):
     assert _gated_registry(lambda tid: answer).unavailable_exports(1) == {"gated-md": expected}
+
+
+def _summary_registry(answer, *, other_action_owner: bool = False):
+    """An extension `gated` with an export target and the action `summarise`; `other` owns the action `speakers`."""
+
+    class Gated(V1Extension):
+        name = "gated"
+
+        def export_targets(self):
+            return [ExportTarget("gated-md", "Summary", ".md", "text/markdown", lambda t: "x", answer)]
+
+        def upload_actions(self):
+            return [UploadAction("summarise", "Summarise", endpoint="/api/ext/gated/summarise/{id}")]
+
+    class Other(V1Extension):
+        name = "other"
+
+        def upload_actions(self):
+            return [UploadAction("speakers", "Speakers", endpoint="/api/ext/other/speakers/{id}")]
+
+    reg = ExtensionRegistry()
+    assert reg.add(Gated)
+    assert reg.add(Other)
+    return reg
+
+
+def test_a_failed_state_keeps_a_retry_that_names_the_extensions_own_action():
+    reg = _summary_registry(lambda tid: {"error": "Offline", "retry": "summarise"})
+    assert reg.unavailable_exports(1) == {"gated-md": {"error": "Offline", "retry": "summarise"}}
+
+
+def test_a_retry_naming_another_extensions_action_is_dropped():
+    reg = _summary_registry(lambda tid: {"error": "Offline", "retry": "speakers"})
+    assert reg.unavailable_exports(1) == {"gated-md": {"error": "Offline"}}
+
+
+def test_a_pending_state_survives_a_check_that_is_too_slow(monkeypatch):
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.05)
+    answers = iter([{"pending": "Summarising"}, "slow", {"pending": "Summarising"}, True])
+
+    def check(tid):
+        answer = next(answers)
+        if answer == "slow":
+            time.sleep(0.3)
+        return answer
+
+    reg = _summary_registry(check)
+    assert reg.unavailable_exports(1) == {"gated-md": {"pending": "Summarising"}}
+    assert reg.unavailable_exports(1) == {"gated-md": {"pending": "Summarising"}}  # the check timed out: unchanged
+    time.sleep(0.4)  # the slow call ends, the check answers again
+    assert reg.unavailable_exports(1) == {"gated-md": {"pending": "Summarising"}}
+    assert reg.unavailable_exports(1) == {}  # it answered: finished
+
+
+def test_a_pending_state_does_not_leak_to_another_upload():
+    reg = _summary_registry(lambda tid: {"pending": "x"} if tid == 1 else True)
+    assert reg.unavailable_exports(1) == {"gated-md": {"pending": "x"}}
+    assert reg.unavailable_exports(2) == {}

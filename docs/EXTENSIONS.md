@@ -177,7 +177,7 @@ Besides the answers above, `available` may return a small dict. It works the sam
 | Answer | Shown on the row |
 |---|---|
 | `{"pending": "<label>"}` | The label with a spinner; the export or button stays greyed out. While any row is pending, the dashboard re-fetches the Meetings and Upload lists every few seconds and stops when none is, so a finished export becomes active without a page reload |
-| `{"error": "<reason>", "retry": "<action id>"}` | The reason in red and a Retry button that runs the named `UploadAction` of your extension. Without `retry`, or when no such action exists, only the reason is shown |
+| `{"error": "<reason>", "retry": "<action id>"}` | The reason in red and a Retry button that runs the named `UploadAction`. `retry` must be an action your own extension registered; any other id is dropped with a log warning and only the reason is shown. Retry is also hidden while that action is itself greyed out for the row, and disabled while it runs |
 
 ```python
 def _summary_state(self, tid: int):
@@ -195,7 +195,9 @@ UploadAction("summarise", "Summarise", endpoint="/api/ext/my-tab/summarise/{id}"
 ```
 
 A dict with neither key greys the row out like `False`. The check is still called once per listed row on each
-refresh, so keep it cheap.
+refresh, so keep it cheap. A refresh in which the check raises or is too slow keeps showing the last `pending`
+answer, so a running job never looks finished because of one missed answer; a plain answer (or `True`) ends it.
+The dashboard refreshes only the list that has a pending row, and only while the page and that tab are shown.
 
 ## Hook 5: change a dictation before it is typed
 

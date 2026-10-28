@@ -140,14 +140,17 @@ def plausible(original: str, cleaned: str, level: str) -> bool:
     return difflib.SequenceMatcher(None, before, after, autojunk=False).ratio() >= _MIN_SIMILARITY[level]
 
 
-def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = MIN_WORDS) -> CleanupResult:
+def cleanup(
+    text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = MIN_WORDS, *, needs_cuda: bool = True
+) -> CleanupResult:
     """*text* cleaned up at `config.level`, or *text* itself. Blocking HTTP; never raises.
 
     A *text* of fewer than *min_words* words is returned as it is, without asking the model.
+    Without a CUDA GPU the dictation is returned as it is too, unless *needs_cuda* is False (file uploads).
     """
     if config.level not in PROMPTS or len(_words(text)) < min_words:
         return CleanupResult(text)
-    if not cuda_available():
+    if needs_cuda and not cuda_available():
         global _no_cuda_logged
         if not _no_cuda_logged:
             _no_cuda_logged = True

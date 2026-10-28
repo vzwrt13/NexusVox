@@ -38,6 +38,7 @@ from .injector import foreground_window, inject_text
 from .lang_detect import detect_language
 from .llm import LlmError
 from .llm import warm_up as llm_warm_up
+from .logsetup import Text
 from .mic_guard import MicGuard, create_mic_guard
 from .models import COMMAND_APP
 from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
@@ -295,7 +296,7 @@ class NexusVoxApp:
         except OSError as exc:
             logger.warning("os-control not reachable (%s)", exc)
             return None
-        logger.info("os-control command %r -> %s", text, reply or "(no reply)")
+        logger.info("os-control command %r -> %s", Text(text), reply or "(no reply)")
         return reply
 
     def get_learn_status(self) -> dict:
@@ -648,7 +649,9 @@ class NexusVoxApp:
                 cleanup_ms=processed.cleanup.ms,
                 app=target_app,
             )
-            logger.info("%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, processed.typed)
+            logger.info(
+                "%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, Text(processed.typed)
+            )
             self._store_audio(audio_buffer, record.id)
 
         except Exception:
@@ -762,7 +765,7 @@ class NexusVoxApp:
             logger.info("Paste last: nothing pasted yet in this session")
             self._cue(beep_error, ERROR)
             return
-        logger.info("Paste last: %s", self._last_typed)
+        logger.info("Paste last: %s", Text(self._last_typed))
         try:
             await asyncio.get_running_loop().run_in_executor(
                 None, inject_text, self._last_typed, self._config.injection_delay_ms
@@ -860,7 +863,7 @@ class NexusVoxApp:
             try:
                 opened = await loop.run_in_executor(None, window_manager.open_target, target)
             except OSError:
-                logger.exception("Opening %r failed", target)
+                logger.exception("Opening %r failed", Text(target))
                 opened = False
             if not opened:
                 self._cue(beep_error, ERROR)
@@ -875,7 +878,7 @@ class NexusVoxApp:
                 self._cue(beep_error, ERROR)
             else:
                 if reply.startswith("error:"):
-                    logger.warning("Assistant refused the command: %s", reply)
+                    logger.warning("Assistant refused the command: %s", Text(reply))
                     self._cue(beep_error, ERROR)
                 return f"[assistant] {assistant_text}"
 

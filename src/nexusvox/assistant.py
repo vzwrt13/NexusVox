@@ -15,6 +15,7 @@ import re
 import socket
 
 from .config import AssistantConfig
+from .logsetup import Text
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def send_to_assistant(text: str, config: AssistantConfig) -> str:
     """Hand `text` to the assistant service. Returns its reply; raises OSError when
     nothing answers on the port, so the caller can fall back to typing the text."""
     reply = send_to_service(config.service, text, config.host, config.port, config.timeout_s)
-    logger.info("Assistant command forwarded to %s:%d -> %s", config.host, config.port, reply or "(no reply)")
+    logger.info("Assistant command forwarded to %s:%d -> %s", config.host, config.port, Text(reply or "(no reply)"))
     return reply
 
 

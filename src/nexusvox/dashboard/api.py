@@ -54,6 +54,7 @@ from ..file_transcribe import (
 )
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
+from ..meeting_live import LIVE_OTHERS_LABEL, LiveTranscriber, WindowTranscriber
 from ..meeting_recorder import META_FILENAME, list_devices
 from ..meeting_session import MeetingSession
 from ..meeting_transcribe import (
@@ -71,7 +72,7 @@ from ..meeting_transcribe import (
 from ..os_commands import NEXUS_ACTIONS
 from ..polish_presets import PolishPreset
 from ..snippets import Snippet, SnippetOption
-from ..transcriber import BaseTranscriber
+from ..transcriber import BaseTranscriber, create_transcriber
 from ..translator import is_reachable
 from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
 from . import analytics
@@ -132,7 +133,13 @@ class DashboardAPI:
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
         self._file_jobs = FileJobs()
         self.extensions = extensions if extensions is not None else ExtensionRegistry()
-        self._meeting = meeting or MeetingSession(config.meeting, self._meetings_dir)
+        self._meeting = meeting or MeetingSession(
+            config.meeting,
+            self._meetings_dir,
+            live_factory=lambda: LiveTranscriber(
+                WindowTranscriber(self._make_live_transcriber), labels=self._live_labels
+            ),
+        )
         # The dashboard and the hotkey both start and stop meetings: one at a time, and a press that arrives
         # while another is being handled sees its outcome.
         self._meeting_lock = threading.RLock()
@@ -262,6 +269,7 @@ class DashboardAPI:
             "meeting_consent_hint": self._config.meeting.consent_hint,
             "meeting_leave_dictation_out": self._config.meeting.leave_dictation_out,
             "meeting_own_voice_label": self._config.meeting.own_voice_label,
+            "meeting_live_transcript": self._config.meeting.live_transcript,
         }
 
     def get_translator_status(self) -> dict:
@@ -947,6 +955,33 @@ class DashboardAPI:
         self._config.meeting.leave_dictation_out = bool(enabled)
         save_config(self._config)
         return self.get_settings()
+
+    def set_meeting_live_transcript(self, enabled: bool) -> dict:
+        """Applied from the next meeting on; the running one keeps what it started with."""
+        self._config.meeting.live_transcript = bool(enabled)
+        save_config(self._config)
+        return self.get_settings()
+
+    def get_meeting_live(self, after: int = 0) -> dict:
+        """Live transcript segments from `after` on (the Meetings tab polls this while a meeting records)."""
+        return self._meeting.live(after)
+
+    def _live_labels(self) -> dict[str, str]:
+        """Live speaker labels: the microphone is named after the Settings label, everyone on the system track is
+        `Others` (no speaker detection while recording; the stored transcript numbers them)."""
+        return {
+            "mic": self._config.meeting.own_voice_label,
+            "system": LIVE_OTHERS_LABEL,
+        }
+
+    def _make_live_transcriber(self) -> BaseTranscriber:
+        """The transcriber one live transcript uses for all its windows (current model and language)."""
+        return create_transcriber(
+            self._config.inference,
+            device=None,
+            language=self._config.language,
+            auto_detect_language=self._config.auto_language_detection,
+        )
 
     def begin_dictation(self, start: float) -> int | None:
         """A dictation take began (`time.monotonic()`); the token for `end_dictation`. Never raises."""

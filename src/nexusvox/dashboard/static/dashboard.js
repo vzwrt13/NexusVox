@@ -2143,6 +2143,14 @@ const meetingProgressBar = document.getElementById("meeting-progress-bar");
 const meetingConsent = document.getElementById("meeting-consent");
 const meetingConsentToggle = document.getElementById("meeting-consent-toggle");
 const meetingDictationToggle = document.getElementById("meeting-dictation-toggle");
+const meetingLiveToggle = document.getElementById("meeting-live-toggle");
+const meetingLiveBox = document.getElementById("meeting-live");
+const meetingLiveText = document.getElementById("meeting-live-text");
+const meetingLiveStatus = document.getElementById("meeting-live-status");
+let meetingLiveTimer = null;
+let meetingLiveAfter = 0;
+let meetingLiveBusy = false;
+let meetingLiveGeneration = 0;
 const meetingHotkeyMods = Array.from(document.querySelectorAll("#meeting-hotkey-mods input"));
 const meetingHotkeyKey = document.getElementById("meeting-hotkey-key");
 const meetingHotkeyStatus = document.getElementById("meeting-hotkey-status");
@@ -2168,8 +2176,68 @@ function showMeetingStatus(text, cls) {
   meetingStatus.textContent = text;
 }
 
+// Live transcript: poll the new segments every 2 s while a meeting records. Text goes in with textContent only.
+function appendLiveSegments(segments) {
+  const atBottom = meetingLiveText.scrollTop + meetingLiveText.clientHeight >= meetingLiveText.scrollHeight - 8;
+  for (const seg of segments) {
+    if (seg.n < meetingLiveAfter) continue; // already shown (overlapping polls)
+    const p = document.createElement("p");
+    const who = document.createElement("span");
+    who.className = "who " + (seg.speaker === "mic" ? "me" : "system");
+    who.textContent = seg.label + ":";
+    p.append(who, document.createTextNode(seg.text));
+    meetingLiveText.append(p);
+    meetingLiveAfter = seg.n + 1;
+  }
+  if (atBottom) meetingLiveText.scrollTop = meetingLiveText.scrollHeight;
+}
+
+async function pollMeetingLive() {
+  if (meetingLiveBusy) return; // one request at a time: two in flight would both append the same segments
+  meetingLiveBusy = true;
+  const generation = meetingLiveGeneration;
+  try {
+    const live = await fetch("/api/meetings/live?after=" + meetingLiveAfter).then((r) => r.json());
+    if (generation !== meetingLiveGeneration) return; // a new meeting started while this was in flight
+    // A meeting stopped from the hotkey while another tab is shown never reaches renderMeetingState.
+    // The poll runs on until the worker has ended too: a window in flight at Stop still adds its text.
+    if (!live.recording && !(live.status && live.status.active) && meetingLiveTimer) {
+      clearInterval(meetingLiveTimer);
+      meetingLiveTimer = null;
+    }
+    meetingLiveBox.hidden = !live.status;
+    appendLiveSegments(live.segments);
+    if (live.status) {
+      const st = live.status;
+      meetingLiveStatus.textContent = st.error
+        ? "Live transcription failed for the last window: " + st.error
+        : st.skipped_s > 0
+          ? `Model load ${Math.round(st.load * 100)}%. The live view skipped ${st.skipped_s} s of audio to keep up; the saved transcript is complete.`
+          : `Model load ${Math.round(st.load * 100)}%.`;
+    }
+  } catch (err) {
+    console.error("Live transcript failed:", err);
+  } finally {
+    meetingLiveBusy = false;
+  }
+}
+
+function setMeetingLivePolling(on) {
+  if (on && !meetingLiveTimer) {
+    meetingLiveAfter = 0;
+    meetingLiveGeneration += 1;
+    meetingLiveBusy = false;
+    meetingLiveText.textContent = "";
+    pollMeetingLive();
+    meetingLiveTimer = setInterval(pollMeetingLive, 2000);
+  } else if (!on && meetingLiveTimer) {
+    pollMeetingLive(); // the timer stops itself once the worker has ended (see pollMeetingLive)
+  }
+}
+
 function renderMeetingState(status) {
   meetingRecording = !!status.recording;
+  setMeetingLivePolling(meetingRecording);
   meetingElapsed = status.elapsed_s || 0;
   meetingIndicator.classList.toggle("recording", meetingRecording);
   meetingTimer.textContent = formatClock(meetingElapsed);
@@ -2386,6 +2454,17 @@ async function saveMeetingDevices() {
 meetingMicSelect.addEventListener("change", saveMeetingDevices);
 meetingOutputSelect.addEventListener("change", saveMeetingDevices);
 
+meetingLiveToggle.addEventListener("change", async () => {
+  const wanted = meetingLiveToggle.checked;
+  try {
+    const r = await postSetting("/api/settings/meeting-live-transcript", { enabled: wanted });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    meetingLiveToggle.checked = (await r.json()).meeting_live_transcript;
+  } catch (err) {
+    meetingLiveToggle.checked = !wanted; // not saved: show the setting that is still in force
+  }
+});
+
 async function openMeetingsTab() {
   const [settings, devices] = await Promise.all([
     fetch("/api/settings").then((r) => r.json()),
@@ -2394,6 +2473,7 @@ async function openMeetingsTab() {
   meetingConsentHint = settings.meeting_consent_hint;
   meetingConsentToggle.checked = meetingConsentHint;
   meetingDictationToggle.checked = settings.meeting_leave_dictation_out;
+  meetingLiveToggle.checked = settings.meeting_live_transcript;
   renderMeetingHotkey(settings);
   fillDeviceSelect(meetingMicSelect, devices.inputs, devices.mic_device);
   fillDeviceSelect(meetingOutputSelect, devices.outputs, devices.output_device);

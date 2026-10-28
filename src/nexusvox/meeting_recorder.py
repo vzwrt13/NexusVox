@@ -317,8 +317,16 @@ class TrackWriter:
 class _Track:
     """One source, its writer and the thread that moves blocks from the audio callback to disk."""
 
-    def __init__(self, name: str, source: AudioSource, writer: TrackWriter, clock: Callable[[], float]) -> None:
+    def __init__(
+        self,
+        name: str,
+        source: AudioSource,
+        writer: TrackWriter,
+        clock: Callable[[], float],
+        tap: Callable[[bytes], None] | None = None,
+    ) -> None:
         self.name = name
+        self._tap = tap
         self.source = source
         self.writer = writer
         self._clock = clock
@@ -331,6 +339,11 @@ class _Track:
 
     def sink(self, data: bytes) -> None:
         """Runs on the audio thread: never blocks, a full queue drops the block."""
+        if self._tap is not None:
+            try:
+                self._tap(data)
+            except Exception:  # the live preview must never cost a recorded block
+                logger.exception("Meeting %s audio tap failed", self.name)
         try:
             self._queue.put_nowait((self._clock(), data))
         except queue.Full:
@@ -399,11 +412,21 @@ class MeetingRecorder:
         self._open_takes: dict[int, float] = {}
         self._next_take = 0
         self._dictation_lock = threading.Lock()
+        self._tap: Callable[[str, AudioFormat, bytes], None] | None = None
         self.folder: Path | None = None
 
     @property
     def recording(self) -> bool:
         return bool(self._tracks)
+
+    def set_tap(self, tap: Callable[[str, AudioFormat, bytes], None] | None) -> None:
+        """Hand every block of every track to `tap(track, format, data)` as well (the live transcript). Set before
+        `start()`; it runs on the audio thread and must not block."""
+        self._tap = tap
+
+    def _track_tap(self, name: str, fmt: AudioFormat) -> Callable[[bytes], None] | None:
+        tap = self._tap
+        return None if tap is None else (lambda data: tap(name, fmt, data))
 
     def _new_folder(self, started_at: datetime) -> Path:
         stem = started_at.astimezone().strftime("meeting-%Y%m%d-%H%M%S")
@@ -439,7 +462,8 @@ class MeetingRecorder:
             self._open_takes = {}
             for name, source in self._sources.items():
                 writer = TrackWriter(folder / f"{name}.wav", formats[name], t0)
-                tracks[name] = _Track(name, source, writer, self._clock)
+                track_tap = self._track_tap(name, formats[name])
+                tracks[name] = _Track(name, source, writer, self._clock, track_tap)
             self.folder = folder
             self._tracks = tracks
             self._write_meta(ended_at=None)
@@ -463,6 +487,12 @@ class MeetingRecorder:
         self._started_at = None
         if folder is not None:
             shutil.rmtree(folder, ignore_errors=True)
+
+    @property
+    def dictating(self) -> bool:
+        """Whether a dictation take is running right now (the live transcript waits for it)."""
+        with self._dictation_lock:
+            return bool(self._open_takes)
 
     def begin_dictation(self, start: float) -> int | None:
         """Note that a dictation take began at `start` (recorder clock); None when no meeting runs.

@@ -579,6 +579,12 @@
           <button type="button" class="flagged-save-btn" id="meeting-toggle">Start recording</button>
         </div>
         <p id="meeting-status" class="status-line" hidden></p>
+        <div id="meeting-live" class="meeting-live" hidden>
+          <h3>Live transcript</h3>
+          <p class="settings-hint">A rough preview a few seconds behind the call. The transcript made after you stop is the one that is saved.</p>
+          <div id="meeting-live-text" class="meeting-live-text" aria-live="polite"></div>
+          <p id="meeting-live-status" class="settings-hint"></p>
+        </div>
         <div id="meeting-progress" class="upload-progress" style="display: none;">
           <progress id="meeting-progress-bar" max="100" value="0"></progress>
         </div>
@@ -641,6 +647,13 @@
             <p>Text you dictate during a meeting is also picked up by the microphone. With this on, those words are dropped from the Me part when the meeting is transcribed; the recorded audio stays as it is.</p>
           </div>
           <label class="toggle"><input type="checkbox" id="meeting-dictation-toggle"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Show a live transcript while recording</h3>
+            <p>Transcribes both sides in short windows during the meeting and labels your voice with your own-voice name and everyone else <em>Others</em>, since it cannot tell several people apart while recording. The transcript saved after you stop numbers them (<code>Speaker 2</code>, <code>Speaker 3</code>, ...). It uses the transcription model all through the call, so it is off by default. Applies from the next meeting.</p>
+          </div>
+          <label class="toggle"><input type="checkbox" id="meeting-live-toggle"><span class="toggle-slider"></span></label>
         </div>
       </div>
 

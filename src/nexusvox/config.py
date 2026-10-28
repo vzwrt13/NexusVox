@@ -315,6 +315,10 @@ class MeetingConfig:
     leave_dictation_out: bool = True
     # The label of the microphone's speaker in a meeting transcript; the other participants are numbered on from 2.
     own_voice_label: str = DEFAULT_OWN_VOICE_LABEL
+    # Show a rough transcript of both tracks (your voice and "Others") in the dashboard while the meeting
+    # records. It sends the audio to the transcription model in 6 s windows all meeting long, and that load is not
+    # measured yet, so it is off until switched on (dashboard Meetings tab).
+    live_transcript: bool = False
 
 
 def meeting_hotkey_clash(modifiers: list[str], key: str, dictation: HotkeyConfig) -> str | None:
@@ -728,6 +732,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             consent_hint=bool(meeting_data.get("consent_hint", True)),
             leave_dictation_out=bool(meeting_data.get("leave_dictation_out", True)),
             own_voice_label=_own_voice_label(meeting_data.get("own_voice_label", "")),
+            live_transcript=bool(meeting_data.get("live_transcript", False)),
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
@@ -835,6 +840,7 @@ def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
             f"consent_hint = {'true' if config.meeting.consent_hint else 'false'}",
             f"leave_dictation_out = {'true' if config.meeting.leave_dictation_out else 'false'}",
             f"own_voice_label = {json.dumps(config.meeting.own_voice_label)}",
+            f"live_transcript = {'true' if config.meeting.live_transcript else 'false'}",
             "",
             "[audio]",
             f"sample_rate = {config.audio.sample_rate}",

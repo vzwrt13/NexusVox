@@ -198,7 +198,7 @@ def clean_transcript(
                     continue
                 if on_progress:
                     on_progress("cleaning", done, total)
-                result = cleanup(piece, config, llm, MIN_PIECE_WORDS)
+                result = cleanup(piece, config, llm, MIN_PIECE_WORDS, needs_cuda=False)
                 if result.error:
                     failed += 1
                 if result.ms is not None:

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import sessionmaker
 
+from ..cleanup import NO_CUDA_HINT
 from ..config import (
     CLEANUP_LEVELS,
     CUSTOM_PROTOCOLS,
@@ -28,6 +29,7 @@ from ..config import (
     Config,
     HotkeyConfig,
     MeetingConfig,
+    cuda_available,
     meeting_hotkey_clash,
     normalize_hotkey_key,
     normalize_speaker_label,
@@ -226,7 +228,7 @@ class DashboardAPI:
         return {
             "requested": requested,
             "resolved": resolve_device(requested),
-            "cuda_available": resolve_device("auto") == "cuda",
+            "cuda_available": cuda_available(),
         }
 
     def set_device(self, requested: str) -> dict:
@@ -267,6 +269,7 @@ class DashboardAPI:
             "polish_in_terminals": self._config.polish.in_terminals,
             "cleanup_level": self._config.cleanup.level,
             "cleanup_levels": list(CLEANUP_LEVELS),
+            "cleanup_needs_cuda": not cuda_available(),
             "meeting_modifiers": list(self._config.meeting.modifiers),
             "meeting_key": self._config.meeting.key,
             "meeting_hotkey_default": {"modifiers": list(MeetingConfig().modifiers), "key": MeetingConfig().key},
@@ -389,6 +392,8 @@ class DashboardAPI:
         """Read by the pipeline on every dictation, so this is live."""
         if level not in CLEANUP_LEVELS:
             return {"error": f"Unsupported cleanup level: {level}", **self.get_settings()}
+        if level != "off" and not cuda_available():
+            return {"error": NO_CUDA_HINT, **self.get_settings()}
         self._config.cleanup.level = level
         save_config(self._config)
         if level != "off":

@@ -536,6 +536,9 @@ async function loadSettings() {
   llmModelInput.value = s.llm_model;
   meetingOwnLabelInput.value = meetingOwnLabelSaved = s.meeting_own_voice_label;
   cleanupLevelSelect.value = s.cleanup_level;
+  cleanupLevelSelect.disabled = !!s.cleanup_needs_cuda;
+  cleanupLevelSelect.title = s.cleanup_needs_cuda ? "Needs a CUDA GPU" : "";
+  document.getElementById("cleanup-cuda-hint").hidden = !s.cleanup_needs_cuda;
   feedbackModeSelect.value = s.feedback_mode;
   loadLlmStatus();
   micGuardToggle.checked = s.mic_guard_enabled;

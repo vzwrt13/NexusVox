@@ -29,6 +29,8 @@ class AudioCapture:
         self._log_interval = 0  # set in start()
         # Called from the audio thread with each chunk's RMS (0..1); must return at once.
         self.on_rms: Callable[[float], None] | None = None
+        # Asked per chunk before the RMS is computed for `on_rms`; None means always.
+        self.rms_wanted: Callable[[], bool] | None = None
 
     def _audio_callback(
         self,
@@ -45,12 +47,14 @@ class AudioCapture:
         clipped = np.clip(samples, -1.0, 1.0)
         pcm_bytes = (clipped * 32767).astype(np.int16).tobytes()
 
-        if self.on_rms is not None:
-            self.on_rms(float(np.sqrt(np.mean(samples**2))))
-
         self._chunk_count += 1
-        if self._log_interval > 0 and self._chunk_count % self._log_interval == 0:
+        log_now = self._log_interval > 0 and self._chunk_count % self._log_interval == 0
+        feed = self.on_rms is not None and (self.rms_wanted is None or self.rms_wanted())
+        if feed or log_now:
             rms = float(np.sqrt(np.mean(samples**2)))
+            if feed:
+                self.on_rms(rms)
+        if log_now:
             db = 20 * math.log10(max(rms, 1e-10))
             logger.info("Audio: chunks=%d rms=%.1fdB", self._chunk_count, db)
 

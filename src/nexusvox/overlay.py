@@ -24,8 +24,10 @@ HIDDEN = "hidden"
 RECORDING = "recording"
 PROCESSING = "processing"
 ERROR = "error"
+CONFIRMED = "confirmed"  # a brief all-clear, e.g. a transcription was flagged
 
 ERROR_S = 1.4  # how long an error stays on screen
+CONFIRMED_S = 0.8
 BARS = 28
 FLOOR_DB = -60.0  # at or below this the bars are flat
 CEILING_DB = -20.0  # speech this loud fills the pill
@@ -39,6 +41,9 @@ def level_from_rms(rms: float) -> float:
     return min(1.0, max(0.0, (db - FLOOR_DB) / (CEILING_DB - FLOOR_DB)))
 
 
+_TIMED = (ERROR, CONFIRMED)
+
+
 class OverlayModel:
     """What the overlay shows. `show` and `level` may be called from any thread."""
 
@@ -46,7 +51,8 @@ class OverlayModel:
         self._clock = clock
         self._lock = threading.Lock()
         self._state = HIDDEN
-        self._error_until = 0.0
+        self._timed_until = 0.0
+        self.generation = 0  # bumped by every new recording: the window re-places itself for it
         self._levels: deque[float] = deque([0.0] * BARS, maxlen=BARS)
 
     @property
@@ -56,24 +62,25 @@ class OverlayModel:
             return self._current()
 
     def _current(self) -> str:
-        if self._state == ERROR and self._clock() >= self._error_until:
+        if self._state in _TIMED and self._clock() >= self._timed_until:
             self._state = HIDDEN
         return self._state
 
     def show(self, state: str) -> None:
-        """Enter `recording`, `processing` or `error`; `done` / `hidden` end it (an error runs out by itself)."""
+        """Enter `recording`, `processing`, `error` or `confirmed`; `done` / `hidden` end it (the last two
+        run out by themselves and are never cut short)."""
         with self._lock:
             if state == RECORDING:
                 self._levels.extend([0.0] * BARS)
                 self._state = RECORDING
-            elif state == PROCESSING:
-                if self._current() != ERROR:
-                    self._state = PROCESSING
-            elif state == ERROR:
-                self._state = ERROR
-                self._error_until = self._clock() + ERROR_S
-            elif self._current() != ERROR:  # done / hidden: never cut an error short
-                self._state = HIDDEN
+                self.generation += 1
+            elif state in _TIMED:
+                self._state = state
+                self._timed_until = self._clock() + (ERROR_S if state == ERROR else CONFIRMED_S)
+            elif self._current() in _TIMED:  # processing / done / hidden never cut a timed state short
+                pass
+            else:
+                self._state = PROCESSING if state == PROCESSING else HIDDEN
 
     def level(self, value: float) -> None:
         """Push a microphone level (0..1); only a recording shows it."""
@@ -81,9 +88,10 @@ class OverlayModel:
             if self._state == RECORDING:
                 self._levels.append(min(1.0, max(0.0, value)))
 
-    def snapshot(self) -> tuple[str, list[float]]:
+    def snapshot(self) -> tuple[str, list[float], int]:
+        """State, level history and the recording generation, read together."""
         with self._lock:
-            return self._current(), list(self._levels)
+            return self._current(), list(self._levels), self.generation
 
 
 # --- the window ------------------------------------------------------------------------------------
@@ -96,6 +104,7 @@ _COLORS = {
     RECORDING: ("#18181b", "#8b8bff"),
     PROCESSING: ("#18181b", "#a1a1aa"),
     ERROR: ("#3a1416", "#f87171"),
+    CONFIRMED: ("#13251a", "#4ade80"),
 }
 
 _GWL_EXSTYLE = -20
@@ -119,13 +128,37 @@ class _MonitorInfo(ctypes.Structure):
     ]
 
 
+_user32_cache = None
+
+
+def _user32():
+    """The overlay's own user32 with its own prototypes: the ones on `ctypes.windll.user32` are shared
+    with `injector`, `window_manager` and `uia`, and changing them there changes what those get back."""
+    global _user32_cache
+    if _user32_cache is None:
+        user32 = ctypes.WinDLL("user32")
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32.MonitorFromWindow.restype = wintypes.HANDLE
+        user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_MonitorInfo)]
+        user32.GetParent.restype = wintypes.HWND
+        user32.GetParent.argtypes = [wintypes.HWND]
+        user32.GetWindowLongW.restype = ctypes.c_long
+        user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.SetWindowLongW.restype = ctypes.c_long
+        user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.SetWindowPos.argtypes = [
+            wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT,
+        ]  # fmt: skip
+        _user32_cache = user32
+    return _user32_cache
+
+
 def work_area_of_focused_window() -> tuple[int, int, int, int]:
     """The work area (left, top, right, bottom) of the monitor holding the focused window, else the primary one."""
-    user32 = ctypes.windll.user32
-    user32.GetForegroundWindow.restype = wintypes.HWND
-    user32.MonitorFromWindow.restype = wintypes.HANDLE
-    user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
-    user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_MonitorInfo)]
+    user32 = _user32()
     monitor = user32.MonitorFromWindow(user32.GetForegroundWindow(), _MONITOR_DEFAULTTOPRIMARY)
     info = _MonitorInfo()
     info.cbSize = ctypes.sizeof(_MonitorInfo)
@@ -142,11 +175,11 @@ class Overlay:
         self.model = model or OverlayModel()
         self._thread: threading.Thread | None = None
         self._start_lock = threading.Lock()
-        self._failed = False
+        self.failed = False  # the window could not start or died: the caller falls back to the sounds
 
     def show(self, state: str) -> None:
         self.model.show(state)
-        if state in (RECORDING, PROCESSING, ERROR):
+        if state in (RECORDING, PROCESSING, ERROR, CONFIRMED):
             self._ensure_window()
 
     def level(self, value: float) -> None:
@@ -158,7 +191,7 @@ class Overlay:
 
     def _ensure_window(self) -> None:
         with self._start_lock:
-            if self._thread is not None or self._failed:
+            if self._thread is not None or self.failed:
                 return
             self._thread = threading.Thread(target=self._run, name="overlay", daemon=True)
             self._thread.start()
@@ -167,15 +200,13 @@ class Overlay:
         try:
             self._loop()
         except Exception:
-            self._failed = True
-            logger.exception("The dictation overlay could not start; use the sounds instead")
+            self.failed = True
+            logger.exception("The dictation overlay stopped; the sounds are used instead")
 
     def _loop(self) -> None:
         import tkinter as tk  # lazy: only users of the visual feedback pay for it
 
-        user32 = ctypes.windll.user32
-        user32.GetForegroundWindow.restype = wintypes.HWND
-        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32 = _user32()
         previous = user32.GetForegroundWindow()
         root = tk.Tk()
         root.withdraw()
@@ -191,19 +222,12 @@ class Overlay:
         canvas.pack()
         root.update_idletasks()
 
-        user32.GetParent.restype = wintypes.HWND
-        user32.GetWindowLongW.restype = ctypes.c_long
-        user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
-        user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
-        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-        user32.SetWindowPos.argtypes = [
-            wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT,
-        ]  # fmt: skip
         hwnd = user32.GetParent(root.winfo_id()) or root.winfo_id()
         shown = False
+        placed_for = -1
 
         def place() -> None:
-            """Show the window at the bottom centre of the focused window's monitor, without activating it."""
+            """Move the window to the bottom centre of the focused window's monitor, without activating it."""
             # Tk rewrites the extended style when it maps the window, so set it right before every show.
             style = user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
             style |= _WS_EX_LAYERED | _WS_EX_TRANSPARENT | _WS_EX_NOACTIVATE | _WS_EX_TOOLWINDOW
@@ -214,17 +238,30 @@ class Overlay:
             user32.SetWindowPos(hwnd, _HWND_TOPMOST, x, y, _WIDTH, _HEIGHT, _SWP_NOACTIVATE | _SWP_SHOWWINDOW)
 
         def tick() -> None:
-            nonlocal shown
-            state, levels = self.model.snapshot()
-            if state == HIDDEN:
-                if shown:
+            nonlocal shown, placed_for
+            try:
+                state, levels, generation = self.model.snapshot()
+                if state == HIDDEN:
+                    if shown:
+                        user32.ShowWindow(hwnd, _SW_HIDE)
+                        shown = False
+                else:
+                    # A new recording is placed again, so it follows the focus to another monitor even when
+                    # the pill never went away in between.
+                    if not shown or generation != placed_for:
+                        place()
+                        shown = True
+                        placed_for = generation
+                    self._draw(canvas, state, levels)
+            except Exception:
+                # Tk would swallow this and never call tick again, leaving the pill on screen for good.
+                self.failed = True
+                logger.exception("The dictation overlay failed; the sounds are used instead")
+                try:
                     user32.ShowWindow(hwnd, _SW_HIDE)
-                    shown = False
-            else:
-                if not shown:
-                    place()
-                    shown = True
-                self._draw(canvas, state, levels)
+                finally:
+                    root.quit()
+                return
             root.after(_TICK_MS, tick)
 
         tick()
@@ -238,7 +275,7 @@ class Overlay:
         canvas.create_oval(0, 0, _HEIGHT, _HEIGHT, fill=background, outline="")
         canvas.create_oval(_WIDTH - _HEIGHT, 0, _WIDTH, _HEIGHT, fill=background, outline="")
         canvas.create_rectangle(r, 0, _WIDTH - r, _HEIGHT, fill=background, outline="")
-        if state == ERROR:
+        if state in (ERROR, CONFIRMED):
             canvas.create_line(r + 4, r, _WIDTH - r - 4, r, fill=accent, width=3, capstyle="round")
             return
         left, right = r + 2, _WIDTH - r - 2

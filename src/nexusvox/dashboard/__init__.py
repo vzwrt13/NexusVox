@@ -557,6 +557,7 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
             get_switch_status = None
             get_learn_status = None
             get_transcriber = None
+            on_feedback_mode = None
             if app is not None:
 
                 def on_model_switch(model_id: str) -> None:
@@ -565,6 +566,7 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
 
                 get_switch_status = app.get_switch_status
                 get_learn_status = app.get_learn_status
+                on_feedback_mode = app.on_feedback_mode
 
                 def get_transcriber():
                     return app._transcriber
@@ -580,6 +582,7 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 get_switch_status=get_switch_status,
                 get_learn_status=get_learn_status,
                 get_transcriber=get_transcriber,
+                on_feedback_mode=on_feedback_mode,
                 benchmarks_dir=benchmarks_dir,
                 extensions=load_extensions(),
             )

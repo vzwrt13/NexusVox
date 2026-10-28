@@ -5,7 +5,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nexusvox.overlay import ERROR, ERROR_S, HIDDEN, PROCESSING, RECORDING, OverlayModel, level_from_rms
+from nexusvox.overlay import (
+    CONFIRMED,
+    CONFIRMED_S,
+    ERROR,
+    ERROR_S,
+    HIDDEN,
+    PROCESSING,
+    RECORDING,
+    OverlayModel,
+    level_from_rms,
+)
 
 try:
     from nexusvox import app as app_module
@@ -83,7 +93,7 @@ def test_level_scale(rms, expected):
 def _app(mode):
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._config = SimpleNamespace(feedback=SimpleNamespace(mode=mode))
-    app._overlay = MagicMock()
+    app._overlay = MagicMock(failed=False)
     return app
 
 
@@ -125,3 +135,58 @@ def test_microphone_level_reaches_the_overlay():
     app = _app("visual")
     app._on_rms(0.1)
     app._overlay.level.assert_called_once_with(1.0)
+
+
+def test_a_confirmation_is_brief_and_not_cut_short():
+    clock = Clock()
+    model = OverlayModel(clock)
+    model.show(PROCESSING)
+    model.show(CONFIRMED)
+    model.show("done")
+    assert model.state == CONFIRMED
+    clock.now += CONFIRMED_S + 0.1
+    assert model.state == HIDDEN
+
+
+def test_every_recording_gets_a_new_generation():
+    model = OverlayModel(Clock())
+    model.show(RECORDING)
+    first = model.snapshot()[2]
+    model.show(PROCESSING)
+    model.show(RECORDING)  # back to back, never hidden in between
+    assert model.snapshot()[2] == first + 1
+
+
+@needs_app
+def test_visual_mode_falls_back_to_the_sound_when_the_window_failed(monkeypatch):
+    played = []
+    monkeypatch.setattr(app_module, "_play", played.append)
+    app = _app("visual")
+    app._overlay.failed = True
+    app._cue("beep", ERROR)
+    assert played == ["beep"]
+    app._overlay.show.assert_not_called()
+    assert not app._shows_overlay()
+
+
+@needs_app
+def test_flag_confirmation_is_visible_in_visual_mode(monkeypatch):
+    monkeypatch.setattr(app_module, "_play", lambda beep: None)
+    app = _app("visual")
+    app._cue("beep", CONFIRMED)
+    app._overlay.show.assert_called_once_with(CONFIRMED)
+
+
+@needs_app
+def test_the_level_is_only_wanted_with_visual_feedback():
+    assert not _app("sound")._shows_overlay()
+    assert _app("both")._shows_overlay()
+
+
+@needs_app
+def test_switching_to_visual_builds_the_window():
+    app = _app("sound")
+    app.on_feedback_mode("sound")
+    app._overlay.warm_up.assert_not_called()
+    app.on_feedback_mode("both")
+    app._overlay.warm_up.assert_called_once()

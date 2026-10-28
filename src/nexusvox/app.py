@@ -19,7 +19,15 @@ from . import docker_ctl
 from .assistant import parse_assistant_command, send_to_assistant, send_to_service
 from .audio import AudioCapture
 from .clipboard import ClipboardError
-from .config import MODEL_REGISTRY, Config, InferenceConfig, model_needs_docker, resolve_device, save_config
+from .config import (
+    FEEDBACK_MODES,
+    MODEL_REGISTRY,
+    Config,
+    InferenceConfig,
+    model_needs_docker,
+    resolve_device,
+    save_config,
+)
 from .dashboard import ensure_dashboard_api, open_dashboard, running_dashboard_api
 from .db import Database
 from .edit_watch import EditWatcher
@@ -32,7 +40,7 @@ from .llm import LlmError
 from .llm import warm_up as llm_warm_up
 from .mic_guard import MicGuard, create_mic_guard
 from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
-from .overlay import ERROR, PROCESSING, RECORDING, Overlay, level_from_rms
+from .overlay import CONFIRMED, ERROR, PROCESSING, RECORDING, Overlay, level_from_rms
 from .pipeline import process_text
 from .polish import polish, read_selection
 from .polish_presets import resolve_instruction
@@ -50,7 +58,7 @@ def _play(beep: Callable[[], None]) -> None:
 def _feedback_mode(config: object) -> str:
     """`sound`, `visual` or `both`: how dictation cues are shown; `sound` when the config says nothing."""
     mode = getattr(getattr(config, "feedback", None), "mode", "sound")
-    return mode if mode in ("sound", "visual", "both") else "sound"
+    return mode if mode in FEEDBACK_MODES else "sound"
 
 
 @dataclass(frozen=True)
@@ -124,6 +132,7 @@ class NexusVoxApp:
         if _feedback_mode(config) != "sound":
             self._overlay.warm_up()
         self._audio.on_rms = self._on_rms
+        self._audio.rms_wanted = self._shows_overlay
         self._transcriber = create_transcriber(
             config.inference,
             device=self._device,
@@ -658,8 +667,22 @@ class NexusVoxApp:
             # next dictation (pressed during transcription), and its hold must stand.
             if self._mic_guard is not None and not self._hotkey.active:
                 self._mic_guard.release_async()
-            if self._overlay is not None and not remote and not self._hotkey.active:
-                self._overlay.show("done")  # the text is typed (or nothing was); an error stays its moment
+            if self._overlay is not None and not remote:
+                if not self._hotkey.active:
+                    self._overlay.show("done")  # the text is typed (or nothing was); an error stays its moment
+                elif self._shows_overlay():
+                    # Held again: the next take starts when its connection is up, but the user is speaking now.
+                    self._overlay.show(RECORDING)
+
+    def _shows_overlay(self) -> bool:
+        """Whether the waveform is wanted and its window is alive."""
+        overlay = self._overlay
+        return overlay is not None and not overlay.failed and _feedback_mode(getattr(self, "_config", None)) != "sound"
+
+    def on_feedback_mode(self, mode: str) -> None:
+        """The dashboard changed `[feedback].mode`: build the overlay window now, not mid-dictation."""
+        if mode != "sound" and self._overlay is not None:
+            self._overlay.warm_up()
 
     def _on_rms(self, rms: float) -> None:
         """Microphone level from the audio thread, for the waveform; only a recording shows it."""
@@ -669,13 +692,16 @@ class NexusVoxApp:
     def _cue(self, beep: Callable[[], None] | None, state: str) -> None:
         """Signal a state the way `[feedback].mode` says: the chime, the overlay, or both.
 
-        `state` is `RECORDING`, `PROCESSING`, `ERROR`, or `done` (the overlay goes away). Meeting
-        recordings and the phone never come through here for the overlay."""
+        `state` is `RECORDING`, `PROCESSING`, `ERROR` or `CONFIRMED`. Meeting recordings and the phone
+        never come through here for the overlay. A window that could not start or died leaves the sounds
+        on, whatever the mode."""
         mode = _feedback_mode(getattr(self, "_config", None))
-        if beep is not None and mode != "visual":
+        overlay = self._overlay
+        visual = overlay is not None and not overlay.failed and mode != "sound"
+        if beep is not None and (mode != "visual" or not visual):
             _play(beep)
-        if self._overlay is not None and mode != "sound":
-            self._overlay.show(state)
+        if visual:
+            overlay.show(state)
 
     @staticmethod
     def _active_app() -> ActiveApp:
@@ -796,7 +822,7 @@ class NexusVoxApp:
             return
         self._db.flag_transcription(last_tid)
         logger.info("Nexus flag: flagged transcription id=%d", last_tid)
-        self._cue(beep_flag, "done")
+        self._cue(beep_flag, CONFIRMED)
 
     async def _run_command(self, raw_text: str, nexus_cmd: NexusCommand | None, snippets: list[Snippet]) -> str | None:
         """Run the command *raw_text* is, if any. Returns the label to save it under, or None to type it.

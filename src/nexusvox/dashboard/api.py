@@ -116,6 +116,7 @@ class DashboardAPI:
         get_switch_status: Callable[[], dict] | None = None,
         get_learn_status: Callable[[], dict] | None = None,
         get_transcriber: Callable[[], BaseTranscriber] | None = None,
+        on_feedback_mode: Callable[[str], None] | None = None,
         benchmarks_dir: Path | None = None,
         extensions: ExtensionRegistry | None = None,
         meeting: MeetingSession | None = None,
@@ -127,6 +128,7 @@ class DashboardAPI:
         self._get_switch_status = get_switch_status
         self._get_learn_status = get_learn_status
         self._get_transcriber = get_transcriber
+        self._on_feedback_mode = on_feedback_mode
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
         self._file_jobs = FileJobs()
         self.extensions = extensions if extensions is not None else ExtensionRegistry()
@@ -365,6 +367,8 @@ class DashboardAPI:
             return {"error": f"Unsupported feedback mode: {mode}", **self.get_settings()}
         self._config.feedback.mode = mode
         save_config(self._config)
+        if self._on_feedback_mode:
+            self._on_feedback_mode(mode)  # builds the overlay window now, not in the middle of a dictation
         return self.get_settings()
 
     def set_cleanup_level(self, level: str) -> dict:

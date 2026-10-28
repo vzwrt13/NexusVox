@@ -140,8 +140,11 @@ class ExportTarget:
     mimetype: str
     export: Callable[[FileTranscript], bytes | str]
     # Optional, per upload: True/None offers the link; any other falsy answer (False, 0, ...) greys it out;
-    # a string greys it out with that text as the tooltip. Called while the Upload list is built, so keep it cheap.
-    available: Callable[[int], bool | str | None] | None = None
+    # a string greys it out with that text as the tooltip. A dict shows a state instead: `{"pending": "<label>"}`
+    # (label with a spinner; the dashboard keeps refreshing until it is gone) or `{"error": "<reason>", "retry":
+    # "<upload action id>"}` (the reason plus a Retry button that runs that action). Called while the Upload list
+    # is built, so keep it cheap.
+    available: Callable[[int], bool | str | dict | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -158,8 +161,9 @@ class UploadAction:
     endpoint: str = ""  # an absolute path on this server, e.g. `/api/ext/my-tab/summarise/{id}`
     panel: str = ""
     # Optional, per upload, with the same answers as `ExportTarget.available`: a falsy answer or a string greys the
-    # button out (the string is its tooltip). Called while the Upload list is built, so keep it cheap.
-    available: Callable[[int], bool | str | None] | None = None
+    # button out (the string is its tooltip); a dict shows a pending or failed state. Called while the Upload list
+    # is built, so keep it cheap.
+    available: Callable[[int], bool | str | dict | None] | None = None
 
 
 class Extension:
@@ -281,6 +285,18 @@ def _problem_with_target(target: ExportTarget) -> str:
     if target.available is not None and not callable(target.available):
         return "available is not callable"
     return ""
+
+
+def _availability_state(answer: dict) -> str | dict:
+    """A pending or failed state from an `available` check, cleaned for the dashboard; anything else greys out."""
+    if isinstance(answer.get("pending"), str):
+        return {"pending": answer["pending"] or "Working"}
+    if isinstance(answer.get("error"), str):
+        state = {"error": answer["error"] or "Failed"}
+        if isinstance(answer.get("retry"), str) and answer["retry"]:
+            state["retry"] = answer["retry"]
+        return state
+    return "Not available"
 
 
 def _problem_with_action(action: UploadAction, own_panels: set[str]) -> str:
@@ -566,22 +582,24 @@ class ExtensionRegistry:
     def upload_actions(self) -> list[UploadAction]:
         return list(self._actions.values())
 
-    def unavailable_exports(self, transcription_id: int, *, deadline: float | None = None) -> dict[str, str]:
+    def unavailable_exports(self, transcription_id: int, *, deadline: float | None = None) -> dict[str, str | dict]:
         """The export targets that cannot export this upload, `{target id: reason}`.
+
+        A reason is a string, or a state dict: `{"pending": label}` / `{"error": reason, "retry": action id}`.
 
         A target without `available` is always offered; one whose check raises or is too slow is offered too, so
         the export itself reports what is wrong. *deadline* (`time.monotonic()`) bounds all checks of a list.
         """
         return self._unavailable(self._targets.values(), transcription_id, "Export target", deadline)
 
-    def unavailable_actions(self, transcription_id: int, *, deadline: float | None = None) -> dict[str, str]:
+    def unavailable_actions(self, transcription_id: int, *, deadline: float | None = None) -> dict[str, str | dict]:
         """The upload actions that are greyed out for this upload, `{action id: reason}` (same rules)."""
         return self._unavailable(self._actions.values(), transcription_id, "Upload action", deadline)
 
-    def _unavailable(self, items, transcription_id: int, what: str, deadline: float | None) -> dict[str, str]:
+    def _unavailable(self, items, transcription_id: int, what: str, deadline: float | None) -> dict[str, str | dict]:
         if deadline is None:
             deadline = time.monotonic() + HOOK_TIMEOUT_S
-        unavailable: dict[str, str] = {}
+        unavailable: dict[str, str | dict] = {}
         for item in items:
             if item.available is None:
                 continue
@@ -593,7 +611,9 @@ class ExtensionRegistry:
             except Exception:  # _guarded never raises; kept so one odd item cannot hide the others
                 logger.exception("%s failed its availability check", who)
                 continue
-            if isinstance(answer, str):
+            if isinstance(answer, dict):
+                unavailable[item.id] = _availability_state(answer)
+            elif isinstance(answer, str):
                 unavailable[item.id] = answer or "Not available"
             elif answer is not None and not answer:
                 unavailable[item.id] = "Not available"

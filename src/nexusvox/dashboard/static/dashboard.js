@@ -1971,22 +1971,74 @@ async function runUploadAction(button, item) {
   }
 }
 
-async function loadFileTranscriptions() {
-  await Promise.all([
-    renderFileTranscriptions(document.getElementById("upload-list"), "", "No file transcriptions yet."),
-    renderFileTranscriptions(document.getElementById("meeting-list"), "meeting", "No meetings yet."),
+// ── Pending and failed states ────────────────────────────────────────
+// An extension's `available` check may answer a string (greyed out, the text is the tooltip) or a dict:
+// `{pending: label}` (spinner, the list keeps refreshing) or `{error: reason, retry: action id}`.
+const PENDING_POLL_MS = 4000;
+
+function availabilityState(reason) {
+  if (reason && typeof reason === "object") {
+    if (typeof reason.pending === "string") return { kind: "pending", text: reason.pending };
+    if (typeof reason.error === "string") return { kind: "error", text: reason.error, retry: reason.retry || "" };
+    return { kind: "off", text: "Not available" };
+  }
+  return { kind: "off", text: String(reason) };
+}
+
+function rowsHavePending(rows) {
+  return rows.some((row) => [row.exports_unavailable, row.actions_unavailable].some(
+    (states) => Object.values(states || {}).some((reason) => availabilityState(reason).kind === "pending")));
+}
+
+// Reloads the lists after `intervalMs` while the last load had a pending row: one timer at most, none once nothing is pending.
+function createPendingPoller(reload, intervalMs, timers = { set: setTimeout, clear: clearTimeout }) {
+  let handle = null;
+  return {
+    update(pending) {
+      if (!pending) {
+        if (handle !== null) timers.clear(handle);
+        handle = null;
+      } else if (handle === null) {
+        handle = timers.set(() => { handle = null; reload(); }, intervalMs);
+      }
+    },
+    get active() { return handle !== null; },
+  };
+}
+// ── end of pending and failed states ──────────────────────────────────
+
+const lastRenderedRows = new Map();
+const pendingPoller = createPendingPoller(async () => {
+  if (document.hidden) return pendingPoller.update(true);
+  try {
+    await loadFileTranscriptions(true);
+  } catch (err) {
+    pendingPoller.update(true); // a failed refresh must not end the polling
+  }
+}, PENDING_POLL_MS);
+
+async function loadFileTranscriptions(poll = false) {
+  const rendered = await Promise.all([
+    renderFileTranscriptions(document.getElementById("upload-list"), "", "No file transcriptions yet.", poll),
+    renderFileTranscriptions(document.getElementById("meeting-list"), "meeting", "No meetings yet.", poll),
     loadPendingMeetings(),
   ]);
+  pendingPoller.update(rendered[0] || rendered[1]);
 }
 
 // One history list: `kind` "" shows every entry, "meeting" only meetings. Each card can be deleted, with
-// the confirmation inside the card (never a browser dialog).
-async function renderFileTranscriptions(container, kind, emptyText) {
+// the confirmation inside the card (never a browser dialog). Returns whether any row is pending. A refresh
+// (`poll`) that changes nothing leaves the DOM alone, so audio playback and open confirmations survive it.
+async function renderFileTranscriptions(container, kind, emptyText, poll = false) {
   const data = await fetch("/api/file-transcriptions" + (kind ? `?kind=${kind}` : "")).then((r) => r.json());
+  const pending = rowsHavePending(data);
+  const signature = JSON.stringify(data);
+  if (poll && lastRenderedRows.get(container.id) === signature) return pending;
+  lastRenderedRows.set(container.id, signature);
 
   if (!data.length) {
     container.innerHTML = `<p class="empty-state">${escapeHtml(emptyText)}</p>`;
-    return;
+    return false;
   }
 
   container.innerHTML = data.map((item, index) => `
@@ -1999,15 +2051,16 @@ async function renderFileTranscriptions(container, kind, emptyText) {
         ${item.cleaned_text ? `<button type="button" class="upload-view-switch" data-index="${index}">Show original</button>` : ""}
         ${extensionExports.map((t) => {
           const reason = (item.exports_unavailable || {})[t.id];
-          if (reason !== undefined) return `<a class="upload-export disabled" aria-disabled="true" title="${escapeHtml(reason)}">${escapeHtml(t.label)}</a>`;
+          if (reason !== undefined) return `<a class="upload-export disabled" aria-disabled="true" title="${escapeHtml(availabilityState(reason).text)}">${escapeHtml(t.label)}</a>`;
           return `<a class="upload-export" href="/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}">${escapeHtml(t.label)}</a>`;
         }).join("")}
         ${extensionUploadActions.map((a) => {
           const reason = (item.actions_unavailable || {})[a.id];
           const off = reason !== undefined || runningUploadActions.has(`${a.id}:${item.id}`);
-          return `<button type="button" class="upload-action" data-action="${escapeHtml(a.id)}" data-index="${index}"${off ? " disabled" : ""}${reason !== undefined ? ` title="${escapeHtml(reason)}"` : ""}>${escapeHtml(a.label)}</button>`;
+          return `<button type="button" class="upload-action" data-action="${escapeHtml(a.id)}" data-index="${index}"${off ? " disabled" : ""}${reason !== undefined ? ` title="${escapeHtml(availabilityState(reason).text)}"` : ""}>${escapeHtml(a.label)}</button>`;
         }).join("")}
       </div>
+      ${renderRowStates(item, index)}
       <div class="upload-filename">${escapeHtml(item.original_filename)}${item.kind === "meeting" ? " (meeting)" : ""}</div>
       ${item.has_audio ? `<audio class="upload-audio" controls preload="none" src="/api/file-transcriptions/${item.id}/audio"></audio>` : ""}
       <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>
@@ -2023,7 +2076,7 @@ async function renderFileTranscriptions(container, kind, emptyText) {
     });
   });
 
-  container.querySelectorAll(".upload-action").forEach((button) => {
+  container.querySelectorAll(".upload-action, .upload-retry").forEach((button) => {
     button.addEventListener("click", () => runUploadAction(button, data[Number(button.dataset.index)]));
   });
 
@@ -2040,6 +2093,28 @@ async function renderFileTranscriptions(container, kind, emptyText) {
   container.querySelectorAll(".upload-delete-btn").forEach((button) => {
     button.addEventListener("click", () => askDeleteFileTranscription(button.closest(".upload-delete-row")));
   });
+  return pending;
+}
+
+// The pending labels (spinner) and failure reasons (with Retry) of a row, one line each.
+function renderRowStates(item, index) {
+  const lines = [];
+  const states = [
+    ...extensionExports.map((t) => [t.label, (item.exports_unavailable || {})[t.id]]),
+    ...extensionUploadActions.map((a) => [a.label, (item.actions_unavailable || {})[a.id]]),
+  ];
+  for (const [label, reason] of states) {
+    if (reason === undefined) continue;
+    const state = availabilityState(reason);
+    if (state.kind === "pending") {
+      lines.push(`<div class="upload-state" role="status"><span class="model-status-spinner"></span><span>${escapeHtml(label)}: ${escapeHtml(state.text)}</span></div>`);
+    } else if (state.kind === "error") {
+      const retry = extensionUploadActions.some((a) => a.id === state.retry)
+        ? ` <button type="button" class="upload-retry" data-action="${escapeHtml(state.retry)}" data-index="${index}">Retry</button>` : "";
+      lines.push(`<div class="upload-state down"><span>✕ ${escapeHtml(label)}: ${escapeHtml(state.text)}</span>${retry}</div>`);
+    }
+  }
+  return lines.join("");
 }
 
 function askDeleteFileTranscription(row) {

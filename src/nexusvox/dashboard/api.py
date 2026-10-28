@@ -1217,7 +1217,7 @@ class DashboardAPI:
         shown = self.extensions.display_texts(file_transcript_from_record(record), texts, deadline=deadline)
         return shown[0], shown[1] if len(shown) > 1 else record.cleaned_text
 
-    def _unavailable_exports(self, record, deadline: float | None = None) -> dict[str, str]:
+    def _unavailable_exports(self, record, deadline: float | None = None) -> dict[str, str | dict]:
         """`{target id: reason}` for the export targets that cannot export this row: the extensions' own checks,
         plus the built-in subtitle targets when no word timing is stored."""
         unavailable = self.extensions.unavailable_exports(record.id, deadline=deadline)

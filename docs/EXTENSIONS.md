@@ -169,6 +169,33 @@ UploadAction(
 )
 ```
 
+### Showing a pending or failed state
+
+Besides the answers above, `available` may return a small dict. It works the same for `ExportTarget` and
+`UploadAction`, and it is additive: the extension API version stays 1, and the old answers keep working.
+
+| Answer | Shown on the row |
+|---|---|
+| `{"pending": "<label>"}` | The label with a spinner; the export or button stays greyed out. While any row is pending, the dashboard re-fetches the Meetings and Upload lists every few seconds and stops when none is, so a finished export becomes active without a page reload |
+| `{"error": "<reason>", "retry": "<action id>"}` | The reason in red and a Retry button that runs the named `UploadAction` of your extension. Without `retry`, or when no such action exists, only the reason is shown |
+
+```python
+def _summary_state(self, tid: int):
+    if self._summaries.has(tid):
+        return True
+    if self._jobs.running(tid):
+        return {"pending": "Summarising…"}
+    if (reason := self._jobs.failure(tid)) is not None:
+        return {"error": reason, "retry": "summarise"}
+    return "No summary yet"
+
+ExportTarget("summary", "Summary (Markdown)", ".md", "text/markdown", self._export, available=self._summary_state)
+UploadAction("summarise", "Summarise", endpoint="/api/ext/my-tab/summarise/{id}")
+```
+
+A dict with neither key greys the row out like `False`. The check is still called once per listed row on each
+refresh, so keep it cheap.
+
 ## Hook 5: change a dictation before it is typed
 
 ```python

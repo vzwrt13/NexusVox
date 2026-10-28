@@ -925,3 +925,20 @@ def test_a_failing_selection_command_hook_is_skipped():
 def test_the_new_hooks_keep_the_api_version_and_old_extensions_loading():
     assert API_VERSION == 1
     assert _registry(DummyExtension(Path("."))).selection_command("s", "c", APP) is None
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ({"pending": "Summarising"}, {"pending": "Summarising"}),
+        ({"error": "Model offline", "retry": "summarise"}, {"error": "Model offline", "retry": "summarise"}),
+        ({"error": "Model offline"}, {"error": "Model offline"}),
+        ({"pending": ""}, {"pending": "Working"}),
+        ({"pending": "Summarising", "junk": 1}, {"pending": "Summarising"}),
+        ({"retry": "x"}, "Not available"),
+        ({}, "Not available"),
+        ({"pending": 5}, "Not available"),
+    ],
+)
+def test_unavailable_exports_accept_pending_and_failed_states(answer, expected):
+    assert _gated_registry(lambda tid: answer).unavailable_exports(1) == {"gated-md": expected}

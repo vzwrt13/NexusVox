@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 
 from nexusvox.dashboard.analytics import (
@@ -15,8 +16,9 @@ from nexusvox.dashboard.analytics import (
     get_top_words,
     get_transcriptions_over_time,
     get_unreviewed_transcriptions,
+    get_upload_overview,
 )
-from nexusvox.models import Transcription
+from nexusvox.models import FileTranscription, Transcription
 
 
 def _seed(session_factory, records):
@@ -575,3 +577,98 @@ def test_unreviewed_pages_with_before_id(session_factory):
 def test_unreviewed_empty_page(session_factory):
     result = get_unreviewed_transcriptions(session_factory)
     assert result == {"items": [], "remaining": 0}
+
+
+def test_overview_cleanup_stats(session_factory):
+    now = datetime.now()
+    rows = [
+        ("applied", 200),
+        ("applied", 400),
+        ("unchanged", 300),
+        ("rejected", 500),
+        ("timeout", 3000),
+        ("failed", None),
+    ]
+    _seed(
+        session_factory,
+        [{"text": "a", "language": "en", "duration_ms": 1000, "created_at": now}]  # cleanup never asked
+        + [
+            {
+                "text": "a",
+                "language": "en",
+                "duration_ms": 1000,
+                "created_at": now,
+                "cleanup_status": s,
+                "cleanup_ms": ms,
+            }
+            for s, ms in rows
+        ],
+    )
+
+    result = get_overview(session_factory)
+
+    assert result["cleanup_applied"] == 2
+    assert result["cleanup_unchanged"] == 1
+    assert result["cleanup_rejected"] == 1
+    assert result["cleanup_timeouts"] == 1
+    assert result["cleanup_failed"] == 1
+    assert result["avg_cleanup_ms"] == 880  # (200 + 400 + 300 + 500 + 3000) / 5
+
+
+def test_overview_cleanup_stats_empty(session_factory):
+    result = get_overview(session_factory)
+
+    assert result["cleanup_applied"] == 0
+    assert result["avg_cleanup_ms"] is None
+
+
+def _upload(**fields):
+    return FileTranscription(
+        text="t", language="en", duration_ms=fields.pop("duration_ms", 3_600_000), original_filename="a.wav", **fields
+    )
+
+
+def test_upload_overview(session_factory):
+    two = json.dumps(
+        [{"word": "a", "start": 0, "end": 1, "speaker": 1}, {"word": "b", "start": 1, "end": 2, "speaker": 2}]
+    )
+    three = json.dumps([{"word": "a", "speaker": n} for n in (1, 2, 3)])
+    with session_factory() as session:
+        session.add_all(
+            [
+                _upload(processing_ms=72_000, words=two),
+                _upload(processing_ms=144_000, words=three),
+                _upload(),  # from before processing time was measured: counts, but not in the timing
+                _upload(words=json.dumps([{"word": "a", "start": 0, "end": 1}])),  # no speaker detection
+                _upload(kind="meeting", processing_ms=1, words=two),  # meetings are not uploads
+            ]
+        )
+        session.commit()
+
+    result = get_upload_overview(session_factory)
+
+    assert result["upload_count"] == 4
+    assert result["upload_audio_hours"] == 4.0
+    assert result["avg_upload_processing_ms"] == 108_000
+    assert result["upload_rtf"] == 0.03  # 216 s of processing for 2 h of audio
+    assert result["avg_upload_speakers"] == 2.5
+
+
+def test_upload_overview_empty_and_date_range(session_factory):
+    empty = get_upload_overview(session_factory)
+    assert empty["upload_count"] == 0 and empty["avg_upload_processing_ms"] is None
+    assert empty["upload_rtf"] is None and empty["avg_upload_speakers"] is None
+
+    with session_factory() as session:
+        session.add_all([_upload(created_at=datetime(2026, 1, 5)), _upload(created_at=datetime(2026, 3, 5))])
+        session.commit()
+
+    assert get_upload_overview(session_factory, start="2026-03-01", end="2026-03-31")["upload_count"] == 1
+
+
+def test_upload_overview_ignores_broken_words_json(session_factory):
+    with session_factory() as session:
+        session.add(_upload(words="not json"))
+        session.commit()
+
+    assert get_upload_overview(session_factory)["avg_upload_speakers"] is None

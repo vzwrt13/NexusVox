@@ -1145,6 +1145,24 @@ function renderOverview(d) {
   if (d.translate_failures) parts.push(d.translate_failures + " fell back");
   document.getElementById("stat-translated-label").textContent =
     "Translated" + (parts.length ? " (" + parts.join(", ") + ")" : "");
+
+  document.getElementById("stat-cleaned").textContent = d.cleanup_applied;
+  const cleanParts = [];
+  if (d.avg_cleanup_ms != null) cleanParts.push("avg " + formatDuration(d.avg_cleanup_ms));
+  if (d.cleanup_timeouts) cleanParts.push(d.cleanup_timeouts + " timed out");
+  if (d.cleanup_rejected) cleanParts.push(d.cleanup_rejected + " rejected");
+  if (d.cleanup_failed) cleanParts.push(d.cleanup_failed + " failed");
+  document.getElementById("stat-cleaned-label").textContent =
+    "Cleaned Up" + (cleanParts.length ? " (" + cleanParts.join(", ") + ")" : "");
+
+  document.getElementById("stat-uploads").textContent = d.upload_count;
+  document.getElementById("stat-upload-hours").textContent = d.upload_audio_hours;
+  document.getElementById("stat-upload-processing").textContent =
+    d.avg_upload_processing_ms != null ? formatDuration(d.avg_upload_processing_ms) : "--";
+  document.getElementById("stat-upload-processing-label").textContent =
+    d.upload_rtf != null ? `Upload Processing (${d.upload_rtf}x real time)` : "Upload Processing";
+  document.getElementById("stat-upload-speakers").textContent =
+    d.avg_upload_speakers != null ? d.avg_upload_speakers : "--";
 }
 
 function formatDuration(ms) {

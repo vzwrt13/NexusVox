@@ -623,3 +623,21 @@ def test_unknown_feedback_mode_falls_back_to_sound(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[feedback]\nmode = "disco"\n', encoding="utf-8")
     assert load_config(path).feedback.mode == "sound"
+
+
+def test_save_config_writes_back_to_the_file_that_was_loaded(tmp_path, monkeypatch):
+    """The dashboard saves with no path: it must hit the loaded file even after the working directory moved."""
+    loaded = tmp_path / "app" / "config.toml"
+    loaded.parent.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(loaded.parent)
+    config = load_config(Path("config.toml"))
+    assert config.source_path == loaded.resolve()
+
+    monkeypatch.chdir(elsewhere)
+    config.cleanup.level = "medium"
+    save_config(config)
+
+    assert not (elsewhere / "config.toml").exists()
+    assert load_config(loaded).cleanup.level == "medium"

@@ -1093,6 +1093,7 @@ def test_upload_asks_for_words_stores_them_and_returns_notes(flask_client, db, s
     assert data["ok"] is True and data["notes"] == result.notes
     stored = db.get_file_transcriptions(limit=1)[0]
     assert [w["word"] for w in json.loads(stored.words)] == ["hello", "world"]
+    assert stored.processing_ms is not None and stored.processing_ms >= 0
 
 
 def test_retry_without_stored_audio_says_why(flask_client, db):

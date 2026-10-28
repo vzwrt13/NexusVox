@@ -123,3 +123,22 @@ def test_medium_allows_more_change_than_light():
     original = "also ich wollte nur kurz sagen dass ich das irgendwie nicht so gut finde was wir da machen"
     shorter = "Ich finde nicht gut, was wir da machen."
     assert plausible(original, shorter, "medium") and not plausible(original, shorter, "light")
+
+
+def test_status_says_how_the_pass_ended(model):
+    text = "um so I think we should ship it"
+    model.reply = "So, I think we should ship it."
+    assert cleanup(text, LIGHT, LlmConfig()).status == "applied"
+    model.reply = text
+    assert cleanup(text, LIGHT, LlmConfig()).status == "unchanged"
+    model.reply = "Paris is the capital of France, a country in Western Europe."
+    assert cleanup(text, LIGHT, LlmConfig()).status == "rejected"
+    model.reply = LlmError("TimeoutError: timed out")
+    assert cleanup(text, LIGHT, LlmConfig()).status == "timeout"
+    model.reply = LlmError("URLError: connection refused")
+    assert cleanup(text, LIGHT, LlmConfig()).status == "failed"
+
+
+def test_status_is_none_when_the_model_was_not_asked(model):
+    assert cleanup("hello", LIGHT, LlmConfig()).status is None
+    assert cleanup("um so I think we should ship it", CleanupConfig(level="off"), LlmConfig()).status is None

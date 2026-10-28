@@ -628,6 +628,9 @@ class Config:
     polish: PolishConfig = field(default_factory=PolishConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
     remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
+    # The file `load_config` read, as an absolute path; `save_config` writes back to it, whatever the working
+    # directory is by then. None for a Config that was not loaded from a file.
+    source_path: Path | None = field(default=None, repr=False, compare=False)
 
 
 def _log_level(value: object) -> str:
@@ -712,7 +715,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             numbers_as_digits=False,
         )
 
-    return Config(
+    config = Config(
         language=general.get("language", "en"),
         injection_delay_ms=general.get("injection_delay_ms", 500),
         auto_language_detection=general.get("auto_language_detection", False),
@@ -808,13 +811,16 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             token=str(remote_mic_data.get("token", "")),
         ),
     )
+    config.source_path = path.resolve()
+    return config
 
 
 _config_lock = threading.Lock()
 
 
-def save_config(config: Config, path: Path = DEFAULT_CONFIG_PATH) -> None:
-    """Write the current configuration back to TOML."""
+def save_config(config: Config, path: Path | None = None) -> None:
+    """Write the current configuration back to TOML: to *path*, else to the file it was loaded from."""
+    path = path or config.source_path or DEFAULT_CONFIG_PATH
     with _config_lock:
         symbols_toml = "[{}]".format(", ".join(f'"{s}"' for s in config.voice_commands.symbols))
         structural_toml = "[{}]".format(", ".join(f'"{s}"' for s in config.voice_commands.structural))

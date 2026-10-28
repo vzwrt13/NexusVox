@@ -70,6 +70,8 @@ from ..meeting_transcribe import (
     load_meeting,
     merge_words,
     mix_tracks,
+    track_offset,
+    track_shifts,
 )
 from ..os_commands import NEXUS_ACTIONS
 from ..polish_presets import PolishPreset
@@ -1107,7 +1109,8 @@ class DashboardAPI:
         plain: dict[str, str] = {}
         incomplete: list[str] = []
         confidences: list[float] = []
-        tracks_16k: list[Path] = []
+        tracks_16k: dict[str, Path] = {}
+        levels: dict[str, list] = {}  # each track's loudness steps, for lining the tracks up
         chunk_s = MAX_CHUNK_MS // 1000
         total_chunks = sum(max(1, -(-t.frames // t.sample_rate // chunk_s)) for t in meeting.tracks.values())
         done_chunks = 0
@@ -1115,11 +1118,11 @@ class DashboardAPI:
             for name, track in meeting.tracks.items():
                 label = TRACK_NAMES[name]
                 try:
-                    chunks = convert_track(track, Path(tmp) / f"{name}.wav")
+                    chunks = convert_track(track, Path(tmp) / f"{name}.wav", levels.setdefault(name, []))
                 except Exception as exc:
                     logger.error("Audio conversion failed for meeting %s: %s", folder, exc)
                     return {"ok": False, "error": f"Audio conversion failed: {exc}"}
-                tracks_16k.append(Path(tmp) / f"{name}.wav")
+                tracks_16k[name] = Path(tmp) / f"{name}.wav"
 
                 own_chunks = len(chunks)
 
@@ -1161,6 +1164,18 @@ class DashboardAPI:
                 if len(result.words) < len(plain[name].split()):
                     incomplete.append(label)
 
+            # The tracks are lined up (one of them delayed), in the words and in the mix alike.
+            try:
+                offset, measured = track_offset(meeting, levels.get("mic"), levels.get("system"))
+            except Exception as exc:  # the transcription is done: never lose it over the alignment
+                logger.exception("Lining up the tracks of meeting %s failed: %s", folder, exc)
+                notes.append(f"The tracks could not be lined up from the audio ({exc}); the stream delays are used.")
+                offset, measured = track_offset(meeting)
+            mic_shift, system_shift = track_shifts(offset)
+            logger.info(
+                "Meeting %s: system track is %+.3f s late against the microphone (%s)", folder.name, offset, measured
+            )
+
             if incomplete:
                 # Interleaving needs every word timed: a gap would vanish from the merged text. Keep all the words.
                 notes.append(
@@ -1186,7 +1201,10 @@ class DashboardAPI:
             else:
                 leave_out = self._config.meeting.leave_dictation_out
                 merged = merge_words(
-                    words.get("mic", []), words.get("system", []), meeting.dictations if leave_out else None
+                    words.get("mic", []),
+                    words.get("system", []),
+                    meeting.dictations if leave_out else None,
+                    system_offset=offset,
                 )
                 text = format_meeting(merged, self._config.meeting.own_voice_label)
 
@@ -1194,7 +1212,11 @@ class DashboardAPI:
                 progress("saving")
             mix_path: Path | None = folder / MIX_FILENAME
             try:
-                seconds = mix_tracks(tracks_16k, mix_path)
+                seconds = mix_tracks(
+                    list(tracks_16k.values()),
+                    mix_path,
+                    [system_shift if n == "system" else mic_shift for n in tracks_16k],
+                )
             except Exception as exc:
                 logger.exception("Mixing meeting %s failed: %s", folder, exc)
                 notes.append(f"The playable mix could not be written: {exc}")

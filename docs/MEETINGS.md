@@ -57,6 +57,23 @@ that label. Speaker detection sends the whole system audio in one request, so a 
 skips it and shows everyone on the system audio as Speaker 2, with a note. The setting is read when a meeting is transcribed: *Transcribe*
 a meeting recorded earlier to get the new labels; nothing is changed automatically.
 
+## Order of the words
+
+Your microphone and the system audio are transcribed separately and then merged by the time of each word.
+Two things keep that order right:
+
+- **The tracks are lined up first.** When your microphone also hears your speakers, NexusVox measures how late
+  that sound reaches it (playback delay included, e.g. Bluetooth speakers) and delays the system audio by that
+  much. With a headset there is nothing to measure, so it uses the input delays the two audio streams reported
+  when the recording started (stored as `latency_s` per track in `meeting.json`). Those cover recording only:
+  the playback delay of a Bluetooth headset is not known to Windows' recording streams and stays uncorrected.
+  The playable `meeting.wav` is lined up the same way.
+- **A turn is not split at its last word.** The speech engine's word timing is off by up to a few hundred
+  milliseconds at a pause: the first word after it starts early, the last word before it runs on. So when
+  someone starts speaking right as another finishes, the one who was speaking keeps the turn until their
+  sentence is done. After a pause nobody holds the turn, and the words follow their times. When two people talk over each other, their words still alternate, each at most half a
+  second from its time order.
+
 ## Leave dictation out of the transcript
 
 While a meeting records, NexusVox stores the start and end of every dictation take in `meeting.json`

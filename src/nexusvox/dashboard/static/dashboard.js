@@ -2420,6 +2420,7 @@ const meetingConsent = document.getElementById("meeting-consent");
 const meetingConsentToggle = document.getElementById("meeting-consent-toggle");
 const meetingDictationToggle = document.getElementById("meeting-dictation-toggle");
 const meetingLiveToggle = document.getElementById("meeting-live-toggle");
+const meetingStoreAudioToggle = document.getElementById("meeting-store-audio-toggle");
 const meetingLiveBox = document.getElementById("meeting-live");
 const meetingLiveText = document.getElementById("meeting-live-text");
 const meetingLiveStatus = document.getElementById("meeting-live-status");
@@ -2731,16 +2732,21 @@ async function saveMeetingDevices() {
 meetingMicSelect.addEventListener("change", saveMeetingDevices);
 meetingOutputSelect.addEventListener("change", saveMeetingDevices);
 
-meetingLiveToggle.addEventListener("change", async () => {
-  const wanted = meetingLiveToggle.checked;
-  try {
-    const r = await postSetting("/api/settings/meeting-live-transcript", { enabled: wanted });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    meetingLiveToggle.checked = (await r.json()).meeting_live_transcript;
-  } catch (err) {
-    meetingLiveToggle.checked = !wanted; // not saved: show the setting that is still in force
-  }
-});
+// A meeting toggle that saves on change and shows the stored value (or the one still in force on failure).
+function bindMeetingToggle(toggle, url, key) {
+  toggle.addEventListener("change", async () => {
+    const wanted = toggle.checked;
+    try {
+      const r = await postSetting(url, { enabled: wanted });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      toggle["checked"] = (await r.json())[key];
+    } catch (err) {
+      toggle.checked = !wanted; // not saved: show the setting that is still in force
+    }
+  });
+}
+bindMeetingToggle(meetingStoreAudioToggle, "/api/settings/meeting-store-audio", "meeting_store_audio");
+bindMeetingToggle(meetingLiveToggle, "/api/settings/meeting-live-transcript", "meeting_live_transcript");
 
 // The meeting settings sit in the Settings tab; the Meetings tab shows the devices as an info line.
 async function loadMeetingSettings() {
@@ -2752,6 +2758,7 @@ async function loadMeetingSettings() {
   meetingConsentToggle.checked = meetingConsentHint;
   meetingDictationToggle.checked = settings.meeting_leave_dictation_out;
   meetingLiveToggle.checked = settings.meeting_live_transcript;
+  meetingStoreAudioToggle.checked = settings.meeting_store_audio;
   renderMeetingHotkey(settings);
   fillDeviceSelect(meetingMicSelect, devices.inputs, devices.mic_device);
   fillDeviceSelect(meetingOutputSelect, devices.outputs, devices.output_device);

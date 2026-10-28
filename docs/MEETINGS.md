@@ -21,8 +21,12 @@ meeting would show it under your own voice; by default NexusVox leaves it out (s
   and stop, an error beep says it failed.
 
 Each meeting is stored in its own folder `audio/meetings/meeting-YYYYMMDD-HHMMSS/` next to the
-database: `mic.wav` and `system.wav` (the two tracks), `meeting.wav` (a playable mix, written after
-the transcription) and `meeting.json`. If another file is still being transcribed when you stop, the
+database: `mic.wav` and `system.wav` (the two tracks) and `meeting.json` while it is recorded. Once the
+transcript is saved, the two tracks are deleted and a single `meeting.wav` (a playable mix of both) stays for
+playback in the dashboard. *Store meeting audio* in the Settings tab (Meetings card, `[meeting].store_audio`, on by
+default) decides whether that mix is kept: off, it is deleted too and only the transcript remains. Turning it off
+does not touch meetings that are already stored. If the transcription fails, nothing is deleted and *Transcribe*
+in the pending list still works. If another file is still being transcribed when you stop, the
 recording is kept in its folder, the dashboard says so and lists it under *Recorded, not yet transcribed*, where you can transcribe or delete it. The same list holds a meeting cut short because NexusVox quit, and one whose transcription failed. The hotkey beeps as for a normal stop.
 
 Pick a microphone and an output device in the Settings tab (Meetings card) if the system defaults are not the ones you
@@ -81,8 +85,8 @@ While a meeting records, NexusVox stores the start and end of every dictation ta
 meeting transcript** switch in the Settings tab's Meetings card (`[meeting].leave_dictation_out`, on by default) decides
 what the transcription does with them: on, the words of your own voice that fall inside a take (plus half a second
 on each side) are dropped; off, they stay. The switch is read when the meeting is transcribed, so
-*Transcribe* on a meeting recorded earlier uses the current setting. `mic.wav`, `system.wav` and
-`meeting.wav` are never changed. If the speech engine returns no word timing, nothing can be removed and
+*Transcribe* on a meeting recorded earlier uses the current setting. The recorded tracks are never
+changed (they are deleted only after a successful transcription). If the speech engine returns no word timing, nothing can be removed and
 the transcript says so in a note.
 
 ## Consent: tell everyone before you record
@@ -111,4 +115,4 @@ NexusVox shows this reminder before each recording from the dashboard. *Don't sh
 
 Every entry in the Upload history and every meeting in the Meetings tab has a **Delete** button with a
 confirmation in the page. It removes the entry and its audio: for an upload its stored audio, for a
-meeting the whole folder (`mic.wav`, `system.wav`, `meeting.wav`, `meeting.json`).
+meeting the whole folder (whatever is left of `mic.wav`, `system.wav`, `meeting.wav` and `meeting.json`).

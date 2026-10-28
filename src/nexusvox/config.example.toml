@@ -65,6 +65,10 @@ own_voice_label = "Speaker 1"
 # time, so it is off by default; also switchable in the dashboard Meetings tab. The transcript made after Stop
 # is the one that is stored either way.
 live_transcript = false
+# Keep meeting.wav, a playable mix of both tracks, after the meeting is transcribed (the dashboard plays it).
+# The two recorded tracks (mic.wav, system.wav) are always deleted after a successful transcription.
+# Off: meeting.wav is deleted too and only the transcript remains. Meetings already stored are not touched.
+store_audio = true
 
 [audio]
 # Sample rate in Hz (must match model expectation)

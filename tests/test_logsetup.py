@@ -51,7 +51,7 @@ def test_records_reach_a_daily_rotating_file(file_log):
     logging.getLogger("nexusvox.test").info("hello file")
     assert path.name == "nexusvox.log" and "hello file" in _read(path)
     handler = next(h for h in logging.getLogger().handlers if isinstance(h, TimedRotatingFileHandler))
-    assert handler.when == "MIDNIGHT" and handler.backupCount == logsetup.KEEP_DAYS
+    assert handler.when == "MIDNIGHT"
 
 
 def test_rotation_moves_the_day_to_a_dated_file(file_log):
@@ -153,3 +153,80 @@ def test_dashboard_toggles_the_setting_and_opens_the_folder(db, session_factory,
         assert config.log_full_text is True
         assert client.post("/api/log-folder/open").get_json()["ok"] is True
     assert [str(p) for p in opened] == [str(tmp_path / "NexusVox" / "logs")]
+
+
+def test_a_failed_rollover_is_skipped_instead_of_retried_on_every_record(file_log, monkeypatch):
+    path, _ = file_log
+    handler = next(h for h in logging.getLogger().handlers if getattr(h, "baseFilename", None) == str(path))
+    handler.rolloverAt = 0  # a day has passed
+
+    def refused(self):
+        raise PermissionError("another process holds the file")
+
+    monkeypatch.setattr(TimedRotatingFileHandler, "doRollover", refused)
+    handler.handle(logging.makeLogRecord({"msg": "after midnight", "levelno": logging.INFO, "levelname": "INFO"}))
+    handler.handle(logging.makeLogRecord({"msg": "still logging", "levelno": logging.INFO, "levelname": "INFO"}))
+    assert handler.rolloverAt > time.time()
+    assert "after midnight" in path.read_text(encoding="utf-8") and "still logging" in path.read_text(encoding="utf-8")
+
+
+def test_rollover_deletes_files_past_the_retention(file_log):
+    path, _ = file_log
+    handler = next(h for h in logging.getLogger().handlers if getattr(h, "baseFilename", None) == str(path))
+    old = path.parent / "nexusvox.log.2020-01-01"
+    old.write_text("x")
+    os.utime(old, (1, 1))
+    handler.handle(logging.makeLogRecord({"msg": "today", "levelno": logging.INFO, "levelname": "INFO"}))
+    handler.doRollover()
+    assert not old.exists()
+
+
+def test_the_dashboard_refuses_a_non_boolean_switch(db, session_factory, monkeypatch):
+    monkeypatch.setattr("nexusvox.dashboard.api.save_config", lambda cfg, path=None: None)
+    config = Config()
+    with _create_app(DashboardAPI(session_factory, config, db=db)).test_client() as client:
+        for bad in ("false", 0, None):
+            assert client.post("/api/settings/log-full-text", json={"enabled": bad}).status_code == 400
+        assert client.post("/api/settings/log-full-text", json={}).status_code == 400
+    assert config.log_full_text is False
+
+
+def test_open_log_folder_says_so_where_startfile_does_not_exist(db, session_factory, monkeypatch):
+    monkeypatch.delattr("nexusvox.dashboard.api.os.startfile", raising=False)
+    with _create_app(DashboardAPI(session_factory, Config(), db=db)).test_client() as client:
+        resp = client.post("/api/log-folder/open")
+    assert resp.status_code == 500 and "only supported on Windows" in resp.get_json()["error"]
+
+
+# Names that carry what the user said or what a model made of it. A logger call passing one of them must wrap it
+# in Text, or the full dictation lands in the file log.
+_SPOKEN_NAMES = {
+    "text", "raw", "corrected", "typed", "_last_typed", "delta", "target", "command", "cleaned", "translated",
+    "reply", "assistant_text", "spoken", "instruction",
+}  # fmt: skip
+
+
+def _unwrapped_spoken_log_arguments():
+    import ast
+    from pathlib import Path
+
+    found = []
+    for source in sorted(Path(logsetup.__file__).parent.rglob("*.py")):
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"debug", "info", "warning", "error", "exception", "critical"}
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "logger"
+            ):
+                continue
+            for arg in node.args[1:]:
+                name = arg.id if isinstance(arg, ast.Name) else arg.attr if isinstance(arg, ast.Attribute) else None
+                if name in _SPOKEN_NAMES:
+                    found.append(f"{source.name}:{node.lineno} passes {name} without Text()")
+    return found
+
+
+def test_no_log_call_passes_spoken_text_without_the_marker():
+    assert _unwrapped_spoken_log_arguments() == []

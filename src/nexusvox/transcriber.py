@@ -285,7 +285,11 @@ class VoxtralRealtimeTranscriber(BaseTranscriber):
                     logger.debug("Delta: %s (logprob=%s)", Text(delta), logprob)
 
                 elif msg_type == "transcription.done":
-                    logger.debug("transcription.done payload: %s", Text(json.dumps(msg)))
+                    logger.debug(
+                        "transcription.done payload: %s, text: %s",
+                        json.dumps({k: v for k, v in msg.items() if k != "text"}),
+                        Text(msg.get("text", "")),
+                    )
                     result.finalize(
                         text=msg.get("text", result.text),
                         usage=msg.get("usage"),

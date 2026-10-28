@@ -84,6 +84,21 @@ def delete_old_logs(directory: Path, keep_days: int = KEEP_DAYS, now: float | No
     return removed
 
 
+class _DailyFileHandler(TimedRotatingFileHandler):
+    """Rotates at midnight and keeps `KEEP_DAYS` days: retention is `delete_old_logs`, one definition.
+
+    A rollover that fails (on Windows a second NexusVox process holds the file, so the rename is refused) is
+    skipped until the next midnight; the stock handler would retry on every record and lose the log.
+    """
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except OSError:
+            self.rolloverAt = self.computeRollover(int(time.time()))
+        delete_old_logs(Path(self.baseFilename).parent)
+
+
 def setup_file_logging(
     full_text: Callable[[], bool], directory: Path | None = None, level: int = logging.INFO
 ) -> Path | None:
@@ -92,9 +107,7 @@ def setup_file_logging(
     try:
         directory.mkdir(parents=True, exist_ok=True)
         delete_old_logs(directory)
-        handler = TimedRotatingFileHandler(
-            directory / LOG_FILE_NAME, when="midnight", backupCount=KEEP_DAYS, encoding="utf-8", delay=True
-        )
+        handler = _DailyFileHandler(directory / LOG_FILE_NAME, when="midnight", encoding="utf-8", delay=True)
     except OSError:
         return None  # a read-only profile must not stop the app from starting
     handler.setLevel(level)

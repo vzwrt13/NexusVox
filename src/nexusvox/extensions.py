@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
+from .logsetup import Text
 from .transcriber import Word
 
 if TYPE_CHECKING:
@@ -527,7 +528,7 @@ class ExtensionRegistry:
         for extension in self.extensions:
             result = self._text_hook(extension, "on_selection_command", deadline, selection, command, app)
             if result is not None:
-                logger.info("Extension %s handled the selection command %r", extension.name, command)
+                logger.info("Extension %s handled the selection command %r", extension.name, Text(command))
                 return result
         return None
 

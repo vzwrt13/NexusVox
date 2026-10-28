@@ -164,8 +164,10 @@ def _create_app(api: DashboardAPI) -> Flask:
 
     @app.route("/api/settings/log-full-text", methods=["POST"])
     def set_log_full_text():
-        data = request.get_json(force=True)
-        return jsonify(api.set_log_full_text(bool(data.get("enabled", False))))
+        enabled = request.get_json(force=True).get("enabled")
+        if not isinstance(enabled, bool):  # bool("false") would be True
+            return jsonify({"error": "enabled must be true or false"}), 400
+        return jsonify(api.set_log_full_text(enabled))
 
     @app.route("/api/log-folder/open", methods=["POST"])
     def open_log_folder():

@@ -413,16 +413,19 @@ class DashboardAPI:
 
     def set_log_full_text(self, enabled: bool) -> dict:
         """The file log's filter reads the config on every record, so this is live."""
-        self._config.log_full_text = bool(enabled)
+        self._config.log_full_text = enabled
         save_config(self._config)
         return self.get_settings()
 
     def open_log_folder(self) -> dict:
         """Opens the log folder in Explorer, creating it first when nothing has been logged yet."""
         folder = log_dir()
+        startfile = getattr(os, "startfile", None)  # Windows only; missing on a development machine elsewhere
+        if startfile is None:
+            return {"error": f"Opening a folder is only supported on Windows; the log folder is {folder}"}
         try:
             folder.mkdir(parents=True, exist_ok=True)
-            os.startfile(folder)  # noqa: S606 - Windows-only app; the path is ours, not user input
+            startfile(folder)
         except OSError as exc:
             logger.error("Could not open the log folder %s: %s", folder, exc)
             return {"error": f"Could not open {folder}: {exc}"}

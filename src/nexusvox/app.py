@@ -646,7 +646,9 @@ class NexusVoxApp:
                 cleanup_status=processed.cleanup.status,
                 cleanup_ms=processed.cleanup.ms,
             )
-            logger.info("%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, processed.typed)
+            logger.info(
+                "%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, Text(processed.typed)
+            )
             self._store_audio(audio_buffer, record.id)
 
         except Exception:
@@ -745,7 +747,7 @@ class NexusVoxApp:
             logger.info("Paste last: nothing pasted yet in this session")
             self._cue(beep_error, ERROR)
             return
-        logger.info("Paste last: %s", self._last_typed)
+        logger.info("Paste last: %s", Text(self._last_typed))
         try:
             await asyncio.get_running_loop().run_in_executor(
                 None, inject_text, self._last_typed, self._config.injection_delay_ms
@@ -843,7 +845,7 @@ class NexusVoxApp:
             try:
                 opened = await loop.run_in_executor(None, window_manager.open_target, target)
             except OSError:
-                logger.exception("Opening %r failed", target)
+                logger.exception("Opening %r failed", Text(target))
                 opened = False
             if not opened:
                 self._cue(beep_error, ERROR)
@@ -858,7 +860,7 @@ class NexusVoxApp:
                 self._cue(beep_error, ERROR)
             else:
                 if reply.startswith("error:"):
-                    logger.warning("Assistant refused the command: %s", reply)
+                    logger.warning("Assistant refused the command: %s", Text(reply))
                     self._cue(beep_error, ERROR)
                 return f"[assistant] {assistant_text}"
 

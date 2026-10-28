@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from .cleanup import MIN_WORDS, CleanupResult, cleanup
 from .config import CleanupConfig, Config, LlmConfig, TranslatorConfig, VoiceCommandsConfig
 from .dictionary import DictionaryEntry, apply_dictionary
+from .logsetup import Text
 from .snippets import Snippet, expand_snippets, mark_snippets, placeholders_intact
 from .translator import TranslateResult, translate
 from .voice_commands import process_voice_commands, split_press_enter
@@ -74,7 +75,7 @@ def process_text(
     """Run the pipeline. Blocking (cleanup and the translator are HTTP), so callers run it in an executor."""
     corrected = apply_dictionary(raw, dictionary)
     if corrected != raw:
-        logger.info("Dictionary applied: %r -> %r", raw, corrected)
+        logger.info("Dictionary applied: %r -> %r", Text(raw), Text(corrected))
 
     press_enter = False
     if config.voice_commands.enabled and config.voice_commands.press_enter and not remote:

@@ -1654,18 +1654,71 @@ const uploadZone = document.getElementById("upload-zone");
 const uploadInput = document.getElementById("upload-input");
 const uploadBrowse = document.getElementById("upload-browse");
 const uploadSelected = document.getElementById("upload-selected");
+const uploadSelectedName = document.getElementById("upload-selected-name");
+const uploadSelectedMeta = document.getElementById("upload-selected-meta");
+const uploadRemoveBtn = document.getElementById("upload-remove");
+const uploadZoneText = document.getElementById("upload-zone-text");
+const uploadZoneReady = document.getElementById("upload-zone-ready");
 const transcribeBtn = document.getElementById("upload-transcribe");
 let selectedUploadFile = null;
 let uploadRunning = false;
 
 function updateTranscribeButton() {
   transcribeBtn.disabled = !selectedUploadFile || uploadRunning;
+  uploadRemoveBtn.disabled = uploadRunning;
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  const kb = Math.round(bytes / 1024);
+  if (kb < 1024) return kb + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function formatClock(seconds) {
+  const s = Math.round(seconds);
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+// Reads the duration from the file's metadata; best effort, the row simply stays without it.
+// Only one probe lives at a time: a new selection or a removal cancels the running one.
+let cancelUploadProbe = null;
+function showUploadDuration(file, sizeText) {
+  if (cancelUploadProbe) cancelUploadProbe();
+  const url = URL.createObjectURL(file);
+  const probe = new Audio();
+  let timer = null;
+  const done = () => {
+    clearTimeout(timer);
+    probe.removeAttribute("src");
+    probe.load(); // drops the media resource; removing src alone does not abort the load
+    URL.revokeObjectURL(url);
+    if (cancelUploadProbe === done) cancelUploadProbe = null;
+  };
+  cancelUploadProbe = done;
+  timer = setTimeout(done, 10000); // a stalled probe must not hold the blob forever
+  probe.preload = "metadata";
+  probe.addEventListener("loadedmetadata", () => {
+    if (selectedUploadFile === file && Number.isFinite(probe.duration)) {
+      uploadSelectedMeta.textContent = sizeText + " · " + formatClock(probe.duration);
+    }
+    done();
+  });
+  probe.addEventListener("error", done);
+  probe.src = url;
 }
 
 function selectUploadFile(file) {
   selectedUploadFile = file;
-  uploadSelected.textContent = file ? "Selected: " + file.name : "No file selected.";
-  uploadSelected.classList.toggle("has-file", Boolean(file));
+  uploadSelected.hidden = !file;
+  uploadSelectedName.textContent = file ? file.name : "";
+  const sizeText = file ? formatFileSize(file.size) : "";
+  uploadSelectedMeta.textContent = sizeText;
+  uploadZone.classList.toggle("has-file", Boolean(file));
+  uploadZoneText.hidden = Boolean(file);
+  uploadZoneReady.hidden = !file;
+  if (file) showUploadDuration(file, sizeText);
+  else if (cancelUploadProbe) cancelUploadProbe();
   document.getElementById("upload-error").style.display = "none";
   document.getElementById("upload-note").style.display = "none";
   updateTranscribeButton();
@@ -1676,8 +1729,19 @@ uploadBrowse.addEventListener("click", (e) => {
   uploadInput.click();
 });
 
+document.getElementById("upload-browse-again").addEventListener("click", (e) => {
+  e.preventDefault();
+  uploadInput.click();
+});
+
+uploadRemoveBtn.addEventListener("click", () => {
+  if (uploadRunning) return;
+  selectUploadFile(null);
+  uploadBrowse.focus(); // the row, and the button with it, is gone; keep keyboard focus nearby
+});
+
 uploadInput.addEventListener("change", () => {
-  if (uploadInput.files.length) selectUploadFile(uploadInput.files[0]);
+  if (uploadInput.files.length && !uploadRunning) selectUploadFile(uploadInput.files[0]);
   uploadInput.value = ""; // so choosing the same file again still counts as a choice
 });
 
@@ -1697,7 +1761,7 @@ uploadZone.addEventListener("dragleave", () => {
 uploadZone.addEventListener("drop", (e) => {
   e.preventDefault();
   uploadZone.classList.remove("drag-over");
-  if (e.dataTransfer.files.length) selectUploadFile(e.dataTransfer.files[0]);
+  if (e.dataTransfer.files.length && !uploadRunning) selectUploadFile(e.dataTransfer.files[0]);
 });
 
 const cleanupToggle = document.getElementById("upload-cleanup-toggle");

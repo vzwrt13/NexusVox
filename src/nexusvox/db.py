@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import sessionmaker
 
 from .config import DatabaseConfig
-from .dictionary import DictionaryEntry
+from .dictionary import DictionaryEntry, usage_key
 from .models import (
     ACCEPTED_EVENT,
     Base,
@@ -322,7 +322,7 @@ class Database:
         day = utc_now().strftime("%Y-%m-%d")
         with self._session_factory() as session:
             for entry, count in hits.items():
-                key = " ".join(entry.wrong.split()).lower()
+                key = usage_key(entry.wrong)
                 row = session.query(DictionaryUsageRow).filter_by(wrong=key, day=day).first()
                 if row is None:
                     session.add(DictionaryUsageRow(wrong=key, right=entry.right, day=day, hits=count))

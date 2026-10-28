@@ -235,3 +235,11 @@ def test_dictionary_hits_are_reported():
 
 def test_no_dictionary_hits_without_entries():
     assert _run("hello there").dictionary_hits == {}
+
+
+def test_german_dictionary_hits_are_reported():
+    entry = DictionaryEntry("grüße", "Grüße")
+
+    result = _run("viele grüße und grüße", dictionary=[entry])
+
+    assert result.dictionary_hits == {entry: 2}

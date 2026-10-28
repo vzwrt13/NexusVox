@@ -24,7 +24,7 @@ from nexusvox.dashboard.analytics import (
     get_upload_overview,
 )
 from nexusvox.dictionary import DictionaryEntry
-from nexusvox.models import COMMAND_APP, FileTranscription, Transcription, utc_now
+from nexusvox.models import COMMAND_APP, DictionaryUsageRow, FileTranscription, Transcription, utc_now
 
 
 def _seed(session_factory, records):
@@ -878,3 +878,44 @@ def test_dictionary_usage_respects_the_date_range(db, session_factory):
 
     assert get_dictionary_usage(session_factory, start="2000-01-01", end="2000-01-31")["total_hits"] == 0
     assert get_dictionary_usage(session_factory, start="2000-01-01")["total_hits"] == 4
+
+
+def test_accuracy_ignores_command_rows(session_factory):
+    _seed(
+        session_factory,
+        [
+            {"text": "a b c d", "language": "en", "duration_ms": 1},
+            {"text": "[os-control] open the browser now", "language": "en", "duration_ms": 1, "app": COMMAND_APP},
+        ],
+    )
+
+    assert get_accuracy_over_time(session_factory)["words"] == 4
+
+
+def test_accuracy_keeps_accepted_suggestions_of_a_day_without_dictation(db, session_factory):
+    db.save_transcription("one two three four", "en", 1000)
+    db.add_dictionary_suggestions([DictionaryEntry("a b", "c")])
+    db.accept_dictionary_suggestion(db.list_dictionary_suggestions()[0]["id"])
+    with session_factory() as session:
+        session.query(Transcription).update({Transcription.created_at: datetime(2000, 1, 1)})
+        session.commit()
+
+    result = get_accuracy_over_time(session_factory)
+
+    assert result["corrections"] == 1
+    assert result["labels"][0] == "2000-01-01"
+    assert result["values"][1:] == [None]
+
+
+def test_dictionary_usage_shows_the_latest_replacement_of_a_removed_entry(db, session_factory):
+    row = db.add_dictionary_entry("nexus fox", "NexusVox")
+    db.record_dictionary_hits({DictionaryEntry("nexus fox", "Nexusvox"): 1})
+    with session_factory() as session:
+        session.query(DictionaryUsageRow).update({DictionaryUsageRow.day: "2000-01-01"})
+        session.commit()
+    db.record_dictionary_hits({DictionaryEntry("nexus fox", "NexusVox"): 1})
+    db.delete_dictionary_entry(row["id"])
+
+    (item,) = get_dictionary_usage(session_factory)["items"]
+
+    assert (item["right"], item["hits"], item["removed"]) == ("NexusVox", 2, True)

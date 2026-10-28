@@ -1115,13 +1115,14 @@ async function loadAnalytics() {
 }
 
 async function loadTimeline() {
-  const [timeline, latency] = await Promise.all([
+  const [timeline, latency, accuracy] = await Promise.all([
     api("/api/transcriptions-over-time?period=" + currentPeriod),
     api("/api/latency-trend?period=" + currentPeriod),
+    api("/api/accuracy?period=" + currentPeriod),
   ]);
   renderTimeline(timeline);
   renderLatency(latency);
-  renderAccuracy(await api("/api/accuracy?period=" + currentPeriod));
+  renderAccuracy(accuracy);
 }
 
 // ── Render Functions ─────────────────────────────────────────────────
@@ -1413,7 +1414,7 @@ function renderAccuracy(d) {
   }
 
   const learn = d.learn;
-  document.getElementById("learn-summary").textContent = learn.watched
+  document.getElementById("learn-summary").textContent = learn.watched || learn.skipped || learn.accepted
     ? `${learn.watched} watched, ${learn.skipped} skipped. ${learn.suggested} led to suggestions, ${learn.accepted} accepted.`
     : "";
   document.getElementById("learn-outcomes").innerHTML = learn.outcomes.length
@@ -1435,8 +1436,8 @@ function renderAccuracy(d) {
     : '<tr><td colspan="3" class="empty-state">No corrections yet.</td></tr>';
 
   const dict = d.dictionary;
-  document.getElementById("dictionary-summary").textContent = dict.entries
-    ? `${dict.entries} entries applied ${dict.total_hits.toLocaleString()} times.`
+  document.getElementById("dictionary-summary").textContent = dict.items.length
+    ? `${dict.entries} entries now. ${dict.total_hits.toLocaleString()} applications in total, removed entries included.`
     : "";
   document.getElementById("dictionary-usage").innerHTML = dict.items.length
     ? dict.items

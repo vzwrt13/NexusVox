@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from nexusvox.dictionary import DictionaryEntry, apply_dictionary, apply_dictionary_counted, suggest_entries
+from nexusvox.dictionary import DictionaryEntry, apply_dictionary, apply_dictionary_counted, suggest_entries, usage_key
 
 # ---- apply_dictionary -----------------------------------------------------
 
@@ -157,3 +157,17 @@ def test_apply_counted_reports_each_entry_that_fired():
 def test_apply_counted_empty_inputs():
     assert apply_dictionary_counted("", [DictionaryEntry("a", "b")]) == ("", {})
     assert apply_dictionary_counted("text", []) == ("text", {})
+
+
+def test_apply_counted_german_umlauts_and_eszett():
+    strasse = DictionaryEntry("die strasse", "die Straße")
+    mueller = DictionaryEntry("herr müller", "Herr Müller")
+
+    text, hits = apply_dictionary_counted("Die Strasse und HERR MÜLLER, die strasse", [strasse, mueller])
+
+    assert text == "die Straße und Herr Müller, die Straße"
+    assert hits == {strasse: 2, mueller: 1}
+
+
+def test_usage_key_folds_whitespace_and_case():
+    assert usage_key("  Herr   MÜLLER ") == "herr müller"

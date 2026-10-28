@@ -10,6 +10,7 @@ import threading
 import time
 import wave
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -141,12 +142,15 @@ class NexusVoxApp:
             auto_detect_language=config.auto_language_detection,
         )
         self._db = Database(config.database)
+        # Statistics writes (dictionary hits, learn-from-edits outcomes) run here, one at a time and in order,
+        # so a slow or locked database never delays the paste or the hotkey.
+        self._stats_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stats")
         # Reads the field of the last paste and queues the user's corrections as dictionary
         # suggestions. `[learn_from_edits].enabled` is checked per paste, so the toggle is live.
         self._edit_watcher = EditWatcher(
             self._db.add_dictionary_suggestions,
             self._db.get_dictionary_entries,
-            on_outcome=self._db.record_learn_event,
+            on_outcome=lambda outcome: self._stats_pool.submit(self._store_stat, self._db.record_learn_event, outcome),
         )
 
         self._hotkey = HotkeyListener(
@@ -301,6 +305,13 @@ class NexusVoxApp:
             return None
         logger.info("os-control command %r -> %s", text, reply or "(no reply)")
         return reply
+
+    @staticmethod
+    def _store_stat(write: Callable[..., None], *args) -> None:
+        try:
+            write(*args)
+        except Exception:
+            logger.exception("Could not store a statistic")
 
     def get_learn_status(self) -> dict:
         """How the pastes since start ended for learning from edits, for the dashboard."""
@@ -608,10 +619,6 @@ class NexusVoxApp:
                     extend_fn=None if remote else self._extend_dictation,
                 ),
             )
-            try:
-                self._db.record_dictionary_hits(processed.dictionary_hits)
-            except Exception:
-                logger.exception("Could not count the dictionary entries applied")
             done_at = None  # when the text was in place; the clipboard restore after it is not latency
             target_app = None  # process name of the app the text lands in; never the window title
             if remote:
@@ -657,6 +664,7 @@ class NexusVoxApp:
                 app=target_app,
             )
             logger.info("%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, processed.typed)
+            self._stats_pool.submit(self._store_stat, self._db.record_dictionary_hits, processed.dictionary_hits)
             self._store_audio(audio_buffer, record.id)
 
         except Exception:
@@ -1024,6 +1032,7 @@ class NexusVoxApp:
         self._tray.stop()
         self._audio.stop()
         self._edit_watcher.stop()
+        self._stats_pool.shutdown(wait=True)
         if self._remote_mic is not None:
             await self._remote_mic.close()
         if self._mic_guard is not None:

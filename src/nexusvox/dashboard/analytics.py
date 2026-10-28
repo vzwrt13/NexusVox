@@ -9,7 +9,7 @@ from collections import Counter
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
-from ..dictionary import suggest_entries
+from ..dictionary import suggest_entries, usage_key
 from ..edit_watch import OUTCOMES, WATCHED_KEYS
 from ..models import (
     ACCEPTED_EVENT,
@@ -475,6 +475,7 @@ def get_accuracy_over_time(
 
     with session_factory() as session:
         query = session.query(period_col, Transcription.text, Transcription.corrected_text)
+        query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
         rows = _apply_date_filter(query, start, end).all()
         event_period = func.strftime(fmt, LearnEventRow.created_at)
         event_query = session.query(event_period, func.count()).filter(LearnEventRow.outcome == ACCEPTED_EVENT)
@@ -489,12 +490,13 @@ def get_accuracy_over_time(
     for bucket, count in accepted.items():
         corrections[bucket] += count
 
-    labels = sorted(b for b in words if words[b])
+    # A period with only accepted suggestions has no rate (no words), but its corrections still count.
+    labels = sorted(b for b in set(words) | set(corrections) if words[b] or corrections[b])
     return {
         "labels": labels,
-        "values": [round(corrections[b] * 100 / words[b], 1) for b in labels],
-        "corrections": sum(corrections[b] for b in labels),
-        "words": sum(words[b] for b in labels),
+        "values": [round(corrections[b] * 100 / words[b], 1) if words[b] else None for b in labels],
+        "corrections": sum(corrections.values()),
+        "words": sum(words.values()),
     }
 
 
@@ -544,27 +546,27 @@ def get_learn_outcomes(session_factory: sessionmaker, *, start: str | None = Non
 def get_dictionary_usage(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> dict:
     """Every dictionary entry with how often it fired in the range; entries that never fired show 0.
 
-    Entries that were deleted keep their history and show as `removed`.
+    Entries that were deleted keep their history and show as `removed`, with the replacement they had last.
     """
     with session_factory() as session:
-        query = session.query(
-            DictionaryUsageRow.wrong,
-            func.max(DictionaryUsageRow.right),
-            func.sum(DictionaryUsageRow.hits),
-            func.max(DictionaryUsageRow.day),
-        )
+        query = session.query(DictionaryUsageRow.wrong, DictionaryUsageRow.right, DictionaryUsageRow.hits)
+        query = query.add_columns(DictionaryUsageRow.day)
         if start:
             query = query.filter(DictionaryUsageRow.day >= start)
         if end:
             query = query.filter(DictionaryUsageRow.day <= end)
-        grouped = query.group_by(DictionaryUsageRow.wrong)
-        used = {wrong: (right, int(hits), last) for wrong, right, hits, last in grouped}
+        usage_rows = query.order_by(DictionaryUsageRow.day).all()  # oldest first: the last row wins `right`
         entries = session.query(DictionaryEntryRow.wrong, DictionaryEntryRow.right).all()
+
+    used: dict[str, tuple[str, int, str]] = {}
+    for wrong, right, hits, day in usage_rows:
+        _, total, _ = used.get(wrong, (right, 0, day))
+        used[wrong] = (right, total + hits, day)
 
     items = []
     current = set()
     for wrong, right in entries:
-        key = " ".join(wrong.split()).lower()
+        key = usage_key(wrong)
         current.add(key)
         _, hits, last = used.get(key, (right, 0, None))
         items.append({"wrong": wrong, "right": right, "hits": hits, "last_used": last, "removed": False})

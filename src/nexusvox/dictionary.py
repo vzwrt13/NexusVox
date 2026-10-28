@@ -22,6 +22,11 @@ def _normalize(phrase: str) -> str:
     return " ".join(phrase.split())
 
 
+def usage_key(wrong: str) -> str:
+    """The key under which an entry's applications are counted: its ``wrong`` phrase, whitespace and case folded."""
+    return _normalize(wrong).lower()
+
+
 def apply_dictionary_counted(text: str, entries: list[DictionaryEntry]) -> tuple[str, dict[DictionaryEntry, int]]:
     """`apply_dictionary`, plus how often each entry replaced something (entries that never fired are left out)."""
     hits: dict[DictionaryEntry, int] = {}

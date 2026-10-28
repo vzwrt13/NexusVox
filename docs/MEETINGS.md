@@ -29,6 +29,20 @@ Pick a microphone and an output device in the Meetings tab if the system default
 use for the call. The output device is only *recorded*, never changed: choose the device the call is
 played on.
 
+## Live transcript
+
+While a meeting records, the Meetings tab shows a live transcript: what you say under **Me**, what
+everyone else says under **Others**, a few seconds behind the call. It is a preview. Both tracks are
+cut into windows of about six seconds (at a pause where possible) and sent to the transcription model one
+window at a time; silent windows are not sent. The live text has no speaker detection, no echo filter and no
+dictation filter, so your microphone may repeat what the speakers play and your dictation shows up under Me.
+
+The transcript made after **Stop** is the stored one and does not depend on the live view. If the model
+cannot keep up, the live view skips audio instead of falling behind; the tab then says how much it skipped and
+shows the share of time the model spent on live windows. Switch it off with *Show a live transcript while
+recording* in the Meetings tab (`[meeting].live_transcript`, on by default); the change applies from the
+next meeting.
+
 ## Speakers
 
 Your microphone is **Speaker 1**. Set **Meetings: name for your own voice** in the Settings tab

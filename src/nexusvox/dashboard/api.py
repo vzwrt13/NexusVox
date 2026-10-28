@@ -54,6 +54,7 @@ from ..file_transcribe import (
 )
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
+from ..meeting_live import LiveTranscriber
 from ..meeting_recorder import META_FILENAME, list_devices
 from ..meeting_session import MeetingSession
 from ..meeting_transcribe import (
@@ -132,7 +133,9 @@ class DashboardAPI:
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
         self._file_jobs = FileJobs()
         self.extensions = extensions if extensions is not None else ExtensionRegistry()
-        self._meeting = meeting or MeetingSession(config.meeting, self._meetings_dir)
+        self._meeting = meeting or MeetingSession(
+            config.meeting, self._meetings_dir, live_factory=lambda: LiveTranscriber(self._transcribe_live_window)
+        )
         # The dashboard and the hotkey both start and stop meetings: one at a time, and a press that arrives
         # while another is being handled sees its outcome.
         self._meeting_lock = threading.RLock()
@@ -262,6 +265,7 @@ class DashboardAPI:
             "meeting_consent_hint": self._config.meeting.consent_hint,
             "meeting_leave_dictation_out": self._config.meeting.leave_dictation_out,
             "meeting_own_voice_label": self._config.meeting.own_voice_label,
+            "meeting_live_transcript": self._config.meeting.live_transcript,
         }
 
     def get_translator_status(self) -> dict:
@@ -947,6 +951,19 @@ class DashboardAPI:
         self._config.meeting.leave_dictation_out = bool(enabled)
         save_config(self._config)
         return self.get_settings()
+
+    def set_meeting_live_transcript(self, enabled: bool) -> dict:
+        """Applied from the next meeting on; the running one keeps what it started with."""
+        self._config.meeting.live_transcript = bool(enabled)
+        save_config(self._config)
+        return self.get_settings()
+
+    def get_meeting_live(self, after: int = 0) -> dict:
+        """Live transcript segments from `after` on (the Meetings tab polls this while a meeting records)."""
+        return self._meeting.live(after)
+
+    def _transcribe_live_window(self, wav: bytes) -> str:
+        return self._transcribe_wav_chunks([wav]).text
 
     def begin_dictation(self, start: float) -> int | None:
         """A dictation take began (`time.monotonic()`); the token for `end_dictation`. Never raises."""

@@ -56,13 +56,20 @@ def test_records_reach_a_daily_rotating_file(file_log):
 
 def test_rotation_moves_the_day_to_a_dated_file(file_log):
     path, _ = file_log
-    logging.getLogger("nexusvox.test").info("day one")
-    handler = next(h for h in logging.getLogger().handlers if isinstance(h, TimedRotatingFileHandler))
+    # Straight into the handler, so the logger levels other tests left behind cannot matter.
+    handler = next(h for h in logging.getLogger().handlers if getattr(h, "baseFilename", None) == str(path))
+
+    def write(message):
+        handler.handle(logging.makeLogRecord({"msg": message, "levelno": logging.INFO, "levelname": "INFO"}))
+
+    write("day one")
+    assert "day one" in path.read_text(encoding="utf-8")
     handler.doRollover()
-    logging.getLogger("nexusvox.test").info("day two")
+    write("day two")
     rotated = [p for p in path.parent.iterdir() if p.name.startswith("nexusvox.log.")]
-    assert len(rotated) == 1 and "day one" in rotated[0].read_text(encoding="utf-8")
-    assert "day two" in _read(path) and "day one" not in _read(path)
+    assert len(rotated) == 1, sorted(p.name for p in path.parent.iterdir())
+    assert "day one" in rotated[0].read_text(encoding="utf-8")
+    assert "day two" in path.read_text(encoding="utf-8") and "day one" not in path.read_text(encoding="utf-8")
 
 
 def test_files_older_than_seven_days_are_deleted_at_start(tmp_path):

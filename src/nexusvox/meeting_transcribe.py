@@ -217,6 +217,23 @@ def _wav_bytes(pcm: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
+def downmix(raw: bytes, channels: int) -> np.ndarray:
+    """Little-endian PCM16 frames as one float32 mono array (channels averaged, a partial last frame cut)."""
+    samples = np.frombuffer(raw[: len(raw) // 2 * 2], dtype="<i2").astype(np.float32)
+    if channels > 1:
+        samples = samples[: len(samples) // channels * channels]
+        samples = samples.reshape(-1, channels).mean(axis=1)
+    return samples
+
+
+def block_power(samples: np.ndarray, block: int) -> np.ndarray:
+    """Mean square of each whole `block` of samples (empty when there is none); sqrt gives the RMS."""
+    n = len(samples) // block
+    if n == 0:
+        return np.zeros(0, dtype=np.float32)
+    return np.mean(samples[: n * block].astype(np.float32).reshape(n, block) ** 2, axis=1)
+
+
 def iter_track_chunks(track: MeetingTrack) -> Iterator[np.ndarray]:
     """The track as 16 kHz mono int16 arrays of 60 s each (the last one shorter), read window by window.
 
@@ -226,11 +243,7 @@ def iter_track_chunks(track: MeetingTrack) -> Iterator[np.ndarray]:
     window = track.sample_rate * (MAX_CHUNK_MS // 1000)
     with wave.open(str(track.path), "rb") as wf:
         while raw := wf.readframes(window):
-            samples = np.frombuffer(raw, dtype="<i2").astype(np.float32)
-            if track.channels > 1:
-                samples = samples[: len(samples) // track.channels * track.channels]
-                samples = samples.reshape(-1, track.channels).mean(axis=1)
-            yield _resample(samples, track.sample_rate)
+            yield _resample(downmix(raw, track.channels), track.sample_rate)
 
 
 def _resample(samples: np.ndarray, rate: int) -> np.ndarray:
@@ -280,10 +293,7 @@ def _analyse(chunks: Iterable[np.ndarray]) -> tuple[float, int]:
     for chunk in chunks:
         if len(chunk):
             peak = max(peak, int(np.abs(chunk.astype(np.int32)).max()))
-        n = len(chunk) // block
-        if n:
-            blocks = chunk[: n * block].astype(np.float32).reshape(n, block)
-            levels.extend(np.mean(blocks**2, axis=1).tolist())
+        levels.extend(block_power(chunk, block).tolist())
     if not levels:
         return 0.0, peak
     power = np.asarray(levels)

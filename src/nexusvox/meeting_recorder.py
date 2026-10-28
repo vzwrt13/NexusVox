@@ -488,6 +488,12 @@ class MeetingRecorder:
         if folder is not None:
             shutil.rmtree(folder, ignore_errors=True)
 
+    @property
+    def dictating(self) -> bool:
+        """Whether a dictation take is running right now (the live transcript waits for it)."""
+        with self._dictation_lock:
+            return bool(self._open_takes)
+
     def begin_dictation(self, start: float) -> int | None:
         """Note that a dictation take began at `start` (recorder clock); None when no meeting runs.
 

@@ -242,3 +242,166 @@ def test_labels_follow_the_own_voice_setting_and_never_say_me_or_others():
     assert _wait(lambda: len(live.segments_since()) == 2)
     live.stop()
     assert {s["label"] for s in live.segments_since()} == {"Vincent", "Speaker 2"}
+
+
+# -- review fixes ---------------------------------------------------------------------------------
+
+
+def test_blocks_fed_before_start_are_timed_from_the_meeting_start():
+    now = [5000.0]
+    live = LiveTranscriber(lambda wav: "hi", clock=lambda: now[0], window_s=1.0)  # created = meeting clock zero
+    now[0] += 0.5
+    live.feed("mic", AudioFormat(RATE, 1), _tone(1.2))  # the recorder feeds before the worker starts
+    live.start()
+    assert _wait(lambda: live.segments_since())
+    live.stop()
+    assert live.segments_since()[0]["at_s"] <= 1  # not ~5000
+
+
+def test_audio_fed_during_a_slow_window_is_kept_and_the_backlog_limit_applies(monkeypatch):
+    monkeypatch.setattr("nexusvox.meeting_live.MAX_BACKLOG_S", 10.0)
+    release = threading.Event()
+    texts = iter(["first", "second", "third", "fourth"])
+    live = _live(lambda wav: release.wait(5) and next(texts))
+    live.feed("mic", AudioFormat(RATE, 1), _tone(1.2))
+    assert _wait(lambda: live._queue.empty())
+    for _ in range(300):  # 30 s of 100 ms blocks, far more than the old 2000-block queue could hold for two tracks
+        live.feed("mic", AudioFormat(RATE, 1), _tone(0.1))
+        live.feed("system", AudioFormat(RATE, 1), _tone(0.1))
+    release.set()
+    assert _wait(lambda: live.status()["skipped_s"] > 0)
+    live.stop()
+    assert live.status()["skipped_s"] > 15  # whole audio was seen by the trim, not dropped block by block at random
+
+
+def test_the_track_waiting_longest_goes_first():
+    order = []
+    live = LiveTranscriber(lambda wav: order.append(1) or "x", window_s=1.0)
+    live.feed("system", AudioFormat(RATE, 1), _tone(1.2))
+    live._drain()
+    live.feed("mic", AudioFormat(RATE, 1), _tone(1.2))
+    live._drain()
+    assert live._ready()[0] == "system"
+
+
+def test_a_dictation_take_holds_back_new_windows():
+    taking = [True]
+    live = LiveTranscriber(lambda wav: "x", window_s=1.0)
+    live.pause_while(lambda: taking[0])
+    live.start()
+    live.feed("mic", AudioFormat(RATE, 1), _tone(1.2))
+    time.sleep(0.6)
+    assert live.segments_since() == []
+    taking[0] = False
+    assert _wait(lambda: live.segments_since())
+    live.stop()
+
+
+class _Transcriber:
+    def __init__(self, done=True, text="hi"):
+        self.done, self.text, self.connects, self.disconnects, self.made = done, text, 0, 0, 0
+        self.loops = set()
+
+    async def connect(self):
+        import asyncio
+
+        self.loops.add(id(asyncio.get_running_loop()))
+        self.connects += 1
+
+    async def send_audio_chunk(self, pcm):
+        pass
+
+    async def finish(self, timeout=30.0):
+        from nexusvox.transcriber import TranscriptionResult
+
+        result = TranscriptionResult()
+        result.finalize(text=self.text)
+        result.done = self.done
+        return result
+
+    async def disconnect(self):
+        self.disconnects += 1
+
+
+def test_window_transcriber_reuses_one_transcriber_and_loop_and_closes_them():
+    from nexusvox.meeting_live import WindowTranscriber
+    from nexusvox.meeting_transcribe import _wav_bytes
+
+    made = []
+    t = _Transcriber()
+    wt = WindowTranscriber(lambda: made.append(1) or t)
+    wav = _wav_bytes(np.zeros(1600, dtype=np.int16))
+    assert wt(wav) == "hi" and wt(wav) == "hi"
+    assert len(made) == 1 and t.connects == 2 and len(t.loops) == 1
+    wt.close()
+    assert t.disconnects == 1
+
+
+def test_a_window_the_server_did_not_finish_is_an_error_not_a_silent_success():
+    from nexusvox.meeting_live import WindowTranscriber
+    from nexusvox.meeting_transcribe import _wav_bytes
+
+    wt = WindowTranscriber(lambda: _Transcriber(done=False, text=""))
+    with pytest.raises(TimeoutError):
+        wt(_wav_bytes(np.zeros(1600, dtype=np.int16)))
+    wt.close()
+
+    live = _live(wt_raising := (lambda wav: (_ for _ in ()).throw(TimeoutError("slow"))))
+    live.feed("mic", AudioFormat(RATE, 1), _tone(1.2))
+    assert _wait(lambda: live.status()["error"])
+    live.stop()
+    assert "slow" in live.status()["error"] and wt_raising
+
+
+def test_the_worker_closes_its_transcriber_when_it_ends():
+    closed = []
+
+    class Fn:
+        def __call__(self, wav):
+            return "x"
+
+        def close(self):
+            closed.append(1)
+
+    live = _live(Fn())
+    live.stop()
+    assert closed == [1]
+
+
+def test_stopping_the_session_does_not_hold_the_session_lock():
+    rec = _Recorder()
+    session, live = _session(True, rec)
+    session.start()
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_stop(timeout=5.0):
+        entered.set()
+        release.wait(5)
+
+    live.stop = slow_stop
+    stopper = threading.Thread(target=session.stop)
+    stopper.start()
+    assert entered.wait(5)
+    assert session.status()["recording"] is False  # would block while the lock is held
+    assert session.begin_dictation(0.0) is None
+    release.set()
+    stopper.join(5)
+
+
+def test_live_transcript_is_off_by_default(tmp_path):
+    from nexusvox.config import Config, load_config
+
+    assert MeetingConfig().live_transcript is False and Config().meeting.live_transcript is False
+    path = tmp_path / "c.toml"
+    path.write_text('[meeting]\nkey = "M"\n', encoding="utf-8")  # a file from before the setting existed
+    assert load_config(path).meeting.live_transcript is False
+
+
+def test_the_shipped_config_template_leaves_it_off():
+    import tomllib
+    from pathlib import Path
+
+    import nexusvox
+
+    template = Path(nexusvox.__file__).parent / "config.example.toml"
+    assert tomllib.loads(template.read_text(encoding="utf-8"))["meeting"]["live_transcript"] is False

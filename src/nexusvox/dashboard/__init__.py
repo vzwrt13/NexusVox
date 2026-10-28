@@ -200,7 +200,7 @@ def _create_app(api: DashboardAPI) -> Flask:
     @app.route("/api/settings/meeting-live-transcript", methods=["POST"])
     def set_meeting_live_transcript():
         data = request.get_json(force=True)
-        return jsonify(api.set_meeting_live_transcript(bool(data.get("enabled", True))))
+        return jsonify(api.set_meeting_live_transcript(bool(data.get("enabled", False))))
 
     # ---- Meeting recording ---------------------------------------------------
 

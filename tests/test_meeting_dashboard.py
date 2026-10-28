@@ -286,12 +286,14 @@ def test_stop_without_a_meeting_and_a_second_start_are_errors(env):
 def test_live_endpoint_and_setting(env):
     client, api, *_ = env
     assert client.get("/api/meetings/live?after=x").get_json() == {
-        "enabled": True,
+        "enabled": False,
         "recording": False,
         "segments": [],
         "status": None,
     }
-    assert client.get("/api/settings").get_json()["meeting_live_transcript"] is True
+    assert client.get("/api/settings").get_json()["meeting_live_transcript"] is False  # off until switched on
+    resp = client.post("/api/settings/meeting-live-transcript", json={"enabled": True})
+    assert resp.get_json()["meeting_live_transcript"] is True and api._config.meeting.live_transcript is True
     resp = client.post("/api/settings/meeting-live-transcript", json={"enabled": False})
     assert resp.get_json()["meeting_live_transcript"] is False and api._config.meeting.live_transcript is False
 

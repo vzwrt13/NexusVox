@@ -54,7 +54,7 @@ from ..file_transcribe import (
 )
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
-from ..meeting_live import LiveTranscriber
+from ..meeting_live import LiveTranscriber, WindowTranscriber
 from ..meeting_recorder import META_FILENAME, list_devices
 from ..meeting_session import MeetingSession
 from ..meeting_transcribe import (
@@ -72,7 +72,7 @@ from ..meeting_transcribe import (
 from ..os_commands import NEXUS_ACTIONS
 from ..polish_presets import PolishPreset
 from ..snippets import Snippet, SnippetOption
-from ..transcriber import BaseTranscriber
+from ..transcriber import BaseTranscriber, create_transcriber
 from ..translator import is_reachable
 from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
 from . import analytics
@@ -136,7 +136,9 @@ class DashboardAPI:
         self._meeting = meeting or MeetingSession(
             config.meeting,
             self._meetings_dir,
-            live_factory=lambda: LiveTranscriber(self._transcribe_live_window, labels=self._live_labels),
+            live_factory=lambda: LiveTranscriber(
+                WindowTranscriber(self._make_live_transcriber), labels=self._live_labels
+            ),
         )
         # The dashboard and the hotkey both start and stop meetings: one at a time, and a press that arrives
         # while another is being handled sees its outcome.
@@ -972,8 +974,14 @@ class DashboardAPI:
             "system": numbered_speaker_label(SPEAKER_FIRST_SYSTEM),
         }
 
-    def _transcribe_live_window(self, wav: bytes) -> str:
-        return self._transcribe_wav_chunks([wav]).text
+    def _make_live_transcriber(self) -> BaseTranscriber:
+        """The transcriber one live transcript uses for all its windows (current model and language)."""
+        return create_transcriber(
+            self._config.inference,
+            device=None,
+            language=self._config.language,
+            auto_detect_language=self._config.auto_language_detection,
+        )
 
     def begin_dictation(self, start: float) -> int | None:
         """A dictation take began (`time.monotonic()`); the token for `end_dictation`. Never raises."""

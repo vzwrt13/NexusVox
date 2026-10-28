@@ -57,6 +57,7 @@ class MeetingSession:
             live = self._live_factory() if self._live_factory and self._config.live_transcript else None
             if live is not None:
                 recorder.set_tap(live.feed)
+                live.pause_while(lambda: bool(getattr(recorder, "dictating", False)))
             folder = recorder.start()
             if live is not None:
                 live.start()
@@ -71,11 +72,21 @@ class MeetingSession:
             if self._recorder is None:
                 raise RuntimeError("No meeting is being recorded")
             recorder, self._recorder, self._started = self._recorder, None, None
+            live = self._live
             try:
-                return recorder.stop()
-            finally:
-                if self._live is not None:
-                    self._live.stop()
+                folder = recorder.stop()
+            except BaseException:
+                self._stop_live_later(live)
+                raise
+        # Outside the lock: waiting for a window in flight must not block dictation, status or the live poll.
+        if live is not None:
+            live.stop()
+        return folder
+
+    @staticmethod
+    def _stop_live_later(live: LiveTranscriber | None) -> None:
+        if live is not None:
+            threading.Thread(target=live.stop, name="meeting-live-stop", daemon=True).start()
 
     def begin_dictation(self, start: float) -> int | None:
         """A dictation take began (`time.monotonic()`); the token for `end_dictation`, None when no meeting runs."""

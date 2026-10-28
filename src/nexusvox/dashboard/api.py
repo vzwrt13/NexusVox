@@ -675,6 +675,9 @@ class DashboardAPI:
     def get_model_breakdown(self, start: str | None = None, end: str | None = None) -> list[dict]:
         return analytics.get_model_breakdown(self._sf, start=start, end=end)
 
+    def get_app_breakdown(self, start: str | None = None, end: str | None = None) -> list[dict]:
+        return analytics.get_app_breakdown(self._sf, start=start, end=end)
+
     # ---- File Upload Transcription -----------------------------------------
 
     def start_file_transcription(

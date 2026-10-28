@@ -1094,13 +1094,14 @@ function pollModelStatus(prevModel) {
 
 // ── Analytics Loading ────────────────────────────────────────────────
 async function loadAnalytics() {
-  const [overview, lang, hours, words, heatmap, models] = await Promise.all([
+  const [overview, lang, hours, words, heatmap, models, apps] = await Promise.all([
     api("/api/overview"),
     api("/api/language-distribution"),
     api("/api/peak-usage-hours"),
     api("/api/top-words?n=20"),
     api("/api/activity-heatmap"),
     api("/api/model-breakdown"),
+    api("/api/app-breakdown"),
   ]);
 
   renderOverview(overview);
@@ -1109,6 +1110,7 @@ async function loadAnalytics() {
   renderWords(words);
   renderHeatmap(heatmap);
   renderModelBreakdown(models);
+  renderAppBreakdown(apps);
   loadTimeline();
 }
 
@@ -1357,6 +1359,24 @@ function renderModelBreakdown(rows) {
         <td>${m.avg_wpm}</td>
         <td>${formatDuration(m.avg_duration_ms)}</td>
         <td>${m.avg_transcribe_ms != null ? formatDuration(m.avg_transcribe_ms) : "--"}</td>
+      </tr>`
+    )
+    .join("");
+}
+
+// ── Per-App Table ────────────────────────────────────────────────────
+function renderAppBreakdown(rows) {
+  const body = document.getElementById("app-breakdown");
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="3" class="empty-state">No transcriptions yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows
+    .map(
+      (a) => `<tr>
+        <td>${escapeHtml(a.app)}</td>
+        <td>${a.count}</td>
+        <td>${a.words.toLocaleString()}</td>
       </tr>`
     )
     .join("");

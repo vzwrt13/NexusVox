@@ -125,9 +125,19 @@ def test_parse_empty_string_returns_none():
 
 @pytest.fixture
 def mock_wm():
-    """Inject a mock window_manager into sys.modules so the lazy import works on all platforms."""
+    """Inject a mock window_manager so the lazy import works on all platforms.
+
+    `from . import window_manager` returns the package attribute once the real module was imported
+    anywhere earlier in the run, so the attribute is replaced too; otherwise these tests would
+    close, snap and focus the user's real windows.
+    """
+    import nexusvox
+
     mock = MagicMock()
-    with patch.dict(sys.modules, {"nexusvox.window_manager": mock}):
+    with (
+        patch.dict(sys.modules, {"nexusvox.window_manager": mock}),
+        patch.object(nexusvox, "window_manager", mock, create=True),
+    ):
         yield mock
 
 

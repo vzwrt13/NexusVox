@@ -8,7 +8,7 @@ from collections import Counter
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
-from ..models import FileTranscription, Transcription
+from ..models import COMMAND_APP, FileTranscription, Transcription
 
 # Assumed average typing speed for "time saved" calculation.
 _TYPING_WPM = 40
@@ -369,3 +369,76 @@ def get_model_breakdown(
         )
     out.sort(key=lambda m: m["count"], reverse=True)
     return out
+
+
+# Friendly names for common apps, keyed by lower-case process file name. Anything else is "Other".
+APP_NAMES = {
+    "outlook.exe": "Outlook",
+    "olk.exe": "Outlook",
+    "thunderbird.exe": "Thunderbird",
+    "chrome.exe": "Chrome",
+    "msedge.exe": "Edge",
+    "firefox.exe": "Firefox",
+    "brave.exe": "Brave",
+    "opera.exe": "Opera",
+    "code.exe": "VS Code",
+    "cursor.exe": "Cursor",
+    "devenv.exe": "Visual Studio",
+    "pycharm64.exe": "PyCharm",
+    "idea64.exe": "IntelliJ IDEA",
+    "notepad.exe": "Notepad",
+    "notepad++.exe": "Notepad++",
+    "winword.exe": "Word",
+    "excel.exe": "Excel",
+    "powerpnt.exe": "PowerPoint",
+    "onenote.exe": "OneNote",
+    "teams.exe": "Teams",
+    "ms-teams.exe": "Teams",
+    "slack.exe": "Slack",
+    "discord.exe": "Discord",
+    "telegram.exe": "Telegram",
+    "whatsapp.exe": "WhatsApp",
+    "signal.exe": "Signal",
+    "zoom.exe": "Zoom",
+    "obsidian.exe": "Obsidian",
+    "notion.exe": "Notion",
+    "windowsterminal.exe": "Windows Terminal",
+    "wt.exe": "Windows Terminal",
+    "powershell.exe": "PowerShell",
+    "pwsh.exe": "PowerShell",
+    "cmd.exe": "Command Prompt",
+    "explorer.exe": "File Explorer",
+}
+UNKNOWN_APP = "Unknown"
+OTHER_APP = "Other"
+
+
+def app_label(process: str | None) -> str:
+    """The name shown for a stored process name: friendly when common, "Other" when not, "Unknown" when unrecorded.
+
+    Process names are stored lower-case (`App._paste`), so they are looked up as they are.
+    """
+    if not process:
+        return UNKNOWN_APP
+    return APP_NAMES.get(process, OTHER_APP)
+
+
+def get_app_breakdown(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> list[dict]:
+    """Dictations and words per target app, busiest first; "Other" and "Unknown" always come last.
+
+    Process names that share a friendly name (`olk.exe` and `outlook.exe`) are one row. Rows that ran a command
+    instead of typing text are left out.
+    """
+    with session_factory() as session:
+        query = session.query(Transcription.app, Transcription.text)
+        query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
+        rows = _apply_date_filter(query, start, end).all()
+
+    groups: dict[str, dict] = {}
+    for r in rows:
+        label = app_label(r.app)
+        group = groups.setdefault(label, {"app": label, "count": 0, "words": 0})
+        group["count"] += 1
+        group["words"] += len(r.text.split())
+    tail = {OTHER_APP: 1, UNKNOWN_APP: 2}
+    return sorted(groups.values(), key=lambda g: (tail.get(g["app"], 0), -g["count"], g["app"]))

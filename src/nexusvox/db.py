@@ -62,6 +62,7 @@ class Database:
             "ALTER TABLE transcriptions ADD COLUMN latency_ms INTEGER",
             "ALTER TABLE transcriptions ADD COLUMN cleanup_status VARCHAR(10)",
             "ALTER TABLE transcriptions ADD COLUMN cleanup_ms INTEGER",
+            "ALTER TABLE transcriptions ADD COLUMN app VARCHAR(100)",
             "ALTER TABLE snippets ADD COLUMN options TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN words TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN cleaned_text TEXT",
@@ -95,6 +96,7 @@ class Database:
         latency_ms: int | None = None,
         cleanup_status: str | None = None,
         cleanup_ms: int | None = None,
+        app: str | None = None,
     ) -> Transcription:
         """Save a transcription record to the database."""
         with self._session_factory() as session:
@@ -114,6 +116,7 @@ class Database:
                 latency_ms=latency_ms,
                 cleanup_status=cleanup_status,
                 cleanup_ms=cleanup_ms,
+                app=app,
             )
             session.add(record)
             session.commit()

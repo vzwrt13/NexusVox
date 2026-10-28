@@ -39,6 +39,7 @@ from .lang_detect import detect_language
 from .llm import LlmError
 from .llm import warm_up as llm_warm_up
 from .mic_guard import MicGuard, create_mic_guard
+from .models import COMMAND_APP
 from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
 from .overlay import CONFIRMED, ERROR, PROCESSING, RECORDING, Overlay, level_from_rms
 from .pipeline import process_text
@@ -604,13 +605,14 @@ class NexusVoxApp:
                 ),
             )
             done_at = None  # when the text was in place; the clipboard restore after it is not latency
+            target_app = None  # process name of the app the text lands in; never the window title
             if remote:
                 # The phone inserts it into its own focused field.
                 self._remote_text = processed.typed
             else:
                 try:
-                    done_at = await loop.run_in_executor(
-                        None, inject_text, processed.typed, self._config.injection_delay_ms, processed.press_enter
+                    done_at, target_app = await loop.run_in_executor(
+                        None, self._paste, processed.typed, self._config.injection_delay_ms, processed.press_enter
                     )
                     pasted = True
                 except ClipboardError as exc:
@@ -644,6 +646,7 @@ class NexusVoxApp:
                 latency_ms=latency_ms,
                 cleanup_status=processed.cleanup.status,
                 cleanup_ms=processed.cleanup.ms,
+                app=target_app,
             )
             logger.info("%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, processed.typed)
             self._store_audio(audio_buffer, record.id)
@@ -705,16 +708,30 @@ class NexusVoxApp:
         if visual:
             overlay.show(state)
 
-    @staticmethod
-    def _active_app() -> ActiveApp:
+    _active_app_failed = False
+
+    @classmethod
+    def _active_app(cls) -> ActiveApp:
         try:
             from .window_manager import foreground_app  # lazy, like the other window_manager uses here
 
             process, title = foreground_app()
         except Exception:
-            logger.exception("Could not read the active app")
+            # Every dictation asks; one traceback is enough when it keeps failing.
+            level = logging.DEBUG if cls._active_app_failed else logging.ERROR
+            logger.log(level, "Could not read the active app", exc_info=True)
+            cls._active_app_failed = True
             return ActiveApp()
         return ActiveApp(process, title)
+
+    def _paste(self, text: str, delay_ms: int, press_enter: bool) -> tuple[float, str | None]:
+        """Type the text at the cursor (runs in the executor); also the process name of the app it lands in.
+
+        The app is read right before the paste, and only a paste that went through returns it, so a dictation
+        the clipboard refused is never credited to an app. Only the process name is kept, never the title.
+        """
+        process = self._active_app().process.lower() if text else ""
+        return inject_text(text, delay_ms, press_enter), process or None
 
     def _extend_dictation(self, text: str) -> str:
         """The extensions' say on a dictation about to be typed (runs in the executor with the pipeline)."""
@@ -735,6 +752,7 @@ class NexusVoxApp:
             confidence=recording.confidence,
             model=self._transcriber.model,
             transcribe_ms=recording.transcribe_ms,
+            app=COMMAND_APP,
         )
         self._store_audio(recording.audio, record.id)
 

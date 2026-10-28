@@ -285,6 +285,15 @@ def test_model_breakdown_endpoint(flask_client, sample_transcriptions):
     assert data[0]["count"] == len(sample_transcriptions)
 
 
+def test_app_breakdown_endpoint(flask_client, sample_transcriptions):
+    resp = flask_client.get("/api/app-breakdown")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    words = sum(len(t.text.split()) for t in sample_transcriptions)
+    assert data == [{"app": "Unknown", "count": len(sample_transcriptions), "words": words}]
+
+
 # ── Model endpoints ──────────────────────────────────────────────────
 
 

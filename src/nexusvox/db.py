@@ -60,6 +60,8 @@ class Database:
             "ALTER TABLE transcriptions ADD COLUMN translate_error VARCHAR(200)",
             "ALTER TABLE transcriptions ADD COLUMN transcribe_ms INTEGER",
             "ALTER TABLE transcriptions ADD COLUMN latency_ms INTEGER",
+            "ALTER TABLE transcriptions ADD COLUMN cleanup_status VARCHAR(10)",
+            "ALTER TABLE transcriptions ADD COLUMN cleanup_ms INTEGER",
             "ALTER TABLE snippets ADD COLUMN options TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN words TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN cleaned_text TEXT",
@@ -67,6 +69,7 @@ class Database:
             "ALTER TABLE file_transcriptions ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'upload'",
             "ALTER TABLE file_transcriptions ADD COLUMN audio_path VARCHAR(500)",
             "ALTER TABLE file_transcriptions ADD COLUMN speaker_names TEXT",
+            "ALTER TABLE file_transcriptions ADD COLUMN processing_ms INTEGER",
         ]
         with self._engine.connect() as conn:
             for sql in migrations:
@@ -90,6 +93,8 @@ class Database:
         translate_error: str | None = None,
         transcribe_ms: int | None = None,
         latency_ms: int | None = None,
+        cleanup_status: str | None = None,
+        cleanup_ms: int | None = None,
     ) -> Transcription:
         """Save a transcription record to the database."""
         with self._session_factory() as session:
@@ -107,6 +112,8 @@ class Database:
                 translate_error=translate_error,
                 transcribe_ms=transcribe_ms,
                 latency_ms=latency_ms,
+                cleanup_status=cleanup_status,
+                cleanup_ms=cleanup_ms,
             )
             session.add(record)
             session.commit()
@@ -460,6 +467,7 @@ class Database:
         kind: str = "upload",
         audio_path: str | None = None,
         speaker_names: dict[int, str] | None = None,
+        processing_ms: int | None = None,
     ) -> FileTranscription:
         """Save a file-upload transcription record, with per-word timing when there is any.
 
@@ -480,6 +488,7 @@ class Database:
                 kind=kind,
                 audio_path=audio_path,
                 speaker_names=json.dumps(speaker_names) if speaker_names else None,
+                processing_ms=processing_ms,
             )
             session.add(record)
             session.commit()

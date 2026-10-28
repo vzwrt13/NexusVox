@@ -51,6 +51,10 @@ class Transcription(Base):
     # transcript took to arrive, and how long until the text was at the cursor.
     transcribe_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Auto cleanup: how the model's pass ended ("applied", "unchanged", "rejected", "timeout", "failed")
+    # and how long it took; both NULL when cleanup was off or the dictation too short to send.
+    cleanup_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    cleanup_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class FileTranscription(Base):
@@ -78,6 +82,9 @@ class FileTranscription(Base):
     speaker_names: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Playable audio kept for the row (a meeting's mix), relative to the database folder; NULL for uploads.
     audio_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Wall time from the start of the upload's processing (conversion, transcription, speaker detection,
+    # cleanup) to the moment it was saved; NULL for rows from before this was measured and meetings.
+    processing_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class DictionaryEntryRow(Base):

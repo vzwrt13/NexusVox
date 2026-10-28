@@ -467,7 +467,10 @@ class DashboardAPI:
     # ---- Analytics ---------------------------------------------------------
 
     def get_overview(self, start: str | None = None, end: str | None = None) -> dict:
-        return analytics.get_overview(self._sf, start=start, end=end)
+        return {
+            **analytics.get_overview(self._sf, start=start, end=end),
+            **analytics.get_upload_overview(self._sf, start=start, end=end),
+        }
 
     def get_transcriptions_over_time(
         self, period: str = "day", start: str | None = None, end: str | None = None
@@ -709,6 +712,7 @@ class DashboardAPI:
         With a `cleanup_level`, the transcript is also cleaned up by the [llm] model; that text is saved
         beside the transcript, never in place of it. `job` receives the stage as the work moves on.
         """
+        started = time.monotonic()
         progress = job.update if job else None
         if progress:
             progress("converting")
@@ -751,6 +755,7 @@ class DashboardAPI:
             words=result.words,
             cleaned_text=cleaned_text,
             cleanup_level=cleanup_level,
+            processing_ms=int((time.monotonic() - started) * 1000),
         )
 
     def _store_file_transcription(self, filename: str, notes: list[str], progress, **fields) -> dict:

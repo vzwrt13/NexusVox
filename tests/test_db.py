@@ -526,3 +526,35 @@ def test_migration_adds_words_column_to_old_file_transcriptions(tmp_path):
     database = Database(DatabaseConfig(path=str(path)))
 
     assert database.save_file_transcription("hi", "en", 1000, "a.wav").words is None
+
+
+def test_migration_adds_the_stats_columns_to_an_old_database(tmp_path):
+    import sqlite3
+
+    from nexusvox.config import DatabaseConfig
+    from nexusvox.db import Database
+
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE transcriptions (id INTEGER PRIMARY KEY, text TEXT NOT NULL,"
+            " language VARCHAR(5) NOT NULL, duration_ms INTEGER NOT NULL, created_at DATETIME, confidence FLOAT)"
+        )
+        conn.execute(
+            "CREATE TABLE file_transcriptions (id INTEGER PRIMARY KEY, text TEXT NOT NULL,"
+            " language VARCHAR(5) NOT NULL, duration_ms INTEGER NOT NULL, created_at DATETIME, model VARCHAR(100),"
+            " original_filename VARCHAR(255) NOT NULL, confidence FLOAT)"
+        )
+        conn.execute("INSERT INTO transcriptions (text, language, duration_ms) VALUES ('hi', 'en', 1)")
+        conn.execute(
+            "INSERT INTO file_transcriptions (text, language, duration_ms, original_filename)"
+            " VALUES ('hi', 'en', 1, 'a.wav')"
+        )
+
+    old = Database(DatabaseConfig(path=str(path)))
+
+    assert old.get_file_transcriptions(limit=1)[0].processing_ms is None
+    dictation = old.get_recent(1)[0]
+    assert dictation.cleanup_status is None and dictation.cleanup_ms is None
+    old.save_transcription("new", "en", 1, cleanup_status="applied", cleanup_ms=120)
+    assert old.get_recent(1)[0].cleanup_status == "applied"

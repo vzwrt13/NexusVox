@@ -615,6 +615,8 @@ class NexusVoxApp:
                 translate_error=processed.translation.error,
                 transcribe_ms=transcribe_ms,
                 latency_ms=latency_ms,
+                cleanup_status=processed.cleanup.status,
+                cleanup_ms=processed.cleanup.ms,
             )
             logger.info("%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, processed.typed)
             self._store_audio(audio_buffer, record.id)

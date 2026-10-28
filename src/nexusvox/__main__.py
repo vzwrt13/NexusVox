@@ -24,7 +24,7 @@ def main() -> None:
     # otherwise only noticed as a setting that does nothing.
     logging.getLogger(__name__).info(
         "Config: %s, database: %s, cleanup: %s",
-        DEFAULT_CONFIG_PATH.resolve(),
+        config.source_path or DEFAULT_CONFIG_PATH.resolve(),
         Path(config.database.path).resolve(),
         config.cleanup.level,
     )

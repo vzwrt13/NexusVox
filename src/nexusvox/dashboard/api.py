@@ -226,7 +226,7 @@ class DashboardAPI:
         return {
             "requested": requested,
             "resolved": resolve_device(requested),
-            "cuda_available": resolve_device("auto") == "cuda",
+            "cuda_available": cuda_available(),
         }
 
     def set_device(self, requested: str) -> dict:

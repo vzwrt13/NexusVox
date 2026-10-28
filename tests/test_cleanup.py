@@ -169,3 +169,13 @@ def test_cleanup_is_skipped_without_cuda_and_logs_once(model, monkeypatch, caplo
 def test_cleanup_runs_with_cuda(model):
     model.reply = "Das ist ein Test."
     assert cleanup("ähm das ist ein test", LIGHT, LlmConfig()).cleaned
+
+
+def test_cuda_available_is_false_when_the_probe_fails(monkeypatch):
+    from nexusvox import config
+
+    def boom(requested):
+        raise RuntimeError("driver")
+
+    monkeypatch.setattr(config, "resolve_device", boom)
+    assert config.cuda_available() is False

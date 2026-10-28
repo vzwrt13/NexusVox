@@ -1132,12 +1132,14 @@ async function loadAnalytics() {
 }
 
 async function loadTimeline() {
-  const [timeline, latency] = await Promise.all([
+  const [timeline, latency, accuracy] = await Promise.all([
     api("/api/transcriptions-over-time?period=" + currentPeriod),
     api("/api/latency-trend?period=" + currentPeriod),
+    api("/api/accuracy?period=" + currentPeriod),
   ]);
   renderTimeline(timeline);
   renderLatency(latency);
+  renderAccuracy(accuracy);
 }
 
 // ── Render Functions ─────────────────────────────────────────────────
@@ -1397,6 +1399,75 @@ function renderAppBreakdown(rows) {
       </tr>`
     )
     .join("");
+}
+
+// ── Accuracy and Dictionary Stats ────────────────────────────────────
+function renderAccuracy(d) {
+  if (charts.accuracy) charts.accuracy.destroy();
+  document.getElementById("accuracy-summary").textContent = d.words
+    ? `${d.corrections.toLocaleString()} corrections in ${d.words.toLocaleString()} dictated words. ` +
+      "Counted from reviewed transcripts and suggestions you accepted."
+    : "";
+  if (d.labels.length) {
+    const ctx = document.getElementById("chart-accuracy").getContext("2d");
+    charts.accuracy = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: d.labels,
+        datasets: [{
+          data: d.values,
+          borderColor: COLORS.orange,
+          backgroundColor: "transparent",
+          tension: 0.3,
+          pointRadius: d.labels.length > 30 ? 0 : 3,
+          pointBackgroundColor: COLORS.orange,
+        }],
+      },
+      options: {
+        ...chartDefaults,
+        plugins: { ...chartDefaults.plugins, tooltip: { mode: "index", intersect: false } },
+      },
+    });
+  }
+
+  const learn = d.learn;
+  document.getElementById("learn-summary").textContent = learn.watched || learn.skipped || learn.accepted
+    ? `${learn.watched} watched, ${learn.skipped} skipped. ${learn.suggested} led to suggestions, ${learn.accepted} accepted.`
+    : "";
+  document.getElementById("learn-outcomes").innerHTML = learn.outcomes.length
+    ? learn.outcomes
+        .map((o) => `<tr><td>${escapeHtml(o.message)}</td><td>${o.count}</td></tr>`)
+        .join("")
+    : '<tr><td colspan="2" class="empty-state">No pastes watched yet.</td></tr>';
+
+  document.getElementById("most-corrected").innerHTML = d.most_corrected.length
+    ? d.most_corrected
+        .map(
+          (c) => `<tr>
+            <td>${escapeHtml(c.wrong)}</td>
+            <td>${escapeHtml(c.right)}</td>
+            <td>${c.count}</td>
+          </tr>`
+        )
+        .join("")
+    : '<tr><td colspan="3" class="empty-state">No corrections yet.</td></tr>';
+
+  const dict = d.dictionary;
+  document.getElementById("dictionary-summary").textContent = dict.items.length
+    ? `${dict.entries} entries now. ${dict.total_hits.toLocaleString()} applications in total, removed entries included.`
+    : "";
+  document.getElementById("dictionary-usage").innerHTML = dict.items.length
+    ? dict.items
+        .map(
+          (e) => `<tr>
+            <td>${escapeHtml(e.wrong)}</td>
+            <td>${escapeHtml(e.right)}${e.removed ? " (removed)" : ""}</td>
+            <td>${e.hits}</td>
+            <td>${e.last_used ? escapeHtml(e.last_used) : "--"}</td>
+          </tr>`
+        )
+        .join("")
+    : '<tr><td colspan="4" class="empty-state">The dictionary is empty.</td></tr>';
 }
 
 // ── Flagged Transcriptions (Edit Tab) ────────────────────────────────

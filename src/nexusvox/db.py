@@ -11,12 +11,15 @@ from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import sessionmaker
 
 from .config import DatabaseConfig
-from .dictionary import DictionaryEntry
+from .dictionary import DictionaryEntry, usage_key
 from .models import (
+    ACCEPTED_EVENT,
     Base,
     DictionaryEntryRow,
     DictionarySuggestionRow,
+    DictionaryUsageRow,
     FileTranscription,
+    LearnEventRow,
     PolishPresetRow,
     SnippetRow,
     Transcription,
@@ -306,8 +309,33 @@ class Database:
                 session.query(DictionarySuggestionRow).filter(
                     func.lower(DictionarySuggestionRow.wrong) == wrong.lower()
                 ).delete(synchronize_session=False)
+                session.add(LearnEventRow(outcome=ACCEPTED_EVENT))
                 session.commit()
         return entry
+
+    # ---- Dictionary statistics ----------------------------------------------
+
+    def record_dictionary_hits(self, hits: dict[DictionaryEntry, int]) -> None:
+        """Add today's applications of dictionary entries to the per-entry, per-day counters."""
+        if not hits:
+            return
+        day = utc_now().strftime("%Y-%m-%d")
+        with self._session_factory() as session:
+            for entry, count in hits.items():
+                key = usage_key(entry.wrong)
+                row = session.query(DictionaryUsageRow).filter_by(wrong=key, day=day).first()
+                if row is None:
+                    session.add(DictionaryUsageRow(wrong=key, right=entry.right, day=day, hits=count))
+                else:
+                    row.right = entry.right
+                    row.hits += count
+            session.commit()
+
+    def record_learn_event(self, outcome: str) -> None:
+        """Store how a paste ended for learning from edits (a key of `edit_watch.OUTCOMES`)."""
+        with self._session_factory() as session:
+            session.add(LearnEventRow(outcome=outcome))
+            session.commit()
 
     def delete_dictionary_suggestion(self, suggestion_id: int) -> bool:
         with self._session_factory() as session:

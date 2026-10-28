@@ -702,6 +702,14 @@ class DashboardAPI:
     def get_app_breakdown(self, start: str | None = None, end: str | None = None) -> list[dict]:
         return analytics.get_app_breakdown(self._sf, start=start, end=end)
 
+    def get_accuracy(self, period: str = "day", start: str | None = None, end: str | None = None) -> dict:
+        return {
+            **analytics.get_accuracy_over_time(self._sf, period, start=start, end=end),
+            "most_corrected": analytics.get_most_corrected(self._sf, start=start, end=end)["items"],
+            "learn": analytics.get_learn_outcomes(self._sf, start=start, end=end),
+            "dictionary": analytics.get_dictionary_usage(self._sf, start=start, end=end),
+        }
+
     # ---- File Upload Transcription -----------------------------------------
 
     def start_file_transcription(

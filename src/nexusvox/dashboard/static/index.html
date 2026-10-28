@@ -541,6 +541,58 @@
           </div>
         </div>
         <div class="chart-card wide">
+          <h3>Corrections per 100 Words</h3>
+          <p class="hint" id="accuracy-summary"></p>
+          <canvas id="chart-accuracy"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Learn From Edits</h3>
+          <p class="hint" id="learn-summary"></p>
+          <div class="table-wrap">
+            <table class="model-table">
+              <thead>
+                <tr>
+                  <th>Outcome</th>
+                  <th>Pastes</th>
+                </tr>
+              </thead>
+              <tbody id="learn-outcomes"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="chart-card">
+          <h3>Most Corrected</h3>
+          <div class="table-wrap">
+            <table class="model-table">
+              <thead>
+                <tr>
+                  <th>Heard</th>
+                  <th>Corrected to</th>
+                  <th>Times</th>
+                </tr>
+              </thead>
+              <tbody id="most-corrected"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="chart-card wide">
+          <h3>Dictionary Usage</h3>
+          <p class="hint" id="dictionary-summary"></p>
+          <div class="table-wrap">
+            <table class="model-table">
+              <thead>
+                <tr>
+                  <th>Heard</th>
+                  <th>Replaced with</th>
+                  <th>Applied</th>
+                  <th>Last used</th>
+                </tr>
+              </thead>
+              <tbody id="dictionary-usage"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="chart-card wide">
           <h3>Top Words</h3>
           <canvas id="chart-words"></canvas>
         </div>

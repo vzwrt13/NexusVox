@@ -222,3 +222,24 @@ def test_cleanup_off_is_not_logged_at_info(caplog):
     with caplog.at_level("INFO", logger="nexusvox.pipeline"):
         _run("hello there my friend")
     assert "Cleanup" not in caplog.text
+
+
+def test_dictionary_hits_are_reported():
+    fox = DictionaryEntry("nexus fox", "NexusVox")
+    unused = DictionaryEntry("never", "Always")
+
+    result = _run("nexus fox and nexus fox", dictionary=[fox, unused])
+
+    assert result.dictionary_hits == {fox: 2}
+
+
+def test_no_dictionary_hits_without_entries():
+    assert _run("hello there").dictionary_hits == {}
+
+
+def test_german_dictionary_hits_are_reported():
+    entry = DictionaryEntry("grüße", "Grüße")
+
+    result = _run("viele grüße und grüße", dictionary=[entry])
+
+    assert result.dictionary_hits == {entry: 2}

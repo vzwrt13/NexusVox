@@ -639,3 +639,24 @@ def test_watched_outcomes_are_derived_from_the_messages():
     assert {"suggested", "unchanged", "lost_field"} <= edit_watch.WATCHED
     assert not {"terminal", "not_found", "unreadable"} & edit_watch.WATCHED
     assert EditWatcher(lambda s: None, lambda: []).status()["watched"] == list(edit_watch.WATCHED_KEYS)
+
+
+def test_watcher_hands_every_outcome_to_the_store():
+    stored = []
+    watcher = EditWatcher(lambda s: None, lambda: [], field_factory=lambda: None, on_outcome=stored.append)
+    watcher.skip("clipboard")
+    watcher.watch("I use nexus fox", 0.05)
+    deadline = time.monotonic() + 2
+    while len(stored) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    watcher.stop()
+    assert stored == ["clipboard", "no_field"]
+
+
+def test_watcher_survives_a_failing_store():
+    def broken(_outcome):
+        raise RuntimeError("database is locked")
+
+    watcher = EditWatcher(lambda s: None, lambda: [], on_outcome=broken)
+    watcher.skip("terminal")
+    assert watcher.status()["counts"] == {"terminal": 1}

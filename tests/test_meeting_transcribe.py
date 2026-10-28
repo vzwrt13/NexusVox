@@ -689,7 +689,6 @@ def test_transcribe_meeting_stores_one_me_others_transcript_and_a_mix(meeting_ap
     meta = json.loads((folder / "meeting.json").read_text())
     meta["ended_at"] = None
     (folder / "meeting.json").write_text(json.dumps(meta))
-    mic_bytes = (folder / "mic.wav").read_bytes()
 
     result = api.transcribe_meeting(folder)
 
@@ -706,10 +705,48 @@ def test_transcribe_meeting_stores_one_me_others_transcript_and_a_mix(meeting_ap
     assert row.duration_ms == 5000
     assert row.confidence == pytest.approx(0.625)  # the mean of the two tracks
     assert hook.seen[0].kind == "meeting"
-    # The repaired header is the only change the recorded tracks get.
-    assert (folder / "mic.wav").read_bytes()[44:] == mic_bytes[44:]
+    assert not (folder / "mic.wav").exists() and not (folder / "system.wav").exists()  # only the mix is kept
     listed = api.get_file_transcriptions()[0]
     assert (listed["kind"], listed["has_audio"]) == ("meeting", True)
+
+
+def test_store_audio_off_deletes_the_mix_too_and_the_card_has_no_player(meeting_api, db, tmp_path):
+    api, _ = meeting_api
+    api._config.meeting.store_audio = False
+    folder = tmp_path / "meeting-20261026-100000"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["ok"], result
+    assert sorted(p.name for p in folder.iterdir()) == ["meeting.json"]
+    row = db.get_file_transcription(result["id"])
+    assert row.audio_path is None and api.get_file_audio_path(row.id) is None
+    assert row.text  # the transcript is stored
+    assert api.get_file_transcriptions()[0]["has_audio"] is False
+
+
+def test_the_tracks_stay_when_the_transcription_fails(meeting_api, db, tmp_path, monkeypatch):
+    api, _ = meeting_api
+    folder = tmp_path / "meeting-20261026-100000"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    monkeypatch.setattr(db, "save_file_transcription", lambda **kwargs: (_ for _ in ()).throw(OSError("locked")))
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["ok"] is False
+    assert (folder / "mic.wav").is_file() and (folder / "system.wav").is_file()
+
+
+def test_turning_store_audio_off_leaves_a_stored_meeting_alone(meeting_api, db, tmp_path):
+    api, _ = meeting_api
+    folder = tmp_path / "meeting-20261026-100000"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    result = api.transcribe_meeting(folder)
+    api._config.meeting.store_audio = False
+
+    assert (folder / "meeting.wav").is_file()
+    assert api.get_file_audio_path(result["id"]) == str((folder / "meeting.wav").resolve())
 
 
 def test_the_job_shifts_the_system_track_by_the_recorded_offset(meeting_api, db, tmp_path, monkeypatch):
@@ -864,7 +901,7 @@ def test_switch_decides_whether_dictation_stays_in_the_transcript(meeting_api, t
     api, _ = meeting_api
     folder = tmp_path / "m"
     _dictation_meeting(folder, [(2.9, 3.6)])
-    mic_audio = (folder / "mic.wav").read_bytes()
+    tracks = {n: (folder / n).read_bytes() for n in ("mic.wav", "system.wav")}
 
     def fake(chunks, **kwargs):
         fake.calls = getattr(fake, "calls", 0) + 1
@@ -884,10 +921,11 @@ def test_switch_decides_whether_dictation_stays_in_the_transcript(meeting_api, t
     assert all(word not in left_out["text"] for word in dictated)
 
     api._config.meeting.leave_dictation_out = False  # applied at transcription time, so the same folder works again
+    assert not (folder / "mic.wav").exists()  # stored: only the mix is left
+    for name, data in tracks.items():  # put the tracks back to transcribe the same folder again
+        (folder / name).write_bytes(data)
     kept_in = api.transcribe_meeting(folder)
     assert kept_in["text"] == f"Speaker 2: hello\n\nSpeaker 1: {' '.join(spoken)}"
-
-    assert (folder / "mic.wav").read_bytes() == mic_audio  # the tracks never change
 
 
 def test_missing_word_timing_is_noted_when_dictation_cannot_be_left_out(meeting_api, tmp_path):

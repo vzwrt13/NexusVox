@@ -209,6 +209,11 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_meeting_leave_dictation_out(bool(data.get("enabled", True))))
 
+    @app.route("/api/settings/meeting-store-audio", methods=["POST"])
+    def set_meeting_store_audio():
+        data = request.get_json(silent=True) or {}
+        return jsonify(api.set_meeting_store_audio(bool(data.get("enabled", True))))
+
     @app.route("/api/settings/meeting-live-transcript", methods=["POST"])
     def set_meeting_live_transcript():
         data = request.get_json(force=True)

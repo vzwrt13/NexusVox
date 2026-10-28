@@ -2420,6 +2420,7 @@ const meetingConsent = document.getElementById("meeting-consent");
 const meetingConsentToggle = document.getElementById("meeting-consent-toggle");
 const meetingDictationToggle = document.getElementById("meeting-dictation-toggle");
 const meetingLiveToggle = document.getElementById("meeting-live-toggle");
+const meetingStoreAudioToggle = document.getElementById("meeting-store-audio-toggle");
 const meetingLiveBox = document.getElementById("meeting-live");
 const meetingLiveText = document.getElementById("meeting-live-text");
 const meetingLiveStatus = document.getElementById("meeting-live-status");
@@ -2731,6 +2732,17 @@ async function saveMeetingDevices() {
 meetingMicSelect.addEventListener("change", saveMeetingDevices);
 meetingOutputSelect.addEventListener("change", saveMeetingDevices);
 
+meetingStoreAudioToggle.addEventListener("change", async () => {
+  const wanted = meetingStoreAudioToggle.checked;
+  try {
+    const r = await postSetting("/api/settings/meeting-store-audio", { enabled: wanted });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    meetingStoreAudioToggle.checked = (await r.json()).meeting_store_audio;
+  } catch (err) {
+    meetingStoreAudioToggle.checked = !wanted; // not saved: show the setting that is still in force
+  }
+});
+
 meetingLiveToggle.addEventListener("change", async () => {
   const wanted = meetingLiveToggle.checked;
   try {
@@ -2752,6 +2764,7 @@ async function loadMeetingSettings() {
   meetingConsentToggle.checked = meetingConsentHint;
   meetingDictationToggle.checked = settings.meeting_leave_dictation_out;
   meetingLiveToggle.checked = settings.meeting_live_transcript;
+  meetingStoreAudioToggle.checked = settings.meeting_store_audio;
   renderMeetingHotkey(settings);
   fillDeviceSelect(meetingMicSelect, devices.inputs, devices.mic_device);
   fillDeviceSelect(meetingOutputSelect, devices.outputs, devices.output_device);

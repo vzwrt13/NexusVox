@@ -279,6 +279,7 @@ class DashboardAPI:
             "meeting_leave_dictation_out": self._config.meeting.leave_dictation_out,
             "meeting_own_voice_label": self._config.meeting.own_voice_label,
             "meeting_live_transcript": self._config.meeting.live_transcript,
+            "meeting_store_audio": self._config.meeting.store_audio,
         }
 
     def get_translator_status(self) -> dict:
@@ -1003,6 +1004,12 @@ class DashboardAPI:
         save_config(self._config)
         return self.get_settings()
 
+    def set_meeting_store_audio(self, enabled: bool) -> dict:
+        """Applied when a meeting is transcribed; audio of meetings already stored stays."""
+        self._config.meeting.store_audio = bool(enabled)
+        save_config(self._config)
+        return self.get_settings()
+
     def set_meeting_live_transcript(self, enabled: bool) -> dict:
         """Applied from the next meeting on; the running one keeps what it started with."""
         self._config.meeting.live_transcript = bool(enabled)
@@ -1055,7 +1062,8 @@ class DashboardAPI:
 
     def delete_file_transcription(self, tid: int) -> dict:
         """Delete an upload or a meeting with its audio: an upload's stored file, a meeting's whole folder
-        (`mic.wav`, `system.wav`, `meeting.json`, `meeting.wav`). A file that is already gone does not stop it."""
+        (whatever is left of `mic.wav`, `system.wav`, `meeting.wav` and `meeting.json`).
+        A file that is already gone does not stop it."""
         record = self._db.get_file_transcription(tid) if self._db else None
         if record is None:
             return {"ok": False, "error": "Unknown file transcription"}
@@ -1227,7 +1235,8 @@ class DashboardAPI:
                 notes.append(f"The playable mix could not be written: {exc}")
                 mix_path, seconds = None, max(t.frames / t.sample_rate for t in meeting.tracks.values())
 
-        return self._store_file_transcription(
+        keep_mix = mix_path is not None and self._config.meeting.store_audio
+        result = self._store_file_transcription(
             folder.name,
             notes,
             progress,
@@ -1237,8 +1246,18 @@ class DashboardAPI:
             words=merged,
             speaker_names={SPEAKER_OWN: self._config.meeting.own_voice_label},
             kind="meeting",
-            audio_path=self._stored_audio_path(mix_path) if mix_path else None,
+            audio_path=self._stored_audio_path(mix_path) if keep_mix else None,
         )
+        if result.get("ok"):
+            doomed = [t.path for t in meeting.tracks.values()]
+            if mix_path is not None and not keep_mix:
+                doomed.append(mix_path)
+            for path in doomed:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as exc:  # a locked file only costs disk space; the transcript is stored
+                    logger.warning("Could not delete %s after transcribing the meeting: %s", path, exc)
+        return result
 
     def _stored_audio_path(self, path: Path) -> str:
         """`path` relative to the database folder when it lies inside it (like recordings), else absolute."""

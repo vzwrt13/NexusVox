@@ -291,6 +291,11 @@ def test_live_endpoint_and_setting(env):
         "segments": [],
         "status": None,
     }
+    assert client.get("/api/settings").get_json()["meeting_store_audio"] is True  # on by default
+    resp = client.post("/api/settings/meeting-store-audio", json={"enabled": False})
+    assert resp.get_json()["meeting_store_audio"] is False and api._config.meeting.store_audio is False
+    resp = client.post("/api/settings/meeting-store-audio", json={"enabled": True})
+    assert resp.get_json()["meeting_store_audio"] is True and api._config.meeting.store_audio is True
     assert client.get("/api/settings").get_json()["meeting_live_transcript"] is False  # off until switched on
     resp = client.post("/api/settings/meeting-live-transcript", json={"enabled": True})
     assert resp.get_json()["meeting_live_transcript"] is True and api._config.meeting.live_transcript is True

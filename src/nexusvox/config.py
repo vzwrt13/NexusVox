@@ -319,6 +319,9 @@ class MeetingConfig:
     # records. It sends the audio to the transcription model in 6 s windows all meeting long, and that load is not
     # measured yet, so it is off until switched on (dashboard Meetings tab).
     live_transcript: bool = False
+    # Keep `meeting.wav`, the playable mix, after a successful transcription. The per-track WAVs are always
+    # deleted then; off deletes the mix too. Meetings already stored keep their audio.
+    store_audio: bool = True
 
 
 def meeting_hotkey_clash(modifiers: list[str], key: str, dictation: HotkeyConfig) -> str | None:
@@ -747,6 +750,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             leave_dictation_out=bool(meeting_data.get("leave_dictation_out", True)),
             own_voice_label=_own_voice_label(meeting_data.get("own_voice_label", "")),
             live_transcript=bool(meeting_data.get("live_transcript", False)),
+            store_audio=bool(meeting_data.get("store_audio", True)),
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
@@ -859,6 +863,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
             f"leave_dictation_out = {'true' if config.meeting.leave_dictation_out else 'false'}",
             f"own_voice_label = {json.dumps(config.meeting.own_voice_label)}",
             f"live_transcript = {'true' if config.meeting.live_transcript else 'false'}",
+            f"store_audio = {'true' if config.meeting.store_audio else 'false'}",
             "",
             "[audio]",
             f"sample_rate = {config.audio.sample_rate}",

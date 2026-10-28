@@ -434,6 +434,7 @@ def test_switch_to_gpu_model_on_cpu_is_rejected(db, session_factory, monkeypatch
 
 
 def test_get_device(flask_client, monkeypatch):
+    monkeypatch.setattr("nexusvox.dashboard.api.cuda_available", lambda: True)
     monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cuda" if d in ("auto", "cuda") else "cpu")
 
     resp = flask_client.get("/api/device")

@@ -102,6 +102,7 @@
           <div class="setting-info">
             <h3>Auto Cleanup</h3>
             <p>Tidies every dictation through the same model before it is typed. Light: removes fillers ("um", "äh"), false starts and repeated words, fixes punctuation, keeps your wording. Medium: also grammar, slightly more concise. Adds about half a second; while the model is still loading, or when its reply does not look like your text cleaned up, the dictation is typed unchanged. Saved as spoken.</p>
+            <p class="settings-hint" id="cleanup-cuda-hint" hidden>Needs a CUDA GPU. Not available on this PC.</p>
           </div>
           <select id="cleanup-level-select" class="select-input">
             <option value="off">Off</option>

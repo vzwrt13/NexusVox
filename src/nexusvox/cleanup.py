@@ -23,7 +23,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from .config import CleanupConfig, LlmConfig
+from .config import CleanupConfig, LlmConfig, cuda_available
 from .llm import LlmError, clean_reply, complete
 from .logsetup import Text
 
@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 # Below this many words there is rarely anything to clean, and the model call is not worth the wait.
 MIN_WORDS = 3
+
+# Cleanup is skipped without a CUDA GPU (the model would run slowly on the CPU); logged once per run.
+NO_CUDA_HINT = "Needs a CUDA GPU"
+_no_cuda_logged = False
 
 # `CleanupResult.error` when the model answered with something that is not the dictation cleaned up.
 IMPLAUSIBLE = "implausible reply"
@@ -136,12 +140,21 @@ def plausible(original: str, cleaned: str, level: str) -> bool:
     return difflib.SequenceMatcher(None, before, after, autojunk=False).ratio() >= _MIN_SIMILARITY[level]
 
 
-def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = MIN_WORDS) -> CleanupResult:
+def cleanup(
+    text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = MIN_WORDS, *, needs_cuda: bool = True
+) -> CleanupResult:
     """*text* cleaned up at `config.level`, or *text* itself. Blocking HTTP; never raises.
 
     A *text* of fewer than *min_words* words is returned as it is, without asking the model.
+    Without a CUDA GPU the dictation is returned as it is too, unless *needs_cuda* is False (file uploads).
     """
     if config.level not in PROMPTS or len(_words(text)) < min_words:
+        return CleanupResult(text)
+    if needs_cuda and not cuda_available():
+        global _no_cuda_logged
+        if not _no_cuda_logged:
+            _no_cuda_logged = True
+            logger.warning("Cleanup: no CUDA GPU found; skipping auto cleanup (the model would be slow on the CPU)")
         return CleanupResult(text)
     started = time.monotonic()
     try:

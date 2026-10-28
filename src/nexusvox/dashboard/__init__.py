@@ -211,7 +211,7 @@ def _create_app(api: DashboardAPI) -> Flask:
 
     @app.route("/api/settings/meeting-store-audio", methods=["POST"])
     def set_meeting_store_audio():
-        data = request.get_json(silent=True) or {}
+        data = request.get_json(force=True)
         return jsonify(api.set_meeting_store_audio(bool(data.get("enabled", True))))
 
     @app.route("/api/settings/meeting-live-transcript", methods=["POST"])
@@ -628,6 +628,7 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 extensions=load_extensions(),
             )
             flask_app = _create_app(_api)
+            threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
 
             thread = threading.Thread(
                 target=flask_app.run,

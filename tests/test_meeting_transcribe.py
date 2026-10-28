@@ -726,6 +726,82 @@ def test_store_audio_off_deletes_the_mix_too_and_the_card_has_no_player(meeting_
     assert api.get_file_transcriptions()[0]["has_audio"] is False
 
 
+def test_store_audio_off_writes_no_mix_at_all(meeting_api, tmp_path, monkeypatch):
+    api, _ = meeting_api
+    api._config.meeting.store_audio = False
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    monkeypatch.setattr("nexusvox.dashboard.api.mix_tracks", lambda *a: pytest.fail("no mix without storing"))
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["ok"], result
+    assert sorted(p.name for p in folder.iterdir()) == ["meeting.json"]
+
+
+def test_the_tracks_are_kept_when_the_mix_fails_and_audio_is_stored(meeting_api, db, tmp_path, monkeypatch):
+    api, _ = meeting_api
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    monkeypatch.setattr("nexusvox.dashboard.api.mix_tracks", lambda *args: (_ for _ in ()).throw(OSError("full")))
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["ok"] and any("tracks were kept" in n for n in result["notes"])
+    assert (folder / "mic.wav").is_file() and (folder / "system.wav").is_file()
+
+
+def test_an_unreadable_track_is_deleted_with_the_others(meeting_api, tmp_path):
+    api, _ = meeting_api
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    (folder / "system.wav").write_bytes(b"not a wav")  # left out of the transcript with a note
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["ok"], result
+    assert sorted(p.name for p in folder.iterdir()) == ["meeting.json", "meeting.wav"]
+
+
+def test_a_track_path_outside_the_folder_is_never_deleted(meeting_api, tmp_path):
+    api, _ = meeting_api
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    outside = tmp_path / "keep.db"
+    outside.write_text("precious")
+    meta = json.loads((folder / "meeting.json").read_text())
+    meta["tracks"]["mic"]["file"] = "../keep.db"
+    (folder / "meeting.json").write_text(json.dumps(meta))
+
+    api._discard_meeting_files(folder, ["../keep.db", str(outside), "meeting.json", "mic.wav"])
+
+    assert outside.read_text() == "precious" and (folder / "meeting.json").is_file()
+    assert not (folder / "mic.wav").exists()
+
+
+def test_a_locked_track_is_deleted_by_the_sweep_at_the_next_start(meeting_api, db, tmp_path, monkeypatch):
+    api, _ = meeting_api
+    folder = api._meetings_dir() / "meeting-20261026-100000"
+    write_meeting(folder, tone(2, 3000), tone(2, 3000))
+    real_unlink = Path.unlink
+
+    def locked(self, *args, **kwargs):
+        if self.name == "mic.wav":
+            raise PermissionError("in use")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    assert api.transcribe_meeting(folder)["ok"]
+    assert (folder / "mic.wav").is_file() and not (folder / "system.wav").exists()
+    assert json.loads((folder / "meeting.json").read_text())["discard"]  # remembered for the sweep
+
+    monkeypatch.setattr(Path, "unlink", real_unlink)  # the scanner let go
+    api.sweep_meeting_leftovers()
+
+    assert not (folder / "mic.wav").exists()
+    assert "discard" not in json.loads((folder / "meeting.json").read_text())
+
+
 def test_the_tracks_stay_when_the_transcription_fails(meeting_api, db, tmp_path, monkeypatch):
     api, _ = meeting_api
     folder = tmp_path / "meeting-20261026-100000"

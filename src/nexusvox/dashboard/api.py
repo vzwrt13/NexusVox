@@ -92,6 +92,17 @@ logger = logging.getLogger(__name__)
 _MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
 
 
+def _declared_track_files(folder: Path) -> list[str]:
+    """The track file names `meeting.json` lists (also unreadable ones), `<name>.wav` where it names none."""
+    try:
+        tracks = json.loads((folder / META_FILENAME).read_text(encoding="utf-8")).get("tracks") or {}
+    except (OSError, ValueError):
+        tracks = {}
+    names = {f"{name}.wav" for name in TRACK_NAMES}
+    names.update(str(info["file"]) for info in tracks.values() if isinstance(info, dict) and info.get("file"))
+    return sorted(names)
+
+
 def _remove_folder(folder: Path) -> None:
     """Delete a meeting folder so that a failure can be retried: `meeting.json` goes last, because it is what
     marks the folder as a meeting. A file that is locked (a player, a virus scanner) raises after the others
@@ -983,10 +994,13 @@ class DashboardAPI:
         save_config(self._config)
         return self.get_settings()
 
-    def set_meeting_consent_hint(self, enabled: bool) -> dict:
-        self._config.meeting.consent_hint = bool(enabled)
+    def _set_meeting_flag(self, name: str, enabled: bool) -> dict:
+        setattr(self._config.meeting, name, bool(enabled))
         save_config(self._config)
         return self.get_settings()
+
+    def set_meeting_consent_hint(self, enabled: bool) -> dict:
+        return self._set_meeting_flag("consent_hint", enabled)
 
     def set_meeting_own_voice_label(self, label: str) -> dict:
         """The name of the microphone's speaker in meeting transcripts; applied when a meeting is transcribed."""
@@ -1000,21 +1014,15 @@ class DashboardAPI:
 
     def set_meeting_leave_dictation_out(self, enabled: bool) -> dict:
         """Applied when a meeting is transcribed, so it also covers a meeting recorded earlier."""
-        self._config.meeting.leave_dictation_out = bool(enabled)
-        save_config(self._config)
-        return self.get_settings()
+        return self._set_meeting_flag("leave_dictation_out", enabled)
 
     def set_meeting_store_audio(self, enabled: bool) -> dict:
         """Applied when a meeting is transcribed; audio of meetings already stored stays."""
-        self._config.meeting.store_audio = bool(enabled)
-        save_config(self._config)
-        return self.get_settings()
+        return self._set_meeting_flag("store_audio", enabled)
 
     def set_meeting_live_transcript(self, enabled: bool) -> dict:
         """Applied from the next meeting on; the running one keeps what it started with."""
-        self._config.meeting.live_transcript = bool(enabled)
-        save_config(self._config)
-        return self.get_settings()
+        return self._set_meeting_flag("live_transcript", enabled)
 
     def get_meeting_live(self, after: int = 0) -> dict:
         """Live transcript segments from `after` on (the Meetings tab polls this while a meeting records)."""
@@ -1115,6 +1123,7 @@ class DashboardAPI:
             logger.error("Loading meeting %s failed: %s", folder, exc)
             return {"ok": False, "error": f"Could not load the meeting: {exc}"}
         notes = list(meeting.notes)
+        store_audio = self._config.meeting.store_audio  # read once: a switch mid-job applies from the next one
         if not meeting.tracks:
             return {"ok": False, "error": "The meeting has no readable audio track"}
 
@@ -1223,19 +1232,22 @@ class DashboardAPI:
 
             if progress:
                 progress("saving")
-            mix_path: Path | None = folder / MIX_FILENAME
-            try:
-                seconds = mix_tracks(
-                    list(tracks_16k.values()),
-                    mix_path,
-                    [system_shift if n == "system" else mic_shift for n in tracks_16k],
-                )
-            except Exception as exc:
-                logger.exception("Mixing meeting %s failed: %s", folder, exc)
-                notes.append(f"The playable mix could not be written: {exc}")
-                mix_path, seconds = None, max(t.frames / t.sample_rate for t in meeting.tracks.values())
+            # Without a mix to keep there is nothing to write: the length comes from the tracks.
+            mix_path: Path | None = None
+            seconds = max(t.frames / t.sample_rate for t in meeting.tracks.values())
+            if store_audio:
+                try:
+                    mix_path = folder / MIX_FILENAME
+                    seconds = mix_tracks(
+                        list(tracks_16k.values()),
+                        mix_path,
+                        [system_shift if n == "system" else mic_shift for n in tracks_16k],
+                    )
+                except Exception as exc:
+                    logger.exception("Mixing meeting %s failed: %s", folder, exc)
+                    notes.append(f"The playable mix could not be written, so the recorded tracks were kept: {exc}")
+                    mix_path = None
 
-        keep_mix = mix_path is not None and self._config.meeting.store_audio
         result = self._store_file_transcription(
             folder.name,
             notes,
@@ -1246,18 +1258,62 @@ class DashboardAPI:
             words=merged,
             speaker_names={SPEAKER_OWN: self._config.meeting.own_voice_label},
             kind="meeting",
-            audio_path=self._stored_audio_path(mix_path) if keep_mix else None,
+            audio_path=self._stored_audio_path(mix_path) if mix_path else None,
         )
-        if result.get("ok"):
-            doomed = [t.path for t in meeting.tracks.values()]
-            if mix_path is not None and not keep_mix:
-                doomed.append(mix_path)
-            for path in doomed:
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError as exc:  # a locked file only costs disk space; the transcript is stored
-                    logger.warning("Could not delete %s after transcribing the meeting: %s", path, exc)
+        # The recorded tracks are the only audio there is when the mix could not be written: keep them then.
+        if result.get("ok") and (mix_path is not None or not store_audio):
+            doomed = [*_declared_track_files(folder), *([] if store_audio else [MIX_FILENAME])]
+            self._discard_meeting_files(folder, doomed)
         return result
+
+    def _discard_meeting_files(self, folder: Path, names: list[str]) -> None:
+        """Delete files of a stored meeting's folder. The names are written to `meeting.json` first and dropped
+        from it once all are gone, so a locked file or a crash is finished by `sweep_meeting_leftovers`. Only
+        plain files directly inside the folder are ever deleted, whatever `meeting.json` names."""
+        meta_path = folder / META_FILENAME
+        meta: dict | None = None
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta["discard"] = names
+            meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        except (OSError, ValueError) as exc:
+            logger.warning("Could not note the leftover files of %s: %s", folder.name, exc)
+        failed = False
+        for name in names:
+            path = folder / name
+            if name == META_FILENAME or path.resolve().parent != folder.resolve():
+                continue
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:  # a player or scanner holds it; the sweep at the next start tries again
+                failed = True
+                logger.warning("Could not delete %s after transcribing the meeting: %s", path, exc)
+        if meta is not None and not failed:
+            try:
+                del meta["discard"]
+                meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+            except OSError as exc:
+                logger.warning("Could not update %s: %s", meta_path, exc)
+
+    def sweep_meeting_leftovers(self) -> None:
+        """Finish the deletion of audio files a stored meeting still lists in `meeting.json` (a locked file or
+        a quit between the save and the delete). Runs at start; never raises."""
+        try:
+            base = self._meetings_dir()
+            if self._db is None or not base.is_dir():
+                return
+            for name in self._db.meeting_folder_names():
+                folder = self._meeting_folder(name)
+                if folder is None:
+                    continue
+                try:
+                    left = json.loads((folder / META_FILENAME).read_text(encoding="utf-8")).get("discard")
+                except (OSError, ValueError):
+                    continue
+                if isinstance(left, list) and left:
+                    self._discard_meeting_files(folder, [str(n) for n in left])
+        except Exception:
+            logger.exception("Sweeping the leftover meeting audio failed")
 
     def _stored_audio_path(self, path: Path) -> str:
         """`path` relative to the database folder when it lies inside it (like recordings), else absolute."""

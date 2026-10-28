@@ -2732,27 +2732,21 @@ async function saveMeetingDevices() {
 meetingMicSelect.addEventListener("change", saveMeetingDevices);
 meetingOutputSelect.addEventListener("change", saveMeetingDevices);
 
-meetingStoreAudioToggle.addEventListener("change", async () => {
-  const wanted = meetingStoreAudioToggle.checked;
-  try {
-    const r = await postSetting("/api/settings/meeting-store-audio", { enabled: wanted });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    meetingStoreAudioToggle.checked = (await r.json()).meeting_store_audio;
-  } catch (err) {
-    meetingStoreAudioToggle.checked = !wanted; // not saved: show the setting that is still in force
-  }
-});
-
-meetingLiveToggle.addEventListener("change", async () => {
-  const wanted = meetingLiveToggle.checked;
-  try {
-    const r = await postSetting("/api/settings/meeting-live-transcript", { enabled: wanted });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    meetingLiveToggle.checked = (await r.json()).meeting_live_transcript;
-  } catch (err) {
-    meetingLiveToggle.checked = !wanted; // not saved: show the setting that is still in force
-  }
-});
+// A meeting toggle that saves on change and shows the stored value (or the one still in force on failure).
+function bindMeetingToggle(toggle, url, key) {
+  toggle.addEventListener("change", async () => {
+    const wanted = toggle.checked;
+    try {
+      const r = await postSetting(url, { enabled: wanted });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      toggle["checked"] = (await r.json())[key];
+    } catch (err) {
+      toggle.checked = !wanted; // not saved: show the setting that is still in force
+    }
+  });
+}
+bindMeetingToggle(meetingStoreAudioToggle, "/api/settings/meeting-store-audio", "meeting_store_audio");
+bindMeetingToggle(meetingLiveToggle, "/api/settings/meeting-live-transcript", "meeting_live_transcript");
 
 // The meeting settings sit in the Settings tab; the Meetings tab shows the devices as an info line.
 async function loadMeetingSettings() {

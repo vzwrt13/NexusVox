@@ -84,6 +84,7 @@ function activateTab(name) {
   if (name === "analytics") loadAnalytics();
   if (name === "edit") loadFlaggedTranscriptions();
   if (name === "meetings") openMeetingsTab();
+  if (name === "settings") loadMeetingSettings();
   if (name === "upload") {
     loadFileTranscriptions();
     refreshDiarizeToggle();
@@ -2722,6 +2723,7 @@ function fillDeviceSelect(select, names, chosen) {
 
 async function saveMeetingDevices() {
   await postSetting("/api/settings/meeting-devices", { mic: meetingMicSelect.value, output: meetingOutputSelect.value });
+  renderMeetingDevicesInfo();
 }
 meetingMicSelect.addEventListener("change", saveMeetingDevices);
 meetingOutputSelect.addEventListener("change", saveMeetingDevices);
@@ -2737,7 +2739,8 @@ meetingLiveToggle.addEventListener("change", async () => {
   }
 });
 
-async function openMeetingsTab() {
+// The meeting settings sit in the Settings tab; the Meetings tab shows the devices as an info line.
+async function loadMeetingSettings() {
   const [settings, devices] = await Promise.all([
     fetch("/api/settings").then((r) => r.json()),
     fetch("/api/meetings/devices").then((r) => r.json()),
@@ -2749,6 +2752,29 @@ async function openMeetingsTab() {
   renderMeetingHotkey(settings);
   fillDeviceSelect(meetingMicSelect, devices.inputs, devices.mic_device);
   fillDeviceSelect(meetingOutputSelect, devices.outputs, devices.output_device);
+  renderMeetingDevicesInfo();
+}
+
+function renderMeetingDevicesInfo() {
+  document.getElementById("meeting-info-mic").textContent = meetingMicSelect.value || "System default";
+  document.getElementById("meeting-info-output").textContent = meetingOutputSelect.value || "System default";
+}
+
+// "Meeting settings" link: open the Settings tab, scroll to the Meetings card and flash it.
+document.getElementById("meeting-settings-link").addEventListener("click", (e) => {
+  e.preventDefault();
+  history.replaceState(null, "", "#settings");
+  activateTab("settings");
+  const card = document.getElementById("meeting-settings-card");
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  card.classList.remove("flash-highlight");
+  void card.offsetWidth; // restart the animation when the link is clicked again
+  card.classList.add("flash-highlight");
+  setTimeout(() => card.classList.remove("flash-highlight"), 2000);
+});
+
+async function openMeetingsTab() {
+  await loadMeetingSettings();
   await refreshMeetingStatus();
   loadFileTranscriptions();
   // A meeting started with the hotkey while this tab is open shows up through the poll.
@@ -2764,6 +2790,7 @@ const DEV_MODE = new URLSearchParams(window.location.search).has("dev");
 // ── Init ─────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   loadSettings();
+  loadMeetingSettings();
   if (DEV_MODE) {
     document.querySelectorAll("[data-dev-only]").forEach((el) => (el.style.display = ""));
   }

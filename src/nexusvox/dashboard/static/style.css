@@ -34,6 +34,7 @@
   --accent-fill: rgba(108, 92, 231, 0.2);
   --green-fill: rgba(0, 210, 160, 0.15);
   --green: #00d2a0;
+  --green-soft: rgba(0, 210, 160, 0.1);
   --red: #ff6b6b;
   --orange: #ffa94d;
   --radius: 18px;
@@ -497,7 +498,8 @@ canvas { width: 100% !important; max-height: 260px; }
   transition: all 0.15s;
 }
 .flagged-save-btn:hover { filter: brightness(1.15); }
-.flagged-save-btn:disabled { opacity: 0.35; cursor: not-allowed; filter: grayscale(0.6); }
+.flagged-save-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+#upload-transcribe:disabled { opacity: 0.35; filter: grayscale(0.6); }
 
 /* Model switch status */
 .model-status {
@@ -606,7 +608,11 @@ canvas { width: 100% !important; max-height: 260px; }
 .upload-zone.has-file {
   border-style: solid;
   border-color: var(--green);
-  background: var(--green-fill);
+  background: var(--green-soft);
+}
+.upload-zone.has-file:hover, .upload-zone.has-file.drag-over {
+  border-color: var(--accent-light);
+  background: var(--accent-glow);
 }
 .upload-zone-ready { color: var(--text); font-weight: 600; }
 .upload-selected {

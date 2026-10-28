@@ -456,8 +456,12 @@ def test_the_upload_tab_shows_the_selected_file_and_lets_it_be_removed():
     assert "Ready to transcribe" in html
     section = js[js.index("function selectUploadFile") : js.index("uploadBrowse.addEventListener")]
     assert 'classList.toggle("has-file"' in section and "formatFileSize(file.size)" in section
-    assert "selectUploadFile(null)" in js[js.index('getElementById("upload-remove").addEventListener') :][:200]
-    assert ".upload-zone.has-file" in css and ".flagged-save-btn:disabled" in css
+    handler = js[js.index("uploadRemoveBtn.addEventListener") :]
+    handler = handler[: handler.index("});")]
+    assert "selectUploadFile(null)" in handler and "uploadBrowse.focus()" in handler
+    assert "#upload-transcribe:disabled" in css and ".upload-zone.has-file.drag-over" in css
+    assert ".flagged-save-btn:disabled { opacity: 0.6;" in css  # shared button look is untouched
+    assert "--green-fill" not in css[css.index(".upload-zone.has-file") :][:400]
 
 
 # -- the dictation hotkey may not clash with the meeting hotkey -----------------------------------

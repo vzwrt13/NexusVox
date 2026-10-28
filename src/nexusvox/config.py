@@ -315,8 +315,9 @@ class MeetingConfig:
     leave_dictation_out: bool = True
     # The label of the microphone's speaker in a meeting transcript; the other participants are numbered on from 2.
     own_voice_label: str = DEFAULT_OWN_VOICE_LABEL
-    # Show a rough transcript of both tracks (Me / Others) in the dashboard while the meeting records. It sends
-    # the audio to the transcription model in 6 s windows, so switch it off if a call needs every bit of GPU.
+    # Show a rough transcript of both tracks (your voice and "Speaker 2") in the dashboard while the meeting
+    # records. It sends the audio to the transcription model in 6 s windows, so switch it off if a call needs
+    # every bit of GPU.
     live_transcript: bool = True
 
 

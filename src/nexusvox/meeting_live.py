@@ -1,4 +1,4 @@
-"""A rough transcript of a meeting while it records, shown in the dashboard with Me / Others labels.
+"""A rough transcript of a meeting while it records, shown in the dashboard with speaker labels.
 
 The recorder hands every audio block of both tracks to `LiveTranscriber.feed`. A worker thread collects each track
 into windows of about `WINDOW_S` seconds, cut at the quietest moment of the window's last two seconds so a word is
@@ -20,8 +20,9 @@ from collections.abc import Callable
 
 import numpy as np
 
+from .config import DEFAULT_OWN_VOICE_LABEL, numbered_speaker_label
 from .meeting_recorder import AudioFormat
-from .meeting_transcribe import _resample, _wav_bytes
+from .meeting_transcribe import SPEAKER_FIRST_SYSTEM, _resample, _wav_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,11 @@ MAX_QUEUED_BLOCKS = 2000
 SILENCE_RMS = 100.0  # a window whose loudest 50 ms block stays below this is not sent
 IDLE_WAIT_S = 0.25
 
-LABELS = {"mic": "Me", "system": "Others"}
+
+def default_labels() -> dict[str, str]:
+    """The microphone is the own voice (Speaker 1 unless named); the system track has no speaker detection live,
+    so everyone on it is the first system speaker, numbered like the stored transcript does without detection."""
+    return {"mic": DEFAULT_OWN_VOICE_LABEL, "system": numbered_speaker_label(SPEAKER_FIRST_SYSTEM)}
 
 
 def _downmix(data: bytes, channels: int) -> np.ndarray:
@@ -87,8 +92,10 @@ class LiveTranscriber:
         *,
         clock: Callable[[], float] = time.monotonic,
         window_s: float = WINDOW_S,
+        labels: Callable[[], dict[str, str]] = default_labels,
     ) -> None:
         self._transcribe = transcribe
+        self._labels = labels
         self._clock = clock
         self._window_s = window_s
         self._queue: queue.Queue[tuple[str, AudioFormat, bytes, float]] = queue.Queue(MAX_QUEUED_BLOCKS)
@@ -212,7 +219,7 @@ class LiveTranscriber:
                     {
                         "n": len(self._segments),
                         "speaker": name,
-                        "label": LABELS.get(name, name),
+                        "label": self._labels().get(name, name),
                         "text": text,
                         "at_s": int(at_s),
                     }

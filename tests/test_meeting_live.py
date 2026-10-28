@@ -40,7 +40,7 @@ def _live(transcribe, window_s=1.0):
     return live
 
 
-def test_each_track_is_sent_in_windows_and_labelled_me_and_others():
+def test_each_track_is_sent_in_windows_and_labelled_with_speaker_numbers():
     sent: list[float] = []
 
     def transcribe(wav: bytes) -> str:
@@ -56,7 +56,7 @@ def test_each_track_is_sent_in_windows_and_labelled_me_and_others():
     assert _wait(lambda: len(live.segments_since()) == 2)
     live.stop()
     by_speaker = {s["speaker"]: s for s in live.segments_since()}
-    assert by_speaker["mic"]["label"] == "Me" and by_speaker["system"]["label"] == "Others"
+    assert by_speaker["mic"]["label"] == "Speaker 1" and by_speaker["system"]["label"] == "Speaker 2"
     assert all(0.66 < s <= 1.0 + 1e-6 for s in sent)  # cut at or before the window length, at a quiet block
     assert [s["n"] for s in live.segments_since()] == [0, 1]
     assert live.segments_since(1)[0]["n"] == 1
@@ -209,7 +209,7 @@ def test_session_feeds_the_live_view_and_ends_it_at_stop():
     rec.tap("mic", AudioFormat(RATE, 1), _tone(1.3))
     assert _wait(lambda: session.live()["segments"])
     out = session.live()
-    assert out["recording"] and out["segments"][0]["label"] == "Me" and out["status"]["active"]
+    assert out["recording"] and out["segments"][0]["label"] == "Speaker 1" and out["status"]["active"]
     session.stop()
     after = session.live()
     assert not after["recording"] and after["segments"] and not live.active  # kept until the next meeting
@@ -232,3 +232,13 @@ def test_config_round_trips_live_transcript(tmp_path, enabled):
     cfg.meeting.live_transcript = enabled
     save_config(cfg, tmp_path / "c.toml")
     assert load_config(tmp_path / "c.toml").meeting.live_transcript is enabled
+
+
+def test_labels_follow_the_own_voice_setting_and_never_say_me_or_others():
+    live = LiveTranscriber(lambda wav: "hi", window_s=1.0, labels=lambda: {"mic": "Vincent", "system": "Speaker 2"})
+    live.start()
+    live.feed("mic", AudioFormat(RATE, 1), _tone(1.2))
+    live.feed("system", AudioFormat(RATE, 1), _tone(1.2))
+    assert _wait(lambda: len(live.segments_since()) == 2)
+    live.stop()
+    assert {s["label"] for s in live.segments_since()} == {"Vincent", "Speaker 2"}

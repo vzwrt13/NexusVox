@@ -134,7 +134,9 @@ class DashboardAPI:
         self._file_jobs = FileJobs()
         self.extensions = extensions if extensions is not None else ExtensionRegistry()
         self._meeting = meeting or MeetingSession(
-            config.meeting, self._meetings_dir, live_factory=lambda: LiveTranscriber(self._transcribe_live_window)
+            config.meeting,
+            self._meetings_dir,
+            live_factory=lambda: LiveTranscriber(self._transcribe_live_window, labels=self._live_labels),
         )
         # The dashboard and the hotkey both start and stop meetings: one at a time, and a press that arrives
         # while another is being handled sees its outcome.
@@ -961,6 +963,14 @@ class DashboardAPI:
     def get_meeting_live(self, after: int = 0) -> dict:
         """Live transcript segments from `after` on (the Meetings tab polls this while a meeting records)."""
         return self._meeting.live(after)
+
+    def _live_labels(self) -> dict[str, str]:
+        """Live speaker labels: the microphone is named after the Settings label, everyone on the system track is
+        the first system speaker (no speaker detection while recording)."""
+        return {
+            "mic": self._config.meeting.own_voice_label,
+            "system": numbered_speaker_label(SPEAKER_FIRST_SYSTEM),
+        }
 
     def _transcribe_live_window(self, wav: bytes) -> str:
         return self._transcribe_wav_chunks([wav]).text

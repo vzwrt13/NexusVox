@@ -497,7 +497,7 @@ canvas { width: 100% !important; max-height: 260px; }
   transition: all 0.15s;
 }
 .flagged-save-btn:hover { filter: brightness(1.15); }
-.flagged-save-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.flagged-save-btn:disabled { opacity: 0.35; cursor: not-allowed; filter: grayscale(0.6); }
 
 /* Model switch status */
 .model-status {
@@ -603,8 +603,42 @@ canvas { width: 100% !important; max-height: 260px; }
 }
 
 .upload-option { margin-bottom: 16px; }
-.upload-selected { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
-.upload-selected.has-file { color: var(--text); }
+.upload-zone.has-file {
+  border-style: solid;
+  border-color: var(--green);
+  background: var(--green-fill);
+}
+.upload-zone-ready { color: var(--text); font-weight: 600; }
+.upload-selected {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  background: var(--surface2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.upload-selected[hidden] { display: none; }
+.upload-selected-info { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+.upload-selected-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.upload-selected-meta { font-size: 13px; color: var(--text-dim); font-family: var(--mono); }
+.upload-selected-remove {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  line-height: 1;
+  font-size: 20px;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.upload-selected-remove:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
+.upload-selected-remove:disabled { opacity: 0.4; cursor: not-allowed; }
 .upload-actions { margin-bottom: 16px; }
 
 /* Speaker-labelled transcripts are paragraphs separated by blank lines. */

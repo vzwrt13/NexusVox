@@ -1654,18 +1654,58 @@ const uploadZone = document.getElementById("upload-zone");
 const uploadInput = document.getElementById("upload-input");
 const uploadBrowse = document.getElementById("upload-browse");
 const uploadSelected = document.getElementById("upload-selected");
+const uploadSelectedName = document.getElementById("upload-selected-name");
+const uploadSelectedMeta = document.getElementById("upload-selected-meta");
+const uploadZoneText = document.getElementById("upload-zone-text");
+const uploadZoneReady = document.getElementById("upload-zone-ready");
 const transcribeBtn = document.getElementById("upload-transcribe");
 let selectedUploadFile = null;
 let uploadRunning = false;
 
 function updateTranscribeButton() {
   transcribeBtn.disabled = !selectedUploadFile || uploadRunning;
+  document.getElementById("upload-remove").disabled = uploadRunning;
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function formatClock(seconds) {
+  const s = Math.round(seconds);
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+// Reads the duration from the file's metadata; best effort, the row simply stays without it.
+function showUploadDuration(file) {
+  const url = URL.createObjectURL(file);
+  const probe = new Audio();
+  const done = () => {
+    probe.removeAttribute("src");
+    URL.revokeObjectURL(url);
+  };
+  probe.preload = "metadata";
+  probe.addEventListener("loadedmetadata", () => {
+    if (selectedUploadFile === file && Number.isFinite(probe.duration)) {
+      uploadSelectedMeta.textContent += " · " + formatClock(probe.duration);
+    }
+    done();
+  });
+  probe.addEventListener("error", done);
+  probe.src = url;
 }
 
 function selectUploadFile(file) {
   selectedUploadFile = file;
-  uploadSelected.textContent = file ? "Selected: " + file.name : "No file selected.";
-  uploadSelected.classList.toggle("has-file", Boolean(file));
+  uploadSelected.hidden = !file;
+  uploadSelectedName.textContent = file ? file.name : "";
+  uploadSelectedMeta.textContent = file ? formatFileSize(file.size) : "";
+  uploadZone.classList.toggle("has-file", Boolean(file));
+  uploadZoneText.hidden = Boolean(file);
+  uploadZoneReady.hidden = !file;
+  if (file) showUploadDuration(file);
   document.getElementById("upload-error").style.display = "none";
   document.getElementById("upload-note").style.display = "none";
   updateTranscribeButton();
@@ -1674,6 +1714,15 @@ function selectUploadFile(file) {
 uploadBrowse.addEventListener("click", (e) => {
   e.preventDefault();
   uploadInput.click();
+});
+
+document.getElementById("upload-browse-again").addEventListener("click", (e) => {
+  e.preventDefault();
+  uploadInput.click();
+});
+
+document.getElementById("upload-remove").addEventListener("click", () => {
+  if (!uploadRunning) selectUploadFile(null);
 });
 
 uploadInput.addEventListener("change", () => {

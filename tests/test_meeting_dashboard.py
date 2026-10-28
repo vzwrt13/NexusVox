@@ -446,6 +446,20 @@ def test_the_page_has_a_meetings_tab_and_in_page_delete_confirmation():
     assert "confirm(" not in section and "alert(" not in section
 
 
+def test_the_upload_tab_shows_the_selected_file_and_lets_it_be_removed():
+    static = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static"
+    html = (static / "index.html").read_text(encoding="utf-8")
+    js = (static / "dashboard.js").read_text(encoding="utf-8")
+    css = (static / "style.css").read_text(encoding="utf-8")
+    for element_id in ("upload-selected-name", "upload-selected-meta", "upload-remove", "upload-zone-ready"):
+        assert f'id="{element_id}"' in html
+    assert "Ready to transcribe" in html
+    section = js[js.index("function selectUploadFile") : js.index("uploadBrowse.addEventListener")]
+    assert 'classList.toggle("has-file"' in section and "formatFileSize(file.size)" in section
+    assert "selectUploadFile(null)" in js[js.index('getElementById("upload-remove").addEventListener') :][:200]
+    assert ".upload-zone.has-file" in css and ".flagged-save-btn:disabled" in css
+
+
 # -- the dictation hotkey may not clash with the meeting hotkey -----------------------------------
 
 

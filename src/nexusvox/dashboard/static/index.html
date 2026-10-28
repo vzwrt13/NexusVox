@@ -511,10 +511,17 @@
         <input type="file" id="upload-input" accept=".wav,.mp3,.flac,.ogg,.webm" hidden>
         <div class="upload-zone-content">
           <div class="upload-icon">&#x1F4C1;</div>
-          <p>Drag &amp; drop an audio file here, or <button class="upload-browse-btn" id="upload-browse">browse</button></p>
+          <p id="upload-zone-text">Drag &amp; drop an audio file here, or <button class="upload-browse-btn" id="upload-browse">browse</button></p>
+          <p id="upload-zone-ready" class="upload-zone-ready" hidden>Ready to transcribe &ndash; drop another file or <button class="upload-browse-btn" id="upload-browse-again" type="button">choose a different one</button></p>
         </div>
       </div>
-      <p id="upload-selected" class="upload-selected">No file selected.</p>
+      <div id="upload-selected" class="upload-selected" hidden>
+        <div class="upload-selected-info">
+          <span class="upload-selected-name" id="upload-selected-name"></span>
+          <span class="upload-selected-meta" id="upload-selected-meta"></span>
+        </div>
+        <button type="button" class="upload-selected-remove" id="upload-remove" aria-label="Remove the selected file" title="Remove the selected file">&times;</button>
+      </div>
 
       <div class="setting-row upload-option">
         <div class="setting-info">

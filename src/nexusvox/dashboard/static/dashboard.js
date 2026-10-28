@@ -2077,7 +2077,9 @@ function rowsHavePending(rows) {
 }
 
 // Reloads the lists after `intervalMs` while the last load had a pending row: one timer at most, none once nothing is pending.
-function createPendingPoller(reload, intervalMs, timers = { set: setTimeout, clear: clearTimeout }) {
+// The default timers are wrapped: a browser's setTimeout throws "Illegal invocation" when called as a method of `timers`.
+function createPendingPoller(reload, intervalMs,
+  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (handle) => clearTimeout(handle) }) {
   let handle = null;
   return {
     update(pending) {
@@ -2135,6 +2137,8 @@ async function loadFileTranscriptions(poll = false) {
       if (rowsHavePending(rows[i])) pendingLists.add(list.id);
       else pendingLists.delete(list.id);
     });
+    // A list that is not on screen is not polled; opening its tab loads it again, so it must not keep the timer alive.
+    if (poll) FILE_LISTS.filter((l) => !lists.includes(l) && !listIsShown(l)).forEach((l) => pendingLists.delete(l.id));
   } catch (err) {
     console.error("Failed to load file transcriptions:", err);
   }

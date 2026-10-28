@@ -65,3 +65,27 @@ def test_polling_starts_with_a_pending_row_and_stops_without_one():
         """
     )
     assert result == [False, True, 1, 4000, False, 1, False, 1]
+
+
+def test_default_timers_work_where_set_timeout_needs_its_own_receiver():
+    # A browser's setTimeout throws "Illegal invocation" when it is called as a method of another object.
+    result = run_js(
+        """
+        const real = globalThis.setTimeout, realClear = globalThis.clearTimeout;
+        const strict = function (fn, ms) {
+          if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+          return real(fn, ms);
+        };
+        globalThis.setTimeout = strict;
+        globalThis.clearTimeout = function (h) {
+          if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+          return realClear(h);
+        };
+        let reloads = 0;
+        const poller = createPendingPoller(() => { reloads++; poller.update(false); }, 5);
+        poller.update(true);
+        const started = poller.active;
+        setTimeout(() => { console.log(JSON.stringify([started, reloads, poller.active])); }, 50);
+        """
+    )
+    assert result == [True, 1, False]

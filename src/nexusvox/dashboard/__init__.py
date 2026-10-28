@@ -459,6 +459,12 @@ def _create_app(api: DashboardAPI) -> Flask:
         start, end = _date_args()
         return jsonify(api.get_model_breakdown(start, end))
 
+    @app.route("/api/accuracy")
+    def accuracy():
+        period = request.args.get("period", "day")
+        start, end = _date_args()
+        return jsonify(api.get_accuracy(period, start, end))
+
     @app.route("/api/app-breakdown")
     def app_breakdown():
         start, end = _date_args()

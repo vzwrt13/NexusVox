@@ -22,18 +22,26 @@ def _normalize(phrase: str) -> str:
     return " ".join(phrase.split())
 
 
-def apply_dictionary(text: str, entries: list[DictionaryEntry]) -> str:
-    """Replace every whole-word, case-insensitive occurrence of each entry's ``wrong`` phrase."""
+def apply_dictionary_counted(text: str, entries: list[DictionaryEntry]) -> tuple[str, dict[DictionaryEntry, int]]:
+    """`apply_dictionary`, plus how often each entry replaced something (entries that never fired are left out)."""
+    hits: dict[DictionaryEntry, int] = {}
     if not text or not entries:
-        return text
+        return text, hits
     # Longest phrases first so "cloud code editor" wins over "cloud code".
     for entry in sorted(entries, key=lambda e: len(e.wrong), reverse=True):
         wrong = _normalize(entry.wrong)
         if not wrong:
             continue
         pattern = r"(?<!\w)" + r"\s+".join(re.escape(w) for w in wrong.split()) + r"(?!\w)"
-        text = re.sub(pattern, lambda _m, r=entry.right: r, text, flags=re.IGNORECASE)
-    return text
+        text, count = re.subn(pattern, lambda _m, r=entry.right: r, text, flags=re.IGNORECASE)
+        if count:
+            hits[entry] = count
+    return text, hits
+
+
+def apply_dictionary(text: str, entries: list[DictionaryEntry]) -> str:
+    """Replace every whole-word, case-insensitive occurrence of each entry's ``wrong`` phrase."""
+    return apply_dictionary_counted(text, entries)[0]
 
 
 _TOKEN_RE = re.compile(r"\w+(?:['’]\w+)*|[^\w\s]", re.UNICODE)

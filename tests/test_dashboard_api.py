@@ -294,6 +294,21 @@ def test_app_breakdown_endpoint(flask_client, sample_transcriptions):
     assert data == [{"app": "Unknown", "count": len(sample_transcriptions), "words": words}]
 
 
+def test_accuracy_endpoint(flask_client, db):
+    db.save_transcription("hello there world", "en", 1000)
+    db.record_learn_event("suggested")
+    db.record_dictionary_hits({DictionaryEntry("hello", "Hi"): 2})
+
+    resp = flask_client.get("/api/accuracy?period=month")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["words"] == 3
+    assert data["learn"]["suggested"] == 1
+    assert data["dictionary"]["total_hits"] == 2
+    assert data["most_corrected"] == []
+
+
 # ── Model endpoints ──────────────────────────────────────────────────
 
 

@@ -22,11 +22,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .cleanup import MIN_WORDS, CleanupResult, cleanup
 from .config import CleanupConfig, Config, LlmConfig, TranslatorConfig, VoiceCommandsConfig
-from .dictionary import DictionaryEntry, apply_dictionary
+from .dictionary import DictionaryEntry, apply_dictionary_counted
 from .snippets import Snippet, expand_snippets, mark_snippets, placeholders_intact
 from .translator import TranslateResult, translate
 from .voice_commands import process_voice_commands, split_press_enter
@@ -47,6 +47,8 @@ class ProcessedText:
     translation: TranslateResult  # what the translator did (saved with the transcript)
     learnable: bool  # `typed` holds the spoken words (voice commands and snippets aside), not cleaned or translated
     spoken: str  # the text after the dictionary, snippets as placeholders: a learned entry must match it
+    # How often each dictionary entry replaced something.
+    dictionary_hits: dict[DictionaryEntry, int] = field(default_factory=dict)
 
 
 def _voice_commands(text: str, config: VoiceCommandsConfig) -> str:
@@ -72,7 +74,7 @@ def process_text(
     extend_fn: Extend | None = None,
 ) -> ProcessedText:
     """Run the pipeline. Blocking (cleanup and the translator are HTTP), so callers run it in an executor."""
-    corrected = apply_dictionary(raw, dictionary)
+    corrected, dictionary_hits = apply_dictionary_counted(raw, dictionary)
     if corrected != raw:
         logger.info("Dictionary applied: %r -> %r", raw, corrected)
 
@@ -117,4 +119,5 @@ def process_text(
         # only a dictation whose words it actually changed is not learnable.
         learnable=not cleaned.cleaned and translation.text == cleaned.text and extended == typed,
         spoken=marked,
+        dictionary_hits=dictionary_hits,
     )

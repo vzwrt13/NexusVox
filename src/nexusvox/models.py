@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, Float, Integer, String, Text
+from sqlalchemy import Boolean, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Stored in `Transcription.app` by rows that ran a command instead of typing text, so analytics can skip them.
@@ -142,3 +142,31 @@ class DictionarySuggestionRow(Base):
     wrong: Mapped[str] = mapped_column(String(500), nullable=False)
     right: Mapped[str] = mapped_column(String(500), nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+# Stored in `LearnEventRow.outcome` when the user accepts a suggestion in the dashboard; not a paste outcome.
+ACCEPTED_EVENT = "accepted"
+
+
+class LearnEventRow(Base):
+    """One learn-from-edits event: how a watched paste ended (a key of `edit_watch.OUTCOMES`) or an accepted one."""
+
+    __tablename__ = "learn_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    outcome: Mapped[str] = mapped_column(String(30), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
+class DictionaryUsageRow(Base):
+    """How often a dictionary entry was applied on one day. Entries are keyed by their lower-cased ``wrong``
+    phrase and keep their ``right`` side, so the history outlives a deleted entry."""
+
+    __tablename__ = "dictionary_usage"
+    __table_args__ = (UniqueConstraint("wrong", "day"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    wrong: Mapped[str] = mapped_column(String(500), nullable=False)
+    right: Mapped[str] = mapped_column(String(500), nullable=False)
+    day: Mapped[str] = mapped_column(String(10), nullable=False)  # UTC date, YYYY-MM-DD
+    hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

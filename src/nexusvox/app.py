@@ -143,7 +143,11 @@ class NexusVoxApp:
         self._db = Database(config.database)
         # Reads the field of the last paste and queues the user's corrections as dictionary
         # suggestions. `[learn_from_edits].enabled` is checked per paste, so the toggle is live.
-        self._edit_watcher = EditWatcher(self._db.add_dictionary_suggestions, self._db.get_dictionary_entries)
+        self._edit_watcher = EditWatcher(
+            self._db.add_dictionary_suggestions,
+            self._db.get_dictionary_entries,
+            on_outcome=self._db.record_learn_event,
+        )
 
         self._hotkey = HotkeyListener(
             config=config.hotkey,
@@ -604,6 +608,10 @@ class NexusVoxApp:
                     extend_fn=None if remote else self._extend_dictation,
                 ),
             )
+            try:
+                self._db.record_dictionary_hits(processed.dictionary_hits)
+            except Exception:
+                logger.exception("Could not count the dictionary entries applied")
             done_at = None  # when the text was in place; the clipboard restore after it is not latency
             target_app = None  # process name of the app the text lands in; never the window title
             if remote:

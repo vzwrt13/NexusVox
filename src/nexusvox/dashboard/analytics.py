@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import difflib
 import json
 from collections import Counter
 
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
-from ..models import COMMAND_APP, FileTranscription, Transcription
+from ..dictionary import suggest_entries
+from ..edit_watch import OUTCOMES, WATCHED_KEYS
+from ..models import (
+    ACCEPTED_EVENT,
+    COMMAND_APP,
+    DictionaryEntryRow,
+    DictionaryUsageRow,
+    FileTranscription,
+    LearnEventRow,
+    Transcription,
+)
 
 # Assumed average typing speed for "time saved" calculation.
 _TYPING_WPM = 40
@@ -442,3 +453,123 @@ def get_app_breakdown(session_factory: sessionmaker, *, start: str | None = None
         group["words"] += len(r.text.split())
     tail = {OTHER_APP: 1, UNKNOWN_APP: 2}
     return sorted(groups.values(), key=lambda g: (tail.get(g["app"], 0), -g["count"], g["app"]))
+
+
+def _word_edits(original: str, corrected: str) -> int:
+    """Words changed between a transcript and its correction: the larger side of every differing stretch."""
+    a, b = original.split(), corrected.split()
+    matcher = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+    return sum(max(i2 - i1, j2 - j1) for tag, i1, i2, j1, j2 in matcher.get_opcodes() if tag != "equal")
+
+
+def get_accuracy_over_time(
+    session_factory: sessionmaker, period: str = "day", *, start: str | None = None, end: str | None = None
+) -> dict:
+    """Corrections per 100 dictated words, by day, week or month.
+
+    A correction is a word the user changed in a reviewed transcript (`corrected_text`) or a suggestion
+    accepted in the dashboard. Periods without a dictation are left out.
+    """
+    fmt = {"day": "%Y-%m-%d", "week": "%Y-W%W", "month": "%Y-%m"}.get(period, "%Y-%m-%d")
+    period_col = func.strftime(fmt, Transcription.created_at)
+
+    with session_factory() as session:
+        query = session.query(period_col, Transcription.text, Transcription.corrected_text)
+        rows = _apply_date_filter(query, start, end).all()
+        event_period = func.strftime(fmt, LearnEventRow.created_at)
+        event_query = session.query(event_period, func.count()).filter(LearnEventRow.outcome == ACCEPTED_EVENT)
+        accepted = dict(_apply_date_filter(event_query, start, end, LearnEventRow).group_by(event_period).all())
+
+    words: Counter[str] = Counter()
+    corrections: Counter[str] = Counter()
+    for bucket, text, corrected in rows:
+        words[bucket] += len(text.split())
+        if corrected:
+            corrections[bucket] += _word_edits(text, corrected)
+    for bucket, count in accepted.items():
+        corrections[bucket] += count
+
+    labels = sorted(b for b in words if words[b])
+    return {
+        "labels": labels,
+        "values": [round(corrections[b] * 100 / words[b], 1) for b in labels],
+        "corrections": sum(corrections[b] for b in labels),
+        "words": sum(words[b] for b in labels),
+    }
+
+
+def get_most_corrected(
+    session_factory: sessionmaker, n: int = 10, *, start: str | None = None, end: str | None = None
+) -> dict:
+    """The phrases the user corrected most often in reviewed transcripts, as transcribed -> as corrected."""
+    with session_factory() as session:
+        query = session.query(Transcription.text, Transcription.corrected_text)
+        rows = _apply_date_filter(query, start, end).filter(Transcription.corrected_text.isnot(None)).all()
+
+    counter: Counter[tuple[str, str]] = Counter()
+    for text, corrected in rows:
+        for entry in suggest_entries(text, corrected):
+            counter[(entry.wrong.lower(), entry.right)] += 1
+    return {
+        "items": [{"wrong": wrong, "right": right, "count": count} for (wrong, right), count in counter.most_common(n)]
+    }
+
+
+def get_learn_outcomes(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> dict:
+    """How watched pastes ended for learning from edits, plus the suggestions the user accepted.
+
+    `outcomes` lists every outcome that was seen, most frequent first, with the sentence the dashboard shows;
+    skipped pastes (terminal, password field, ...) count in `skipped` but not in `watched`.
+    """
+    with session_factory() as session:
+        query = session.query(LearnEventRow.outcome, func.count())
+        rows = _apply_date_filter(query, start, end, LearnEventRow).group_by(LearnEventRow.outcome).all()
+
+    counts = dict(rows)
+    outcomes = [
+        {"outcome": key, "message": OUTCOMES[key], "count": count}
+        for key, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        if key in OUTCOMES
+    ]
+    watched = sum(c for k, c in counts.items() if k in WATCHED_KEYS)
+    return {
+        "outcomes": outcomes,
+        "watched": watched,
+        "skipped": sum(c for k, c in counts.items() if k in OUTCOMES) - watched,
+        "suggested": counts.get("suggested", 0),
+        "accepted": counts.get(ACCEPTED_EVENT, 0),
+    }
+
+
+def get_dictionary_usage(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> dict:
+    """Every dictionary entry with how often it fired in the range; entries that never fired show 0.
+
+    Entries that were deleted keep their history and show as `removed`.
+    """
+    with session_factory() as session:
+        query = session.query(
+            DictionaryUsageRow.wrong,
+            func.max(DictionaryUsageRow.right),
+            func.sum(DictionaryUsageRow.hits),
+            func.max(DictionaryUsageRow.day),
+        )
+        if start:
+            query = query.filter(DictionaryUsageRow.day >= start)
+        if end:
+            query = query.filter(DictionaryUsageRow.day <= end)
+        grouped = query.group_by(DictionaryUsageRow.wrong)
+        used = {wrong: (right, int(hits), last) for wrong, right, hits, last in grouped}
+        entries = session.query(DictionaryEntryRow.wrong, DictionaryEntryRow.right).all()
+
+    items = []
+    current = set()
+    for wrong, right in entries:
+        key = " ".join(wrong.split()).lower()
+        current.add(key)
+        _, hits, last = used.get(key, (right, 0, None))
+        items.append({"wrong": wrong, "right": right, "hits": hits, "last_used": last, "removed": False})
+    for key, (right, hits, last) in used.items():
+        if key not in current:
+            items.append({"wrong": key, "right": right, "hits": hits, "last_used": last, "removed": True})
+    items.sort(key=lambda i: (-i["hits"], i["wrong"].lower()))
+    return {"items": items, "total_hits": sum(i["hits"] for i in items), "entries": len(entries)}

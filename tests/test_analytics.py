@@ -6,12 +6,16 @@ import json
 from datetime import datetime, timedelta
 
 from nexusvox.dashboard.analytics import (
+    get_accuracy_over_time,
     get_activity_heatmap,
     get_app_breakdown,
+    get_dictionary_usage,
     get_flagged_transcriptions,
     get_language_distribution,
     get_latency_over_time,
+    get_learn_outcomes,
     get_model_breakdown,
+    get_most_corrected,
     get_overview,
     get_peak_usage_hours,
     get_top_words,
@@ -19,7 +23,8 @@ from nexusvox.dashboard.analytics import (
     get_unreviewed_transcriptions,
     get_upload_overview,
 )
-from nexusvox.models import COMMAND_APP, FileTranscription, Transcription
+from nexusvox.dictionary import DictionaryEntry
+from nexusvox.models import COMMAND_APP, FileTranscription, Transcription, utc_now
 
 
 def _seed(session_factory, records):
@@ -727,3 +732,149 @@ def test_app_breakdown_leaves_out_command_rows(session_factory):
 
 def test_app_breakdown_empty(session_factory):
     assert get_app_breakdown(session_factory) == []
+
+
+# ---- accuracy and dictionary stats ------------------------------------------
+
+
+def test_accuracy_counts_corrected_words_per_100(session_factory):
+    _seed(
+        session_factory,
+        [
+            {
+                "text": "one two three four five six seven eight nine ten",
+                "corrected_text": "one two three four five six seven eight nine tenth",
+                "language": "en",
+                "duration_ms": 1000,
+                "created_at": datetime(2026, 3, 1, 10),
+            },
+            {
+                "text": "a b c d e f g h i j",
+                "language": "en",
+                "duration_ms": 1000,
+                "created_at": datetime(2026, 3, 1, 11),
+            },
+            {"text": "x y", "language": "en", "duration_ms": 1000, "created_at": datetime(2026, 3, 2, 9)},
+        ],
+    )
+
+    result = get_accuracy_over_time(session_factory)
+
+    assert result["labels"] == ["2026-03-01", "2026-03-02"]
+    assert result["values"] == [5.0, 0.0]
+    assert result["corrections"] == 1
+    assert result["words"] == 22
+
+
+def test_accuracy_counts_accepted_suggestions(db, session_factory):
+    db.save_transcription("hello world " * 5, "en", 1000)
+    db.add_dictionary_suggestions([DictionaryEntry("nexus fox", "NexusVox")])
+    suggestion_id = db.list_dictionary_suggestions()[0]["id"]
+    db.accept_dictionary_suggestion(suggestion_id)
+
+    result = get_accuracy_over_time(session_factory)
+
+    assert result["corrections"] == 1
+    assert result["values"] == [10.0]
+
+
+def test_accuracy_empty_db(session_factory):
+    assert get_accuracy_over_time(session_factory) == {"labels": [], "values": [], "corrections": 0, "words": 0}
+
+
+def test_accuracy_respects_the_date_range(session_factory):
+    _seed(
+        session_factory,
+        [
+            {
+                "text": "a b",
+                "corrected_text": "a c",
+                "language": "en",
+                "duration_ms": 1,
+                "created_at": datetime(2026, 1, 5),
+            },
+            {"text": "a b", "language": "en", "duration_ms": 1, "created_at": datetime(2026, 2, 5)},
+        ],
+    )
+
+    result = get_accuracy_over_time(session_factory, start="2026-02-01", end="2026-02-28")
+
+    assert result["labels"] == ["2026-02-05"]
+    assert result["corrections"] == 0
+
+
+def test_most_corrected_groups_by_phrase(session_factory):
+    _seed(
+        session_factory,
+        [
+            {"text": "ask cloud code now", "corrected_text": "ask Claude Code now", "language": "en", "duration_ms": 1},
+            {"text": "cloud code again", "corrected_text": "Claude Code again", "language": "en", "duration_ms": 1},
+            {"text": "send it", "corrected_text": "send that", "language": "en", "duration_ms": 1},
+            {"text": "untouched", "language": "en", "duration_ms": 1},
+        ],
+    )
+
+    items = get_most_corrected(session_factory)["items"]
+
+    assert items[0] == {"wrong": "cloud code", "right": "Claude Code", "count": 2}
+    assert {"wrong": "it", "right": "that", "count": 1} in items
+
+
+def test_learn_outcomes_survive_in_the_database(db, session_factory):
+    for outcome in ("suggested", "suggested", "too_many_changes", "terminal"):
+        db.record_learn_event(outcome)
+    db.record_learn_event("not_an_outcome")
+
+    result = get_learn_outcomes(session_factory)
+
+    assert [(o["outcome"], o["count"]) for o in result["outcomes"]] == [
+        ("suggested", 2),
+        ("terminal", 1),
+        ("too_many_changes", 1),
+    ]
+    assert result["watched"] == 3
+    assert result["skipped"] == 1
+    assert result["suggested"] == 2
+    assert result["accepted"] == 0
+
+
+def test_dictionary_usage_counts_per_entry_and_day(db, session_factory):
+    db.add_dictionary_entry("nexus fox", "NexusVox")
+    db.add_dictionary_entry("never used", "Unused")
+    entry = DictionaryEntry("nexus fox", "NexusVox")
+    db.record_dictionary_hits({entry: 2})
+    db.record_dictionary_hits({entry: 3})
+
+    result = get_dictionary_usage(session_factory)
+
+    assert result["total_hits"] == 5
+    assert result["entries"] == 2
+    assert [(i["wrong"], i["hits"]) for i in result["items"]] == [("nexus fox", 5), ("never used", 0)]
+    assert result["items"][0]["last_used"] == utc_now().strftime("%Y-%m-%d")
+    assert result["items"][1]["last_used"] is None
+
+
+def test_dictionary_usage_keeps_history_of_deleted_entries(db, session_factory):
+    row = db.add_dictionary_entry("nexus fox", "NexusVox")
+    db.record_dictionary_hits({DictionaryEntry("Nexus  Fox", "NexusVox"): 1})
+    db.delete_dictionary_entry(row["id"])
+
+    items = get_dictionary_usage(session_factory)["items"]
+
+    assert items == [
+        {
+            "wrong": "nexus fox",
+            "right": "NexusVox",
+            "hits": 1,
+            "last_used": utc_now().strftime("%Y-%m-%d"),
+            "removed": True,
+        }
+    ]
+
+
+def test_dictionary_usage_respects_the_date_range(db, session_factory):
+    db.add_dictionary_entry("nexus fox", "NexusVox")
+    db.record_dictionary_hits({DictionaryEntry("nexus fox", "NexusVox"): 4})
+
+    assert get_dictionary_usage(session_factory, start="2000-01-01", end="2000-01-31")["total_hits"] == 0
+    assert get_dictionary_usage(session_factory, start="2000-01-01")["total_hits"] == 4

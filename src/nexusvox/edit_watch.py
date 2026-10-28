@@ -371,8 +371,10 @@ class EditWatcher:
         on_suggestions: Callable[[list[DictionaryEntry]], None],
         existing: Callable[[], list[DictionaryEntry]],
         field_factory: Callable[[], TextField | None] = UiaTextField.focused,
+        on_outcome: Callable[[str], None] | None = None,
     ) -> None:
         self._on_suggestions = on_suggestions
+        self._on_outcome = on_outcome
         self._existing = existing
         self._field_factory = field_factory
         self._queue: queue.Queue[_Watch | None] = queue.Queue()
@@ -406,6 +408,11 @@ class EditWatcher:
         with self._lock:
             self._counts[outcome] = self._counts.get(outcome, 0) + 1
             self._last = (outcome, time.time())
+        if self._on_outcome is not None:
+            try:
+                self._on_outcome(outcome)
+            except Exception:
+                logger.exception("Could not store the learn-from-edits outcome")
 
     def stop(self) -> None:
         if self._thread is not None:

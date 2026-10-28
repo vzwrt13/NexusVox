@@ -383,6 +383,9 @@ body::before {
 .chart-card.wide { grid-column: span 2; }
 .chart-card h3 { font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 16px; }
 
+.chart-card .hint { font-size: 12px; color: var(--text-faint); margin: -8px 0 12px; }
+.chart-card .hint:empty { display: none; }
+
 canvas { width: 100% !important; max-height: 260px; }
 
 /* Per-model table */

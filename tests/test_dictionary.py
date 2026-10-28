@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from nexusvox.dictionary import DictionaryEntry, apply_dictionary, suggest_entries
+from nexusvox.dictionary import DictionaryEntry, apply_dictionary, apply_dictionary_counted, suggest_entries
 
 # ---- apply_dictionary -----------------------------------------------------
 
@@ -141,3 +141,19 @@ def test_review_correct_returns_no_suggestions(flask_client, db):
     record = db.save_transcription("fine", "en", 1000, audio_path="audio/1.wav")
     res = _post(flask_client, f"/api/review/{record.id}", {"is_correct": True}).get_json()
     assert res == {"ok": True, "suggestions": []}
+
+
+def test_apply_counted_reports_each_entry_that_fired():
+    cloud = DictionaryEntry("cloud code", "Claude Code")
+    fox = DictionaryEntry("nexus fox", "NexusVox")
+    unused = DictionaryEntry("never", "Always")
+
+    text, hits = apply_dictionary_counted("cloud code and Cloud Code, nexus fox", [cloud, fox, unused])
+
+    assert text == "Claude Code and Claude Code, NexusVox"
+    assert hits == {cloud: 2, fox: 1}
+
+
+def test_apply_counted_empty_inputs():
+    assert apply_dictionary_counted("", [DictionaryEntry("a", "b")]) == ("", {})
+    assert apply_dictionary_counted("text", []) == ("text", {})

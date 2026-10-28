@@ -15,6 +15,7 @@ import logging
 import threading
 
 from ..config import MODEL_REGISTRY, InferenceConfig
+from ..logsetup import Text
 from ..transcriber import BaseTranscriber, TranscriptionResult, pcm16_to_wav_bytes
 
 logger = logging.getLogger(__name__)
@@ -105,7 +106,7 @@ class LocalWhisperTranscriber(BaseTranscriber):
         try:
             text = await asyncio.wait_for(loop.run_in_executor(None, _transcribe), timeout=timeout)
             result.finalize(text=text)
-            logger.info("Transcription done: %s", result.text)
+            logger.info("Transcription done: %s", Text(result.text))
         except TimeoutError:
             logger.warning("In-process transcription timed out after %.0fs", timeout)
 

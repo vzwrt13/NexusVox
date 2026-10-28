@@ -10,6 +10,8 @@ import subprocess
 import time
 from ctypes import wintypes
 
+from .logsetup import Text
+
 logger = logging.getLogger(__name__)
 
 user32 = ctypes.windll.user32
@@ -272,9 +274,9 @@ def open_target(target: str) -> bool:
     """
     is_url = re.match(r"^(?:https?://|mailto:)\S+$", target, re.IGNORECASE) is not None
     if not is_url and not os.path.exists(target):
-        logger.warning("Not a URL or an existing path, not opening: %r", target)
+        logger.warning("Not a URL or an existing path, not opening: %r", Text(target))
         return False
-    logger.info("Opening target: %s", target)
+    logger.info("Opening target: %s", Text(target))
     os.startfile(target)  # noqa: S606 - the user's own snippet text
     return True
 

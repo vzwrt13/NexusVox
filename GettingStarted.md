@@ -155,6 +155,9 @@ injection_delay_ms = 500
 auto_language_detection = false
 # How much the console log says: "DEBUG", "INFO", "WARNING" or "ERROR" (takes effect on the next start)
 log_level = "INFO"
+# The log is also written to %LOCALAPPDATA%\NexusVox\logs (one file per day, 7 days kept).
+# Dictated text is shortened there; true writes it in full (debugging only)
+log_full_text = false
 # Enable voice commands for text formatting (new line, new paragraph, tab, all caps)
 voice_commands_enabled = true
 
@@ -309,6 +312,8 @@ Turn on Settings → Correction Dictionary → Learn From Edits (or `[learn_from
 ---
 
 ## Troubleshooting
+
+NexusVox writes its log to `%LOCALAPPDATA%\NexusVox\logs` (one file per day, the last 7 days are kept); Settings → Voice Input → *Open log folder* opens it. Send the newest file when you report a problem. Dictated text is shortened in the file to its first 20 characters and its length, unless `[general].log_full_text` is on.
 
 | Problem | Solution |
 |---|---|

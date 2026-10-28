@@ -22,15 +22,21 @@ from nexusvox.meeting_transcribe import (
     MAX_GAIN,
     PEAK_LIMIT,
     TARGET_RMS,
+    TURN_SLACK_S,
     balance_gain,
     convert_track,
     drop_dictation,
     drop_echo,
+    echo_lag,
+    envelope,
+    format_meeting,
+    interleave,
     load_meeting,
     merge_words,
     mix_tracks,
     repair_wav_header,
     speech_rms,
+    track_offset,
 )
 from nexusvox.transcriber import TranscriptionResult, Word
 
@@ -293,7 +299,6 @@ def test_merge_orders_by_time_and_numbers_the_speakers():
 
     assert [x.word for x in merged] == ["hi", "there", "how", "are", "you", "fine", "thanks"]
     assert [x.speaker for x in merged] == [1, 1, 2, 2, 2, 1, 1]
-    from nexusvox.meeting_transcribe import format_meeting
 
     assert format_meeting(merged) == "Speaker 1: hi there\n\nSpeaker 2: how are you\n\nSpeaker 1: fine thanks"
     assert format_meeting(merged, "Alex").startswith("Alex: hi there\n\nSpeaker 2:")
@@ -310,6 +315,148 @@ def test_system_speakers_from_detection_follow_the_microphone():
 
 def test_format_transcript_without_names_is_unchanged():
     assert format_transcript([Word("hi", 0, 1, 1), Word("yo", 1, 2, 2)]) == "Speaker 1: hi\n\nSpeaker 2: yo"
+
+
+# ---- Track offset and turn changes ------------------------------------------
+
+
+def test_a_tie_at_a_turn_change_does_not_split_the_last_sentence():
+    # Word timing from a real meeting: the user finished "... an das Video." and then started the video. The
+    # engine started the video's first word on the same 80 ms frame as the user's last word, and let it run on.
+    me = [Word("an", 20.32, 20.56), Word("das", 20.56, 20.80), Word("Video.", 20.80, 21.60)]
+    others = [Word("Innerhalb", 20.80, 21.36), Word("der", 21.36, 21.52), Word("App", 21.52, 21.84)]
+
+    merged = merge_words(me, others)
+
+    assert format_meeting(merged) == "Speaker 1: an das Video.\n\nSpeaker 2: Innerhalb der App"
+
+
+def test_a_first_word_timed_early_after_a_pause_waits_for_the_turn_to_end():
+    # The engine put the video's first word 0.38 s before its sound, inside the user's last word.
+    me = [Word("an", 5.68, 6.00), Word("das", 6.00, 6.24), Word("Video.", 6.24, 7.04)]
+    others = [Word("Ich", 6.32, 6.40), Word("würde", 6.56, 6.64), Word("es", 6.80, 6.96)]
+
+    assert format_meeting(merge_words(me, others)) == "Speaker 1: an das Video.\n\nSpeaker 2: Ich würde es"
+
+
+def test_a_known_track_offset_is_corrected_before_the_tracks_are_merged():
+    # The other side's reply came 1.0 s late through the playback path (a Bluetooth headset, say), so the system
+    # track has it 1.0 s before the user heard it; corrected, it ties with the user's last word.
+    me = run(["so", "over", "to", "you", "now"], 0.0)  # "now" at 1.6
+    others = [Word("thanks", 0.62, 0.9), Word("sure", 1.0, 1.3)]
+    meeting = load_meeting_stub(latency={"mic": 1.05, "system": 0.05})
+
+    offset, measured = track_offset(meeting, None, None)
+    merged = merge_words(me, others, system_offset=offset)
+
+    assert (round(offset, 3), measured) == (1.0, "latency")
+    assert format_meeting(merged) == "Speaker 1: so over to you now\n\nSpeaker 2: thanks sure"
+    assert [x.start for x in merged if x.speaker == 2] == pytest.approx([1.62, 2.0])
+    # Uncorrected, the reply lands inside the user's sentence.
+    assert format_meeting(merge_words(me, others)).startswith("Speaker 1: so over to\n\nSpeaker 2: thanks sure")
+
+
+def test_german_turn_change_with_a_known_offset_keeps_both_sentences_whole():
+    me = [Word("Jetzt", 0.0, 0.3), Word("bist", 0.3, 0.5), Word("du", 0.5, 0.7), Word("dran.", 0.7, 1.0)]
+    others = [Word("Danke,", 0.4, 0.7), Word("gerne.", 0.7, 1.0)]  # really from 0.75 s: offset 0.35 s
+
+    merged = merge_words(me, others, system_offset=0.35)
+
+    assert format_meeting(merged, "Vincent") == "Vincent: Jetzt bist du dran.\n\nSpeaker 2: Danke, gerne."
+
+
+def test_crosstalk_is_interleaved_and_no_word_moves_further_than_the_slack():
+    me = run([f"m{i}" for i in range(20)], 0.0, step=0.25)
+    others = run([f"o{i}" for i in range(20)], 0.1, step=0.25)
+
+    merged = merge_words(me, others)
+
+    assert len(merged) == 40
+    assert {x.speaker for x in merged[:10]} == {1, 2}  # both people talk over each other: neither waits it out
+    for i, word in enumerate(merged):
+        assert all(earlier.start <= word.start + TURN_SLACK_S for earlier in merged[:i])
+    for speaker in (1, 2):  # each speaker's own words keep their order
+        own = [x.start for x in merged if x.speaker == speaker]
+        assert own == sorted(own)
+
+
+def test_interleave_starts_with_the_earlier_word():
+    assert [x.word for x in interleave([w("me", 1.0)], [w("you", 0.9)])] == ["you", "me"]
+    assert [x.word for x in interleave([w("me", 1.0)], [w("you", 1.0)])] == ["me", "you"]
+    assert [x.word for x in interleave([], [w("you", 1.0)])] == ["you"]
+
+
+def load_meeting_stub(latency: dict[str, float]):
+    from nexusvox.meeting_transcribe import Meeting
+
+    return Meeting(Path("m"), None, False, latency=latency)
+
+
+def speechlike(seconds: float, seed: int) -> np.ndarray:
+    """Noise in bursts of 0.1-0.5 s with pauses between, like speech seen through its loudness."""
+    rng = np.random.default_rng(seed)
+    out = np.zeros(int(seconds * 16_000), dtype=np.float32)
+    pos = 0
+    while pos < len(out):
+        burst = int(rng.uniform(0.1, 0.5) * 16_000)
+        out[pos : pos + burst] = rng.normal(0, rng.uniform(1000, 6000), len(out[pos : pos + burst]))
+        pos += burst + int(rng.uniform(0.05, 0.4) * 16_000)
+    return out
+
+
+def test_echo_of_the_speakers_in_the_microphone_gives_the_offset(tmp_path):
+    system = speechlike(60, seed=1)
+    delay = int(0.18 * 16_000)
+    echo = np.concatenate([np.zeros(delay, dtype=np.float32), system[:-delay]]) * 0.3
+    mic = speechlike(60, seed=2) * 0.5 + echo
+    paths = wav16(tmp_path, "mic", mic.clip(-32768, 32767)), wav16(tmp_path, "system", system.clip(-32768, 32767))
+
+    offset, measured = track_offset(load_meeting_stub({"mic": 0.02, "system": 0.02}), *paths)
+
+    assert measured == "echo"
+    assert offset == pytest.approx(0.18, abs=0.011)
+
+
+def test_without_echo_the_reported_latencies_are_used(tmp_path):
+    # A headset: the microphone hears only the user, who talks while the others are quiet.
+    system = speechlike(60, seed=3)
+    mic = speechlike(60, seed=4) * (np.abs(system) < 1)
+    paths = wav16(tmp_path, "mic", mic), wav16(tmp_path, "system", system.clip(-32768, 32767))
+
+    assert echo_lag(envelope(paths[0]), envelope(paths[1])) is None
+    offset, measured = track_offset(load_meeting_stub({"mic": 0.026, "system": 0.022}), *paths)
+    assert (round(offset, 4), measured) == (0.004, "latency")
+    assert track_offset(load_meeting_stub({}), *paths) == (0.0, "none")
+
+
+def test_silent_or_short_tracks_have_no_echo():
+    assert echo_lag(np.zeros(10_000), np.ones(10_000)) is None
+    assert echo_lag(np.arange(50.0), np.arange(50.0)) is None
+
+
+def test_load_meeting_reads_the_reported_latencies(tmp_path):
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(1, 1000), tone(1, 1000))
+    meta = json.loads((folder / "meeting.json").read_text())
+    meta["tracks"]["mic"]["latency_s"] = 0.0258
+    meta["tracks"]["system"]["latency_s"] = "broken"
+    (folder / "meeting.json").write_text(json.dumps(meta))
+
+    assert load_meeting(folder).latency == {"mic": 0.0258}
+
+
+def test_mix_moves_a_track_by_its_offset(tmp_path):
+    click = np.zeros(3 * 16_000, dtype=np.int16)
+    click[16_000 : 16_000 + 1600] = tone(0.1, 8000)
+    silent = wav16(tmp_path, "mic", np.zeros(3 * 16_000, dtype=np.int16))
+    system = wav16(tmp_path, "system", click)
+
+    for offset, onset in ((0.25, 1.25), (-0.5, 0.5), (0.0, 1.0)):
+        out = tmp_path / f"m{offset}.wav"
+        seconds = mix_tracks([silent, system], out, [0.0, offset])
+        mixed = read_wav(out)
+        assert np.flatnonzero(mixed)[0] / 16_000 == pytest.approx(onset, abs=0.001)
+        assert seconds == pytest.approx(max(3.0, 3.0 + offset))
 
 
 # ---- Mix balance ------------------------------------------------------------
@@ -456,7 +603,7 @@ def test_failed_mix_is_a_note_and_the_meeting_is_still_stored(meeting_api, db, t
     api, _ = meeting_api
     folder = tmp_path / "m"
     write_meeting(folder, tone(2, 3000), tone(2, 3000))
-    monkeypatch.setattr("nexusvox.dashboard.api.mix_tracks", lambda paths, out: (_ for _ in ()).throw(OSError("full")))
+    monkeypatch.setattr("nexusvox.dashboard.api.mix_tracks", lambda *args: (_ for _ in ()).throw(OSError("full")))
 
     result = api.transcribe_meeting(folder)
 
@@ -494,6 +641,33 @@ def test_transcribe_meeting_stores_one_me_others_transcript_and_a_mix(meeting_ap
     assert (folder / "mic.wav").read_bytes()[44:] == mic_bytes[44:]
     listed = api.get_file_transcriptions()[0]
     assert (listed["kind"], listed["has_audio"]) == ("meeting", True)
+
+
+def test_the_job_shifts_the_system_track_by_the_recorded_offset(meeting_api, db, tmp_path, monkeypatch):
+    api, _ = meeting_api
+    folder = tmp_path / "m"
+    write_meeting(folder, tone(5, 3000), np.zeros(5 * 16_000, dtype=np.int16))  # no echo to measure
+    meta = json.loads((folder / "meeting.json").read_text())
+    meta["tracks"]["mic"]["latency_s"] = 1.05
+    meta["tracks"]["system"]["latency_s"] = 0.05
+    (folder / "meeting.json").write_text(json.dumps(meta))
+
+    def fake_transcribe(chunks, **kwargs):
+        result = TranscriptionResult()
+        mic = not hasattr(fake_transcribe, "done")
+        fake_transcribe.done = True
+        result.words = run(["over", "to", "you", "now"], 0.4) if mic else [w("thanks", 0.9), w("sure", 1.3)]
+        result.finalize(text=" ".join(x.word for x in result.words))
+        return result
+
+    monkeypatch.setattr(api, "_transcribe_wav_chunks", fake_transcribe)
+
+    result = api.transcribe_meeting(folder)
+
+    assert result["text"] == "Speaker 1: over to you now\n\nSpeaker 2: thanks sure"
+    stored = json.loads(db.get_file_transcription(result["id"]).words)
+    assert [x["start"] for x in stored if x["speaker"] == 2] == pytest.approx([1.9, 2.3])
+    assert db.get_file_transcription(result["id"]).duration_ms == 6000  # the mix moved the system track too
 
 
 def test_start_meeting_transcription_runs_as_a_background_job(meeting_api, tmp_path):

@@ -51,6 +51,9 @@ class AudioSource(Protocol):
 
     def stop(self) -> None: ...
 
+    # Optional: `latency() -> float`, the seconds the open stream reports from capture to delivery (stored in
+    # `meeting.json`; the transcript lines the tracks up with it when it cannot measure the offset from the audio).
+
 
 _refresh_lock = threading.Lock()
 
@@ -162,6 +165,9 @@ class MicSource:
         self._stream.start()
         audio_state.stream_opened()
 
+    def latency(self) -> float:
+        return float(self._stream.latency) if self._stream is not None else 0.0
+
     def stop(self) -> None:
         if self._stream is not None:
             self._stream.stop()
@@ -245,6 +251,9 @@ class LoopbackSource:
         except Exception:
             self.stop()
             raise
+
+    def latency(self) -> float:
+        return float(self._stream.get_input_latency()) if self._stream is not None else 0.0
 
     def stop(self) -> None:
         if self._stream is not None:
@@ -336,6 +345,7 @@ class _Track:
         self._lost_frames = 0
         self.dropped = 0
         self.error: str | None = None
+        self.latency_s: float | None = None
 
     def sink(self, data: bytes) -> None:
         """Runs on the audio thread: never blocks, a full queue drops the block."""
@@ -371,6 +381,16 @@ class _Track:
 
     def begin(self) -> None:
         self._thread.start()
+
+    def read_latency(self) -> None:
+        """Ask the open stream for its reported input latency; a source that cannot tell leaves it unknown."""
+        latency = getattr(self.source, "latency", None)
+        if latency is None:
+            return
+        try:
+            self.latency_s = round(float(latency()), 4)
+        except Exception:
+            logger.exception("Reading the meeting %s latency failed", self.name)
 
     def flush(self) -> None:
         self._queue.join()
@@ -471,6 +491,9 @@ class MeetingRecorder:
                 track.begin()
             for track in tracks.values():
                 track.source.start(track.sink)
+            for track in tracks.values():
+                track.read_latency()
+            self._write_meta(ended_at=None)
         except BaseException:
             self._abort(tracks, folder)
             raise
@@ -564,6 +587,8 @@ class MeetingRecorder:
                 "channels": fmt.channels,
                 "sample_width": SAMPLE_WIDTH,
             }
+            if track.latency_s is not None:
+                entry["latency_s"] = track.latency_s
             if tracks is not None:
                 entry["frames"] = track.writer.frames
                 entry["duration_s"] = round(track.writer.frames / fmt.sample_rate, 3)

@@ -70,6 +70,7 @@ from ..meeting_transcribe import (
     load_meeting,
     merge_words,
     mix_tracks,
+    track_offset,
 )
 from ..os_commands import NEXUS_ACTIONS
 from ..polish_presets import PolishPreset
@@ -1099,7 +1100,7 @@ class DashboardAPI:
         plain: dict[str, str] = {}
         incomplete: list[str] = []
         confidences: list[float] = []
-        tracks_16k: list[Path] = []
+        tracks_16k: dict[str, Path] = {}
         chunk_s = MAX_CHUNK_MS // 1000
         total_chunks = sum(max(1, -(-t.frames // t.sample_rate // chunk_s)) for t in meeting.tracks.values())
         done_chunks = 0
@@ -1111,7 +1112,7 @@ class DashboardAPI:
                 except Exception as exc:
                     logger.error("Audio conversion failed for meeting %s: %s", folder, exc)
                     return {"ok": False, "error": f"Audio conversion failed: {exc}"}
-                tracks_16k.append(Path(tmp) / f"{name}.wav")
+                tracks_16k[name] = Path(tmp) / f"{name}.wav"
 
                 own_chunks = len(chunks)
 
@@ -1153,6 +1154,10 @@ class DashboardAPI:
                 if len(result.words) < len(plain[name].split()):
                     incomplete.append(label)
 
+            # The system track is moved onto the microphone's timeline, in the words and in the mix alike.
+            offset, measured = track_offset(meeting, tracks_16k.get("mic"), tracks_16k.get("system"))
+            logger.info("Meeting %s: system track shifted by %+.3f s (%s)", folder.name, offset, measured)
+
             if incomplete:
                 # Interleaving needs every word timed: a gap would vanish from the merged text. Keep all the words.
                 notes.append(
@@ -1178,7 +1183,10 @@ class DashboardAPI:
             else:
                 leave_out = self._config.meeting.leave_dictation_out
                 merged = merge_words(
-                    words.get("mic", []), words.get("system", []), meeting.dictations if leave_out else None
+                    words.get("mic", []),
+                    words.get("system", []),
+                    meeting.dictations if leave_out else None,
+                    system_offset=offset,
                 )
                 text = format_meeting(merged, self._config.meeting.own_voice_label)
 
@@ -1186,7 +1194,9 @@ class DashboardAPI:
                 progress("saving")
             mix_path: Path | None = folder / MIX_FILENAME
             try:
-                seconds = mix_tracks(tracks_16k, mix_path)
+                seconds = mix_tracks(
+                    list(tracks_16k.values()), mix_path, [offset if n == "system" else 0.0 for n in tracks_16k]
+                )
             except Exception as exc:
                 logger.exception("Mixing meeting %s failed: %s", folder, exc)
                 notes.append(f"The playable mix could not be written: {exc}")

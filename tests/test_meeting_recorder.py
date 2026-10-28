@@ -263,6 +263,29 @@ def test_format_from_describe_is_what_gets_written(tmp_path):
     assert calls == [1]  # describe() once per start; start() does not resolve the device again
 
 
+def test_reported_stream_latency_is_stored_from_the_start(tmp_path):
+    rec, mic, system, _clock = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(48000, 2))
+    mic.latency = lambda: 0.0257
+    system.latency = lambda: (_ for _ in ()).throw(OSError("closed"))  # a failing read leaves it unknown
+
+    folder = rec.start()
+    running = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))  # an interrupted meeting has it too
+    rec.stop()
+    meta = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))
+
+    assert running["tracks"]["mic"]["latency_s"] == 0.0257
+    assert meta["tracks"]["mic"]["latency_s"] == 0.0257
+    assert "latency_s" not in meta["tracks"]["system"]
+
+
+def test_a_source_without_latency_stores_none(tmp_path):
+    rec, *_ = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
+    folder = rec.start()
+    rec.stop()
+    tracks = json.loads((folder / "meeting.json").read_text(encoding="utf-8"))["tracks"]
+    assert all("latency_s" not in t for t in tracks.values())
+
+
 def test_dictation_takes_are_stored_as_seconds_from_the_meeting_start(tmp_path):
     rec, mic, system, clock = _recorder(tmp_path, AudioFormat(16000, 1), AudioFormat(16000, 1))
     assert rec.begin_dictation(clock()) is None  # no meeting yet

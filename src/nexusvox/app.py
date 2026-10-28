@@ -604,10 +604,13 @@ class NexusVoxApp:
                 ),
             )
             done_at = None  # when the text was in place; the clipboard restore after it is not latency
+            target_app = None  # process name of the app the text lands in; never the window title
             if remote:
                 # The phone inserts it into its own focused field.
                 self._remote_text = processed.typed
             else:
+                if processed.typed:
+                    target_app = self._active_app().process.lower() or None
                 try:
                     done_at = await loop.run_in_executor(
                         None, inject_text, processed.typed, self._config.injection_delay_ms, processed.press_enter
@@ -644,6 +647,7 @@ class NexusVoxApp:
                 latency_ms=latency_ms,
                 cleanup_status=processed.cleanup.status,
                 cleanup_ms=processed.cleanup.ms,
+                app=target_app,
             )
             logger.info("%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, processed.typed)
             self._store_audio(audio_buffer, record.id)

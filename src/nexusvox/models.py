@@ -55,6 +55,9 @@ class Transcription(Base):
     # and how long it took; both NULL when cleanup was off or the dictation too short to send.
     cleanup_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
     cleanup_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The process file name of the app the text was typed into ("outlook.exe"), read at paste time.
+    # Never a window title; NULL for older rows, phone dictations and texts that were not typed.
+    app: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
 
 class FileTranscription(Base):

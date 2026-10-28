@@ -558,6 +558,9 @@ def test_migration_adds_the_stats_columns_to_an_old_database(tmp_path):
     assert dictation.cleanup_status is None and dictation.cleanup_ms is None
     old.save_transcription("new", "en", 1, cleanup_status="applied", cleanup_ms=120)
     assert old.get_recent(1)[0].cleanup_status == "applied"
+    assert dictation.app is None
+    old.save_transcription("typed", "en", 1, app="outlook.exe")
+    assert old.get_recent(1)[0].app == "outlook.exe"
 
 
 def test_migration_is_idempotent_on_a_database_that_already_has_the_columns(tmp_path):

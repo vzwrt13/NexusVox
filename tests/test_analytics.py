@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from nexusvox.dashboard.analytics import (
     get_activity_heatmap,
+    get_app_breakdown,
     get_flagged_transcriptions,
     get_language_distribution,
     get_latency_over_time,
@@ -672,3 +673,51 @@ def test_upload_overview_ignores_broken_words_json(session_factory):
         session.commit()
 
     assert get_upload_overview(session_factory)["avg_upload_speakers"] is None
+
+
+# ---- get_app_breakdown ----------------------------------------------------
+
+
+def _dictation(app, text="one two", day=15):
+    return {"text": text, "language": "en", "duration_ms": 1000, "created_at": datetime(2026, 3, day), "app": app}
+
+
+def test_app_breakdown_groups_by_friendly_name(session_factory):
+    _seed(
+        session_factory,
+        [
+            _dictation("outlook.exe"),
+            _dictation("OLK.EXE", "a b c"),
+            _dictation("code.exe"),
+            _dictation("somethingelse.exe"),
+            _dictation("another.exe"),
+            _dictation(None),
+        ],
+    )
+
+    result = get_app_breakdown(session_factory)
+
+    assert result == [
+        {"app": "Outlook", "count": 2, "words": 5},
+        {"app": "VS Code", "count": 1, "words": 2},
+        {"app": "Other", "count": 2, "words": 4},
+        {"app": "Unknown", "count": 1, "words": 2},
+    ]
+
+
+def test_app_breakdown_puts_other_and_unknown_last_even_when_biggest(session_factory):
+    _seed(session_factory, [_dictation(None), _dictation(None), _dictation("x.exe"), _dictation("code.exe")])
+
+    assert [g["app"] for g in get_app_breakdown(session_factory)] == ["VS Code", "Other", "Unknown"]
+
+
+def test_app_breakdown_respects_the_date_range(session_factory):
+    _seed(session_factory, [_dictation("code.exe", day=1), _dictation("chrome.exe", day=20)])
+
+    result = get_app_breakdown(session_factory, start="2026-03-10", end="2026-03-31")
+
+    assert [g["app"] for g in result] == ["Chrome"]
+
+
+def test_app_breakdown_empty(session_factory):
+    assert get_app_breakdown(session_factory) == []

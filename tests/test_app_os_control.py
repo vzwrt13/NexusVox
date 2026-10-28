@@ -283,6 +283,26 @@ def test_dictation_is_pasted_and_watched_for_edits(monkeypatch):
     app._edit_watcher.watch.assert_called_once_with("Hallo Welt", app._config.learn_from_edits.window_s, "Hallo Welt")
 
 
+def test_dictation_stores_the_process_name_of_the_target_app_only(monkeypatch):
+    from nexusvox.extensions import ActiveApp
+
+    app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: 0.0)
+    monkeypatch.setattr(app, "_active_app", lambda: ActiveApp("Outlook.EXE", "Inbox - secret subject"))
+    _run_cycle(app)
+    kwargs = app._db.save_transcription.call_args.kwargs
+    assert kwargs["app"] == "outlook.exe"
+    assert "secret" not in str(kwargs)
+
+
+def test_dictation_stores_no_app_when_it_cannot_be_read(monkeypatch):
+    from nexusvox.extensions import ActiveApp
+
+    app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: 0.0)
+    monkeypatch.setattr(app, "_active_app", lambda: ActiveApp())
+    _run_cycle(app)
+    assert app._db.save_transcription.call_args.kwargs["app"] is None
+
+
 def test_dictation_beeps_and_is_kept_when_the_clipboard_is_busy(monkeypatch):
     from nexusvox.clipboard import ClipboardError
 

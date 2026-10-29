@@ -644,7 +644,7 @@ def test_the_export_is_named_after_the_title(env):
     plain = client.get(f"/api/file-transcriptions/{row.id}/export/txt")
     assert 'filename="meeting-20261026-100000.txt"' in plain.headers["Content-Disposition"]
 
-    client.patch(f"/api/file-transcriptions/{row.id}", json={"title": 'Q3: plan/review?'})
+    client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "Q3: plan/review?"})
 
     renamed = client.get(f"/api/file-transcriptions/{row.id}/export/txt")
     assert 'filename="Q3_ plan_review_.txt"' in renamed.headers["Content-Disposition"]

@@ -527,9 +527,7 @@ def _create_app(api: DashboardAPI) -> Flask:
         if not isinstance(body, dict) or "title" not in body:
             return jsonify({"ok": False, "error": "Expected a JSON body with a title"}), 400
         result = api.rename_file_transcription(tid, body["title"])
-        if result["ok"]:
-            return jsonify(result)
-        return jsonify(result), (404 if result["error"].startswith("Unknown") else 400)
+        return jsonify(result), (200 if result["ok"] else result["status"])
 
     @app.route("/api/file-transcriptions/<int:tid>", methods=["DELETE"])
     def delete_file_transcription(tid):

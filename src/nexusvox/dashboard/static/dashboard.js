@@ -2270,8 +2270,8 @@ function renderFileTranscriptions(container, data, emptyText, poll) {
   data.forEach((item, i) => {
     const signature = cardSignature(item);
     let card = existing.get(String(item.id));
-    if (card && poll && card._signature === signature) {
-      card._item = item;
+    if (card && (card._editing || (poll && card._signature === signature))) {
+      card._item = item;  // a card with an open rename field keeps it, whatever the refresh
     } else {
       const fresh = buildFileCard(item, signature);
       if (card) card.replaceWith(fresh);
@@ -2328,44 +2328,59 @@ function buildFileCard(item, signature) {
   return card;
 }
 
-// Swaps the card's name for a text field: Enter saves, Esc cancels. An empty title brings the file or
-// folder name back. The server keeps `original_filename`; only the title changes.
+// Swaps the card's name for a text field: Enter saves, Esc or leaving the field cancels. An empty title brings
+// the file or folder name back. The server keeps `original_filename`; only the title changes. Only a saved
+// rename reloads the lists; cancelling puts the name back in place, so other cards keep their state.
 function editFileTitle(card) {
   const row = card.querySelector(".upload-filename");
-  if (row.querySelector(".upload-rename-input")) return;
+  if (card._editing) return;
   const item = card._item;
+  const current = item.title || item.original_filename;
   const input = document.createElement("input");
   input.type = "text";
   input.className = "upload-rename-input";
   input.maxLength = 255;
-  input.value = item.title || item.original_filename;
+  input.value = current;
   input.setAttribute("aria-label", "Name");
-  row.hidden = false;
+  const nameHtml = row.innerHTML;
+  card._editing = true;
   row.replaceChildren(input);
   input.focus();
   input.select();
+  const restore = (error) => {
+    card._editing = false;
+    row.innerHTML = nameHtml;
+    row.querySelector(".upload-rename").addEventListener("click", () => editFileTitle(card));
+    if (error) {
+      const note = document.createElement("span");
+      note.className = "status-line down";
+      note.textContent = "✕ " + error;
+      row.append(note);
+    }
+  };
   let done = false;
   const finish = async (save) => {
     if (done) return;
     done = true;
-    if (save && input.value.trim() !== (item.title || item.original_filename)) {
-      input.disabled = true;
-      try {
-        // Typing the folder/file name back is the same as clearing the title.
-        const typed = input.value.trim();
-        const resp = await fetch(`/api/file-transcriptions/${item.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: typed === item.original_filename ? "" : typed }),
-        });
-        if (!resp.ok) throw new Error((await resp.json()).error || "Rename failed");
-      } catch (err) {
-        console.error("Rename failed:", err);
-      }
+    const typed = input.value.trim();
+    if (!save || typed === current) return restore();
+    input.disabled = true;
+    try {
+      // Typing the folder/file name back is the same as clearing the title.
+      const resp = await fetch(`/api/file-transcriptions/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: typed === item.original_filename ? "" : typed }),
+      });
+      if (!resp.ok) throw new Error((await resp.json()).error || "Rename failed");
+    } catch (err) {
+      return restore("Rename failed: " + err.message);
     }
+    card._editing = false;
     loadFileTranscriptions();
   };
   input.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;  // Enter confirms an IME composition, it is not a save
     if (event.key === "Enter") finish(true);
     else if (event.key === "Escape") finish(false);
   });

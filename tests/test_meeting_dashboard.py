@@ -627,6 +627,26 @@ def test_a_title_is_limited_to_255_characters(env):
     assert len(db.get_file_transcription(row.id).title) == 255
 
 
+def test_a_null_title_clears_it(env):
+    client, _, db, *_ = env
+    row = db.save_file_transcription("hello", "en", 1000, "call.wav")
+    client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "Call"})
+
+    assert client.patch(f"/api/file-transcriptions/{row.id}", json={"title": None}).status_code == 200
+    assert db.get_file_transcription(row.id).title is None
+
+
+def test_a_reserved_windows_name_is_not_used_as_the_export_name(env):
+    client, api, db, *_ = env
+    api.extensions.add_builtin_exports()
+    row = db.save_file_transcription("hello", "en", 1000, "call.wav")
+    client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "nul"})
+
+    resp = client.get(f"/api/file-transcriptions/{row.id}/export/txt")
+
+    assert 'filename="_nul.txt"' in resp.headers["Content-Disposition"]
+
+
 def test_renaming_refuses_unknown_rows_and_bad_bodies(env):
     client, _, db, *_ = env
     row = db.save_file_transcription("hello", "en", 1000, "call.wav")

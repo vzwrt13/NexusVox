@@ -59,6 +59,7 @@ Called for every upload in the dashboard's Upload tab, and for every transcribed
 | `language`, `duration_ms`, `model`, `original_filename`, `created_at` | As stored |
 | `words` | Tuple of `Word(word, start, end, speaker)` (seconds); empty when the engine reported no timing |
 | `kind` | `"upload"` for a file, `"meeting"` for a two-track meeting recording: `text` then has numbered `Speaker N:` paragraphs, like an upload with speaker detection (speaker 1 is the microphone and may carry the name set under `[meeting].own_voice_label` instead of `Speaker 1`; the system audio is speaker 2 and up), and `words` carry `speaker` 1, 2, ...; `speaker_names` maps a speaker number to the name used in `text` instead of `Speaker N` (a meeting stores `{1: <own voice name>}`; empty for an upload). Added later, without an `API_VERSION` change: a hook that ignores it keeps working |
+| `title` | The name the user gave the row in the dashboard, or `None`; `original_filename` stays the file or meeting folder name. A hook that names its output after the row should prefer `title`. Added without an `API_VERSION` change, like `kind` |
 
 The hook runs on the upload's worker thread, after the save: a slow hook delays the end of the job, a
 failing one cannot lose the transcript. Return a JSON-serialisable `dict` to add it to the job result under

@@ -436,7 +436,7 @@ def get_model_breakdown(
     return out
 
 
-# Friendly names for common apps, keyed by lower-case process file name. Anything else is "Other".
+# Friendly names for common apps, keyed by lower-case process file name. Any other process shows under its file name.
 APP_NAMES = {
     "outlook.exe": "Outlook",
     "olk.exe": "Outlook",
@@ -476,23 +476,29 @@ APP_NAMES = {
 }
 UNKNOWN_APP = "Unknown"
 OTHER_APP = "Other"
+# Apps shown by name in the per-app table; the less busy ones are folded into "Other" so the card stays short.
+MAX_APP_ROWS = 10
 
 
 def app_label(process: str | None) -> str:
-    """The name shown for a stored process name: friendly when common, "Other" when not, "Unknown" when unrecorded.
+    """The name shown for a stored process name: friendly when common, the file name without `.exe` otherwise,
+    "Unknown" when unrecorded.
 
     Process names are stored lower-case (`App._paste`), so they are looked up as they are.
     """
     if not process:
         return UNKNOWN_APP
-    return APP_NAMES.get(process, OTHER_APP)
+    if process in APP_NAMES:
+        return APP_NAMES[process]
+    stem = process.removesuffix(".exe")
+    return stem or UNKNOWN_APP
 
 
 def get_app_breakdown(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> list[dict]:
     """Dictations and words per target app, busiest first; "Other" and "Unknown" always come last.
 
-    Process names that share a friendly name (`olk.exe` and `outlook.exe`) are one row. Rows that ran a command
-    instead of typing text are left out.
+    Process names that share a friendly name (`olk.exe` and `outlook.exe`) are one row. Beyond the `MAX_APP_ROWS`
+    busiest apps the rest is summed into "Other". Rows that ran a command instead of typing text are left out.
     """
     with session_factory() as session:
         query = session.query(Transcription.app, Transcription.text)
@@ -506,7 +512,16 @@ def get_app_breakdown(session_factory: sessionmaker, *, start: str | None = None
         group["count"] += 1
         group["words"] += len(r.text.split())
     tail = {OTHER_APP: 1, UNKNOWN_APP: 2}
-    return sorted(groups.values(), key=lambda g: (tail.get(g["app"], 0), -g["count"], g["app"]))
+    ranked = sorted(groups.values(), key=lambda g: (tail.get(g["app"], 0), -g["count"], g["app"]))
+    named = [g for g in ranked if g["app"] not in tail]
+    if len(named) > MAX_APP_ROWS:
+        other = groups.setdefault(OTHER_APP, {"app": OTHER_APP, "count": 0, "words": 0})
+        for g in named[MAX_APP_ROWS:]:
+            other["count"] += g["count"]
+            other["words"] += g["words"]
+        named = named[:MAX_APP_ROWS]
+    rest = sorted((g for g in groups.values() if g["app"] in tail), key=lambda g: tail[g["app"]])
+    return named + rest
 
 
 def _word_edits(original: str, corrected: str) -> int:

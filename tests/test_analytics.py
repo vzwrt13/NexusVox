@@ -732,7 +732,8 @@ def test_app_breakdown_groups_by_friendly_name(session_factory):
             _dictation("outlook.exe"),
             _dictation("olk.exe", "a b c"),
             _dictation("code.exe"),
-            _dictation("somethingelse.exe"),
+            _dictation("orca.exe"),
+            _dictation("orca.exe"),
             _dictation("another.exe"),
             _dictation(None),
         ],
@@ -742,16 +743,28 @@ def test_app_breakdown_groups_by_friendly_name(session_factory):
 
     assert result == [
         {"app": "Outlook", "count": 2, "words": 5},
+        {"app": "orca", "count": 2, "words": 4},
         {"app": "VS Code", "count": 1, "words": 2},
-        {"app": "Other", "count": 2, "words": 4},
+        {"app": "another", "count": 1, "words": 2},
         {"app": "Unknown", "count": 1, "words": 2},
     ]
+
+
+def test_app_breakdown_folds_the_tail_into_other(session_factory):
+    rows = [_dictation(f"app{i:02d}.exe") for i in range(12)] + [_dictation("app00.exe")]
+    _seed(session_factory, rows + [_dictation(None)])
+
+    result = get_app_breakdown(session_factory)
+
+    assert [g["app"] for g in result][:2] == ["app00", "app01"]
+    assert result[-2:] == [{"app": "Other", "count": 2, "words": 4}, {"app": "Unknown", "count": 1, "words": 2}]
+    assert len(result) == 12
 
 
 def test_app_breakdown_puts_other_and_unknown_last_even_when_biggest(session_factory):
     _seed(session_factory, [_dictation(None), _dictation(None), _dictation("x.exe"), _dictation("code.exe")])
 
-    assert [g["app"] for g in get_app_breakdown(session_factory)] == ["VS Code", "Other", "Unknown"]
+    assert [g["app"] for g in get_app_breakdown(session_factory)] == ["VS Code", "x", "Unknown"]
 
 
 def test_app_breakdown_respects_the_date_range(session_factory):

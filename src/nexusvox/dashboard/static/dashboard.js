@@ -2278,8 +2278,8 @@ function renderFileTranscriptions(container, data, emptyText, poll) {
   data.forEach((item, i) => {
     const signature = cardSignature(item);
     let card = existing.get(String(item.id));
-    if (card && poll && card._signature === signature) {
-      card._item = item;
+    if (card && (card._editing || (poll && card._signature === signature))) {
+      card._item = item;  // a card with an open rename field keeps it, whatever the refresh
     } else {
       const fresh = buildFileCard(item, signature);
       if (card) card.replaceWith(fresh);
@@ -2297,7 +2297,7 @@ function renderFileTranscriptions(container, data, emptyText, poll) {
 function cardSignature(item) {
   const running = extensionUploadActions.filter((a) => runningUploadActions.has(`${a.id}:${item.id}`)).map((a) => a.id);
   return JSON.stringify([item.id, item.exports_unavailable, item.actions_unavailable, running, item.has_audio,
-    item.original_filename, item.language, item.model, (item.text || "").length, (item.cleaned_text || "").length]);
+    item.original_filename, item.title, item.language, item.model, (item.text || "").length, (item.cleaned_text || "").length]);
 }
 
 function buildFileCard(item, signature) {
@@ -2331,7 +2331,68 @@ function buildFileCard(item, signature) {
   card.querySelectorAll(".upload-delete-btn").forEach((button) => {
     button.addEventListener("click", () => askDeleteFileTranscription(button.closest(".upload-delete-row")));
   });
+
+  card.querySelector(".upload-rename").addEventListener("click", () => editFileTitle(card));
   return card;
+}
+
+// Swaps the card's name for a text field: Enter saves, Esc or leaving the field cancels. An empty title brings
+// the file or folder name back. The server keeps `original_filename`; only the title changes. Only a saved
+// rename reloads the lists; cancelling puts the name back in place, so other cards keep their state.
+function editFileTitle(card) {
+  const row = card.querySelector(".upload-filename");
+  if (card._editing) return;
+  const item = card._item;
+  const current = item.title || item.original_filename;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "upload-rename-input";
+  input.maxLength = 255;
+  input.value = current;
+  input.setAttribute("aria-label", "Name");
+  const nameHtml = row.innerHTML;
+  card._editing = true;
+  row.replaceChildren(input);
+  input.focus();
+  input.select();
+  const restore = (error) => {
+    card._editing = false;
+    row.innerHTML = nameHtml;
+    row.querySelector(".upload-rename").addEventListener("click", () => editFileTitle(card));
+    if (error) {
+      const note = document.createElement("span");
+      note.className = "status-line down";
+      note.textContent = "✕ " + error;
+      row.append(note);
+    }
+  };
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    const typed = input.value.trim();
+    if (!save || typed === current) return restore();
+    input.disabled = true;
+    try {
+      // Typing the folder/file name back is the same as clearing the title.
+      const resp = await fetch(`/api/file-transcriptions/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: typed === item.original_filename ? "" : typed }),
+      });
+      if (!resp.ok) throw new Error((await resp.json()).error || "Rename failed");
+    } catch (err) {
+      return restore("Rename failed: " + err.message);
+    }
+    card._editing = false;
+    loadFileTranscriptions();
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;  // Enter confirms an IME composition, it is not a save
+    if (event.key === "Enter") finish(true);
+    else if (event.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(false));
 }
 
 function fileCardHtml(item) {
@@ -2355,7 +2416,10 @@ function fileCardHtml(item) {
         }).join("")}
       </div>
       ${renderRowStates(item)}
-      <div class="upload-filename">${escapeHtml(item.original_filename)}${item.kind === "meeting" ? " (meeting)" : ""}</div>
+      <div class="upload-filename" data-kind="${escapeHtml(item.kind || "upload")}">
+        <span class="upload-name">${escapeHtml(item.title || item.original_filename)}${item.kind === "meeting" ? " (meeting)" : ""}</span>
+        <button type="button" class="upload-rename" title="Rename" aria-label="Rename">✎</button>
+      </div>
       ${item.has_audio ? `<audio class="upload-audio" controls preload="none" src="/api/file-transcriptions/${item.id}/audio"></audio>` : ""}
       <div class="flagged-original upload-text">${escapeHtml(item.cleaned_text || item.text)}</div>
       <div class="upload-delete-row"><button type="button" class="period-btn upload-delete-btn">Delete</button></div>
@@ -2392,7 +2456,7 @@ function renderRowStates(item) {
 
 function askDeleteFileTranscription(row) {
   const card = row.closest(".flagged-card");
-  const kind = card.querySelector(".upload-filename").textContent.endsWith("(meeting)") ? "meeting and its audio files" : "entry and its audio";
+  const kind = card.querySelector(".upload-filename").dataset.kind === "meeting" ? "meeting and its audio files" : "entry and its audio";
   row.innerHTML = `
     <span class="upload-delete-ask">Delete this ${kind}? This cannot be undone.</span>
     <button type="button" class="period-btn upload-delete-btn upload-delete-confirm">Delete</button>

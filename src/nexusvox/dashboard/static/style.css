@@ -722,6 +722,27 @@ canvas { width: 100% !important; max-height: 260px; }
   margin-bottom: 6px;
 }
 
+.upload-rename {
+  background: none;
+  border: none;
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0.6;
+}
+.upload-rename:hover { opacity: 1; }
+.upload-rename-input {
+  width: 100%;
+  max-width: 420px;
+  font: inherit;
+  padding: 2px 6px;
+  color: var(--text);
+  background: var(--surface3);
+  border: 1px solid var(--accent-light);
+  border-radius: 4px;
+}
+
 .upload-model {
   background: var(--surface3);
   padding: 1px 6px;
@@ -1193,7 +1214,7 @@ canvas { width: 100% !important; max-height: 260px; }
 .meeting-live-text .who { font-weight: 600; margin-right: 6px; }
 .meeting-live-text .who.me { color: var(--accent-light); }
 .meeting-live-text .who.system { color: var(--green); }
-.meeting-live-text:empty::before { content: "Waiting for speech..."; color: var(--text-muted, inherit); opacity: 0.7; }
+.meeting-live-text:empty::before { content: "Waiting for speech..."; color: var(--text-dim); opacity: 0.7; }
 .meeting-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 .meeting-timer { font-family: var(--mono); font-size: 28px; font-variant-numeric: tabular-nums; }
 .meeting-indicator { width: 12px; height: 12px; border-radius: 50%; background: var(--surface3); flex-shrink: 0; }

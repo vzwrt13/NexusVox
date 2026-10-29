@@ -593,6 +593,102 @@ def test_a_press_while_the_previous_one_is_handled_is_ignored(monkeypatch):
     assert beeps == [] and opened == []
 
 
+# -- renaming -------------------------------------------------------------------------------------
+
+
+def test_renaming_sets_a_trimmed_title_and_keeps_the_original_name(env):
+    client, _, db, *_ = env
+    row = db.save_file_transcription("Me: hi", "en", 1000, "meeting-20261026-100000", kind="meeting")
+
+    resp = client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "  Weekly sync  "})
+
+    assert resp.status_code == 200 and resp.get_json()["title"] == "Weekly sync"
+    listed = client.get("/api/file-transcriptions").get_json()[0]
+    assert listed["title"] == "Weekly sync" and listed["original_filename"] == "meeting-20261026-100000"
+    assert db.meeting_folder_names() == {"meeting-20261026-100000"}
+
+
+def test_an_empty_title_brings_the_original_name_back(env):
+    client, _, db, *_ = env
+    row = db.save_file_transcription("hello", "en", 1000, "call.wav")
+    client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "Call"})
+
+    assert client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "   "}).status_code == 200
+
+    assert client.get("/api/file-transcriptions").get_json()[0]["title"] is None
+
+
+def test_a_title_is_limited_to_255_characters(env):
+    client, _, db, *_ = env
+    row = db.save_file_transcription("hello", "en", 1000, "call.wav")
+
+    assert client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "x" * 255}).status_code == 200
+    assert client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "x" * 256}).status_code == 400
+    assert len(db.get_file_transcription(row.id).title) == 255
+
+
+def test_a_null_title_clears_it(env):
+    client, _, db, *_ = env
+    row = db.save_file_transcription("hello", "en", 1000, "call.wav")
+    client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "Call"})
+
+    assert client.patch(f"/api/file-transcriptions/{row.id}", json={"title": None}).status_code == 200
+    assert db.get_file_transcription(row.id).title is None
+
+
+def test_a_reserved_windows_name_is_not_used_as_the_export_name(env):
+    client, api, db, *_ = env
+    api.extensions.add_builtin_exports()
+    row = db.save_file_transcription("hello", "en", 1000, "call.wav")
+    client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "nul"})
+
+    resp = client.get(f"/api/file-transcriptions/{row.id}/export/txt")
+
+    assert 'filename="_nul.txt"' in resp.headers["Content-Disposition"]
+
+
+def test_renaming_refuses_unknown_rows_and_bad_bodies(env):
+    client, _, db, *_ = env
+    row = db.save_file_transcription("hello", "en", 1000, "call.wav")
+
+    assert client.patch("/api/file-transcriptions/999", json={"title": "x"}).status_code == 404
+    assert client.patch(f"/api/file-transcriptions/{row.id}", json={"title": 5}).status_code == 400
+    assert client.patch(f"/api/file-transcriptions/{row.id}", json={}).status_code == 400
+    assert client.patch(f"/api/file-transcriptions/{row.id}", data="nope").status_code == 400
+
+
+def test_the_export_is_named_after_the_title(env):
+    client, api, db, *_ = env
+    api.extensions.add_builtin_exports()
+    row = db.save_file_transcription("hello", "en", 1000, "meeting-20261026-100000", kind="meeting")
+    plain = client.get(f"/api/file-transcriptions/{row.id}/export/txt")
+    assert 'filename="meeting-20261026-100000.txt"' in plain.headers["Content-Disposition"]
+
+    client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "Q3: plan/review?"})
+
+    renamed = client.get(f"/api/file-transcriptions/{row.id}/export/txt")
+    assert 'filename="Q3_ plan_review_.txt"' in renamed.headers["Content-Disposition"]
+
+
+def test_a_renamed_meeting_is_still_deleted_with_its_folder(env):
+    client, _, db, tmp_path, _ = env
+    folder = _meeting_folder(tmp_path)
+    row = db.save_file_transcription("Me: hi", "en", 1000, folder.name, kind="meeting")
+    client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "Budget talk"})
+
+    assert client.delete(f"/api/file-transcriptions/{row.id}").status_code == 200
+    assert not folder.exists()
+
+
+def test_a_renamed_meeting_does_not_come_back_as_pending(env):
+    client, _, db, tmp_path, _ = env
+    folder = _meeting_folder(tmp_path)
+    row = db.save_file_transcription("Me: hi", "en", 1000, folder.name, kind="meeting")
+    client.patch(f"/api/file-transcriptions/{row.id}", json={"title": "Budget talk"})
+
+    assert folder.name not in [p["name"] for p in client.get("/api/meetings/pending").get_json()]
+
+
 # -- recordings without a transcript --------------------------------------------------------------
 
 

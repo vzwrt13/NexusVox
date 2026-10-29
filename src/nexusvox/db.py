@@ -76,6 +76,7 @@ class Database:
             "ALTER TABLE file_transcriptions ADD COLUMN audio_path VARCHAR(500)",
             "ALTER TABLE file_transcriptions ADD COLUMN speaker_names TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN processing_ms INTEGER",
+            "ALTER TABLE file_transcriptions ADD COLUMN title VARCHAR(255)",
         ]
         with self._engine.connect() as conn:
             for sql in migrations:
@@ -544,6 +545,17 @@ class Database:
             if kind is not None:
                 query = query.filter(FileTranscription.kind == kind)
             return query.order_by(FileTranscription.created_at.desc(), FileTranscription.id.desc()).limit(limit).all()
+
+    def set_file_transcription_title(self, transcription_id: int, title: str | None) -> FileTranscription | None:
+        """Rename one file transcription (None clears the title); None for an unknown id."""
+        with self._session_factory() as session:
+            row = session.get(FileTranscription, transcription_id)
+            if row is None:
+                return None
+            row.title = title
+            session.commit()
+            session.refresh(row)
+            return row
 
     def meeting_folder_names(self) -> set[str]:
         """Folder names of the meetings that have a stored transcript (their `original_filename`)."""

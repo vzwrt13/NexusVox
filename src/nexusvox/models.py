@@ -96,6 +96,9 @@ class FileTranscription(Base):
     # Wall time from the start of the upload's processing (conversion, transcription, speaker detection,
     # cleanup) to the moment it was saved; NULL for rows from before this was measured and meetings.
     processing_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # A name the user gave the row; shown in place of `original_filename`, which never changes (it is how a
+    # meeting's folder is found). NULL when the row was never renamed.
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class DictionaryEntryRow(Base):

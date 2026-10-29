@@ -69,6 +69,8 @@ class FileTranscript:
     kind: str = "upload"
     # Names that replace "Speaker N" in `text`, by speaker number (a meeting names its own voice). Also additive.
     speaker_names: dict[int, str] = field(default_factory=dict)
+    # The name the user gave the row, if any; `original_filename` stays the file or meeting folder name. Also additive.
+    title: str | None = None
 
     @property
     def best_text(self) -> str:
@@ -106,6 +108,7 @@ def file_transcript_from_record(record: FileTranscription) -> FileTranscript:
         words=tuple(words),
         kind=record.kind or "upload",
         speaker_names=_speaker_names_from_json(record.speaker_names),
+        title=record.title,
     )
 
 

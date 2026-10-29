@@ -91,6 +91,28 @@ logger = logging.getLogger(__name__)
 # `[hotkey]` fields that hold a marker key, and how an error message names each.
 _MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
 
+# The longest title a file transcription can carry (the column is VARCHAR(255)).
+MAX_TITLE_LENGTH = 255
+# Names Windows will not create as a file, with or without an extension.
+_RESERVED_FILENAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{n}" for n in range(1, 10)),
+    *(f"LPT{n}" for n in range(1, 10)),
+}
+_UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _export_stem(record) -> str:
+    """The download name (without extension) of an export: the title when set, else the file or folder name."""
+    if record.title:
+        stem = _UNSAFE_FILENAME_CHARS.sub("_", record.title).strip(" .")
+        if stem:
+            return "_" + stem if stem.split(".")[0].upper() in _RESERVED_FILENAMES else stem
+    return Path(record.original_filename).stem or "transcript"
+
 
 def _declared_track_files(folder: Path) -> list[str]:
     """The track file names `meeting.json` lists (also unreadable ones), `<name>.wav` where it names none."""
@@ -1356,6 +1378,20 @@ class DashboardAPI:
             )
         )
 
+    def rename_file_transcription(self, tid: int, title: object) -> dict:
+        """Give an upload or meeting a title (trimmed, at most 255 characters); an empty or null one clears it.
+
+        A failure carries the HTTP `status` that fits it."""
+        if title is not None and not isinstance(title, str):
+            return {"ok": False, "status": 400, "error": "title must be a string or null"}
+        title = (title or "").strip()
+        if len(title) > MAX_TITLE_LENGTH:
+            return {"ok": False, "status": 400, "error": f"title is longer than {MAX_TITLE_LENGTH} characters"}
+        record = self._db.set_file_transcription_title(tid, title or None) if self._db else None
+        if record is None:
+            return {"ok": False, "status": 404, "error": "Unknown file transcription"}
+        return {"ok": True, "id": record.id, "title": record.title}
+
     def get_file_transcriptions(self, limit: int = 50, kind: str | None = None) -> list[dict]:
         """Return file transcription records; `kind` (`upload` / `meeting`) narrows them."""
         if self._db is None:
@@ -1376,6 +1412,7 @@ class DashboardAPI:
                     "duration_ms": r.duration_ms,
                     "model": r.model,
                     "original_filename": r.original_filename,
+                    "title": r.title,
                     "kind": r.kind or "upload",
                     "has_audio": bool(r.audio_path),
                     "confidence": r.confidence,
@@ -1424,7 +1461,7 @@ class DashboardAPI:
         except Exception as exc:
             logger.exception("Export target %s failed on file transcription %s", target_id, transcription_id)
             return {"ok": False, "status": 500, "error": f"Export failed: {exc}"}
-        stem = Path(record.original_filename).stem or "transcript"
+        stem = _export_stem(record)
         return {"ok": True, "filename": stem + target.extension, "mimetype": target.mimetype, "data": data}
 
     # ---- Benchmarks (Dev tab) ----------------------------------------------

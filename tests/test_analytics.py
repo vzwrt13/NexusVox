@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta
 
 from nexusvox.dashboard.analytics import (
+    _command_kind,
     get_accuracy_over_time,
     get_activity_heatmap,
     get_app_breakdown,
@@ -664,6 +665,97 @@ def test_overview_polish_stats_empty(session_factory):
     _seed(session_factory, [{"text": "a", "language": "en", "duration_ms": 1, "created_at": datetime.now()}])
     result = get_overview(session_factory)
     assert result["polish_applied"] == 0 and result["avg_polish_ms"] is None
+
+
+def test_overview_command_stats(session_factory):
+    now = datetime.now()
+
+    def row(text, **fields):
+        return {"text": text, "language": "en", "duration_ms": 1, "created_at": now, "app": COMMAND_APP, **fields}
+
+    _seed(
+        session_factory,
+        [
+            {"text": "typed", "language": "en", "duration_ms": 1000, "created_at": now},
+            row("[nexus] open github"),
+            row("[nexus] open docs"),
+            row("[nexus] open mail"),
+            row("[nexus] close notepad"),
+            row("[nexus] close word"),
+            row("[nexus] snap left notepad"),
+            row("[nexus] snap right word"),
+            row("[assistant] what time is it"),
+            row("[os-control] volume up"),
+            row("[polish] formal", polish_status="applied"),
+            row("[polish] legacy"),
+            row("[polish failed] legacy failure"),
+            row("[extension] sort"),
+        ],
+    )
+
+    result = get_overview(session_factory)
+
+    assert result["command_count"] == 9  # polish and extension rows are no voice commands
+    # ties go by name: assistant comes before os-control, snap left and snap right
+    assert result["top_commands"] == [
+        {"kind": "open", "count": 3},
+        {"kind": "close", "count": 2},
+        {"kind": "assistant", "count": 1},
+    ]
+
+
+def test_command_kind_keeps_two_word_actions_apart():
+    assert _command_kind("[nexus] snap left notepad") == "snap left"
+    assert _command_kind("[nexus] snap right word") == "snap right"
+    assert _command_kind("[nexus] Open github") == "open"
+    assert _command_kind("[assistant] hi") == "assistant"
+
+
+def test_overview_polish_and_commands_without_dictations(session_factory):
+    now = datetime.now()
+    _seed(
+        session_factory,
+        [
+            {
+                "text": "[polish] formal",
+                "language": "en",
+                "duration_ms": 1,
+                "created_at": now,
+                "app": COMMAND_APP,
+                "polish_status": "applied",
+                "polish_ms": 100,
+            },
+            {"text": "[nexus] open x", "language": "en", "duration_ms": 1, "created_at": now, "app": COMMAND_APP},
+        ],
+    )
+    result = get_overview(session_factory)
+    assert result["polish_applied"] == 1 and result["command_count"] == 1
+
+
+def test_overview_command_stats_empty(session_factory):
+    result = get_overview(session_factory)
+    assert result["command_count"] == 0 and result["top_commands"] == []
+    _seed(session_factory, [{"text": "a", "language": "en", "duration_ms": 1, "created_at": datetime.now()}])
+    result = get_overview(session_factory)
+    assert result["command_count"] == 0 and result["top_commands"] == []
+
+
+def test_overview_command_stats_without_dictations(session_factory):
+    _seed(
+        session_factory,
+        [
+            {
+                "text": "[nexus] open x",
+                "language": "en",
+                "duration_ms": 1,
+                "created_at": datetime.now(),
+                "app": COMMAND_APP,
+            }
+        ],
+    )
+    result = get_overview(session_factory)
+    assert result["command_count"] == 1
+    assert result["top_commands"] == [{"kind": "open", "count": 1}]
 
 
 def _upload(**fields):

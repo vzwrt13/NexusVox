@@ -1188,6 +1188,11 @@ function renderOverview(d) {
   document.getElementById("stat-polished-label").textContent =
     "Polished" + (polishParts.length ? " (" + polishParts.join(", ") + ")" : "");
 
+  document.getElementById("stat-commands").textContent = d.command_count;
+  document.getElementById("stat-commands-label").textContent =
+    "Voice Commands" +
+    (d.top_commands.length ? " (" + d.top_commands.map((c) => c.kind + " " + c.count).join(", ") + ")" : "");
+
   document.getElementById("stat-uploads").textContent = d.upload_count;
   document.getElementById("stat-upload-hours").textContent = d.upload_audio_hours;
   document.getElementById("stat-upload-processing").textContent =

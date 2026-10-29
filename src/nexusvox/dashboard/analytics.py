@@ -20,6 +20,7 @@ from ..models import (
     LearnEventRow,
     Transcription,
 )
+from ..os_commands import NEXUS_ACTIONS
 
 # Assumed average typing speed for "time saved" calculation.
 _TYPING_WPM = 40
@@ -46,6 +47,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         query = session.query(Transcription.text, Transcription.duration_ms)
         rows = _apply_date_filter(query, start, end).all()
 
+    command_rows = _command_row_stats(session_factory, start, end)
     if not rows:
         return {
             "total_transcriptions": 0,
@@ -64,7 +66,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
             "avg_translate_ms": None,
             "translate_failures": 0,
             **_EMPTY_CLEANUP,
-            **_EMPTY_POLISH,
+            **command_rows,
         }
 
     total = len(rows)
@@ -117,8 +119,6 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
     timed_count = sum(count for count, _ in timed)
     avg_cleanup_ms = sum(count * avg for count, avg in timed) / timed_count if timed_count else None
 
-    polish = _polish_stats(session_factory, start, end)
-
     return {
         "total_transcriptions": total,
         "total_words": total_words,
@@ -141,7 +141,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         "cleanup_timeouts": cleanup_counts.get("timeout", 0),
         "cleanup_failed": cleanup_counts.get("failed", 0),
         "avg_cleanup_ms": round(avg_cleanup_ms) if avg_cleanup_ms is not None else None,
-        **polish,
+        **command_rows,
     }
 
 
@@ -155,47 +155,74 @@ _EMPTY_CLEANUP = {
 }
 
 
-_EMPTY_POLISH = {
-    "polish_applied": 0,
-    "polish_extension": 0,
-    "polish_timeouts": 0,
-    "polish_failed": 0,
-    "avg_polish_ms": None,
-}
+_POLISH_TAGS = ("polish", "extension")
 
 
-def _polish_stats(session_factory: sessionmaker, start: str | None, end: str | None) -> dict:
-    """Polish on selected text: how often it ran, how it ended, and the model's average time.
+def _split_label(label: str) -> tuple[str, str]:
+    """A stored command label ``[tag] detail`` as (tag, detail); the tag is the label itself when it has none."""
+    tag, _, detail = label.removeprefix("[").partition("] ")
+    return tag, detail
 
-    Rows from before `polish_status` existed carry only their label, and were saved only when the
-    polish went through, so a `[polish] ...` or `[extension] ...` command row without a status counts as
-    applied or handled by an extension.
+
+def _is_polish_label(label: str) -> bool:
+    """Whether a command label belongs to polish on selected text (``[polish ...]``, ``[extension ...]``)."""
+    return _split_label(label)[0].split(" ")[0] in _POLISH_TAGS
+
+
+def _command_kind(label: str) -> str:
+    """The kind a stored label stands for: ``[nexus] snap left x`` -> "snap left", ``[assistant] x`` -> "assistant"."""
+    tag, detail = _split_label(label)
+    if tag == "nexus":
+        words = detail.lower().split()
+        # Longest action first, so a two-word action ("snap left") is not taken for a shorter one.
+        for action in sorted((a["action"] for a in NEXUS_ACTIONS), key=len, reverse=True):
+            if words[: len(action.split())] == action.split():
+                return action
+        return words[0] if words else tag
+    return tag
+
+
+def _command_row_stats(session_factory: sessionmaker, start: str | None, end: str | None, top: int = 3) -> dict:
+    """What the command rows say: polish on selected text, and the voice commands that were saved.
+
+    One query feeds both. Polish attempts (a `polish_status`, or a `[polish ...]` / `[extension ...]` label) are
+    counted by their own card; every other `COMMAND_APP` row is a voice command. A command row is saved
+    whether or not the command worked, so the count is of commands recognised, not of commands that succeeded.
+
+    Polish rows from before `polish_status` existed carry only their label, and were saved only when the
+    polish went through, so a `[polish] ...` or `[extension] ...` row without a status counts as applied or
+    handled by an extension.
     """
     with session_factory() as session:
         query = session.query(Transcription.polish_status, Transcription.polish_ms, Transcription.text)
         query = _apply_date_filter(query, start, end, polish=True).filter(
-            Transcription.polish_status.isnot(None)
-            | (
-                (Transcription.app == COMMAND_APP)
-                & (Transcription.text.startswith("[polish] ") | Transcription.text.startswith("[extension] "))
-            )
+            Transcription.polish_status.isnot(None) | (Transcription.app == COMMAND_APP)
         )
         rows = query.all()
     counts = {"applied": 0, "extension": 0, "timeout": 0, "failed": 0}
     times = []
+    kinds: Counter[str] = Counter()
     for status, ms, text in rows:
+        if status is None and not _is_polish_label(text):
+            kinds[_command_kind(text)] += 1
+            continue
         if status is None:
-            status = "extension" if text.startswith("[extension] ") else "applied"
+            tag = _split_label(text)[0]
+            status = "extension" if tag == "extension" else "applied" if tag == "polish" else None
         if status in counts:
             counts[status] += 1
         if status == "applied" and ms is not None:  # a timeout or failure says nothing about the model's speed
             times.append(ms)
+    # Ties go by kind, so the card does not change between refreshes.
+    ranked = sorted(kinds.items(), key=lambda item: (-item[1], item[0]))[:top]
     return {
         "polish_applied": counts["applied"],
         "polish_extension": counts["extension"],
         "polish_timeouts": counts["timeout"],
         "polish_failed": counts["failed"],
         "avg_polish_ms": round(sum(times) / len(times)) if times else None,
+        "command_count": sum(kinds.values()),
+        "top_commands": [{"kind": kind, "count": count} for kind, count in ranked],
     }
 
 

@@ -46,6 +46,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         query = session.query(Transcription.text, Transcription.duration_ms)
         rows = _apply_date_filter(query, start, end).all()
 
+    commands = _command_stats(session_factory, start, end)
     if not rows:
         return {
             "total_transcriptions": 0,
@@ -65,6 +66,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
             "translate_failures": 0,
             **_EMPTY_CLEANUP,
             **_EMPTY_POLISH,
+            **commands,
         }
 
     total = len(rows)
@@ -142,6 +144,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         "cleanup_failed": cleanup_counts.get("failed", 0),
         "avg_cleanup_ms": round(avg_cleanup_ms) if avg_cleanup_ms is not None else None,
         **polish,
+        **commands,
     }
 
 
@@ -196,6 +199,35 @@ def _polish_stats(session_factory: sessionmaker, start: str | None, end: str | N
         "polish_timeouts": counts["timeout"],
         "polish_failed": counts["failed"],
         "avg_polish_ms": round(sum(times) / len(times)) if times else None,
+    }
+
+
+def _command_kind(label: str) -> str:
+    """The kind of command a stored label stands for: ``[nexus] open x`` -> "open", ``[assistant] x`` -> "assistant"."""
+    tag, _, rest = label.removeprefix("[").partition("] ")
+    if tag == "nexus" and rest.split():
+        return rest.split()[0]
+    return tag
+
+
+def _command_stats(session_factory: sessionmaker, start: str | None, end: str | None, top: int = 3) -> dict:
+    """Voice commands that ran: the total and the ``top`` most used kinds.
+
+    Reads the command rows (`COMMAND_APP`) only. Polish attempts are rows of their own kind (counted by
+    `_polish_stats`), so rows with a `polish_status` and older `[polish]` / `[extension]` labels stay out.
+    """
+    with session_factory() as session:
+        query = session.query(Transcription.text)
+        query = _apply_date_filter(query, start, end).filter(
+            Transcription.app == COMMAND_APP,
+            ~Transcription.text.startswith("[polish] "),
+            ~Transcription.text.startswith("[extension] "),
+        )
+        labels = [text for (text,) in query.all()]
+    counts = Counter(_command_kind(label) for label in labels)
+    return {
+        "command_count": len(labels),
+        "top_commands": [{"kind": kind, "count": count} for kind, count in counts.most_common(top)],
     }
 
 

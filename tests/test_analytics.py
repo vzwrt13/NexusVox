@@ -666,6 +666,62 @@ def test_overview_polish_stats_empty(session_factory):
     assert result["polish_applied"] == 0 and result["avg_polish_ms"] is None
 
 
+def test_overview_command_stats(session_factory):
+    now = datetime.now()
+
+    def row(text, **fields):
+        return {"text": text, "language": "en", "duration_ms": 1, "created_at": now, "app": COMMAND_APP, **fields}
+
+    _seed(
+        session_factory,
+        [
+            {"text": "typed", "language": "en", "duration_ms": 1000, "created_at": now},
+            row("[nexus] open github"),
+            row("[nexus] open docs"),
+            row("[nexus] open mail"),
+            row("[nexus] close notepad"),
+            row("[nexus] close word"),
+            row("[assistant] what time is it"),
+            row("[os-control] volume up"),
+            row("[polish] formal", polish_status="applied"),
+            row("[polish] legacy"),
+            row("[extension] sort"),
+        ],
+    )
+
+    result = get_overview(session_factory)
+
+    assert result["command_count"] == 7  # polish and extension rows are no voice commands
+    assert result["top_commands"][:2] == [{"kind": "open", "count": 3}, {"kind": "close", "count": 2}]
+    assert len(result["top_commands"]) == 3
+
+
+def test_overview_command_stats_empty(session_factory):
+    result = get_overview(session_factory)
+    assert result["command_count"] == 0 and result["top_commands"] == []
+    _seed(session_factory, [{"text": "a", "language": "en", "duration_ms": 1, "created_at": datetime.now()}])
+    result = get_overview(session_factory)
+    assert result["command_count"] == 0 and result["top_commands"] == []
+
+
+def test_overview_command_stats_without_dictations(session_factory):
+    _seed(
+        session_factory,
+        [
+            {
+                "text": "[nexus] open x",
+                "language": "en",
+                "duration_ms": 1,
+                "created_at": datetime.now(),
+                "app": COMMAND_APP,
+            }
+        ],
+    )
+    result = get_overview(session_factory)
+    assert result["command_count"] == 1
+    assert result["top_commands"] == [{"kind": "open", "count": 1}]
+
+
 def _upload(**fields):
     return FileTranscription(
         text="t", language="en", duration_ms=fields.pop("duration_ms", 3_600_000), original_filename="a.wav", **fields

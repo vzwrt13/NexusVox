@@ -65,6 +65,21 @@ def test_every_failure_is_an_llm_error(monkeypatch, server):
         complete(LlmConfig(), "system", "user")
 
 
+@pytest.mark.parametrize(
+    ("error", "timed_out"),
+    [
+        (TimeoutError("slow"), True),
+        (urllib.error.URLError(TimeoutError("slow")), True),
+        (urllib.error.URLError("refused"), False),
+    ],
+)
+def test_llm_error_tells_a_timeout_from_other_failures(monkeypatch, error, timed_out):
+    monkeypatch.setattr(llm.urllib.request, "urlopen", FakeServer(error=error))
+    with pytest.raises(LlmError) as caught:
+        complete(LlmConfig(), "system", "user")
+    assert caught.value.timed_out is timed_out
+
+
 def test_user_message_uses_the_default_instruction_when_nothing_was_said():
     assert build_user_message("Hallo Welt", "  ") == f"Instruction: {DEFAULT_INSTRUCTION}\n\nText:\nHallo Welt"
     assert build_user_message("Hallo Welt", "mach es formeller").startswith("Instruction: mach es formeller")

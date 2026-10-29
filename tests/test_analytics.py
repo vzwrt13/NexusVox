@@ -628,6 +628,42 @@ def test_overview_cleanup_stats_empty(session_factory):
     assert result["avg_cleanup_ms"] is None
 
 
+def test_overview_polish_stats(session_factory):
+    now = datetime.now()
+
+    def row(text, **fields):
+        return {"text": text, "language": "en", "duration_ms": 1, "created_at": now, "app": COMMAND_APP, **fields}
+
+    _seed(
+        session_factory,
+        [
+            {"text": "[polish] looks like one", "language": "en", "duration_ms": 1000, "created_at": now},  # dictation
+            row("[polish] formal", polish_status="applied", polish_ms=300),
+            row("[polish] shorter", polish_status="applied", polish_ms=500),
+            row("[polish] default", polish_status="timeout", polish_ms=3002),
+            row("[polish] default", polish_status="failed", polish_ms=10),
+            row("[extension] sort", polish_status="extension"),
+            row("[polish] formal"),  # saved before the status existed: a polish that went through
+            row("[extension] sort"),  # likewise
+        ],
+    )
+
+    result = get_overview(session_factory)
+
+    assert result["polish_applied"] == 3
+    assert result["polish_extension"] == 2
+    assert result["polish_timeouts"] == 1
+    assert result["polish_failed"] == 1
+    assert result["avg_polish_ms"] == 953  # (300 + 500 + 3002 + 10) / 4
+
+
+def test_overview_polish_stats_empty(session_factory):
+    assert get_overview(session_factory)["polish_applied"] == 0
+    _seed(session_factory, [{"text": "a", "language": "en", "duration_ms": 1, "created_at": datetime.now()}])
+    result = get_overview(session_factory)
+    assert result["polish_applied"] == 0 and result["avg_polish_ms"] is None
+
+
 def _upload(**fields):
     return FileTranscription(
         text="t", language="en", duration_ms=fields.pop("duration_ms", 3_600_000), original_filename="a.wav", **fields

@@ -763,18 +763,32 @@ class NexusVoxApp:
     def _language_of(self, spoken: str) -> str:
         return detect_language(spoken) if self._config.auto_language_detection else self._config.language
 
-    def _save_command(self, recording: _Recording, label: str, spoken: str) -> None:
-        """Save a dictation that ran a command instead of being typed, as ``label``."""
+    def _save_command(
+        self,
+        recording: _Recording | None,
+        label: str,
+        spoken: str,
+        *,
+        polish_status: str | None = None,
+        polish_ms: int | None = None,
+    ) -> None:
+        """Save a dictation that ran a command instead of being typed, as ``label``.
+
+        A quick tap of the polish chord has no *recording*: its row has no audio, duration or model.
+        """
         record = self._db.save_transcription(
             text=label,
             language=self._language_of(spoken),
-            duration_ms=recording.duration_ms,
-            confidence=recording.confidence,
-            model=self._transcriber.model,
-            transcribe_ms=recording.transcribe_ms,
+            duration_ms=recording.duration_ms if recording else 0,
+            confidence=recording.confidence if recording else None,
+            model=self._transcriber.model if recording else None,
+            transcribe_ms=recording.transcribe_ms if recording else None,
             app=COMMAND_APP,
+            polish_status=polish_status,
+            polish_ms=polish_ms,
         )
-        self._store_audio(recording.audio, record.id)
+        if recording:
+            self._store_audio(recording.audio, record.id)
 
     async def _paste_last_text(self) -> None:
         """Paste what the last dictation pasted, once more; the error beep when there is none yet."""
@@ -820,24 +834,39 @@ class NexusVoxApp:
             )
             if handled is not None:
                 await self._paste_over_selection(
-                    handled, window, f"[extension] {spoken}", spoken or selection, recording
+                    handled, window, f"[extension] {spoken}", spoken or selection, recording, "extension", None
                 )
                 return
         instruction, preset = resolve_instruction(spoken, self._db.get_polish_presets())
         if preset:
             logger.info("Polish: preset %r", preset)
+        label = f"[polish] {preset or spoken or 'default'}"
+        started = time.perf_counter()  # not monotonic(): its tick is ~15 ms on Windows
         try:
             rewritten = await loop.run_in_executor(None, polish, selection, instruction, self._config.llm)
         except LlmError as exc:
             logger.warning("Polish: model at %s failed (%s); the selection stays as it was", self._config.llm.url, exc)
             self._cue(beep_error, ERROR)
+            self._save_command(
+                recording,
+                label,
+                spoken or selection,
+                polish_status="timeout" if exc.timed_out else "failed",
+                polish_ms=round((time.perf_counter() - started) * 1000),
+            )
             return
-        await self._paste_over_selection(
-            rewritten, window, f"[polish] {preset or spoken or 'default'}", spoken or selection, recording
-        )
+        model_ms = round((time.perf_counter() - started) * 1000)
+        await self._paste_over_selection(rewritten, window, label, spoken or selection, recording, "applied", model_ms)
 
     async def _paste_over_selection(
-        self, rewritten: str, window: int, label: str, spoken: str, recording: _Recording | None
+        self,
+        rewritten: str,
+        window: int,
+        label: str,
+        spoken: str,
+        recording: _Recording | None,
+        status: str,
+        model_ms: int | None,
     ) -> None:
         """Paste *rewritten* over the still-selected text, unless the focus left *window*; save *label*."""
         self._last_typed = rewritten
@@ -851,8 +880,7 @@ class NexusVoxApp:
             except ClipboardError as exc:
                 logger.warning("Polish: could not paste the reply (%s); the paste key pastes it", exc)
                 self._cue(beep_error, ERROR)
-        if recording is not None:
-            self._save_command(recording, label, spoken)
+        self._save_command(recording, label, spoken, polish_status=status, polish_ms=model_ms)
 
     def _flag_last_transcription(self) -> None:
         """ "nexus flag" - always available, flags the most recent transcription for review."""

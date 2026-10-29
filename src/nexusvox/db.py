@@ -66,6 +66,8 @@ class Database:
             "ALTER TABLE transcriptions ADD COLUMN cleanup_status VARCHAR(10)",
             "ALTER TABLE transcriptions ADD COLUMN cleanup_ms INTEGER",
             "ALTER TABLE transcriptions ADD COLUMN app VARCHAR(100)",
+            "ALTER TABLE transcriptions ADD COLUMN polish_status VARCHAR(10)",
+            "ALTER TABLE transcriptions ADD COLUMN polish_ms INTEGER",
             "ALTER TABLE snippets ADD COLUMN options TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN words TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN cleaned_text TEXT",
@@ -100,6 +102,8 @@ class Database:
         cleanup_status: str | None = None,
         cleanup_ms: int | None = None,
         app: str | None = None,
+        polish_status: str | None = None,
+        polish_ms: int | None = None,
     ) -> Transcription:
         """Save a transcription record to the database."""
         with self._session_factory() as session:
@@ -120,6 +124,8 @@ class Database:
                 cleanup_status=cleanup_status,
                 cleanup_ms=cleanup_ms,
                 app=app,
+                polish_status=polish_status,
+                polish_ms=polish_ms,
             )
             session.add(record)
             session.commit()

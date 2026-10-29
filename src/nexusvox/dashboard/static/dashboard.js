@@ -1180,6 +1180,14 @@ function renderOverview(d) {
   document.getElementById("stat-cleaned-label").textContent =
     "Cleaned Up" + (cleanParts.length ? " (" + cleanParts.join(", ") + ")" : "");
 
+  document.getElementById("stat-polished").textContent = d.polish_applied + d.polish_extension;
+  const polishParts = [];
+  if (d.avg_polish_ms != null) polishParts.push("avg " + formatDuration(d.avg_polish_ms));
+  if (d.polish_timeouts) polishParts.push(d.polish_timeouts + " timed out");
+  if (d.polish_failed) polishParts.push(d.polish_failed + " failed");
+  document.getElementById("stat-polished-label").textContent =
+    "Polished" + (polishParts.length ? " (" + polishParts.join(", ") + ")" : "");
+
   document.getElementById("stat-uploads").textContent = d.upload_count;
   document.getElementById("stat-upload-hours").textContent = d.upload_audio_hours;
   document.getElementById("stat-upload-processing").textContent =

@@ -184,6 +184,7 @@ def test_polish_with_the_model_down_keeps_the_selection(monkeypatch):
     asyncio.run(app._polish_selection("", MagicMock()))
     assert (calls["pasted"], calls["beeps"]) == ([], ["error"])
     assert app._save_command.call_args.kwargs["polish_status"] == "failed"
+    assert app._save_command.call_args.args[1] == "[polish failed] default"
 
 
 def test_polish_with_a_slow_model_is_saved_as_a_timeout(monkeypatch):
@@ -198,7 +199,7 @@ def test_polish_tap_with_nothing_spoken_is_saved_without_a_recording(monkeypatch
     app, _calls = _polish_app(monkeypatch, "hi leute", "Hi Leute")
     asyncio.run(app._polish_selection("", None))
     args, kwargs = app._save_command.call_args
-    assert args == (None, "[polish] default", "hi leute")
+    assert args == (None, "[polish] default", "")
     assert kwargs["polish_status"] == "applied"
 
 
@@ -207,6 +208,8 @@ def test_polish_does_not_paste_when_the_focus_moved(monkeypatch):
     asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
     assert (calls["pasted"], calls["beeps"]) == ([], ["error"])
     assert app._last_typed == "Hallo zusammen"  # the paste key still pastes it
+    assert app._save_command.call_args.args[1] == "[polish failed] mach es formeller"
+    assert app._save_command.call_args.kwargs["polish_status"] == "failed"  # nothing was pasted
 
 
 def test_polish_beeps_when_the_clipboard_is_busy(monkeypatch):

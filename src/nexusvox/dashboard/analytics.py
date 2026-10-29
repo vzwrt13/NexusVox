@@ -25,8 +25,14 @@ from ..models import (
 _TYPING_WPM = 40
 
 
-def _apply_date_filter(query, start: str | None, end: str | None, model=Transcription):
-    """Filter a query by optional ISO date bounds (inclusive)."""
+def _apply_date_filter(query, start: str | None, end: str | None, model=Transcription, *, polish: bool = False):
+    """Filter a query by optional ISO date bounds (inclusive).
+
+    Rows of polish attempts (`polish_status` set) are no dictations - no audio, no model, the label as
+    text - so they stay out of every dictation statistic unless the query is for polish (`polish=True`).
+    """
+    if model is Transcription and not polish:
+        query = query.filter(Transcription.polish_status.is_(None))
     if start:
         query = query.filter(model.created_at >= start)
     if end:
@@ -167,7 +173,7 @@ def _polish_stats(session_factory: sessionmaker, start: str | None, end: str | N
     """
     with session_factory() as session:
         query = session.query(Transcription.polish_status, Transcription.polish_ms, Transcription.text)
-        query = _apply_date_filter(query, start, end).filter(
+        query = _apply_date_filter(query, start, end, polish=True).filter(
             Transcription.polish_status.isnot(None)
             | (
                 (Transcription.app == COMMAND_APP)
@@ -182,7 +188,7 @@ def _polish_stats(session_factory: sessionmaker, start: str | None, end: str | N
             status = "extension" if text.startswith("[extension] ") else "applied"
         if status in counts:
             counts[status] += 1
-        if ms is not None:
+        if status == "applied" and ms is not None:  # a timeout or failure says nothing about the model's speed
             times.append(ms)
     return {
         "polish_applied": counts["applied"],

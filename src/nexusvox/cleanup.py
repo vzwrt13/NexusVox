@@ -109,12 +109,6 @@ def _placeholders(text: str) -> list[str]:
     return sorted(_PLACEHOLDER_RE.findall(text))
 
 
-def _is_timeout(message: str) -> bool:
-    """Whether an `LlmError` message says the request ran into its timeout (`TimeoutError`, "timed out")."""
-    lowered = message.lower()
-    return "timeout" in lowered or "timed out" in lowered
-
-
 def _words(text: str) -> list[str]:
     return [w.lower() for w in _WORD_RE.findall(text)]
 
@@ -165,7 +159,7 @@ def cleanup(
         )
     except LlmError as exc:
         logger.warning("Cleanup: model at %s failed (%s); typing the dictation unchanged", llm.url, exc)
-        return CleanupResult(text, error=str(exc), timed_out=_is_timeout(str(exc)))
+        return CleanupResult(text, error=str(exc), timed_out=exc.timed_out)
     ms = int((time.monotonic() - started) * 1000)
     # A reasoning model may lead with its thinking; a small model sometimes echoes the tags.
     reply = _TAG_RE.sub("", clean_reply(reply))

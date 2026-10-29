@@ -654,7 +654,9 @@ def test_overview_polish_stats(session_factory):
     assert result["polish_extension"] == 2
     assert result["polish_timeouts"] == 1
     assert result["polish_failed"] == 1
-    assert result["avg_polish_ms"] == 953  # (300 + 500 + 3002 + 10) / 4
+    assert result["avg_polish_ms"] == 400  # (300 + 500) / 2: a timeout or failure is no model speed
+    # polish attempts are no dictations: only the first row counts in the dictation totals
+    assert result["total_transcriptions"] == 3  # the dictation and the two rows from before the status existed
 
 
 def test_overview_polish_stats_empty(session_factory):

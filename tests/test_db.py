@@ -236,6 +236,32 @@ def test_migration_adds_the_cleanup_columns_to_an_old_database(tmp_path):
     assert row.text == "hi" and row.cleaned_text is None and row.cleanup_level is None
 
 
+def test_migration_adds_the_title_column_to_an_old_database(tmp_path):
+    import sqlite3
+
+    from nexusvox.config import DatabaseConfig
+    from nexusvox.db import Database
+
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE file_transcriptions (id INTEGER PRIMARY KEY, text TEXT NOT NULL,"
+            " language VARCHAR(5) NOT NULL, duration_ms INTEGER NOT NULL, created_at DATETIME, model VARCHAR(100),"
+            " original_filename VARCHAR(255) NOT NULL, confidence FLOAT, words TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO file_transcriptions (text, language, duration_ms, original_filename)"
+            " VALUES ('hi', 'en', 1, 'a.wav')"
+        )
+
+    old = Database(DatabaseConfig(path=str(path)))
+
+    row = old.get_file_transcriptions(limit=1)[0]
+    assert row.title is None and row.original_filename == "a.wav"
+    assert old.set_file_transcription_title(row.id, "Renamed").title == "Renamed"
+    assert old.set_file_transcription_title(999, "x") is None
+
+
 def test_get_file_transcriptions_newest_first(db):
     db.save_file_transcription("first", "en", 1000, "a.wav")
     db.save_file_transcription("second", "en", 1000, "b.wav")

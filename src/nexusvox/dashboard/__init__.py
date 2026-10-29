@@ -521,6 +521,16 @@ def _create_app(api: DashboardAPI) -> Flask:
         kind = request.args.get("kind")
         return jsonify(api.get_file_transcriptions(limit, kind if kind in ("upload", "meeting") else None))
 
+    @app.route("/api/file-transcriptions/<int:tid>", methods=["PATCH"])
+    def rename_file_transcription(tid):
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or "title" not in body:
+            return jsonify({"ok": False, "error": "Expected a JSON body with a title"}), 400
+        result = api.rename_file_transcription(tid, body["title"])
+        if result["ok"]:
+            return jsonify(result)
+        return jsonify(result), (404 if result["error"].startswith("Unknown") else 400)
+
     @app.route("/api/file-transcriptions/<int:tid>", methods=["DELETE"])
     def delete_file_transcription(tid):
         result = api.delete_file_transcription(tid)

@@ -58,6 +58,10 @@ class Transcription(Base):
     # and how long it took; both NULL when cleanup was off or the dictation too short to send.
     cleanup_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
     cleanup_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Polish on selected text: how it ended ("applied", "failed", "timeout", "extension") and the model time
+    # in ms (NULL for an extension, which is not the model); both NULL for rows from before and for dictations.
+    polish_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    polish_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # The process file name of the app the text was typed into ("outlook.exe"), read at paste time.
     # Never a window title; NULL for older rows, phone dictations and texts the clipboard refused;
     # COMMAND_APP for rows that ran a command.

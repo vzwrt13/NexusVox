@@ -25,8 +25,14 @@ from ..models import (
 _TYPING_WPM = 40
 
 
-def _apply_date_filter(query, start: str | None, end: str | None, model=Transcription):
-    """Filter a query by optional ISO date bounds (inclusive)."""
+def _apply_date_filter(query, start: str | None, end: str | None, model=Transcription, *, polish: bool = False):
+    """Filter a query by optional ISO date bounds (inclusive).
+
+    Rows of polish attempts (`polish_status` set) are no dictations - no audio, no model, the label as
+    text - so they stay out of every dictation statistic unless the query is for polish (`polish=True`).
+    """
+    if model is Transcription and not polish:
+        query = query.filter(Transcription.polish_status.is_(None))
     if start:
         query = query.filter(model.created_at >= start)
     if end:
@@ -58,6 +64,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
             "avg_translate_ms": None,
             "translate_failures": 0,
             **_EMPTY_CLEANUP,
+            **_EMPTY_POLISH,
         }
 
     total = len(rows)
@@ -110,6 +117,8 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
     timed_count = sum(count for count, _ in timed)
     avg_cleanup_ms = sum(count * avg for count, avg in timed) / timed_count if timed_count else None
 
+    polish = _polish_stats(session_factory, start, end)
+
     return {
         "total_transcriptions": total,
         "total_words": total_words,
@@ -132,6 +141,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         "cleanup_timeouts": cleanup_counts.get("timeout", 0),
         "cleanup_failed": cleanup_counts.get("failed", 0),
         "avg_cleanup_ms": round(avg_cleanup_ms) if avg_cleanup_ms is not None else None,
+        **polish,
     }
 
 
@@ -143,6 +153,50 @@ _EMPTY_CLEANUP = {
     "cleanup_failed": 0,
     "avg_cleanup_ms": None,
 }
+
+
+_EMPTY_POLISH = {
+    "polish_applied": 0,
+    "polish_extension": 0,
+    "polish_timeouts": 0,
+    "polish_failed": 0,
+    "avg_polish_ms": None,
+}
+
+
+def _polish_stats(session_factory: sessionmaker, start: str | None, end: str | None) -> dict:
+    """Polish on selected text: how often it ran, how it ended, and the model's average time.
+
+    Rows from before `polish_status` existed carry only their label, and were saved only when the
+    polish went through, so a `[polish] ...` or `[extension] ...` command row without a status counts as
+    applied or handled by an extension.
+    """
+    with session_factory() as session:
+        query = session.query(Transcription.polish_status, Transcription.polish_ms, Transcription.text)
+        query = _apply_date_filter(query, start, end, polish=True).filter(
+            Transcription.polish_status.isnot(None)
+            | (
+                (Transcription.app == COMMAND_APP)
+                & (Transcription.text.startswith("[polish] ") | Transcription.text.startswith("[extension] "))
+            )
+        )
+        rows = query.all()
+    counts = {"applied": 0, "extension": 0, "timeout": 0, "failed": 0}
+    times = []
+    for status, ms, text in rows:
+        if status is None:
+            status = "extension" if text.startswith("[extension] ") else "applied"
+        if status in counts:
+            counts[status] += 1
+        if status == "applied" and ms is not None:  # a timeout or failure says nothing about the model's speed
+            times.append(ms)
+    return {
+        "polish_applied": counts["applied"],
+        "polish_extension": counts["extension"],
+        "polish_timeouts": counts["timeout"],
+        "polish_failed": counts["failed"],
+        "avg_polish_ms": round(sum(times) / len(times)) if times else None,
+    }
 
 
 def _speaker_count(words_json: str | None) -> int:

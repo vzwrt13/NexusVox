@@ -71,7 +71,7 @@ def test_echoed_tags_are_stripped_and_edge_whitespace_kept(model):
 
 
 def test_a_failing_model_types_the_dictation_unchanged(model):
-    model.reply = LlmError("TimeoutError: timed out")
+    model.reply = LlmError("TimeoutError: timed out", timed_out=True)
     result = cleanup("Ähm ich komme äh heute später", LIGHT, LlmConfig())
     assert (result.text, result.cleaned) == ("Ähm ich komme äh heute später", False)
     assert "timed out" in result.error
@@ -140,7 +140,7 @@ def test_status_says_how_the_pass_ended(model):
     assert cleanup(text, LIGHT, LlmConfig()).status == "unchanged"
     model.reply = "Paris is the capital of France, a country in Western Europe."
     assert cleanup(text, LIGHT, LlmConfig()).status == "rejected"
-    model.reply = LlmError("TimeoutError: timed out")
+    model.reply = LlmError("TimeoutError: timed out", timed_out=True)
     assert cleanup(text, LIGHT, LlmConfig()).status == "timeout"
     model.reply = LlmError("URLError: connection refused")
     assert cleanup(text, LIGHT, LlmConfig()).status == "failed"

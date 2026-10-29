@@ -43,6 +43,10 @@ _THINK_RE = re.compile(r"^<think>.*?</think>", re.DOTALL)
 class LlmError(Exception):
     """The model server could not be reached or gave no usable answer."""
 
+    def __init__(self, message: str, *, timed_out: bool = False) -> None:
+        super().__init__(message)
+        self.timed_out = timed_out
+
 
 def _request(config: LlmConfig, system: str, user: str) -> tuple[str, dict]:
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -112,7 +116,8 @@ def _send(config: LlmConfig, system: str, user: str) -> str:
         IndexError,
         TypeError,
     ) as exc:
-        raise LlmError(f"{type(exc).__name__}: {exc}"[:200]) from exc
+        timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+        raise LlmError(f"{type(exc).__name__}: {exc}"[:200], timed_out=timed_out) from exc
     if not isinstance(text, str) or not text.strip():
         raise LlmError("the model returned no text")
     return text.strip()

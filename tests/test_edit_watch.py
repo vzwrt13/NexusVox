@@ -147,6 +147,22 @@ def test_watcher_keeps_last_text_when_field_disappears():
     assert _run_watch(field, "I use nexus fox", window_s=5) == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
 
 
+def test_watcher_keeps_the_edit_when_the_field_is_cleared_on_send():
+    field = FakeField(["I use nexus fox", "I use NexusVox", ""])
+    assert _run_watch(field, "I use nexus fox", window_s=0.3) == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+
+
+def test_watcher_learns_nothing_when_the_field_is_cleared_without_an_edit():
+    field = FakeField(["I use nexus fox", "I use nexus fox", ""])
+    assert _run_watch(field, "I use nexus fox", window_s=0.3) == []
+    assert _outcome(lambda: FakeField(["I use nexus fox", ""]))["counts"] == {"unchanged": 1}
+
+
+def test_watcher_learns_nothing_when_the_field_is_gone_with_no_snapshot():
+    field = FakeField(["I use nexus fox", ""])
+    assert _run_watch(field, "I use nexus fox", window_s=0.3) == []
+
+
 def test_watcher_skips_without_a_readable_field():
     assert _run_watch(None, "I use nexus fox") == []
 

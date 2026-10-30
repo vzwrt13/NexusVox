@@ -14,6 +14,7 @@ found there. Every paste ends in one outcome (`OUTCOMES`), logged at INFO with t
 numbers behind it and how the watch ended, and counted for the dashboard, so
 "learned nothing" always has a stated reason. When a read fails, the focused element
 is fetched again before the watch gives up; the last successful read is still judged.
+A field cleared on send is judged by the last text that still held the dictation.
 
 All UI Automation calls run on the watcher's own thread, so no COM pointer
 crosses threads and the hotkey hook is never blocked. `extract_edit` and `learn`
@@ -499,7 +500,9 @@ class EditWatcher:
                     ended = "unreadable"
                     break
                 field, current = refreshed
-            if len(current) <= MAX_FIELD_CHARS:
+            # A field cleared on send (or the dictation deleted) keeps the last text that still held it:
+            # that is where the user's fixes are. Without an edit it equals `before`, so nothing is learned.
+            if len(current) <= MAX_FIELD_CHARS and extract_edit(before, item.injected, current) is not None:
                 after = current
         self._report(before, item, after, ended)
         return self._queue.get() if nxt is False else nxt

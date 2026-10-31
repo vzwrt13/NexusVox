@@ -13,8 +13,9 @@ scored twice against the reference:
 
 Short clips (up to 20 s) are scored too, to show that dictation does not get worse.
 
-Needs the clip folders and helpers of scripts/parakeet_cpu_bench.py (fetch the clips once with its
---fetch option). Heavy CPU load: run it while nobody works on the machine.
+Needs the FLEURS clip folders (<lang>/*.wav plus refs.tsv, "<file>\t<reference>" per line, named after the
+FLEURS codes), as written by `scripts/parakeet_cpu_bench.py --fetch` once that is merged.
+Heavy CPU load: run it while nobody works on the machine.
 
     python scripts/parakeet_long_bench.py fleurs --target-s 45 --items 8
     python scripts/parakeet_long_bench.py fleurs --config config.toml --gpu-url http://localhost:8002/v1/audio/transcriptions
@@ -24,24 +25,112 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import struct
 import sys
+import threading
+import urllib.request
+import uuid
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from parakeet_cpu_bench import (  # noqa: E402
-    DEFAULT_LANGS,
-    DIRECT_LIMIT_S,
-    SR,
-    CpuBackend,
-    GpuBackend,
-    edit_distance,
-    normalize,
-    read_wav,
-    wer_of,
-)
+SR = 16_000
+DIRECT_LIMIT_S = 20.0  # local_parakeet.MAX_DIRECT_S
+DEFAULT_LANGS = ["de_de", "en_us", "es_419", "fr_fr", "pt_br"]
+
+
+# ---- text, audio and backends (self-contained; same normaliser as scripts/benchmark_parakeet.py) ------
+
+
+def normalize(text: str) -> str:
+    """Same normaliser as scripts/benchmark_parakeet.py (keep the two in sync: WERs must stay comparable)."""
+    text = re.sub(r"[^\w\s]", "", text.lower())
+    return re.sub(r"\s+", " ", text.strip())
+
+
+def edit_distance(a: list[str], b: list[str]) -> int:
+    prev = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        cur = [i]
+        for j, y in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y)))
+        prev = cur
+    return prev[-1]
+
+
+def read_wav(path: Path) -> np.ndarray:
+    """Mono 16 kHz WAV as float32; handles PCM16 and the float32 files FLEURS ships (stdlib `wave` cannot)."""
+    raw = path.read_bytes()
+    pos, fmt, samples = 12, None, None
+    while pos + 8 <= len(raw):
+        cid, size = raw[pos : pos + 4], int.from_bytes(raw[pos + 4 : pos + 8], "little")
+        body = raw[pos + 8 : pos + 8 + size]
+        if cid == b"fmt ":
+            fmt = (
+                int.from_bytes(body[0:2], "little"),
+                int.from_bytes(body[2:4], "little"),
+                int.from_bytes(body[4:8], "little"),
+                int.from_bytes(body[14:16], "little"),
+            )
+        elif cid == b"data":
+            samples = body
+        pos += 8 + size + (size & 1)
+    tag, channels, rate, bits = fmt
+    assert channels == 1 and rate == SR, (path, fmt)
+    if tag == 3 and bits == 32:
+        return np.frombuffer(samples, dtype="<f4").astype(np.float32)
+    assert tag == 1 and bits == 16, (path, fmt)
+    return np.frombuffer(samples, dtype="<i2").astype(np.float32) / 32768.0
+
+
+def wav_bytes(x: np.ndarray) -> bytes:
+    pcm = (np.clip(x, -1, 1) * 32767).astype("<i2").tobytes()
+    hdr = (
+        b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, SR, SR * 2, 2, 16)
+    )
+    return hdr + b"data" + struct.pack("<I", len(pcm)) + pcm
+
+
+class GpuBackend:
+    """The Docker container's OpenAI-style HTTP endpoint."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    def recognize(self, x: np.ndarray) -> str:
+        crlf, bd = "\r\n", uuid.uuid4().hex
+        head = (
+            f'--{bd}{crlf}Content-Disposition: form-data; name="model"{crlf}{crlf}nvidia/parakeet-tdt-0.6b-v3{crlf}'
+            f'--{bd}{crlf}Content-Disposition: form-data; name="file"; filename="a.wav"{crlf}'
+            f"Content-Type: audio/wav{crlf}{crlf}"
+        ).encode()
+        body = head + wav_bytes(x) + f"{crlf}--{bd}--{crlf}".encode()
+        req = urllib.request.Request(self.url, body, {"Content-Type": f"multipart/form-data; boundary={bd}"})
+        return json.load(urllib.request.urlopen(req, timeout=900))["text"]
+
+
+class CpuBackend:
+    """LocalParakeetTranscriber._recognize, the call the app makes."""
+
+    def __init__(self) -> None:
+        from nexusvox.config import InferenceConfig
+        from nexusvox.transcribers.local_parakeet import LocalParakeetTranscriber
+
+        self.tr = LocalParakeetTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"))
+        self.never = threading.Event()
+        self.tr._get_model(self.tr._onnx_model, self.tr._quantization)  # load before any timing
+
+    def recognize(self, x: np.ndarray) -> str:
+        return self.tr._recognize(x, self.never)[0]
+
+
+def wer_of(items: list[tuple[int, int]]) -> float | None:
+    words = sum(w for _, w in items)
+    return round(sum(e for e, _ in items) / words, 4) if words else None
+
 
 GAP = np.zeros(int(0.6 * SR), dtype=np.float32)
 
@@ -79,12 +168,26 @@ def main() -> None:
     from nexusvox.pipeline import process_text
 
     config = load_config(args.config)
-    backend = GpuBackend(args.gpu_url) if args.gpu_url else CpuBackend(None)
-    if not args.gpu_url:
-        backend.tr._get_model(backend.tr._onnx_model, backend.tr._quantization)  # load before timing starts
+    backend = GpuBackend(args.gpu_url) if args.gpu_url else CpuBackend()
+
+    # The text pipeline of the app with the user's settings, minus the two steps that rewrite the words
+    # (cleanup LLM, translator): they would measure the LLM, not the speech recognition.
+    from nexusvox.cleanup import CleanupResult
+    from nexusvox.db import Database
+    from nexusvox.translator import TranslateResult
+
+    db = Database(config.database)
+    dictionary, snippets = db.get_dictionary_entries(), db.get_snippets()
 
     def pipeline_text(raw: str) -> str:
-        return process_text(raw, config, [], []).typed
+        return process_text(
+            raw,
+            config,
+            dictionary,
+            snippets,
+            cleanup_fn=lambda text, *_: CleanupResult(text),
+            translate_fn=lambda text, *_: TranslateResult(text),
+        ).typed
 
     report: dict = {"backend": "gpu" if args.gpu_url else "cpu", "languages": {}}
     for lang in args.langs:

@@ -37,14 +37,18 @@ MAX_DIRECT_S = 20.0
 # A segment cut at a pause is not shorter than this unless the audio ends: the model needs a few
 # seconds of context to keep the language, and onnx-asr's VAD cut far shorter pieces that drifted.
 MIN_SEGMENT_S = 6.0
-# A segment whose loudest sample stays below this (about -50 dBFS) holds no speech and is not decoded.
-_SILENCE_PEAK = 0.003
+# A frame counts as speech only above this RMS (about -44 dBFS), on top of being louder than the
+# recording's own pause level; a segment with fewer than `_MIN_SPEECH_FRAMES` such frames (0.2 s) holds
+# silence, hum or room noise and is not decoded: the model would only make something up.
+_SPEECH_RMS = 0.006
+_MIN_SPEECH_FRAMES = 10
 # Pause detection works on 20 ms frames; a pause is a run of at least this many quiet seconds.
 _PAUSE_FRAME = SAMPLE_RATE // 50
 _MIN_PAUSE_S = 0.2
-# Each second a cut sits later in the window is worth this many seconds of pause: among similar
-# pauses the later cut wins, so segments come out long.
-_LATE_CUT_BONUS = 0.05
+# Each second a cut sits later in the window is worth this many seconds of pause. It only breaks ties
+# between pauses of the same length (the later cut wins, so segments come out long); a real sentence
+# pause always beats a gap between words.
+_LATE_CUT_BONUS = 0.002
 # Less than this is silence for all practical purposes and trips the feature extractor.
 _MIN_SAMPLES = SAMPLE_RATE // 10
 # One encoder frame: a 10 ms feature step times the model's subsampling factor of 8.
@@ -99,6 +103,44 @@ def _frame_levels(samples: np.ndarray) -> np.ndarray:
     return np.sqrt(np.mean(block * block, axis=1))
 
 
+def _analyse(
+    samples: np.ndarray, max_s: float | None, min_s: float | None
+) -> tuple[list[tuple[int, int]], np.ndarray, np.ndarray]:
+    """Segment ranges, the frame levels and the per-frame "speech" flags of the audio."""
+    max_s = MAX_DIRECT_S if max_s is None else max_s
+    min_s = MIN_SEGMENT_S if min_s is None else min_s
+    min_s = min(max(min_s, 1 / 50), max_s / 2)  # at least one frame, so every cut moves forward
+    total = len(samples)
+    max_len = int(max_s * SAMPLE_RATE)
+    min_len = max(int(min_s * SAMPLE_RATE), _PAUSE_FRAME)
+
+    level = _frame_levels(samples)
+    if len(level) == 0:
+        return [(0, total)], level, np.zeros(0, dtype=bool)
+    floor, loud = np.percentile(level, [10, 90])
+    pause_level = min(max(floor * 3.0, 0.002), max(loud * 0.3, 0.002))
+    quiet = level < pause_level
+    speech = level >= max(pause_level, _SPEECH_RMS)
+    if total <= max_len:
+        return [(0, total)], quiet, speech
+
+    min_pause = max(1, round(_MIN_PAUSE_S * SAMPLE_RATE / _PAUSE_FRAME))
+    frames_per_s = SAMPLE_RATE / _PAUSE_FRAME
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    while total - start > max_len:
+        lo = (start + min_len) // _PAUSE_FRAME
+        # The rest after the cut keeps at least `min_len`, so the last segment is never a stub.
+        hi = min((start + max_len) // _PAUSE_FRAME, (total - min_len) // _PAUSE_FRAME, len(level))
+        cut = _best_cut(quiet, level, lo, hi, min_pause, frames_per_s)
+        end = cut * _PAUSE_FRAME if cut is not None else start + max_len
+        end = min(max(end, start + min_len), start + max_len)
+        ranges.append((start, end))
+        start = end
+    ranges.append((start, total))
+    return ranges, quiet, speech
+
+
 def split_at_pauses(
     samples: np.ndarray, max_s: float | None = None, min_s: float | None = None
 ) -> list[tuple[int, int]]:
@@ -106,35 +148,23 @@ def split_at_pauses(
 
     Audio up to `max_s` stays whole. Otherwise each cut goes into the middle of a pause (a run of quiet
     20 ms frames, quiet being a few times the recording's own noise floor) in the window `min_s`..`max_s`
-    after the segment start: the longest pause, with a small bonus for a later cut. A window with no pause
-    is cut at its quietest frame, so a continuous stream is still bounded and never cut mid-loud-passage
-    if a quieter spot exists. The ranges are contiguous and cover all the audio.
+    after the segment start: the longest pause, later ones winning ties. A window with no pause is cut at
+    its quietest frame, so a continuous stream is still bounded. Every segment, the last one included, is
+    at least `min_s` long (one frame at the least). The ranges are contiguous and cover all the audio.
     """
-    max_s = MAX_DIRECT_S if max_s is None else max_s
-    min_s = min(MIN_SEGMENT_S, max_s / 2) if min_s is None else min_s
-    total = len(samples)
-    max_len = int(max_s * SAMPLE_RATE)
-    if total <= max_len:
-        return [(0, total)]
+    return _analyse(samples, max_s, min_s)[0]
 
-    level = _frame_levels(samples)
-    floor, loud = np.percentile(level, [10, 90])
-    quiet = level < min(max(floor * 3.0, 0.002), max(loud * 0.3, 0.002))
-    min_pause = max(1, round(_MIN_PAUSE_S * SAMPLE_RATE / _PAUSE_FRAME))
-    frames_per_s = SAMPLE_RATE / _PAUSE_FRAME
 
-    ranges: list[tuple[int, int]] = []
-    start = 0
-    while total - start > max_len:
-        lo = (start + int(min_s * SAMPLE_RATE)) // _PAUSE_FRAME
-        hi = min((start + max_len) // _PAUSE_FRAME, len(level))
-        cut = _best_cut(quiet, level, lo, hi, min_pause, frames_per_s)
-        end = cut * _PAUSE_FRAME if cut is not None else start + max_len
-        end = min(max(end, start + int(min_s * SAMPLE_RATE)), start + max_len)
-        ranges.append((start, end))
-        start = end
-    ranges.append((start, total))
-    return ranges
+def speech_segments(
+    samples: np.ndarray, max_s: float | None = None, min_s: float | None = None
+) -> list[tuple[int, int]]:
+    """`split_at_pauses` without the segments that hold no speech (silence, hum, room noise)."""
+    ranges, _, speech = _analyse(samples, max_s, min_s)
+    return [
+        (a, b)
+        for a, b in ranges
+        if int(np.count_nonzero(speech[a // _PAUSE_FRAME : -(-b // _PAUSE_FRAME)])) >= _MIN_SPEECH_FRAMES
+    ]
 
 
 def _best_cut(
@@ -256,29 +286,27 @@ class LocalParakeetTranscriber(BaseTranscriber):
         if cancelled.is_set():
             return "", []
         if len(samples) <= MAX_DIRECT_S * SAMPLE_RATE:
-            if not self.word_timestamps:
-                return model.recognize(samples, sample_rate=SAMPLE_RATE).strip(), []
-            result = model.with_timestamps().recognize(samples, sample_rate=SAMPLE_RATE)
-            words = words_from_tokens(result.tokens or [], result.timestamps or [])
-            return result.text.strip(), words
+            return self._decode(model, samples, 0.0)
 
         # Too long for one call: cut at pauses, then every segment is a plain call like a short dictation.
         texts: list[str] = []
         words: list[Word] = []
-        timed = model.with_timestamps() if self.word_timestamps else model
-        for start, end in split_at_pauses(samples):
+        for start, end in speech_segments(samples):
             if cancelled.is_set():
                 return "", []
-            chunk = samples[start:end]
-            if len(chunk) < _MIN_SAMPLES or float(np.max(np.abs(chunk))) < _SILENCE_PEAK:
-                continue  # nothing said: the model would only make something up
-            if self.word_timestamps:
-                result = timed.recognize(chunk, sample_rate=SAMPLE_RATE)
-                texts.append(result.text.strip())
-                words.extend(words_from_tokens(result.tokens or [], result.timestamps or [], start / SAMPLE_RATE))
-            else:
-                texts.append(model.recognize(chunk, sample_rate=SAMPLE_RATE).strip())
+            if end - start < _MIN_SAMPLES:
+                continue
+            text, segment_words = self._decode(model, samples[start:end], start / SAMPLE_RATE)
+            texts.append(text)
+            words.extend(segment_words)
         return " ".join(t for t in texts if t), words
+
+    def _decode(self, model, chunk: np.ndarray, offset_s: float) -> tuple[str, list[Word]]:
+        """One model call on audio the model takes whole; word times are shifted by `offset_s`."""
+        if not self.word_timestamps:
+            return model.recognize(chunk, sample_rate=SAMPLE_RATE).strip(), []
+        result = model.with_timestamps().recognize(chunk, sample_rate=SAMPLE_RATE)
+        return result.text.strip(), words_from_tokens(result.tokens or [], result.timestamps or [], offset_s)
 
     async def connect(self) -> None:
         self._audio_buffer = bytearray()

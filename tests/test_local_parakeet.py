@@ -26,12 +26,6 @@ class _Result:
     timestamps: list[float] | None = None
 
 
-@dataclass
-class _Segment(_Result):
-    start: float = 0.0
-    end: float = 0.0
-
-
 class _FakeAdapter:
     """What `model` and `model.with_timestamps()` look like to the engine."""
 
@@ -212,7 +206,7 @@ def test_german_words_with_umlauts_and_numbers():
 
 
 @pytest.mark.asyncio
-async def test_a_short_dictation_is_one_model_call_as_one_call(monkeypatch):
+async def test_a_short_dictation_is_one_model_call(monkeypatch):
     model = _FakeModel()
     _install(monkeypatch, model)
 
@@ -352,6 +346,37 @@ def test_a_pause_before_the_minimum_length_is_not_used():
     x = _speech_with_pauses([2.0], 30.0)  # the only pause would give a 2 s segment
     first = local_parakeet.split_at_pauses(x)[0]
     assert (first[1] - first[0]) / SR >= local_parakeet.MIN_SEGMENT_S
+
+
+def test_the_last_segment_is_never_a_stub():
+    for total_s in (20.5, 20.9, 26.0, 41.0, 40.4):
+        x = _speech_with_pauses([19.8], total_s)  # a pause right at the end of the first window
+        ranges = local_parakeet.split_at_pauses(x)
+        assert all((b - a) / SR >= local_parakeet.MIN_SEGMENT_S for a, b in ranges), (total_s, _seconds(ranges))
+        assert all((b - a) / SR <= local_parakeet.MAX_DIRECT_S + 1e-6 for a, b in ranges)
+
+
+def test_a_zero_minimum_still_makes_progress():
+    x = _speech_with_pauses([0.01], 45.0, pause_s=0.1)
+    ranges = local_parakeet.split_at_pauses(x, min_s=0)
+    assert all(b > a for a, b in ranges)
+    assert ranges[-1][1] == len(x)
+
+
+def test_a_sentence_pause_beats_a_gap_between_words_later_on():
+    x = _speech_with_pauses([7.0], 40.0, pause_s=0.6)
+    x[int(19.4 * SR) : int(19.6 * SR)] = 0.0  # a 0.2 s gap near the end of the window
+    assert abs(local_parakeet.split_at_pauses(x)[0][1] / SR - 7.0) < 0.05
+
+
+def test_hum_and_room_noise_are_not_speech():
+    rng = np.random.default_rng(4)
+    x = _speech_with_pauses([], 60.0)
+    x[int(20 * SR) : int(40 * SR)] = rng.uniform(-0.01, 0.01, 20 * SR)  # hum, peaks around 0.01
+    voiced = local_parakeet.speech_segments(x)
+    assert voiced
+    assert all(np.max(np.abs(x[a:b])) > 0.1 for a, b in voiced)
+    assert len(voiced) < len(local_parakeet.split_at_pauses(x))
 
 
 def test_a_long_clip_without_pauses_is_still_bounded():

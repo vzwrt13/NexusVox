@@ -5,7 +5,7 @@ Measured 2026-10-31 for the 1.0 goal "Parakeet on CPU, without Docker, as the de
 **Verdict: supported as the default for dictation on a modern desktop CPU (8 cores / 16 threads or
 similar), with two caveats.** Audio longer than ~20 s loses accuracy on the CPU path (German badly),
 and a 4-thread machine is usable but slow. DE and EN are the supported languages; es/fr/pt are
-experimental, dictation only (see the language notes in `docs/model-research.md`).
+experimental, dictation only (see `docs/model-research.md`).
 
 ## Setup
 
@@ -13,73 +13,96 @@ experimental, dictation only (see the language notes in `docs/model-research.md`
 |---|---|
 | CPU | AMD Ryzen 7 5800X, 8 cores / 16 threads, 47.9 GB RAM, Windows 11 |
 | CPU model on disk | `istupakov/parakeet-tdt-0.6b-v3-onnx`, int8: `encoder-model.int8.onnx` 652 MB + `decoder_joint-model.int8.onnx` 18 MB (Hugging Face cache, 640 MB on disk), plus Silero VAD 2.3 MB. Nothing was downloaded. |
-| Code path | `LocalParakeetTranscriber._recognize` (onnx-asr 0.12, onnxruntime CPUExecutionProvider), the same call the app makes |
-| GPU reference | the project's Docker container (`nexusvox-parakeet`, NeMo fp, RTX 5070 Ti), same clips, HTTP |
-| Data | first 25 clips of the FLEURS `test` split per language (de, en, es, fr, pt), 234-379 s of audio each; ~95 MB downloaded from the FLEURS tarballs (streamed, stopped after 25 clips) |
-| WER | corpus WER on the project's normaliser (lowercase, no punctuation); FLEURS references spell numbers as digits, Parakeet writes them out in German, which inflates DE WER on both paths |
+| Code path | `LocalParakeetTranscriber._recognize` (onnx-asr 0.12, onnxruntime CPUExecutionProvider), the call the app makes |
+| GPU reference | the project's Docker container (`nexusvox-parakeet`, NeMo, RTX 5070 Ti), same clips, over HTTP |
+| Data | first 25 clips of the FLEURS `test` split per language (de_de, en_us, es_419, fr_fr, pt_br), 234-379 s of audio each. `--fetch` streams the tarball and stops after 25 clips: ~95 MB transferred, not the 300-650 MB archives. |
+| WER | corpus WER on the same normaliser as `scripts/benchmark_parakeet.py` (lowercase, no punctuation). FLEURS references spell numbers as digits and Parakeet writes them out in German, which inflates DE WER on both paths. Small samples (25 clips), so differences of a point or two are noise. |
 
-Reproduce: `python scripts/parakeet_cpu_bench.py <fleurs-dir> --long-minutes 30`.
+### Reproduce
+
+Windows only for the RAM figures; the rest also runs elsewhere. The clip folders are named after the
+FLEURS codes above.
+
+```bash
+# CPU, all threads; downloads the clips on the first run (--fetch is a no-op once refs.tsv exists)
+python scripts/parakeet_cpu_bench.py fleurs --fetch 25 --long-minutes 30
+# minimum hardware: pin to the first N logical processors
+python scripts/parakeet_cpu_bench.py fleurs --threads 4 --long-minutes 5
+# the 40 s experiment below
+python scripts/parakeet_cpu_bench.py fleurs --max-direct-s 40 --long-minutes 0
+# GPU container (cd docker && docker compose --profile parakeet up), same clips
+python scripts/parakeet_cpu_bench.py fleurs --gpu-url http://localhost:8002/v1/audio/transcriptions
+```
 
 ## Results
 
 ### Latency and cold start
 
-| | CPU (16 threads) | GPU container |
+| | CPU, 16 threads | GPU container |
 |---|---|---|
-| Model load (disk cache warm) | 2.4 s | 31 s container start |
-| **First transcription** | **0.42-0.53 s** (10.6 s clip), same as the repeats | **17.0 s**, then 0.09-0.10 s |
-| 3 s dictation | 0.15 s median | ~0.09 s |
-| 8 s dictation | 0.33 s median | ~0.09 s |
-| Whole FLEURS clip (10-20 s), median | 0.4-0.5 s | 0.09-0.10 s |
+| Model load (disk cache warm) | 2.8 s (+0.07 s VAD) | ~31 s container start |
+| First transcription (17.9 s clip) | 0.86 s, then 0.67-0.81 s | 17.0 s in the first run after a container start; 0.12 s in the later run below |
+| 3 s dictation, median | 0.18 s | 0.08 s |
+| 8 s dictation, median | 0.34 s | 0.08 s |
+| Whole FLEURS clip (10-25 s), median per language | 0.47-0.61 s | 0.09-0.11 s |
 
-**The CPU path has no cold-start problem.** The 17 s first request on the GPU container does not
-exist on CPU: the load is 2.4 s, and `connect()` already preloads it in the background, so the first
-dictation is as fast as the next. (First-ever launch still downloads ~670 MB.)
+**The CPU path has no cold-start problem**: the first request costs ~0.2 s more than the next.
+`connect()` also preloads the model in the background. The GPU container's slow first request was
+real in the first run after a start (17 s) but did not reproduce in the second one, so it is
+intermittent. (First-ever launch on CPU still downloads ~670 MB.)
 
 ### Real-time factor and RAM (16 threads)
 
-| | RTF | |
+| | CPU | GPU |
 |---|---|---|
-| Files, per language | 0.042-0.046 | GPU: 0.007-0.010 |
-| 30 min meeting (VAD path) | **0.051** (92 s for 30.1 min) | |
-| RAM after model load | 856 MB | |
-| RAM peak, 30 min file | 2.2 GB | grows with the length of the audio buffer |
+| RTF, files (per language) | 0.044-0.053 | 0.007-0.010 |
+| RTF, 30 min meeting (VAD path) | **0.055** (100 s) | not measured |
+| RAM, model loaded, no audio | **777 MB** | |
+| RAM peak, 30 min file | 2.25 GB, of which ~0.2 GB is the benchmark's own buffers (93 MB of clips, 110 MB long audio) | |
 
-### Accuracy (same 25 clips per language)
+The model itself needs ~0.8 GB; transcribing a 30-minute file grows that to ~2 GB, so long files
+need real headroom.
 
-| Language | CPU WER | GPU WER |
-|---|---|---|
-| en | 6.9 % | 5.8 % |
-| **de** | **14.6 %** | 5.1 % |
-| es | 3.0 % | 2.4 % |
-| fr | 8.9 % | 5.7 % |
-| pt | 4.9 % | 4.7 % |
+### Accuracy (same 25 clips per language, all lengths)
 
-(For scale, the full-test-set GPU runs from April: de 5.2 %, en 5.8 %.)
+| Language | CPU WER | GPU WER | CPU, clips ≤ 20 s | GPU, clips ≤ 20 s |
+|---|---|---|---|---|
+| de | **14.6 %** | 5.1 % | 6.8 % (21 clips) | 4.9 % |
+| en | 6.9 % | 5.8 % | 6.9 % (25) | 5.8 % |
+| es | 3.0 % | 2.4 % | 2.6 % (24) | 2.4 % |
+| fr | 8.9 % | 5.7 % | 8.3 % (23) | 6.8 % |
+| pt | 4.9 % | 4.7 % | 4.3 % (22) | 3.9 % |
 
-The German gap is almost entirely one cause: **clips longer than `MAX_DIRECT_S` (20 s) go through
-the Silero-VAD segmentation path.** Split by length, CPU German WER is 6.8 % for clips under 20 s
-(21 clips) and 38.6 % for the four clips over 20 s. The long ones drift mid-sentence into English
-or even Cyrillic ("your thermish verhalten is not so gleich mäßig"). French shows the same pattern
-more mildly (8.3 % vs 11.5 %); English was unaffected (no clips over 20 s). Raising the direct limit
-to 40 s as an experiment cut the WER on those long clips from 26 % to 17 %, but the 43-46 s clips
-still drift, so the real fix is better segmentation (or per-segment language pinning), not just a
-bigger limit. This hits long dictations and file uploads, not typical push-to-talk use.
+On clips up to 20 s the CPU path is **0.2-1.9 points of WER behind the GPU** (German is the largest
+gap, English 1.1). It is close, not identical; int8 quantisation is the likely reason, which was
+not tested (no fp32 CPU model on disk).
+
+The large German gap comes from **clips longer than `MAX_DIRECT_S` (20 s), which go through
+Silero-VAD segmentation**: CPU German WER on the four clips over 20 s is 38.6 % (GPU 5.7 %). The
+output drifts mid-sentence into English or even Cyrillic ("your thermish verhalten is not so
+gleich mäßig"). French (11.5 %, two clips), Portuguese (7.3 %, three) and Spanish (7.8 %, one) are
+hit less; English has no clip over 20 s. This affects long dictations and file uploads, not
+typical push-to-talk use.
+
+Raising the direct-decode limit to 40 s (`--max-direct-s 40`) is **not a fix**: WER on the
+over-20 s clips goes de 38.6 → 30.0 %, es 7.8 → 3.9 %, fr 11.5 → 2.5 %, but pt 7.3 → 11.3 %, and the
+two German clips over 40 s still drift. The cause needs a proper look (segment boundaries, language
+carry-over between segments) in its own ticket.
 
 ### Minimum hardware
 
-The same run pinned to fewer logical processors (affinity mask; the timings below are for the Ryzen 5800X cores, a slower CPU scales
-proportionally):
+Pinned with `--threads N` (first N logical processors of the Ryzen 5800X; a slower CPU will be
+proportionally slower). WER is identical at every thread count.
 
-| Threads | 3 s dictation | 8 s dictation | File RTF | 5 min meeting |
+| Threads | 3 s dictation | 8 s dictation | RTF, files | RTF, 5 min meeting |
 |---|---|---|---|---|
-| 16 | 0.15 s | 0.33 s | 0.045 | RTF 0.05 |
-| 8 | 0.27 s | 0.52 s | 0.065 | RTF 0.064 (20 s) |
-| 4 (2 cores + SMT) | 1.06 s | 2.46 s | 0.32 | RTF 0.29 (90 s) |
+| 16 | 0.18 s | 0.34 s | 0.044-0.053 | 0.055 (30 min) |
+| 8 | 0.26 s | 0.51 s | 0.061-0.068 | 0.067 |
+| 4 (2 cores + SMT) | 1.03 s | 2.50 s | 0.32-0.35 | 0.296 |
 
-WER is identical at every thread count. 8 threads is comfortable; 4 threads works but an 8 s
-dictation waits 2.5 s, so treat 4 threads as the floor and 8 as the recommendation. RAM: plan for
-4 GB free (0.9 GB model, ~2 GB with a long file).
+8 threads is comfortable. 4 threads works, but an 8 s dictation waits 2.5 s and a file runs at
+about a third of real time, so treat 4 as the floor. RAM: plan for 4 GB free (0.8 GB model, ~2 GB
+with a 30-minute file).
 
 ## Can Parakeet run on CPU without Docker today?
 
@@ -90,7 +113,7 @@ already resolves to this path. What is missing for "default for everyone":
 
 1. **On a machine with an NVIDIA GPU, `auto` still picks the Docker container.** Making the CPU
    path the default there means changing the `auto` resolution (or the first-run default) in
-   `resolve_device` / the config template.
+   `resolve_device` and the config template.
 2. **The >20 s accuracy problem above**, mainly for German.
 3. **No speaker detection** on CPU (known, `SPEAKERS_NEED_GPU`).
 4. **First launch downloads ~670 MB** from Hugging Face; the dashboard shows the state, but a
@@ -98,8 +121,9 @@ already resolves to this path. What is missing for "default for everyone":
 
 ## Recommendation
 
-- **Supported as the default for dictation**: DE/EN WER matches the GPU path on clips under 20 s,
-  latency is 0.15-0.5 s, there is no cold start, and it needs no GPU or Docker.
+- **Supported as the default for dictation**: clips up to 20 s are within ~1-2 WER points of the
+  GPU path (German +1.9, English +1.1), latency is 0.2-0.6 s, there is no cold start, and it needs
+  no GPU or Docker.
 - **Minimum hardware:** 4 logical processors and 4 GB RAM (slow); recommended 8 threads / 8 GB.
 - **Before it is the default for meetings and uploads,** fix the segmentation accuracy above 20 s.
-  Until then GPU users with long recordings keep the GPU path.
+  Until then, users with a GPU and long recordings keep the GPU path.

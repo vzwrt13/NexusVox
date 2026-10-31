@@ -65,7 +65,12 @@ The cleanup code already rejects implausible replies, which limits the damage of
 over-eager small model. A blind test on German and English dictations (stage 2) is the only
 real answer.
 
-## Recommended defaults per tier (to be confirmed in stage 2)
+## Recommended defaults per tier (stage 2 changed these)
+
+**Superseded by the measurements in `docs/llm-cpu-test.md`**, which has the current table. Short form:
+no GPU and 4-8 GB VRAM use `gemma4:e2b` (on the CPU when the speech container leaves no room), 12+ GB uses
+`gemma4:e4b`. Qwen3 is superseded by Qwen3.5, and `qwen3.5:4b` is not recommended (it translates English text).
+The stage 1 table below is kept as the original estimate.
 
 | Tier | Hardware | Default | Alternative | Features |
 |---|---|---|---|---|

@@ -3,11 +3,16 @@
 Measured 2026-10-31 for the 1.0 goal "default `[llm]` model per hardware tier" (follow-up of
 `docs/llm-low-gpu-research.md`). Three models through Ollama, each on the CPU only and on the GPU.
 
-**Verdict.** `gemma4:e2b` is the default for machines without a usable GPU and for small GPUs that share
-VRAM with the speech model. `gemma4:e4b` stays the default from about 8 GB of VRAM that the speech model
-leaves free. `qwen3.5:4b` is not recommended: it is slower on the CPU and it translates English text into
-German. Auto Cleanup on the CPU works but costs 2 s (short dictation) to 6 s (about 100 words) with
-`gemma4:e2b`, so it stays off by default (as already decided) and gets a latency hint.
+**Verdict.** `gemma4:e2b` is the default for machines without a usable GPU and for GPUs that cannot hold
+both the speech model and a larger language model. `gemma4:e4b` stays the default where the speech model
+and it fit together in VRAM, which is 12 GB and up with the Parakeet container (6.1 + 4.7 = 10.8 GB).
+`qwen3.5:4b` is not recommended: it is slower on the CPU and it translates English text into German.
+Auto Cleanup on the CPU gives a usable answer in 2 s (short dictation) to 6 s (about 100 words) with
+`gemma4:e2b`, so it should stay off by default (as already decided) and show a latency hint.
+**The app does not allow this today**: `cleanup.cleanup()` returns the text unchanged without a CUDA GPU
+and the dashboard refuses to set a level (`NO_CUDA_HINT`, `dashboard/api.py`). Enabling Cleanup on CPU
+needs a code change (relax the `needs_cuda` gate, show the hint); the numbers here were taken by calling
+Ollama directly, not through the app.
 
 ## Setup
 
@@ -28,11 +33,13 @@ German. Auto Cleanup on the CPU works but costs 2 s (short dictation) to 6 s (ab
 
 ```bash
 ollama pull gemma4:e2b
+pip install psutil          # only for the RAM figures
 python scripts/llm_bench.py --model gemma4:e2b --mode gpu --meeting meeting_de.txt --out results/e2b-gpu.json
 python scripts/llm_bench.py --model gemma4:e2b --mode cpu --meeting meeting_de.txt --skip-quality --reps 2 --out results/e2b-cpu.json
 ```
 
-`--meeting` takes any transcript text file. The script talks to `127.0.0.1`: with `localhost` every
+`--meeting` takes any transcript text file; if the file does not exist, the script has `--meeting-model`
+(default `gemma4:12b`) write one first. `--mode cpu` needs no NVIDIA GPU (VRAM is then left out). The script talks to `127.0.0.1`: with `localhost` every
 request on this Windows machine waited an extra 2 s (IPv6 tried first), which would have hidden the real numbers.
 
 ## Results
@@ -48,8 +55,12 @@ time of the file.
 | `gemma4:e4b` | 9.1 s | 7.2 s | 4.7 / 5.1 GB | 7.2 GB | 3.6 GB |
 | `qwen3.5:4b` | 4.6 s | 3.6 s | 3.9 / 4.4 GB | 3.7 GB | 1.1 GB |
 
-VRAM is the change in `nvidia-smi` memory used; RAM is the change in system memory used after the model
-loaded and answered one request. The E-models keep a large embedding table in RAM even on the GPU. Add
+VRAM is the change in `nvidia-smi` memory used (all GPUs); RAM is the change in system-wide memory used
+(`psutil.virtual_memory().used`, all processes) from before the load to after the model answered a
+cleanup request. It includes memory-mapped model pages that are resident, so it is what the machine loses,
+not what one process reports. The first measurement run read the Ollama processes' working set instead,
+which showed almost nothing for a memory-mapped model, so these figures come from a second pass with the
+system-wide method that `scripts/llm_bench.py` now uses. The E-models keep a large embedding table in RAM even on the GPU. Add
 about 0.4 GB for the 16k summary context.
 
 ### Auto Cleanup and Polish latency (median, model loaded)
@@ -92,14 +103,18 @@ was scored, so treat this as "no obvious failure", not a ranking.
 
 The 16 samples of `scripts/cleanup_eval.py` (German, English and mixed dictations, questions and orders
 that must not be answered, digits, a snippet placeholder), at both levels, with the app's plausibility
-guard. "Problems" counts a lost word, a filler that stayed, or a reply the guard rejects (the app then types
-the dictation unchanged, so a rejection is a safe miss, not a wrong text).
+guard. "Problems" counts a lost word or a filler that stayed (the checks of `cleanup_eval._check`). A reply the
+guard rejects is listed apart: the app then types the dictation unchanged, so it is a safe miss, not a
+wrong text.
 
-| | `light` | `medium` | Notes |
+| | `light` problems / rejected | `medium` problems / rejected | Notes |
 |---|---|---|---|
-| `gemma4:e4b` (default) | 0 / 16 | 1 / 16 | The one miss merged two lines into one sentence (guard rejected it) |
-| `gemma4:e2b` | 2 / 16 | 2 / 16 | Misses: the two-line sample and the sample with the snippet placeholder (the model dropped it; guard rejected both). No answered questions, no translation |
-| `qwen3.5:4b` | 0 / 16 | 4 / 16 | At `medium` it **translated an English dictation into German**, wrote "Treffen" for "Meeting" and "drei" for "3", and left a "hm" in |
+| `gemma4:e4b` (default) | 0 / 0 | 0 / 1 | The one rejection merged two lines into one sentence |
+| `gemma4:e2b` | 0 / 2 | 0 / 2 | Rejected: the two-line sample (lines merged or split) and the sample with the snippet placeholder (the model dropped it). No answered questions, no translation |
+| `qwen3.5:4b` | 0 / 0 | 3 / 1 | At `medium` it wrote "Treffen" for "Meeting", "drei" for "3" and left a "hm" in; it also **translated an English dictation into German**, which the guard caught |
+
+Out of 16 samples per level, `gemma4:e2b` falls back to the unchanged text twice where the default does not,
+so Cleanup does less often on awkward input (multi-line dictations, snippets); it did not damage text.
 
 Polish, four samples (two German, two English, with an instruction such as "Make it more formal" or
 "Fasse das kürzer"): all three models handled the German selections and the instructions in both
@@ -107,15 +122,21 @@ languages. The English selection "We shipped the update yesterday ..." with the 
 this text" came back in German from `qwen3.5:4b` in 3 of 3 repeats, with the app's default instruction as
 well, and from `gemma4:e4b` in 3 of 3 repeats with the short instruction (with the default instruction it
 stayed English). `gemma4:e2b` kept English every time. So `gemma4:e2b` is not worse than the current
-default here, and `qwen3.5:4b` is clearly worse. Four selections are a small sample.
+default here, and `qwen3.5:4b` is clearly worse. Four selections are a small sample. The repeats and the
+two-instruction comparison came from an ad-hoc run with the same prompts; `llm_bench.py` now records them
+as `polish_language` (3 replies per instruction, German detected by common words), but that part of the script
+has not been re-run since it was added, so the numbers above are not yet reproduced by it.
 
 ## Recommendation per hardware tier
 
+VRAM arithmetic uses the measured figures: the Parakeet container holds 6.1 GB, `gemma4:e2b` 3.1 GB and
+`gemma4:e4b` 4.7 GB (at 4k context; about 0.4 GB more for the summary).
+
 | Tier | Default | Why | Features |
 |---|---|---|---|
-| **No GPU** (8+ cores, 16 GB RAM) | `gemma4:e2b` | About 2x the CPU speed of `gemma4:e4b` for cleanup, 5 GB RAM instead of 7, keeps the language | Polish on. Cleanup selectable, off by default, with a hint of "about 2 s for a sentence, 6 s for a paragraph on this class of CPU". Summaries as a background job (1.5 min per 35 min of speech) |
-| **4-8 GB VRAM** (shared with the speech model) | `gemma4:e2b` | 3.1 GB VRAM next to the 6 GB of the Parakeet container; 0.5 s per cleanup, the same as `gemma4:e4b` | All features. `gemma4:e4b` (4.7 GB) is the upgrade when the speech model runs on the CPU or 8 GB stay free after it |
-| **12+ GB VRAM** | `gemma4:e4b` | Best cleanup score of the three, ~5 GB VRAM, 0.5-1.1 s | All features. `gemma4:12b` (7.6 GB, exists in the Ollama library) is an optional step up; it was not measured here |
+| **No GPU** (8+ cores, 16 GB RAM) | `gemma4:e2b` on the CPU | About 2x the CPU speed of `gemma4:e4b` for cleanup, 5 GB RAM instead of 7, keeps the language | Polish on. Cleanup selectable, off by default, with a hint of "about 2 s for a sentence, 6 s for a paragraph on this class of CPU" (needs the gate change above). Summaries as a background job (1.5 min per 35 min of speech) |
+| **4-8 GB VRAM** | `gemma4:e2b`, placed by what the card holds | Container + `gemma4:e2b` is 9.2 GB, which does not fit. On a 6-8 GB card run **either** the speech model on the CPU (Parakeet CPU, 0.8 GB RAM) and `gemma4:e2b` on the GPU (3.1 GB, 0.5 s per cleanup), **or** keep the container and run `gemma4:e2b` on the CPU (this table's CPU column). `gemma4:e4b` (4.7 GB) fits on an 8 GB card only with the speech model on the CPU | All features, at GPU speed only in the first layout. The GPU latencies in this document were taken with 10 GB free, so they do not apply to a 6-8 GB card sharing VRAM with the container |
+| **12+ GB VRAM** | `gemma4:e4b` | Container + `gemma4:e4b` is 10.8 GB, best cleanup result of the three, 0.5-1.1 s | All features. `gemma4:12b` (7.6 GB installed) is an optional step up; with the container it needs about 13.7 GB, so a 16 GB card. It was not measured here |
 
 Slower CPUs than the 5800X (4 threads, laptops) will land well above these figures; the Parakeet CPU test
 saw about 2x slower speech on 4 threads, and a language model is memory-bandwidth bound in the same way.
@@ -128,6 +149,6 @@ Not measured: Vulkan (`OLLAMA_VULKAN=1`), an Intel/AMD iGPU, a machine with 8 GB
 - **Qwen3 4B is superseded.** Ollama's library now lists `qwen3.5` (0.8b, 2b, 4b, 9b, 27b, 35b, 122b; the
   4b tag is 3.3 GB) and its `qwen3` page names no newer generation. `qwen3:4b` was not downloaded; the
   installed `qwen3.5:4b` stands in for the "Qwen3 4B" candidate.
-- **`gemma4:12b` exists** (7.7-8.0 GB, 256K context, in the Ollama library and installed here). The research
+- **`gemma4:12b` exists** (7.6 GB installed, 7.7-8.0 GB on the library page, 256K context, in the Ollama library and installed here). The research
   note that the family has no 12B was wrong; it is corrected there. `config.example.toml` keeps the mention.
 - Gemma 4 on Ollama is E2B, E4B, 12B, 26B and 31B, with no newer Gemma generation listed.

@@ -2,10 +2,16 @@
 latency for a short and a long dictation, a meeting summary, memory use, and reply quality.
 
     python scripts/llm_bench.py --model gemma4:e2b --mode gpu --out results/gemma4-e2b-gpu.json
-    python scripts/llm_bench.py --model gemma4:e2b --mode cpu --meeting meeting_de.txt --skip-quality
+    python scripts/llm_bench.py --model gemma4:e2b --mode cpu --meeting meeting_de.txt --skip-quality \
+        --out results/gemma4-e2b-cpu.json
+
+`--meeting` names a transcript file; if it does not exist it is generated first (`--meeting-model`, default
+`gemma4:12b`, must be pulled): about 5,300 words of German team talk, which is a synthetic stand-in for a
+35-minute meeting. RAM figures need `pip install psutil`; VRAM needs `nvidia-smi` (GPU mode only).
 
 `--mode cpu` sends `num_gpu = 0`, so Ollama keeps every layer on the CPU. The prompts are the app's own
-(`cleanup.PROMPTS`, `polish.SYSTEM_PROMPT`) and the reply checks are the ones `cleanup_eval.py` uses. The
+(`cleanup.PROMPTS`, `polish.SYSTEM_PROMPT`) and the cleanup checks are `cleanup_eval._check`: a reply the
+plausibility guard rejects is counted as "rejected" (the app types the dictation unchanged), not as a problem. The
 meeting summary prompt is the benchmark's own: NexusVox has no summary feature yet. Needs a running Ollama;
 the model must already be pulled. Nothing is typed or saved.
 """
@@ -14,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 import subprocess
 import sys
@@ -21,14 +28,19 @@ import time
 import urllib.request
 from pathlib import Path
 
-import psutil
+try:
+    import psutil
+except ImportError:  # RAM and thread count are then left out of the results
+    psutil = None
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from cleanup_eval import SAMPLES  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 
-from nexusvox.cleanup import _TAG_RE, PROMPTS, plausible  # noqa: E402
+from cleanup_eval import SAMPLES, _check  # noqa: E402
+
+from nexusvox.cleanup import _TAG_RE, IMPLAUSIBLE, PROMPTS, plausible  # noqa: E402
 from nexusvox.llm import clean_reply  # noqa: E402
 from nexusvox.polish import SYSTEM_PROMPT as POLISH_PROMPT  # noqa: E402
 from nexusvox.polish import build_user_message  # noqa: E402
@@ -90,19 +102,24 @@ def unload(model: str) -> None:
     time.sleep(3)
 
 
-def vram_used_mib() -> int:
-    out = subprocess.run(
-        ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"], capture_output=True, text=True
-    )
-    return int(out.stdout.split()[0])
+def vram_used_mib() -> int | None:
+    """Memory used on all NVIDIA GPUs together, or None without nvidia-smi or a GPU."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"], capture_output=True, text=True
+        ).stdout.split()
+        return sum(int(v) for v in out) if out else None
+    except (OSError, ValueError):
+        return None
 
 
-def ollama_rss_mib() -> int:
-    total = 0
-    for proc in psutil.process_iter(["name", "memory_info"]):
-        if (proc.info["name"] or "").lower().startswith("ollama") and proc.info["memory_info"]:
-            total += proc.info["memory_info"].rss
-    return total // (1024 * 1024)
+def ram_used_mib() -> int | None:
+    """System memory in use (all processes), or None without psutil."""
+    return psutil.virtual_memory().used // (1024 * 1024) if psutil else None
+
+
+def delta(now: int | None, before: int | None) -> int | None:
+    return None if now is None or before is None else now - before
 
 
 def ollama_ps(model: str) -> str:
@@ -131,6 +148,28 @@ def timed(model: str, system: str, user: str, cpu: bool, reps: int) -> dict:
     }
 
 
+GERMAN_WORDS = {"wir", "und", "der", "die", "das", "ist", "es", "haben", "gestern", "einige", "aber", "bereits"}
+EN_SELECTION = "We shipped the update yesterday and there were some bugs but we fixed most of them already"
+
+
+def looks_german(text: str) -> bool:
+    return len(GERMAN_WORDS & set(re.findall(r"\w+", text.lower()))) >= 3
+
+
+def language_check(model: str, cpu: bool, reps: int = 3) -> dict:
+    """Does an English selection come back in English? Per instruction, how many of `reps` replies are German."""
+    result = {}
+    for label, instruction in (("short", "Improve this text"), ("default", "")):
+        replies = [
+            clean_reply(
+                chat(model, POLISH_PROMPT, build_user_message(EN_SELECTION, instruction), cpu=cpu)["message"]["content"]
+            )
+            for _ in range(reps)
+        ]
+        result[label] = {"german": sum(looks_german(r) for r in replies), "of": reps, "replies": replies}
+    return result
+
+
 def quality(model: str, cpu: bool) -> dict:
     result: dict = {"cleanup": {}, "polish": []}
     for level in sorted(PROMPTS):
@@ -138,15 +177,28 @@ def quality(model: str, cpu: bool) -> dict:
         for dictation, keep, drop in SAMPLES:
             reply = chat(model, PROMPTS[level], f"<dictation>{dictation}</dictation>", cpu=cpu)
             text = _TAG_RE.sub("", clean_reply(reply["message"]["content"])).strip()
-            problems = []
-            if not plausible(dictation, text, level):
-                problems.append("rejected by the plausibility guard")  # the app would type the dictation unchanged
-            else:
-                problems += [f"lost {w!r}" for w in keep if w.lower() not in text.lower()]
-                words = text.replace(",", " ").replace(".", " ").split()
-                problems += [f"kept {w!r}" for w in drop if w in words]
-            rows.append({"in": dictation, "out": text, "problems": problems, "s": round(reply["wall_s"], 2)})
-        result["cleanup"][level] = {"failed": sum(bool(r["problems"]) for r in rows), "total": len(rows), "rows": rows}
+            rejected = not plausible(dictation, text, level)  # the app then types the dictation unchanged
+            outcome = SimpleNamespace(
+                text=dictation if rejected else text,
+                cleaned=not rejected and text != dictation,
+                error=IMPLAUSIBLE if rejected else None,
+            )
+            problems = _check(dictation, outcome, keep, drop)
+            rows.append(
+                {
+                    "in": dictation,
+                    "out": text,
+                    "rejected": rejected,
+                    "problems": problems,
+                    "s": round(reply["wall_s"], 2),
+                }
+            )
+        result["cleanup"][level] = {
+            "failed": sum(bool(r["problems"]) for r in rows),
+            "rejected": sum(r["rejected"] for r in rows),
+            "total": len(rows),
+            "rows": rows,
+        }
     for selection, instruction in POLISH_SAMPLES:
         reply = chat(model, POLISH_PROMPT, build_user_message(selection, instruction), cpu=cpu)
         result["polish"].append(
@@ -157,14 +209,38 @@ def quality(model: str, cpu: bool) -> dict:
                 "s": round(reply["wall_s"], 2),
             }
         )
+    result["polish_language"] = language_check(model, cpu)
     return result
+
+
+def make_meeting(path: Path, model: str) -> None:
+    """Write a synthetic German team-meeting transcript of about 5,300 words (six topic blocks)."""
+    topics = [
+        "Quartalsplanung und Prioritäten",
+        "Fehlerbehebung beim Rechnungsexport",
+        "Neukunden-Onboarding und Support-Tickets",
+        "Budget und Hardware-Beschaffung",
+        "Release-Termin und Testplan",
+        "Datenschutz, Aufbewahrungsfristen und offene Fragen",
+    ]
+    blocks = []
+    for topic in topics:
+        prompt = (
+            f"Schreibe das ungeschnittene Rohtranskript eines Teils einer deutschen Teambesprechung (Thema: {topic}). "
+            "Vier Personen (Anna, Ben, Carla, David) reden durcheinander wie in echt: Füllwörter (äh, also, ähm), "
+            "Satzabbrüche, Rückfragen, konkrete Zahlen, Daten, Namen und Entscheidungen, einige englische IT-Begriffe. "
+            "Format pro Zeile 'Name: Satz'. Genau etwa 750 Wörter. Kein Kommentar, keine Überschrift, kein Markdown."
+        )
+        blocks.append(chat(model, "", prompt, cpu=False, keep_alive="0")["message"]["content"].strip())
+    path.write_text("\n".join(blocks), encoding="utf-8")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", required=True)
     parser.add_argument("--mode", choices=("gpu", "cpu"), required=True)
-    parser.add_argument("--meeting", type=Path, help="transcript text file for the summary run")
+    parser.add_argument("--meeting", type=Path, help="transcript text file for the summary run (generated if missing)")
+    parser.add_argument("--meeting-model", default="gemma4:12b", help="model that writes a missing --meeting file")
     parser.add_argument("--summary-ctx", type=int, default=16384)
     parser.add_argument("--reps", type=int, default=3)
     parser.add_argument("--skip-quality", action="store_true")
@@ -173,16 +249,17 @@ def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     cpu = args.mode == "cpu"
     model = args.model
-    res: dict = {"model": model, "mode": args.mode, "cpu_threads": psutil.cpu_count(logical=True)}
+    res: dict = {"model": model, "mode": args.mode, "cpu_threads": psutil.cpu_count(logical=True) if psutil else None}
 
     unload(model)
-    base_vram, base_rss = vram_used_mib(), ollama_rss_mib()
+    base_vram, base_ram = (None if cpu else vram_used_mib()), ram_used_mib()
     reply = chat(model, "Reply with OK.", "OK", cpu=cpu)
     res["load"] = {"wall_s": round(reply["wall_s"], 2), "load_s": round(reply.get("load_duration", 0) / 1e9, 2)}
-    time.sleep(1)
+    chat(model, PROMPTS["medium"], f"<dictation>{SHORT}</dictation>", cpu=cpu)
+    time.sleep(2)
     res["memory_loaded"] = {
-        "vram_mib": vram_used_mib() - base_vram,
-        "ollama_rss_mib": ollama_rss_mib() - base_rss,
+        "vram_mib": delta(None if cpu else vram_used_mib(), base_vram),
+        "ram_mib": delta(ram_used_mib(), base_ram),
         "ollama_ps": ollama_ps(model),
     }
     print("load", res["load"], res["memory_loaded"], flush=True)
@@ -202,6 +279,8 @@ def main() -> int:
         print(name, {k: v for k, v in res["latency"][name].items() if k != "reply"}, flush=True)
 
     if args.meeting:
+        if not args.meeting.exists():
+            make_meeting(args.meeting, args.meeting_model)
         transcript = args.meeting.read_text(encoding="utf-8")
         run = chat(model, SUMMARY_SYSTEM, transcript, cpu=cpu, num_ctx=args.summary_ctx)
         res["summary"] = {
@@ -213,8 +292,8 @@ def main() -> int:
             "reply_tokens": run.get("eval_count"),
             "gen_s": round(run.get("eval_duration", 0) / 1e9, 1),
             "num_ctx": args.summary_ctx,
-            "vram_mib": vram_used_mib() - base_vram,
-            "ollama_rss_mib": ollama_rss_mib() - base_rss,
+            "vram_mib": delta(None if cpu else vram_used_mib(), base_vram),
+            "ram_mib": delta(ram_used_mib(), base_ram),
             "ollama_ps": ollama_ps(model),
             "reply": run["message"]["content"].strip(),
         }
@@ -223,7 +302,12 @@ def main() -> int:
     if not args.skip_quality:
         res["quality"] = quality(model, cpu)
         for level, q in res["quality"]["cleanup"].items():
-            print("quality", level, f"{q['failed']}/{q['total']} with problems", flush=True)
+            print(
+                "quality",
+                level,
+                f"{q['failed']}/{q['total']} with problems, {q['rejected']} rejected by the guard",
+                flush=True,
+            )
 
     unload(model)
     args.out.parent.mkdir(parents=True, exist_ok=True)

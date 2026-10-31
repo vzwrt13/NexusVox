@@ -41,7 +41,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 SR = 16_000
-DIRECT_LIMIT_S = 20.0  # local_parakeet.MAX_DIRECT_S; clips above it take the VAD path
+DIRECT_LIMIT_S = 20.0  # local_parakeet.MAX_DIRECT_S; clips above it are cut at pauses
 FLEURS_URL = "https://huggingface.co/datasets/google/fleurs/resolve/main/data/%s/"
 DEFAULT_LANGS = ["de_de", "en_us", "es_419", "fr_fr", "pt_br"]
 IS_WINDOWS = sys.platform == "win32"
@@ -216,14 +216,11 @@ class CpuBackend:
         self.tr = local_parakeet.LocalParakeetTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"))
         self.never = threading.Event()
 
-    def load(self) -> tuple[float, float]:
-        """(model seconds, VAD seconds); the VAD is loaded up front so no clip's timing includes it."""
+    def load(self) -> float:
+        """Model load seconds; loaded up front so no clip's timing includes it."""
         t = time.perf_counter()
         self.tr._get_model(self.tr._onnx_model, self.tr._quantization)
-        model_s = time.perf_counter() - t
-        t = time.perf_counter()
-        self.tr._get_vad()
-        return model_s, time.perf_counter() - t
+        return time.perf_counter() - t
 
     def recognize(self, x: np.ndarray) -> str:
         return self.tr._recognize(x, self.never)[0]
@@ -274,7 +271,7 @@ def main() -> None:
 
     # Model first, clips after: the "model" RAM figure then holds no benchmark data.
     if not gpu:
-        out["model_load_s"], out["vad_load_s"] = (round(v, 2) for v in backend.load())
+        out["model_load_s"] = round(backend.load(), 2)
         out["ram_model_mb"] = round(mem_mb()[0])
 
     data: dict[str, list[tuple[np.ndarray, str]]] = {}

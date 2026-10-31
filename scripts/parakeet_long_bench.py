@@ -14,7 +14,7 @@ scored twice against the reference:
 Short clips (up to 20 s) are scored too, to show that dictation does not get worse.
 
 Needs the FLEURS clip folders (<lang>/*.wav plus refs.tsv, "<file>\t<reference>" per line, named after the
-FLEURS codes), as written by `scripts/parakeet_cpu_bench.py --fetch` once that is merged.
+FLEURS codes), as written by `scripts/parakeet_cpu_bench.py --fetch`.
 Heavy CPU load: run it while nobody works on the machine.
 
     python scripts/parakeet_long_bench.py fleurs --target-s 45 --items 8

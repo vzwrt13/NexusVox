@@ -17,6 +17,7 @@ from ..config import Config
 from ..db import Database
 from ..extensions import load_extensions
 from .api import DashboardAPI
+from .guard import LAUNCH_PARAM, DashboardGuard, install_guard
 
 if TYPE_CHECKING:
     from ..app import NexusVoxApp
@@ -27,6 +28,7 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _PORT = 47392  # Uncommon port to avoid collisions.
 _server_started = False
 _api: DashboardAPI | None = None
+_guard: DashboardGuard | None = None
 _lock = threading.Lock()
 
 
@@ -38,6 +40,7 @@ def _attachment(filename: str) -> str:
 
 def _create_app(api: DashboardAPI) -> Flask:
     app = Flask(__name__, static_folder=str(_STATIC_DIR), static_url_path="")
+    install_guard(app, _PORT)  # before any route, so the extension blueprints below are covered too
 
     # Suppress Flask request logging in production.
     wlog = logging.getLogger("werkzeug")
@@ -597,7 +600,7 @@ def _create_app(api: DashboardAPI) -> Flask:
 
 def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None = None) -> DashboardAPI:
     """Start the Flask server (once) without opening the browser, and return its API object."""
-    global _server_started, _api
+    global _server_started, _api, _guard
 
     with _lock:
         if not _server_started:
@@ -636,6 +639,7 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 extensions=load_extensions(),
             )
             flask_app = _create_app(_api)
+            _guard = flask_app.extensions["nexusvox_guard"]
             threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
 
             thread = threading.Thread(
@@ -659,4 +663,6 @@ def running_dashboard_api() -> DashboardAPI | None:
 def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None, tab: str = "") -> None:
     """Start the Flask server (once) and open the dashboard in the browser, on `tab` when given."""
     ensure_dashboard_api(db, config, app)
-    webbrowser.open(f"http://127.0.0.1:{_PORT}" + (f"/#{tab}" if tab else ""))
+    assert _guard is not None
+    query = f"?{LAUNCH_PARAM}={_guard.new_launch_secret()}" + (f"&tab={quote(tab)}" if tab else "")
+    webbrowser.open(f"http://127.0.0.1:{_PORT}/{query}")

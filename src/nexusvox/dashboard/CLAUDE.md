@@ -4,6 +4,7 @@
 
 Flask server starts once on first tray click (left-click on the icon or the Dashboard menu item), runs in a daemon thread on `127.0.0.1:47392`. Static files in `src/nexusvox/dashboard/static/` (HTML, CSS, JS, bundled Chart.js — no CDN). API endpoints under `/api/*` return JSON, consumed by vanilla JS `fetch()` calls.
 
+- `guard.py` — access control, one `before_request` hook installed first in `_create_app`, so every route (extension blueprints included) is covered: the Host header must be `127.0.0.1`/`localhost` with the dashboard port (DNS rebinding), an `Origin` header must be one of those origins, and every request needs the `HttpOnly`, `SameSite=Strict` session cookie (random per run) or gets 403. The cookie comes from `GET /?launch=<secret>`: `open_dashboard` builds that URL with a single-use secret held in memory, so a program that only requests `/` gets nothing. After a restart an old tab is refused until it is reopened from the tray. Tests: `test_dashboard_guard.py`; `tests/conftest.py` makes every `app.test_client()` signed in.
 - `analytics.py` — all SQLAlchemy query functions
 - `api.py` — Flask route wrappers around analytics queries
 - `benchmarks.py` — benchmark JSON file I/O and cross-model comparison (Dev tab)

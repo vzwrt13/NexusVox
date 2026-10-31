@@ -44,7 +44,7 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 - **Translate to English** — dictate in German, English or a mix and have the English version typed, while the recording and transcript are stored as spoken; a tray or dashboard toggle (off by default, `[translator]` in `config.toml`). NexusVox does not translate itself: it needs a separate local translator server that is not part of this project — see [docs/TRANSLATOR.md](docs/TRANSLATOR.md). If the server does not answer, the original text is typed
 - **Mute other apps' microphone while you dictate** — while the push-to-talk keys are held, every other app's WASAPI microphone session is muted so your dictation is not broadcast to a call; on release each app is put back exactly as it was, and an app you muted yourself stays muted. Per-app mute, never the microphone device; a crash mid-hold is repaired on the next start. Verified with browser calls (Chrome/WebRTC goes silent within 300 ms). Off by default; toggle in Settings → Voice Input or `[mic_guard]` in `config.toml`. **Discord's desktop app ignores per-session mute** (its voice engine reads the raw input): for Discord, bind its *Push to Mute* keybind to the same keys as the NexusVox hotkey — that is the reliable way and needs nothing from NexusVox
 - **Meeting recording** — record a call without a bot in it: your microphone and the system audio are captured on your PC and turned into one transcript with numbered speakers (*Speaker 1* is you, the other participants follow). Start and stop it from the dashboard's Meetings tab or with its own hotkey (`Ctrl+Alt+M`, `[meeting]` in `config.toml`); dictation keeps working meanwhile. A reminder to inform all participants appears before each recording. Meetings play back in the dashboard and can be deleted with their audio. Read [docs/MEETINGS.md](docs/MEETINGS.md) first: consent (§ 201 StGB), headset, Bluetooth
-- **Flask dashboard** — analytics, settings, transcription history, audio review, and file upload on `http://localhost:47392`
+- **Flask dashboard** — analytics, settings, transcription history, audio review, and file upload, opened from the tray icon
 - **Dictation feedback** — audio chimes on recording start and stop, a small live waveform at the bottom centre of the screen instead, or both (Settings > Dictation feedback); the waveform never takes focus and ignores the mouse
 - **SQLite history** — every transcription is saved with audio for review and flagging
 - **Auto language detection** — per-recording language switching (English/German)
@@ -96,7 +96,7 @@ pip install -e .
 python -m nexusvox
 ```
 
-Without a usable GPU, Parakeet runs in-process on the CPU (ONNX, int8 — no Docker); Voxtral and Cohere need a GPU, and a config that names one of them starts on Whisper for that session instead. Open the dashboard at `http://localhost:47392` → Settings → **Model** to pick another CPU-capable entry — `whisper-small` for speed, `whisper-medium` for accuracy — or set `[inference].model = "whisper-small"` in `config.toml` before the first run.
+Without a usable GPU, Parakeet runs in-process on the CPU (ONNX, int8 — no Docker); Voxtral and Cohere need a GPU, and a config that names one of them starts on Whisper for that session instead. Open the dashboard from the tray icon → Settings → **Model** to pick another CPU-capable entry — `whisper-small` for speed, `whisper-medium` for accuracy — or set `[inference].model = "whisper-small"` in `config.toml` before the first run.
 
 Models download on first use (~670 MB for Parakeet on CPU, ~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and cache under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Speaker detection for uploads needs the Parakeet GPU container.
 
@@ -159,7 +159,8 @@ Reproduce with `python scripts/benchmark.py` — see [docs/BENCHMARK_GUIDE.md](d
 
 ## Dashboard
 
-Open `http://localhost:47392` while NexusVox is running:
+Open the dashboard from the NexusVox tray icon (left-click) while NexusVox is running. Typing `http://localhost:47392` into the browser does not work: the dashboard only answers the page the tray opens, which carries a one-time key.
+
 
 | Tab | Description |
 |---|---|

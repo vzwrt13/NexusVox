@@ -8,8 +8,9 @@ import wave
 import pytest
 
 from nexusvox.config import Config, DatabaseConfig
-from nexusvox.dashboard import _create_app
+from nexusvox.dashboard import _PORT, _create_app
 from nexusvox.dashboard.api import DashboardAPI
+from nexusvox.dashboard.guard import COOKIE_NAME
 from nexusvox.db import Database
 
 
@@ -19,6 +20,37 @@ def _isolated_cwd(tmp_path, monkeypatch):
     working directory, and a test that saved there left a config (with a throw-away database path) in the
     checkout that the app then loaded."""
     monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _dashboard_test_clients_are_signed_in(monkeypatch):
+    """``app.test_client()`` talks to the dashboard like the real page: right Host, session cookie set.
+
+    The access checks themselves are tested in ``test_dashboard_guard.py``, which passes its own host.
+    """
+    from flask import Flask
+    from flask.testing import FlaskClient
+
+    original_client = Flask.test_client
+    original_open = FlaskClient.open
+
+    def signed_in(self, *args, **kwargs):
+        client = original_client(self, *args, **kwargs)
+        guard = self.extensions.get("nexusvox_guard")
+        if guard is not None:
+            client.set_cookie(COOKIE_NAME, guard.session_token, domain="127.0.0.1")
+        return client
+
+    def open_on_dashboard_host(self, *args, **kwargs):
+        if getattr(self.application, "extensions", {}).get("nexusvox_guard") is None:
+            return original_open(self, *args, **kwargs)  # not a dashboard app
+        if args and not isinstance(args[0], str):
+            return original_open(self, *args, **kwargs)  # a prepared builder/request keeps its own host
+        kwargs.setdefault("base_url", f"http://127.0.0.1:{_PORT}")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Flask, "test_client", signed_in)
+    monkeypatch.setattr(FlaskClient, "open", open_on_dashboard_host)
 
 
 @pytest.fixture

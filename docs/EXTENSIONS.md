@@ -92,6 +92,8 @@ NexusVoxExt.registerPanel("my-tab", (container) => {
 });
 ```
 
+Every dashboard route, yours included, sits behind the core access check (Host, Origin and a session cookie). Same-origin `fetch("/api/ext/...")` from the panel script carries the cookie automatically, so an extension needs no change; requests from other programs or web pages get 403.
+
 The dashboard is local-only (127.0.0.1) and has no CDN: ship what the tab needs in `static_dir`.
 Blueprint names must be unique across the app; a blueprint that cannot be mounted is logged and the tab
 stays without its backend.

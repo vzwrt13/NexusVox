@@ -89,6 +89,41 @@ over-20 s clips goes de 38.6 → 30.0 %, es 7.8 → 3.9 %, fr 11.5 → 2.5 %, bu
 two German clips over 40 s still drift. The cause needs a proper look (segment boundaries, language
 carry-over between segments) in its own ticket.
 
+### Long audio after the pause-cut fix (`scripts/parakeet_long_bench.py`)
+
+Long items are consecutive FLEURS clips joined with 0.6 s of silence (items of at least 45 s, 51-57 s
+on average, 11-12 per language), so each language has many items over 20 s instead of the few FLEURS
+ships. "Short" is every single FLEURS clip (50-60 per language, all up to ~20 s). "Raw" is the model
+output, normalised (lowercase, no punctuation). "Pipeline" is the same output after
+`pipeline.process_text` with the maintainer's `config.toml` (numbers as digits, dictionary, snippets),
+normalised the same way. GPU = the Docker Parakeet container at `localhost:8002`.
+
+| Lang | CPU short raw / pipeline | GPU short raw / pipeline | CPU long raw / pipeline | GPU long raw / pipeline |
+|---|---|---|---|---|
+| de | 7.3 / 7.4 % | 5.4 / 5.5 % | **7.1 / 7.0 %** | 5.4 / 5.3 % |
+| en | 6.0 / 6.5 % | 5.6 / 6.5 % | 66.3 / 66.2 % (see below) | 24.9 / 25.4 % |
+| es | 4.1 / 4.1 % | 3.5 / 3.5 % | 3.6 / 3.6 % | 3.2 / 3.2 % |
+| fr | 7.9 / 7.9 % | 6.2 / 6.2 % | 11.8 / 11.8 % | 9.0 / 9.0 % |
+| pt | 5.9 / 5.9 % | 4.2 / 4.2 % | 5.4 / 5.4 % | 4.7 / 4.7 % |
+
+- **German over 20 s: 38.6 % → 7.1 %** on the CPU path (earlier baseline: four clips; now 12 items of
+  about 57 s). That is 1.7 points behind the GPU, the same gap as on short clips. The drift into
+  English and Cyrillic is gone.
+- **Short clips are unchanged:** the ≤ 20 s path is the same single model call as before, and the
+  short-clip WERs match the earlier run within noise (de 7.3 vs 6.8 %). Latency was not re-measured.
+- **Text pipeline** barely moves the numbers. Only English shifts (by 0.5-1 point, digits are
+  matched differently); German does not, so the earlier suspicion that written-out numbers inflate DE
+  WER is not what drives the gap here.
+- **English long items are not a valid result.** Both CPU (66 %) and GPU (25 %) lose whole sentences
+  from joined English clips. Two joined English clips of at most 20 s, decoded in a single call with
+  no segmentation involved, already lose text on CPU (31 % WER, 6 pairs; German pairs 7.5 %), and single English
+  clips score 7 %. So the cause is the joined test material or the model on it, not the pause cutter.
+  English long audio therefore still has **no trustworthy measurement**; it needs a real recording
+  (one speaker, one take) of 30 s or more.
+- Other languages: fr is 2.8 points behind the GPU on long items, es and pt within 1 point.
+- Caveat: samples are small and the cut thresholds (0.2 s pause, 0.006 RMS) are tuned on nothing but
+  these clips; joined FLEURS clips have clean 0.6 s gaps, which real speech may not.
+
 ### Minimum hardware
 
 Pinned with `--threads N` (first N logical processors of the Ryzen 5800X; a slower CPU will be
@@ -125,5 +160,6 @@ already resolves to this path. What is missing for "default for everyone":
   GPU path (German +1.9, English +1.1), latency is 0.2-0.6 s, there is no cold start, and it needs
   no GPU or Docker.
 - **Minimum hardware:** 4 logical processors and 4 GB RAM (slow); recommended 8 threads / 8 GB.
-- **Before it is the default for meetings and uploads,** fix the segmentation accuracy above 20 s.
-  Until then, users with a GPU and long recordings keep the GPU path.
+- **Meetings and uploads:** German, Spanish, French and Portuguese over 20 s are now within 3 points
+  of the GPU path (pause cut). English over 20 s is unverified (see above); check it with a real long
+  recording before making CPU the default for long files.

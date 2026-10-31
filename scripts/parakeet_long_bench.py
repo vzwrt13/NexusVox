@@ -1,0 +1,228 @@
+"""Measure Parakeet accuracy on long audio (over 20 s): raw WER and WER after the app's text pipeline.
+
+Builds long test items by joining consecutive FLEURS clips of a language (0.6 s of silence between
+them, the references joined the same way), so there are many long clips instead of the few FLEURS
+has. Every item is decoded by the in-process CPU path, or by the GPU container with --gpu-url, and
+scored twice against the reference:
+
+  raw       the model output as is, normalised (lowercase, no punctuation) - comparable with the
+            numbers in docs/parakeet-cpu-test.md
+  pipeline  the output after `pipeline.process_text` with the settings of a real config.toml (numbers
+            as digits, dictionary, snippets), normalised the same way: what the user actually sees.
+            FLEURS references write numbers as digits, so this is the fairer figure.
+
+Short clips (up to 20 s) are scored too, to show that dictation does not get worse.
+
+Needs the FLEURS clip folders (<lang>/*.wav plus refs.tsv, "<file>\t<reference>" per line, named after the
+FLEURS codes), as written by `scripts/parakeet_cpu_bench.py --fetch`.
+Heavy CPU load: run it while nobody works on the machine.
+
+    python scripts/parakeet_long_bench.py fleurs --target-s 45 --items 8
+    python scripts/parakeet_long_bench.py fleurs --config config.toml --gpu-url http://localhost:8002/v1/audio/transcriptions
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import struct
+import sys
+import threading
+import urllib.request
+import uuid
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+SR = 16_000
+DIRECT_LIMIT_S = 20.0  # local_parakeet.MAX_DIRECT_S
+DEFAULT_LANGS = ["de_de", "en_us", "es_419", "fr_fr", "pt_br"]
+
+
+# ---- text, audio and backends (self-contained; same normaliser as scripts/benchmark_parakeet.py) ------
+
+
+def normalize(text: str) -> str:
+    """Same normaliser as scripts/benchmark_parakeet.py (keep the two in sync: WERs must stay comparable)."""
+    text = re.sub(r"[^\w\s]", "", text.lower())
+    return re.sub(r"\s+", " ", text.strip())
+
+
+def edit_distance(a: list[str], b: list[str]) -> int:
+    prev = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        cur = [i]
+        for j, y in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y)))
+        prev = cur
+    return prev[-1]
+
+
+def read_wav(path: Path) -> np.ndarray:
+    """Mono 16 kHz WAV as float32; handles PCM16 and the float32 files FLEURS ships (stdlib `wave` cannot)."""
+    raw = path.read_bytes()
+    pos, fmt, samples = 12, None, None
+    while pos + 8 <= len(raw):
+        cid, size = raw[pos : pos + 4], int.from_bytes(raw[pos + 4 : pos + 8], "little")
+        body = raw[pos + 8 : pos + 8 + size]
+        if cid == b"fmt ":
+            fmt = (
+                int.from_bytes(body[0:2], "little"),
+                int.from_bytes(body[2:4], "little"),
+                int.from_bytes(body[4:8], "little"),
+                int.from_bytes(body[14:16], "little"),
+            )
+        elif cid == b"data":
+            samples = body
+        pos += 8 + size + (size & 1)
+    tag, channels, rate, bits = fmt
+    assert channels == 1 and rate == SR, (path, fmt)
+    if tag == 3 and bits == 32:
+        return np.frombuffer(samples, dtype="<f4").astype(np.float32)
+    assert tag == 1 and bits == 16, (path, fmt)
+    return np.frombuffer(samples, dtype="<i2").astype(np.float32) / 32768.0
+
+
+def wav_bytes(x: np.ndarray) -> bytes:
+    pcm = (np.clip(x, -1, 1) * 32767).astype("<i2").tobytes()
+    hdr = (
+        b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, SR, SR * 2, 2, 16)
+    )
+    return hdr + b"data" + struct.pack("<I", len(pcm)) + pcm
+
+
+class GpuBackend:
+    """The Docker container's OpenAI-style HTTP endpoint."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    def recognize(self, x: np.ndarray) -> str:
+        crlf, bd = "\r\n", uuid.uuid4().hex
+        head = (
+            f'--{bd}{crlf}Content-Disposition: form-data; name="model"{crlf}{crlf}nvidia/parakeet-tdt-0.6b-v3{crlf}'
+            f'--{bd}{crlf}Content-Disposition: form-data; name="file"; filename="a.wav"{crlf}'
+            f"Content-Type: audio/wav{crlf}{crlf}"
+        ).encode()
+        body = head + wav_bytes(x) + f"{crlf}--{bd}--{crlf}".encode()
+        req = urllib.request.Request(self.url, body, {"Content-Type": f"multipart/form-data; boundary={bd}"})
+        return json.load(urllib.request.urlopen(req, timeout=900))["text"]
+
+
+class CpuBackend:
+    """LocalParakeetTranscriber._recognize, the call the app makes."""
+
+    def __init__(self) -> None:
+        from nexusvox.config import InferenceConfig
+        from nexusvox.transcribers.local_parakeet import LocalParakeetTranscriber
+
+        self.tr = LocalParakeetTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"))
+        self.never = threading.Event()
+        self.tr._get_model(self.tr._onnx_model, self.tr._quantization)  # load before any timing
+
+    def recognize(self, x: np.ndarray) -> str:
+        return self.tr._recognize(x, self.never)[0]
+
+
+def wer_of(items: list[tuple[int, int]]) -> float | None:
+    words = sum(w for _, w in items)
+    return round(sum(e for e, _ in items) / words, 4) if words else None
+
+
+GAP = np.zeros(int(0.6 * SR), dtype=np.float32)
+
+
+def join_clips(clips: list[tuple[np.ndarray, str]], target_s: float, items: int) -> list[tuple[np.ndarray, str]]:
+    """Consecutive clips joined into items of at least `target_s` seconds; at most `items` of them."""
+    out: list[tuple[np.ndarray, str]] = []
+    parts: list[np.ndarray] = []
+    refs: list[str] = []
+    total = 0.0
+    for samples, ref in clips:
+        parts += [samples, GAP]
+        refs.append(ref)
+        total += (len(samples) + len(GAP)) / SR
+        if total >= target_s:
+            out.append((np.concatenate(parts), " ".join(refs)))
+            parts, refs, total = [], [], 0.0
+            if len(out) == items:
+                break
+    return out
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("fleurs_dir", type=Path)
+    ap.add_argument("--langs", nargs="+", default=DEFAULT_LANGS)
+    ap.add_argument("--target-s", type=float, default=45.0, help="minimum length of a long item")
+    ap.add_argument("--items", type=int, default=8, help="long items per language")
+    ap.add_argument("--config", type=Path, default=Path("config.toml"), help="settings for the pipeline WER")
+    ap.add_argument("--gpu-url", help="measure the GPU container at this endpoint instead of the CPU path")
+    ap.add_argument("--out", type=Path)
+    args = ap.parse_args()
+
+    from nexusvox.config import load_config
+    from nexusvox.pipeline import process_text
+
+    config = load_config(args.config)
+    backend = GpuBackend(args.gpu_url) if args.gpu_url else CpuBackend()
+
+    # The text pipeline of the app with the user's settings, minus the two steps that rewrite the words
+    # (cleanup LLM, translator): they would measure the LLM, not the speech recognition.
+    from nexusvox.cleanup import CleanupResult
+    from nexusvox.db import Database
+    from nexusvox.translator import TranslateResult
+
+    db = Database(config.database)
+    dictionary, snippets = db.get_dictionary_entries(), db.get_snippets()
+
+    def pipeline_text(raw: str) -> str:
+        return process_text(
+            raw,
+            config,
+            dictionary,
+            snippets,
+            cleanup_fn=lambda text, *_: CleanupResult(text),
+            translate_fn=lambda text, *_: TranslateResult(text),
+        ).typed
+
+    report: dict = {"backend": "gpu" if args.gpu_url else "cpu", "languages": {}}
+    for lang in args.langs:
+        refs_file = args.fleurs_dir / lang / "refs.tsv"
+        if not refs_file.exists():
+            continue
+        rows = [ln.split("\t", 1) for ln in refs_file.read_text("utf-8").splitlines() if ln]
+        clips = [(read_wav(args.fleurs_dir / lang / f), ref) for f, ref in rows]
+        long_items = join_clips(clips, args.target_s, args.items)
+        short_items = [c for c in clips if len(c[0]) <= DIRECT_LIMIT_S * SR]
+
+        scores: dict[str, dict[str, list[tuple[int, int]]]] = {
+            "short": {"raw": [], "pipeline": []},
+            "long": {"raw": [], "pipeline": []},
+        }
+        for kind, items in (("short", short_items), ("long", long_items)):
+            for samples, ref in items:
+                text = backend.recognize(samples)
+                ref_words = normalize(ref).split()
+                for name, hyp in (("raw", text), ("pipeline", pipeline_text(text))):
+                    scores[kind][name].append((edit_distance(ref_words, normalize(hyp).split()), len(ref_words)))
+        report["languages"][lang] = {
+            "short_clips": len(short_items),
+            "long_items": len(long_items),
+            "long_item_s": round(sum(len(x) for x, _ in long_items) / SR / max(len(long_items), 1), 1),
+            "wer_short_raw": wer_of(scores["short"]["raw"]),
+            "wer_short_pipeline": wer_of(scores["short"]["pipeline"]),
+            "wer_long_raw": wer_of(scores["long"]["raw"]),
+            "wer_long_pipeline": wer_of(scores["long"]["pipeline"]),
+        }
+
+    print(json.dumps(report, indent=2))
+    if args.out:
+        args.out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

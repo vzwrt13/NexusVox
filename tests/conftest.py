@@ -42,6 +42,8 @@ def _dashboard_test_clients_are_signed_in(monkeypatch):
         return client
 
     def open_on_dashboard_host(self, *args, **kwargs):
+        if getattr(self.application, "extensions", {}).get("nexusvox_guard") is None:
+            return original_open(self, *args, **kwargs)  # not a dashboard app
         if args and not isinstance(args[0], str):
             return original_open(self, *args, **kwargs)  # a prepared builder/request keeps its own host
         kwargs.setdefault("base_url", f"http://127.0.0.1:{_PORT}")

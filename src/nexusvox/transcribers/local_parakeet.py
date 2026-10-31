@@ -4,8 +4,9 @@ The CPU counterpart of the Docker NeMo container: same model, no GPU and no Dock
 model once and caches it at the class level. The int8 ONNX build (~670 MB) is downloaded from
 Hugging Face on first use; `load_status` reports that to the dashboard.
 
-One model call handles roughly 20-30 s of audio, so longer audio (file uploads) is cut into
-speech segments by onnx-asr's Silero VAD first and the segments' text and word timings are joined.
+One model call handles roughly 20 s of audio well, so longer audio (long dictations, file uploads) is
+cut at speech pauses into segments of at most `MAX_DIRECT_S` (`split_at_pauses`) and each segment goes
+through the same plain model call a short dictation uses; the segments' text and word timings are joined.
 """
 
 from __future__ import annotations
@@ -30,9 +31,20 @@ MODEL_REPO = "istupakov/parakeet-tdt-0.6b-v3-onnx"
 _CACHE_PROBE_FILE = "encoder-model.int8.onnx"
 
 SAMPLE_RATE = 16_000
-# Audio up to this long goes to the model in one call; longer audio is cut by the VAD, whose
-# segments never exceed the same length.
+# Audio up to this long goes to the model in one call; longer audio is cut at pauses into segments
+# that never exceed the same length.
 MAX_DIRECT_S = 20.0
+# A segment cut at a pause is not shorter than this unless the audio ends: the model needs a few
+# seconds of context to keep the language, and onnx-asr's VAD cut far shorter pieces that drifted.
+MIN_SEGMENT_S = 6.0
+# A segment whose loudest sample stays below this (about -50 dBFS) holds no speech and is not decoded.
+_SILENCE_PEAK = 0.003
+# Pause detection works on 20 ms frames; a pause is a run of at least this many quiet seconds.
+_PAUSE_FRAME = SAMPLE_RATE // 50
+_MIN_PAUSE_S = 0.2
+# Each second a cut sits later in the window is worth this many seconds of pause: among similar
+# pauses the later cut wins, so segments come out long.
+_LATE_CUT_BONUS = 0.05
 # Less than this is silence for all practical purposes and trips the feature extractor.
 _MIN_SAMPLES = SAMPLE_RATE // 10
 # One encoder frame: a 10 ms feature step times the model's subsampling factor of 8.
@@ -78,6 +90,78 @@ def words_from_tokens(tokens: list[str], timestamps: list[float], offset_s: floa
     return words
 
 
+def _frame_levels(samples: np.ndarray) -> np.ndarray:
+    """RMS level of every 20 ms frame; a ragged tail shorter than a frame is dropped."""
+    frames = len(samples) // _PAUSE_FRAME
+    if frames == 0:
+        return np.zeros(0, dtype=np.float32)
+    block = samples[: frames * _PAUSE_FRAME].reshape(frames, _PAUSE_FRAME)
+    return np.sqrt(np.mean(block * block, axis=1))
+
+
+def split_at_pauses(
+    samples: np.ndarray, max_s: float | None = None, min_s: float | None = None
+) -> list[tuple[int, int]]:
+    """Cut mono 16 kHz audio into (start, end) sample ranges of at most `max_s`, at speech pauses.
+
+    Audio up to `max_s` stays whole. Otherwise each cut goes into the middle of a pause (a run of quiet
+    20 ms frames, quiet being a few times the recording's own noise floor) in the window `min_s`..`max_s`
+    after the segment start: the longest pause, with a small bonus for a later cut. A window with no pause
+    is cut at its quietest frame, so a continuous stream is still bounded and never cut mid-loud-passage
+    if a quieter spot exists. The ranges are contiguous and cover all the audio.
+    """
+    max_s = MAX_DIRECT_S if max_s is None else max_s
+    min_s = min(MIN_SEGMENT_S, max_s / 2) if min_s is None else min_s
+    total = len(samples)
+    max_len = int(max_s * SAMPLE_RATE)
+    if total <= max_len:
+        return [(0, total)]
+
+    level = _frame_levels(samples)
+    floor, loud = np.percentile(level, [10, 90])
+    quiet = level < min(max(floor * 3.0, 0.002), max(loud * 0.3, 0.002))
+    min_pause = max(1, round(_MIN_PAUSE_S * SAMPLE_RATE / _PAUSE_FRAME))
+    frames_per_s = SAMPLE_RATE / _PAUSE_FRAME
+
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    while total - start > max_len:
+        lo = (start + int(min_s * SAMPLE_RATE)) // _PAUSE_FRAME
+        hi = min((start + max_len) // _PAUSE_FRAME, len(level))
+        cut = _best_cut(quiet, level, lo, hi, min_pause, frames_per_s)
+        end = cut * _PAUSE_FRAME if cut is not None else start + max_len
+        end = min(max(end, start + int(min_s * SAMPLE_RATE)), start + max_len)
+        ranges.append((start, end))
+        start = end
+    ranges.append((start, total))
+    return ranges
+
+
+def _best_cut(
+    quiet: np.ndarray, level: np.ndarray, lo: int, hi: int, min_pause: int, frames_per_s: float
+) -> int | None:
+    """Frame index to cut at inside frames [lo, hi), or None when the window holds no frames."""
+    if hi <= lo:
+        return None
+    best: tuple[float, int] | None = None
+    run_start: int | None = None
+    for i in range(lo, hi + 1):
+        if i < hi and quiet[i]:
+            if run_start is None:
+                run_start = i
+            continue
+        if run_start is not None and i - run_start >= min_pause:
+            length_s = (i - run_start) / frames_per_s
+            middle = (run_start + i) // 2
+            score = length_s + _LATE_CUT_BONUS * (middle - lo) / frames_per_s
+            if best is None or score >= best[0]:
+                best = (score, middle)
+        run_start = None
+    if best is not None:
+        return best[1]
+    return lo + int(np.argmin(level[lo:hi]))  # no pause at all: the quietest spot
+
+
 class LocalParakeetTranscriber(BaseTranscriber):
     """Transcribe with Parakeet TDT 0.6B v3 (ONNX int8) in-process. No HTTP, no Docker, no GPU."""
 
@@ -86,7 +170,6 @@ class LocalParakeetTranscriber(BaseTranscriber):
     no_diarization_reason = SPEAKERS_NEED_GPU
 
     _model_cache: dict[tuple[str, str], object] = {}
-    _vad_cache: dict[str, object] = {}
     _cache_lock = threading.Lock()
     # onnx-asr's decoding is plain Python over the ONNX sessions: one recognition at a time keeps a
     # dictation and an upload from fighting over the CPU cores. A single worker serialises them and
@@ -159,16 +242,6 @@ class LocalParakeetTranscriber(BaseTranscriber):
             logger.info("Parakeet model ready")
             return cls._model_cache[key]
 
-    @classmethod
-    def _get_vad(cls):
-        """Silero VAD from onnx-asr (a few MB), loaded on the first audio longer than `MAX_DIRECT_S`."""
-        with cls._cache_lock:
-            if "silero" not in cls._vad_cache:
-                import onnx_asr
-
-                cls._vad_cache["silero"] = onnx_asr.load_vad("silero", providers=["CPUExecutionProvider"])
-            return cls._vad_cache["silero"]
-
     # ---- Transcription ------------------------------------------------------
 
     def _recognize(self, samples: np.ndarray, cancelled: threading.Event) -> tuple[str, list[Word]]:
@@ -189,18 +262,22 @@ class LocalParakeetTranscriber(BaseTranscriber):
             words = words_from_tokens(result.tokens or [], result.timestamps or [])
             return result.text.strip(), words
 
-        # Too long for one call: the VAD cuts it into speech segments of at most MAX_DIRECT_S.
-        segmented = model.with_vad(self._get_vad(), max_speech_duration_s=MAX_DIRECT_S)
-        if self.word_timestamps:
-            segmented = segmented.with_timestamps()
+        # Too long for one call: cut at pauses, then every segment is a plain call like a short dictation.
         texts: list[str] = []
-        words = []
-        for segment in segmented.recognize(samples, sample_rate=SAMPLE_RATE):
+        words: list[Word] = []
+        timed = model.with_timestamps() if self.word_timestamps else model
+        for start, end in split_at_pauses(samples):
             if cancelled.is_set():
                 return "", []
-            texts.append(segment.text.strip())
+            chunk = samples[start:end]
+            if len(chunk) < _MIN_SAMPLES or float(np.max(np.abs(chunk))) < _SILENCE_PEAK:
+                continue  # nothing said: the model would only make something up
             if self.word_timestamps:
-                words.extend(words_from_tokens(segment.tokens or [], segment.timestamps or [], segment.start))
+                result = timed.recognize(chunk, sample_rate=SAMPLE_RATE)
+                texts.append(result.text.strip())
+                words.extend(words_from_tokens(result.tokens or [], result.timestamps or [], start / SAMPLE_RATE))
+            else:
+                texts.append(model.recognize(chunk, sample_rate=SAMPLE_RATE).strip())
         return " ".join(t for t in texts if t), words
 
     async def connect(self) -> None:

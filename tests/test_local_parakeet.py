@@ -33,58 +33,44 @@ class _Segment(_Result):
 
 
 class _FakeAdapter:
-    """What `model`, `model.with_timestamps()` and `model.with_vad(...)` look like to the engine."""
+    """What `model` and `model.with_timestamps()` look like to the engine."""
 
-    def __init__(self, model: _FakeModel, *, vad: bool = False, timed: bool = False) -> None:
+    def __init__(self, model: _FakeModel, *, timed: bool = False) -> None:
         self._model = model
-        self._vad = vad
         self._timed = timed
 
     def with_timestamps(self):
-        return _FakeAdapter(self._model, vad=self._vad, timed=True)
+        return _FakeAdapter(self._model, timed=True)
 
     def recognize(self, samples, *, sample_rate):
         assert sample_rate == SAMPLE_RATE
         assert samples.dtype == np.float32
-        self._model.calls.append({"vad": self._vad, "timed": self._timed, "seconds": len(samples) / SAMPLE_RATE})
-        if self._vad:
-            return iter(self._model.segments)
-        if self._timed:
-            return self._model.result
-        return self._model.result.text
+        self._model.calls.append({"timed": self._timed, "seconds": len(samples) / SAMPLE_RATE})
+        result = self._model.results.pop(0) if self._model.results else self._model.result
+        return result if self._timed else result.text
 
 
 class _FakeModel(_FakeAdapter):
-    def __init__(self, result: _Result | None = None, segments: list[_Segment] | None = None) -> None:
+    def __init__(self, result: _Result | None = None, results: list[_Result] | None = None) -> None:
         self.calls: list[dict] = []
-        self.vad_args: list[dict] = []
         self.result = result or _Result("hello world", [" hello", " world"], [0.0, 0.4])
-        self.segments = segments or []
+        self.results = list(results or [])
         super().__init__(self)
-
-    def with_vad(self, vad, **kwargs):
-        self.vad_args.append({"vad": vad, **kwargs})
-        return _FakeAdapter(self, vad=True)
 
 
 @pytest.fixture(autouse=True)
 def clean_class_state():
     LocalParakeetTranscriber._model_cache.clear()
-    LocalParakeetTranscriber._vad_cache.clear()
     LocalParakeetTranscriber._set_status("idle")
     LocalParakeetTranscriber._preloading = False
     yield
     LocalParakeetTranscriber._model_cache.clear()
-    LocalParakeetTranscriber._vad_cache.clear()
     LocalParakeetTranscriber._set_status("idle")
     LocalParakeetTranscriber._preloading = False
 
 
-def _install(monkeypatch, model: _FakeModel) -> object:
-    vad = object()
+def _install(monkeypatch, model: _FakeModel) -> None:
     monkeypatch.setattr(LocalParakeetTranscriber, "_get_model", classmethod(lambda cls, *a: model))
-    monkeypatch.setattr(LocalParakeetTranscriber, "_get_vad", classmethod(lambda cls: vad))
-    return vad
 
 
 def _make() -> LocalParakeetTranscriber:
@@ -226,7 +212,7 @@ def test_german_words_with_umlauts_and_numbers():
 
 
 @pytest.mark.asyncio
-async def test_a_short_dictation_is_one_model_call_without_vad(monkeypatch):
+async def test_a_short_dictation_is_one_model_call_as_one_call(monkeypatch):
     model = _FakeModel()
     _install(monkeypatch, model)
 
@@ -235,8 +221,7 @@ async def test_a_short_dictation_is_one_model_call_without_vad(monkeypatch):
     assert result.done is True
     assert result.text == "hello world"
     assert result.words == []  # not asked for
-    assert model.calls == [{"vad": False, "timed": False, "seconds": 3.0}]
-    assert model.vad_args == []
+    assert model.calls == [{"timed": False, "seconds": 3.0}]
 
 
 @pytest.mark.asyncio
@@ -248,7 +233,7 @@ async def test_word_timestamps_ask_the_model_for_tokens(monkeypatch):
 
     result = await _run(t, 3.0)
 
-    assert model.calls == [{"vad": False, "timed": True, "seconds": 3.0}]
+    assert model.calls == [{"timed": True, "seconds": 3.0}]
     assert [w.word for w in result.words] == ["hello", "world"]
     assert result.words[1].start == pytest.approx(0.4)
 
@@ -260,7 +245,7 @@ async def test_audio_at_the_limit_still_goes_in_one_call(monkeypatch):
 
     await _run(_make(), local_parakeet.MAX_DIRECT_S)
 
-    assert [c["vad"] for c in model.calls] == [False]
+    assert [c["timed"] for c in model.calls] == [False]
 
 
 @pytest.mark.asyncio
@@ -314,86 +299,165 @@ async def test_the_buffer_is_cleared_between_recordings(monkeypatch):
 
 # ---- Long audio (file uploads) ----------------------------------------------
 
+SR = SAMPLE_RATE
+
+
+def _speech_with_pauses(pause_at_s: list[float], total_s: float, pause_s: float = 0.5) -> np.ndarray:
+    """Loud noise-like 'speech' with silent gaps of `pause_s` centred on `pause_at_s`."""
+    rng = np.random.default_rng(0)
+    x = rng.uniform(-0.3, 0.3, int(total_s * SR)).astype(np.float32)
+    for at in pause_at_s:
+        x[int((at - pause_s / 2) * SR) : int((at + pause_s / 2) * SR)] = 0.0
+    return x
+
+
+def _seconds(ranges):
+    return [(round(a / SR, 2), round(b / SR, 2)) for a, b in ranges]
+
+
+async def _run_samples(t, x):
+    await t.connect()
+    await t.send_audio_chunk((x * 32767).astype(np.int16).tobytes())
+    return await t.finish()
+
+
+def test_audio_up_to_the_limit_is_not_cut():
+    x = _speech_with_pauses([5.0], local_parakeet.MAX_DIRECT_S)
+    assert local_parakeet.split_at_pauses(x) == [(0, len(x))]
+
+
+def test_long_audio_is_cut_in_the_middle_of_a_pause():
+    x = _speech_with_pauses([14.0], 30.0)
+    assert _seconds(local_parakeet.split_at_pauses(x)) == [(0.0, 14.0), (14.0, 30.0)]
+
+
+def test_the_longest_pause_wins():
+    x = _speech_with_pauses([10.0], 40.0, pause_s=0.3)
+    x[int(16.0 * SR) : int(17.0 * SR)] = 0.0  # a 1 s pause at 16.5 s
+    first = local_parakeet.split_at_pauses(x)[0]
+    assert abs(first[1] / SR - 16.5) < 0.05
+
+
+def test_segments_stay_between_the_minimum_and_the_maximum_length():
+    x = _speech_with_pauses([4.0, 9.0, 21.0, 33.0, 47.0, 58.0, 70.0], 85.0, pause_s=0.4)
+    ranges = local_parakeet.split_at_pauses(x)
+    lengths = [(b - a) / SR for a, b in ranges]
+    assert all(n <= local_parakeet.MAX_DIRECT_S + 1e-6 for n in lengths)
+    assert all(n >= local_parakeet.MIN_SEGMENT_S for n in lengths[:-1])
+    assert ranges[0][0] == 0 and ranges[-1][1] == len(x)
+    assert all(ranges[i][1] == ranges[i + 1][0] for i in range(len(ranges) - 1))
+
+
+def test_a_pause_before_the_minimum_length_is_not_used():
+    x = _speech_with_pauses([2.0], 30.0)  # the only pause would give a 2 s segment
+    first = local_parakeet.split_at_pauses(x)[0]
+    assert (first[1] - first[0]) / SR >= local_parakeet.MIN_SEGMENT_S
+
+
+def test_a_long_clip_without_pauses_is_still_bounded():
+    x = np.random.default_rng(1).uniform(-0.3, 0.3, 70 * SR).astype(np.float32)
+    ranges = local_parakeet.split_at_pauses(x)
+    assert len(ranges) >= 4
+    assert all((b - a) / SR <= local_parakeet.MAX_DIRECT_S + 1e-6 for a, b in ranges)
+    assert sum(b - a for a, b in ranges) == len(x)
+
+
+def test_a_pauseless_clip_is_cut_at_its_quietest_spot():
+    x = np.random.default_rng(2).uniform(-0.3, 0.3, 30 * SR).astype(np.float32)
+    x[int(12.0 * SR) : int(12.02 * SR)] *= 0.01  # one soft frame, too short to be a pause
+    first = local_parakeet.split_at_pauses(x)[0]
+    assert abs(first[1] / SR - 12.01) < 0.03
+
+
+def test_background_noise_does_not_hide_the_pauses():
+    x = _speech_with_pauses([13.0], 30.0)
+    mask = x == 0.0
+    x[mask] = np.random.default_rng(3).uniform(-0.004, 0.004, int(mask.sum()))
+    first = local_parakeet.split_at_pauses(x)[0]
+    assert abs(first[1] / SR - 13.0) < 0.3
+
 
 @pytest.mark.asyncio
-async def test_long_audio_is_cut_by_the_vad_and_the_segments_are_joined(monkeypatch):
-    segments = [
-        _Segment("first part", start=1.0, end=15.0),
-        _Segment("second part", start=20.0, end=38.0),
-    ]
-    model = _FakeModel(segments=segments)
-    vad = _install(monkeypatch, model)
+async def test_long_audio_is_cut_at_pauses_and_the_segments_are_joined(monkeypatch):
+    model = _FakeModel(results=[_Result("first part"), _Result("second part")])
+    _install(monkeypatch, model)
 
-    result = await _run(_make(), 45.0)
+    result = await _run_samples(_make(), _speech_with_pauses([14.0], 30.0))
 
     assert result.text == "first part second part"
-    assert model.calls == [{"vad": True, "timed": False, "seconds": 45.0}]
-    assert model.vad_args == [{"vad": vad, "max_speech_duration_s": local_parakeet.MAX_DIRECT_S}]
+    assert [c["seconds"] for c in model.calls] == [14.0, 16.0]
+    assert all(c["timed"] is False for c in model.calls)
 
 
 @pytest.mark.asyncio
 async def test_segment_words_are_shifted_by_the_segment_start(monkeypatch):
-    segments = [
-        _Segment("alpha beta", [" alpha", " beta"], [0.0, 0.5], start=2.0, end=4.0),
-        _Segment("gamma", [" gamma"], [0.25], start=30.0, end=31.0),
-    ]
-    _install(monkeypatch, _FakeModel(segments=segments))
+    model = _FakeModel(
+        results=[_Result("alpha beta", [" alpha", " beta"], [0.0, 0.5]), _Result("gamma", [" gamma"], [0.25])]
+    )
+    _install(monkeypatch, model)
     t = _make()
     t.word_timestamps = True
 
-    result = await _run(t, 40.0)
+    result = await _run_samples(t, _speech_with_pauses([14.0], 30.0))
 
-    assert [(w.word, w.start) for w in result.words] == [("alpha", 2.0), ("beta", 2.5), ("gamma", 30.25)]
+    assert [(w.word, w.start) for w in result.words] == [("alpha", 0.0), ("beta", 0.5), ("gamma", 14.25)]
     assert len(result.words) == len(result.text.split())
 
 
 @pytest.mark.asyncio
 async def test_long_audio_without_speech_gives_an_empty_transcript(monkeypatch):
-    model = _FakeModel(segments=[])
+    model = _FakeModel()
     _install(monkeypatch, model)
 
-    result = await _run(_make(), 30.0)
+    result = await _run_samples(_make(), np.zeros(30 * SR, dtype=np.float32))
 
     assert result.done is True
     assert result.text == ""
     assert result.words == []
+    assert model.calls == []
 
 
 @pytest.mark.asyncio
-async def test_a_blank_segment_does_not_add_a_stray_space(monkeypatch):
-    segments = [_Segment("one", start=0, end=1), _Segment("  ", start=2, end=3), _Segment("two", start=4, end=5)]
-    _install(monkeypatch, _FakeModel(segments=segments))
+async def test_a_silent_segment_is_not_decoded_and_adds_no_stray_space(monkeypatch):
+    model = _FakeModel(result=_Result("word"))
+    _install(monkeypatch, model)
+    x = _speech_with_pauses([], 60.0)
+    x[int(20 * SR) : int(40 * SR)] = 0.0  # a stretch of pure silence
+    voiced = [(a, b) for a, b in local_parakeet.split_at_pauses(x) if np.max(np.abs(x[a:b])) > 0.01]
+    assert 0 < len(voiced) < len(local_parakeet.split_at_pauses(x))
 
-    result = await _run(_make(), 30.0)
+    result = await _run_samples(_make(), x)
 
-    assert result.text == "one two"
+    assert len(model.calls) == len(voiced)
+    assert result.text == " ".join(["word"] * len(voiced))
 
 
 @pytest.mark.asyncio
-async def test_transcribe_file_runs_a_long_chunk_through_the_vad(monkeypatch):
+async def test_transcribe_file_cuts_a_long_chunk_at_pauses(monkeypatch):
     """The upload path: 60 s chunks reach the engine as one recording each."""
     import io
     import wave
 
     import nexusvox.file_transcribe as ft
 
-    model = _FakeModel(segments=[_Segment("spoken", [" spoken"], [0.0], start=5.0, end=7.0)])
+    model = _FakeModel(result=_Result("spoken", [" spoken"], [0.0]))
     _install(monkeypatch, model)
 
+    pcm = (_speech_with_pauses([14.0], 40.0) * 32767).astype(np.int16).tobytes()
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
         wf.setframerate(SAMPLE_RATE)
-        wf.writeframes(_pcm(50.0))
+        wf.writeframes(pcm)
 
     result = await ft.transcribe_file(
         [buf.getvalue()], InferenceConfig(model="parakeet-tdt-0.6b"), device="cpu", word_timestamps=True
     )
 
-    assert result.text == "spoken"
-    assert [(w.word, w.start) for w in result.words] == [("spoken", 5.0)]
-    assert model.calls[0]["vad"] is True
+    assert result.text == "spoken spoken spoken"
+    assert [w.start for w in result.words][:2] == [0.0, 14.0]
+    assert all(c["timed"] is True and c["seconds"] <= local_parakeet.MAX_DIRECT_S for c in model.calls)
     assert result.notes == []
 
 

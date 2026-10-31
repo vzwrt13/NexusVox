@@ -122,7 +122,7 @@ If one model clears both bars, it becomes the single default. If EN and DE have 
 
 ## Viewing results in the dashboard
 
-Open the dashboard (default `http://localhost:47392`), append `?dev` to the URL, and switch to the **Dev** tab. All benchmark JSON files under `benchmarks/` are rendered as grouped charts — WER per model per language and RTF per model — so you can compare candidates side by side without opening the raw files.
+Open the dashboard from the tray icon, append `?dev` to the URL in the address bar (the page keeps its session), and switch to the **Dev** tab. All benchmark JSON files under `benchmarks/` are rendered as grouped charts — WER per model per language and RTF per model — so you can compare candidates side by side without opening the raw files.
 
 ## Troubleshooting
 

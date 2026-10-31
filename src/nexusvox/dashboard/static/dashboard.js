@@ -1,5 +1,28 @@
 /* NexusVox Dashboard — Tab switching, Chart.js rendering, settings */
 
+// ── Access denied ────────────────────────────────────────────────────
+// The server refuses every request without the session cookie, which happens when NexusVox was restarted
+// while this tab stayed open. Every fetch (extension panels included) goes through here, so one banner
+// tells the user what to do instead of each panel failing on a reply it cannot parse.
+(() => {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const res = await nativeFetch(...args);
+    if (res.status === 403 && res.headers.get("X-NexusVox-Denied") && !document.getElementById("denied-banner")) {
+      const banner = document.createElement("div");
+      banner.id = "denied-banner";
+      banner.setAttribute("role", "alert");
+      banner.style.cssText =
+        "position:fixed;top:0;left:0;right:0;z-index:1000;padding:12px 16px;text-align:center;" +
+        "background:#ff6b6b;color:#1a1a1a;font-weight:600;";
+      banner.textContent =
+        "This dashboard session has ended (NexusVox was restarted). Reopen the dashboard from the NexusVox tray icon.";
+      document.body.prepend(banner);
+    }
+    return res;
+  };
+})();
+
 // ── Globals ──────────────────────────────────────────────────────────
 // Chart colors come from the :root variables in style.css, so the stylesheet is the single source
 // of the theme. The fallbacks only matter when the stylesheet failed to load.

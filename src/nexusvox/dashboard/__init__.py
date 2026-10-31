@@ -12,11 +12,13 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
+from werkzeug.serving import make_server
 
 from ..config import Config
 from ..db import Database
 from ..extensions import load_extensions
 from .api import DashboardAPI
+from .guard import LAUNCH_PARAM, DashboardGuard, install_guard
 
 if TYPE_CHECKING:
     from ..app import NexusVoxApp
@@ -27,6 +29,7 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _PORT = 47392  # Uncommon port to avoid collisions.
 _server_started = False
 _api: DashboardAPI | None = None
+_guard: DashboardGuard | None = None
 _lock = threading.Lock()
 
 
@@ -38,6 +41,7 @@ def _attachment(filename: str) -> str:
 
 def _create_app(api: DashboardAPI) -> Flask:
     app = Flask(__name__, static_folder=str(_STATIC_DIR), static_url_path="")
+    install_guard(app, _PORT)  # before any route, so the extension blueprints below are covered too
 
     # Suppress Flask request logging in production.
     wlog = logging.getLogger("werkzeug")
@@ -597,7 +601,7 @@ def _create_app(api: DashboardAPI) -> Flask:
 
 def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None = None) -> DashboardAPI:
     """Start the Flask server (once) without opening the browser, and return its API object."""
-    global _server_started, _api
+    global _server_started, _api, _guard
 
     with _lock:
         if not _server_started:
@@ -636,17 +640,18 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 extensions=load_extensions(),
             )
             flask_app = _create_app(_api)
+            _guard = flask_app.extensions["nexusvox_guard"]
             threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
 
-            thread = threading.Thread(
-                target=flask_app.run,
-                kwargs={"host": "127.0.0.1", "port": _PORT, "use_reloader": False},
-                daemon=True,
-                name="dashboard-server",
-            )
-            thread.start()
-            _server_started = True
-            logger.info("Dashboard server started on http://127.0.0.1:%d", _PORT)
+            try:  # bind here rather than in the thread, so a port held by another process is noticed
+                server = make_server("127.0.0.1", _PORT, flask_app, threaded=True)
+            except OSError:
+                logger.exception("Dashboard port %d is in use (another NexusVox running?); no dashboard", _PORT)
+                _guard = None
+            else:
+                threading.Thread(target=server.serve_forever, daemon=True, name="dashboard-server").start()
+                _server_started = True
+                logger.info("Dashboard server started on http://127.0.0.1:%d", _PORT)
         assert _api is not None
         return _api
 
@@ -659,4 +664,8 @@ def running_dashboard_api() -> DashboardAPI | None:
 def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None, tab: str = "") -> None:
     """Start the Flask server (once) and open the dashboard in the browser, on `tab` when given."""
     ensure_dashboard_api(db, config, app)
-    webbrowser.open(f"http://127.0.0.1:{_PORT}" + (f"/#{tab}" if tab else ""))
+    if not _server_started or _guard is None:
+        logger.error("The dashboard server is not running, so the dashboard was not opened")
+        return
+    query = f"?{LAUNCH_PARAM}={_guard.new_launch_secret()}" + (f"&tab={quote(tab)}" if tab else "")
+    webbrowser.open(f"http://127.0.0.1:{_PORT}/{query}")

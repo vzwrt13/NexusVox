@@ -21,7 +21,7 @@ python -m nexusvox
 
 That runs the model in-process — Parakeet (ONNX, int8) by default, Whisper if you pick it. The model downloads from HuggingFace on first use (~670 MB for Parakeet, ~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Parakeet on CPU has no speaker detection for uploads — that needs the GPU container.
 
-To stay on CPU even if you later add a GPU, open the dashboard (`http://localhost:47392`) → Settings → **Compute Device** → set to `CPU`.
+To stay on CPU even if you later add a GPU, open the dashboard from the tray icon → Settings → **Compute Device** → set to `CPU`.
 
 ---
 
@@ -254,7 +254,7 @@ You should see:
 NexusVox started. Hold Ctrl+Shift+Alt to talk.
 ```
 
-A system tray icon also appears, where you can toggle the language or quit the app. Open the dashboard at `http://localhost:47392` for analytics, settings, and transcription history.
+A system tray icon also appears, where you can toggle the language or quit the app. Open the dashboard from the tray icon (left-click) for analytics, settings, and transcription history.
 
 ---
 

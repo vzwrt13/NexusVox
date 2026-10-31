@@ -48,11 +48,12 @@ operation involves capabilities that look alarming out of context:
 - **Synthetic input.** `SendInput`, with a `WM_PASTE` fallback, types into
   whatever window currently has focus. NexusVox does not choose that window.
 - **Local dashboard.** A Flask server bound to `127.0.0.1:47392`, started on
-  demand from the tray menu. **It has no authentication.** Anything able to make
-  HTTP requests from your machine can read your full transcription history,
-  change settings, and submit audio for transcription. This is a deliberate
-  trade-off for a single-user desktop tool, not an oversight — but you should
-  know it before running NexusVox on a shared or multi-user machine.
+  demand from the tray menu. Every request must carry a `127.0.0.1`/`localhost`
+  Host header (against DNS rebinding), a matching Origin where the browser sends
+  one, and a per-run session cookie that the browser only gets by opening the
+  one-time link the tray builds. Other programs and web pages get 403. A process
+  running as you can still read NexusVox's memory or database file directly, so
+  on a shared or multi-user machine rely on OS account separation as before.
 - **Local storage.** Transcriptions go into a SQLite database and recordings into
   an audio directory, both unencrypted, both readable by anything running as your
   user. Everything you have ever dictated is in there.

@@ -77,8 +77,18 @@ SUMMARY_SYSTEM = (
 CTX_DEFAULT = 4096
 
 
-def chat(model: str, system: str, user: str, *, cpu: bool, num_ctx: int = CTX_DEFAULT, keep_alive: str = "10m") -> dict:
-    options: dict = {"temperature": 0.2, "num_ctx": num_ctx}
+def chat(
+    model: str,
+    system: str,
+    user: str,
+    *,
+    cpu: bool,
+    num_ctx: int = CTX_DEFAULT,
+    keep_alive: str = "10m",
+    schema: dict | None = None,
+    temperature: float = 0.2,
+) -> dict:
+    options: dict = {"temperature": temperature, "num_ctx": num_ctx}
     if cpu:
         options["num_gpu"] = 0
     body = {
@@ -89,6 +99,8 @@ def chat(model: str, system: str, user: str, *, cpu: bool, num_ctx: int = CTX_DE
         "keep_alive": keep_alive,
         "options": options,
     }
+    if schema:
+        body["format"] = schema  # structured output: the reply is JSON that follows the schema
     request = urllib.request.Request(f"{URL}/api/chat", json.dumps(body).encode(), {"Content-Type": "application/json"})
     started = time.perf_counter()
     with urllib.request.urlopen(request, timeout=3600) as response:

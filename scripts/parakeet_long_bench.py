@@ -1,9 +1,9 @@
 """Measure Parakeet accuracy on long audio (over 20 s): raw WER and WER after the app's text pipeline.
 
-Builds long test items by joining consecutive FLEURS clips of a language (0.6 s of silence between
-them, the references joined the same way), so there are many long clips instead of the few FLEURS
-has. Every item is decoded by the in-process CPU path, or by the GPU container with --gpu-url, and
-scored twice against the reference:
+Builds long test items by joining consecutive clips of a folder (--gap-s of silence between them,
+default 0.6 s for FLEURS, 0 for LibriSpeech chapters; the references joined the same way), so there
+are many long clips instead of the few the corpus has. Every item is decoded by the in-process CPU
+path, or by the GPU container with --gpu-url, and scored twice against the reference:
 
   raw       the model output as is, normalised (lowercase, no punctuation) - comparable with the
             numbers in docs/parakeet-cpu-test.md
@@ -13,8 +13,10 @@ scored twice against the reference:
 
 Short clips (up to 20 s) are scored too, to show that dictation does not get worse.
 
-Needs the FLEURS clip folders (<lang>/*.wav plus refs.tsv, "<file>\t<reference>" per line, named after the
-FLEURS codes), as written by `scripts/parakeet_cpu_bench.py --fetch`.
+Folders from `scripts/librispeech_fetch.py` work too (--gap-s 0: consecutive utterances of one chapter
+need no silence added). Needs clip folders (<name>/*.wav plus refs.tsv, "<file>\t<reference>" per line):
+FLEURS ones named after the FLEURS codes, as written by `scripts/parakeet_cpu_bench.py --fetch`, or any
+names given with --langs.
 Heavy CPU load: run it while nobody works on the machine.
 
     python scripts/parakeet_long_bench.py fleurs --target-s 45 --items 8
@@ -132,19 +134,22 @@ def wer_of(items: list[tuple[int, int]]) -> float | None:
     return round(sum(e for e, _ in items) / words, 4) if words else None
 
 
-GAP = np.zeros(int(0.6 * SR), dtype=np.float32)
+GAP_S = 0.6
 
 
-def join_clips(clips: list[tuple[np.ndarray, str]], target_s: float, items: int) -> list[tuple[np.ndarray, str]]:
+def join_clips(
+    clips: list[tuple[np.ndarray, str]], target_s: float, items: int, gap_s: float = GAP_S
+) -> list[tuple[np.ndarray, str]]:
     """Consecutive clips joined into items of at least `target_s` seconds; at most `items` of them."""
+    gap = np.zeros(int(gap_s * SR), dtype=np.float32)
     out: list[tuple[np.ndarray, str]] = []
     parts: list[np.ndarray] = []
     refs: list[str] = []
     total = 0.0
     for samples, ref in clips:
-        parts += [samples, GAP]
+        parts += [samples, gap]
         refs.append(ref)
-        total += (len(samples) + len(GAP)) / SR
+        total += (len(samples) + len(gap)) / SR
         if total >= target_s:
             out.append((np.concatenate(parts), " ".join(refs)))
             parts, refs, total = [], [], 0.0
@@ -158,11 +163,14 @@ def main() -> None:
     ap.add_argument("fleurs_dir", type=Path)
     ap.add_argument("--langs", nargs="+", default=DEFAULT_LANGS)
     ap.add_argument("--target-s", type=float, default=45.0, help="minimum length of a long item")
+    ap.add_argument("--gap-s", type=float, default=GAP_S, help="silence inserted between joined clips")
     ap.add_argument("--items", type=int, default=8, help="long items per language")
     ap.add_argument("--config", type=Path, default=Path("config.toml"), help="settings for the pipeline WER")
     ap.add_argument("--gpu-url", help="measure the GPU container at this endpoint instead of the CPU path")
     ap.add_argument("--out", type=Path)
     args = ap.parse_args()
+    if args.gap_s < 0:
+        ap.error("--gap-s must be 0 or more")
 
     from nexusvox.config import load_config
     from nexusvox.pipeline import process_text
@@ -196,7 +204,7 @@ def main() -> None:
             continue
         rows = [ln.split("\t", 1) for ln in refs_file.read_text("utf-8").splitlines() if ln]
         clips = [(read_wav(args.fleurs_dir / lang / f), ref) for f, ref in rows]
-        long_items = join_clips(clips, args.target_s, args.items)
+        long_items = join_clips(clips, args.target_s, args.items, args.gap_s)
         short_items = [c for c in clips if len(c[0]) <= DIRECT_LIMIT_S * SR]
 
         scores: dict[str, dict[str, list[tuple[int, int]]]] = {

@@ -3,8 +3,9 @@
 Measured 2026-10-31 for the 1.0 goal "Parakeet on CPU, without Docker, as the default".
 
 **Verdict: supported as the default for dictation on a modern desktop CPU (8 cores / 16 threads or
-similar), with two caveats.** Audio longer than ~20 s loses accuracy on the CPU path (German badly),
-and a 4-thread machine is usable but slow. DE and EN are the supported languages; es/fr/pt are
+similar), with two caveats.** Audio longer than ~20 s is cut at pauses and is now within 3 points of
+the GPU path in every language (French is the widest gap, 11.8 vs 9.0 %); English over 20 s was
+measured on clean audiobook reading only. And a 4-thread machine is usable but slow. DE and EN are the supported languages; es/fr/pt are
 experimental, dictation only (see `docs/model-research.md`).
 
 ## Setup
@@ -101,7 +102,7 @@ normalised the same way. GPU = the Docker Parakeet container at `localhost:8002`
 | Lang | CPU short raw / pipeline | GPU short raw / pipeline | CPU long raw / pipeline | GPU long raw / pipeline |
 |---|---|---|---|---|
 | de | 7.3 / 7.4 % | 5.4 / 5.5 % | **7.1 / 7.0 %** | 5.4 / 5.3 % |
-| en | 6.0 / 6.5 % | 5.6 / 6.5 % | 66.3 / 66.2 % (see below) | 24.9 / 25.4 % |
+| en | 6.0 / 6.5 % | 5.6 / 6.5 % | 66.3 / 66.2 % (invalid, see below; real speech: next section) | 24.9 / 25.4 % |
 | es | 4.1 / 4.1 % | 3.5 / 3.5 % | 3.6 / 3.6 % | 3.2 / 3.2 % |
 | fr | 7.9 / 7.9 % | 6.2 / 6.2 % | 11.8 / 11.8 % | 9.0 / 9.0 % |
 | pt | 5.9 / 5.9 % | 4.2 / 4.2 % | 5.4 / 5.4 % | 4.7 / 4.7 % |
@@ -114,15 +115,44 @@ normalised the same way. GPU = the Docker Parakeet container at `localhost:8002`
 - **Text pipeline** barely moves the numbers. Only English shifts (by 0.5-1 point, digits are
   matched differently); German does not, so the earlier suspicion that written-out numbers inflate DE
   WER is not what drives the gap here.
-- **English long items are not a valid result.** Both CPU (66 %) and GPU (25 %) lose whole sentences
-  from joined English clips. Two joined English clips of at most 20 s, decoded in a single call with
-  no segmentation involved, already lose text on CPU (31 % WER, 6 pairs; German pairs 7.5 %), and single English
-  clips score 7 %. So the cause is the joined test material or the model on it, not the pause cutter.
-  English long audio therefore still has **no trustworthy measurement**; it needs a real recording
-  (one speaker, one take) of 30 s or more.
+- **English long items from joined FLEURS clips are not a valid result.** Both CPU (66 %) and GPU (25 %)
+  lose whole sentences from joined English clips. Two joined English clips of at most 20 s, decoded in a
+  single call with no segmentation involved, already lose text on CPU (31 % WER, 6 pairs; German pairs
+  7.5 %), and single English clips score 7 %. So the cause is not the pause cutter. It is either the
+  glued-together test material or an English weakness of the model on abrupt sentence changes; the
+  next section shows that real continuous English speech is not affected.
 - Other languages: fr is 2.8 points behind the GPU on long items, es and pt within 1 point.
 - Caveat: samples are small and the cut thresholds (0.2 s pause, 0.006 RMS) are tuned on nothing but
   these clips; joined FLEURS clips have clean 0.6 s gaps, which real speech may not.
+
+### English over 20 s on continuous speech (LibriSpeech test-clean)
+
+The joined FLEURS clips above cannot measure English, so this run uses real continuous reading:
+`scripts/librispeech_fetch.py` downloads LibriSpeech test-clean (CC BY 4.0, ~350 MB) and prepares six
+chapters of six different speakers (263-492 s each). `scripts/parakeet_long_bench.py ... --gap-s 0`
+joins consecutive utterances of one chapter (`--gap-s 0 --items 3`), without inserted silence, into items of at least 45 s: 18
+items, 48-55 s each (three per chapter). "Short" is every single utterance up to 20 s from the same
+chapters (294 of them). Raw / pipeline as above; values are the unweighted mean of the six per-chapter WERs (each chapter contributes three items of
+similar length), not a pooled corpus WER like the FLEURS rows.
+The pipeline run used the maintainer's voice-command settings (numbers as digits) with an empty
+dictionary and no snippets.
+
+| | CPU raw / pipeline | GPU raw / pipeline |
+|---|---|---|
+| Short, up to 20 s (294 utterances) | 3.7 / 4.6 % | 3.0 / 3.9 % |
+| Long, 48-55 s (18 items) | **2.4 / 3.3 %** | 2.4 / 3.4 % |
+
+- **English over 20 s is fine on CPU.** It matches the GPU container (2.4 % raw on both) and is no
+  worse than the short clips. Per chapter the CPU is at most 0.6 points behind the GPU on long items (equal on two
+  chapters, ahead on one), and 0.1-1.5 points behind on short ones.
+- **Cause of the FLEURS failure: the test material, not the pause cutter and not the model.** On
+  continuous speech the pause cutter (CPU) and the single full-length call (GPU) give the same WER.
+  Both only lost text when the input was unrelated sentences glued together.
+- The pipeline adds about 1 point to both backends (the LibriSpeech references spell numbers
+  out, so digits count as errors; not checked further), so the raw figure is the fairer one for English.
+- Caveat: audiobook readers speak clearly and evenly with studio-quality audio; microphone dictation
+  with background noise and hesitations will be somewhat worse on either backend. Six speakers and
+  18 items: differences of a few tenths of a point are noise.
 
 ### Minimum hardware
 
@@ -149,7 +179,8 @@ already resolves to this path. What is missing for "default for everyone":
 1. **On a machine with an NVIDIA GPU, `auto` still picks the Docker container.** Making the CPU
    path the default there means changing the `auto` resolution (or the first-run default) in
    `resolve_device` and the config template.
-2. **The >20 s accuracy problem above**, mainly for German.
+2. **Audio over 20 s**: the pause cutter closed most of the gap (see the two sections above), but French
+   is still 2.8 points behind the GPU and English was measured on clean reading only.
 3. **No speaker detection** on CPU (known, `SPEAKERS_NEED_GPU`).
 4. **First launch downloads ~670 MB** from Hugging Face; the dashboard shows the state, but a
    packaged build could bundle or pre-fetch it.
@@ -161,5 +192,5 @@ already resolves to this path. What is missing for "default for everyone":
   no GPU or Docker.
 - **Minimum hardware:** 4 logical processors and 4 GB RAM (slow); recommended 8 threads / 8 GB.
 - **Meetings and uploads:** German, Spanish, French and Portuguese over 20 s are now within 3 points
-  of the GPU path (pause cut). English over 20 s is unverified (see above); check it with a real long
-  recording before making CPU the default for long files.
+  of the GPU path (pause cut). English over 20 s on continuous speech is equal to the GPU (2.4 % vs
+  2.4 % WER on LibriSpeech, see above).

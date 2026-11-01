@@ -543,17 +543,36 @@ class CleanupConfig:
     timeout_s: float = 3.0
 
 
+# `[cleanup].timeout_s` when unset and there is no CUDA GPU: the CPU needs 2-6 s (docs/llm-cpu-test.md).
+CLEANUP_TIMEOUT_CPU_S = 10.0
+
+
+def auto_llm_model() -> str:
+    """The model for an unset `[llm].model`: gemma4:e2b without a CUDA GPU, gemma4:e4b with one."""
+    return LlmConfig.model if cuda_available() else LLM_MODEL_CPU
+
+
+def auto_cleanup_timeout() -> float:
+    """The cleanup timeout for an unset `[cleanup].timeout_s`: longer on the CPU."""
+    return CleanupConfig.timeout_s if cuda_available() else CLEANUP_TIMEOUT_CPU_S
+
+
+def with_hardware_defaults(config: Config) -> Config:
+    """*config* with the hardware-dependent defaults applied (a config built without a file)."""
+    config.llm.model = auto_llm_model()
+    config.cleanup.timeout_s = auto_cleanup_timeout()
+    return config
+
+
 def _llm_model(data: dict) -> str:
-    """The configured model; if none is set, gemma4:e2b without a CUDA GPU and gemma4:e4b with one."""
-    if "model" in data:
-        return str(data["model"])
-    return LLM_MODEL_CPU if not cuda_available() else LlmConfig.model
+    """The configured model, or the hardware default when none is set."""
+    return str(data["model"]) if "model" in data else auto_llm_model()
 
 
 def _cleanup_config(data: dict) -> CleanupConfig:
     """An unknown level is off; a timeout of 0 or less would fail every request at once."""
     level = str(data.get("level", "off")).strip().lower()
-    timeout_s = float(data.get("timeout_s", CleanupConfig.timeout_s))
+    timeout_s = float(data["timeout_s"]) if "timeout_s" in data else auto_cleanup_timeout()
     return CleanupConfig(
         level=level if level in CLEANUP_LEVELS else "off",
         timeout_s=timeout_s if timeout_s > 0 else CleanupConfig.timeout_s,
@@ -680,7 +699,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         if EXAMPLE_CONFIG_PATH.exists():
             shutil.copy(EXAMPLE_CONFIG_PATH, path)
         else:
-            return Config()
+            return with_hardware_defaults(Config())
 
     with open(path, "rb") as f:
         data = tomllib.load(f)
@@ -940,7 +959,12 @@ def save_config(config: Config, path: Path | None = None) -> None:
             "[llm]",
             f"url = {json.dumps(config.llm.url)}",
             f'protocol = "{config.llm.protocol}"',
-            f"model = {json.dumps(config.llm.model)}",
+            # A model that is just the hardware default stays unset, so it keeps following the hardware.
+            *(
+                [f"model = {json.dumps(config.llm.model)}"]
+                if config.llm.model != auto_llm_model()
+                else ["# model = (unset: gemma4:e4b with a CUDA GPU, gemma4:e2b without)"]
+            ),
             # A free-form secret: escape it, a `"` or `\` would break the file.
             f"api_key = {json.dumps(config.llm.api_key)}",
             f"timeout_s = {config.llm.timeout_s}",
@@ -951,7 +975,11 @@ def save_config(config: Config, path: Path | None = None) -> None:
             "",
             "[cleanup]",
             f'level = "{config.cleanup.level}"',
-            f"timeout_s = {config.cleanup.timeout_s}",
+            *(
+                [f"timeout_s = {config.cleanup.timeout_s}"]
+                if config.cleanup.timeout_s != auto_cleanup_timeout()
+                else ["# timeout_s = (unset: 3 s with a CUDA GPU, 10 s without)"]
+            ),
             "",
             "[learn_from_edits]",
             f"enabled = {'true' if config.learn_from_edits.enabled else 'false'}",

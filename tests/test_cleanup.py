@@ -148,8 +148,7 @@ def test_cleanup_defaults_to_off():
     assert CleanupConfig().level == "off"
 
 
-def test_cleanup_runs_without_cuda(model, monkeypatch):
-    monkeypatch.setattr("nexusvox.config.cuda_available", lambda: False)
+def test_cleanup_does_not_depend_on_cuda(model):
     model.reply = "Das ist ein Test."
     assert cleanup("ähm das ist ein test", LIGHT, LlmConfig()).cleaned
 

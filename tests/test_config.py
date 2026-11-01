@@ -613,12 +613,55 @@ def test_llm_model_choice_is_kept(tmp_path, monkeypatch, has_cuda):
     assert load_config(path).llm.model == "gemma4:e4b"
 
 
+@pytest.mark.parametrize("has_cuda", [False, True])
+def test_hardware_defaults_are_not_pinned_by_a_save(tmp_path, monkeypatch, has_cuda):
+    monkeypatch.setattr(config_module, "cuda_available", lambda: has_cuda)
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    save_config(load_config(path), path)
+    saved = tomllib.loads(path.read_text(encoding="utf-8"))
+    assert "model" not in saved["llm"] and "timeout_s" not in saved["cleanup"]
+    # The same file moved to the other kind of machine follows that machine.
+    monkeypatch.setattr(config_module, "cuda_available", lambda: not has_cuda)
+    moved = load_config(path)
+    assert moved.llm.model == ("gemma4:e4b" if not has_cuda else "gemma4:e2b")
+
+
+def test_a_model_that_differs_from_the_default_is_saved(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "cuda_available", lambda: False)
+    path = tmp_path / "config.toml"
+    config = Config()
+    config.llm.model = "gemma4:e4b"
+    save_config(config, path)
+    assert load_config(path).llm.model == "gemma4:e4b"
+
+
+def test_cleanup_timeout_is_longer_on_the_cpu_unless_set(tmp_path, monkeypatch):
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(config_module, "cuda_available", lambda: False)
+    assert load_config(path).cleanup.timeout_s == 10.0
+    monkeypatch.setattr(config_module, "cuda_available", lambda: True)
+    assert load_config(path).cleanup.timeout_s == 3.0
+    monkeypatch.setattr(config_module, "cuda_available", lambda: False)
+    path.write_text("[cleanup]\ntimeout_s = 4.0\n", encoding="utf-8")
+    assert load_config(path).cleanup.timeout_s == 4.0
+
+
+def test_config_without_file_or_example_gets_the_hardware_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "cuda_available", lambda: False)
+    monkeypatch.setattr(config_module, "EXAMPLE_CONFIG_PATH", tmp_path / "missing.toml")
+    loaded = load_config(tmp_path / "config.toml")
+    assert (loaded.llm.model, loaded.cleanup.timeout_s) == ("gemma4:e2b", 10.0)
+
+
 def test_example_config_leaves_the_llm_model_unset():
     example = tomllib.loads(Path(config_module.__file__).with_name("config.example.toml").read_text(encoding="utf-8"))
     assert "model" not in example["llm"]
 
 
-def test_cleanup_roundtrip_and_unknown_level(tmp_path):
+def test_cleanup_roundtrip_and_unknown_level(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "cuda_available", lambda: True)
     path = tmp_path / "config.toml"
     save_config(Config(cleanup=CleanupConfig(level="medium", timeout_s=4.5)), path)
     assert load_config(path).cleanup == CleanupConfig(level="medium", timeout_s=4.5)

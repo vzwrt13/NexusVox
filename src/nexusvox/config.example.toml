@@ -224,7 +224,7 @@ mode = "sound"
 
 [llm]
 # The language model server polish uses. NexusVox does not ship a model: run Ollama
-# (https://ollama.com, then `ollama pull gemma4:e4b`) or any OpenAI-compatible server.
+# (https://ollama.com, then `ollama pull gemma4:e4b`, or `gemma4:e2b` without a CUDA GPU) or any OpenAI-compatible server.
 # protocol: "ollama" (url without /v1; turns a reasoning model's thinking off) or
 # "openai" (url up to /v1, e.g. http://127.0.0.1:1234/v1 for LM Studio).
 # If the server is down or fails, the selection stays as it was (error beep).
@@ -246,15 +246,15 @@ keep_alive = "10m"
 # Tidy every dictation through the [llm] model before it is typed (same model as polish).
 # "off" (default), "light": removes fillers ("um", "äh"), false starts and repeated words and
 # fixes punctuation, keeps the wording; "medium": also grammar, slightly more concise.
-# Adds ~0.6 s per dictation with gemma4:e4b. The transcript is saved as spoken. A reply that
+# Adds ~0.6 s per dictation with a CUDA GPU, about 2-6 s on the CPU (gemma4:e2b). The transcript is saved as spoken. A reply that
 # does not look like the dictation cleaned up (an answer, a translation, a lost line break or
 # snippet) is ignored, and dictations under 3 words are not sent. Also in the dashboard.
 # Without a CUDA GPU it runs on the CPU and adds about 2-6 s per dictation (the dashboard says so).
 level = "off"
 # A model still loading (10-50 s after [llm].keep_alive ran out) must not hold the dictation
-# up: after this many seconds it is typed unchanged. NexusVox loads the model at start and
+# up: after this many seconds it is typed unchanged. Not set: 3 s with a CUDA GPU, 10 s without. NexusVox loads the model at start and
 # when cleanup is switched on; a longer keep_alive keeps it loaded (and its VRAM in use).
-timeout_s = 3.0
+# timeout_s = 3.0
 
 [polish]
 # Polish in terminals too (Windows Terminal, console, Git Bash, VS Code/Orca terminals).

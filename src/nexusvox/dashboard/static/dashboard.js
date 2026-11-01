@@ -526,6 +526,7 @@ cleanupLevelSelect.addEventListener("change", async () => {
   const s = await resp.json();
   if (s.error) alert(s.error);
   cleanupLevelSelect.value = s.cleanup_level;
+  document.getElementById("cleanup-cpu-hint").hidden = !(s.cleanup_cpu_hint && s.cleanup_level !== "off");
 });
 pasteKeySelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/paste-key", { key: pasteKeySelect.value });
@@ -560,9 +561,7 @@ async function loadSettings() {
   llmModelInput.value = s.llm_model;
   meetingOwnLabelInput.value = meetingOwnLabelSaved = s.meeting_own_voice_label;
   cleanupLevelSelect.value = s.cleanup_level;
-  cleanupLevelSelect.disabled = !!s.cleanup_needs_cuda;
-  cleanupLevelSelect.title = s.cleanup_needs_cuda ? "Needs a CUDA GPU" : "";
-  document.getElementById("cleanup-cuda-hint").hidden = !s.cleanup_needs_cuda;
+  document.getElementById("cleanup-cpu-hint").hidden = !(s.cleanup_cpu_hint && s.cleanup_level !== "off");
   feedbackModeSelect.value = s.feedback_mode;
   loadLlmStatus();
   micGuardToggle.checked = s.mic_guard_enabled;

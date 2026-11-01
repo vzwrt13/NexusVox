@@ -9,10 +9,9 @@ and it fit together in VRAM, which is 12 GB and up with the Parakeet container (
 `qwen3.5:4b` is not recommended: it is slower on the CPU and it translates English text into German.
 Auto Cleanup on the CPU gives a usable answer in 2 s (short dictation) to 6 s (about 100 words) with
 `gemma4:e2b`, so it should stay off by default (as already decided) and show a latency hint.
-**The app does not allow this today**: `cleanup.cleanup()` returns the text unchanged without a CUDA GPU
-and the dashboard refuses to set a level (`NO_CUDA_HINT`, `dashboard/api.py`). Enabling Cleanup on CPU
-needs a code change (relax the `needs_cuda` gate, show the hint); the numbers here were taken by calling
-Ollama directly, not through the app.
+Since #173 the app allows it: without a CUDA GPU `[llm].model` defaults to `gemma4:e2b` when nothing is set
+(`config._llm_model`; an existing choice is kept), Cleanup can be switched on in the dashboard, and the
+Settings tab then shows the latency hint. The numbers here were taken by calling Ollama directly, not through the app.
 
 ## Setup
 

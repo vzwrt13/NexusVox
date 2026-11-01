@@ -12,13 +12,6 @@ from nexusvox.llm import LlmError
 LIGHT = CleanupConfig(level="light", timeout_s=3.0)
 
 
-@pytest.fixture(autouse=True)
-def cuda(monkeypatch):
-    """A CUDA GPU is present unless a test says otherwise."""
-    monkeypatch.setattr(cleanup_module, "cuda_available", lambda: True)
-    monkeypatch.setattr(cleanup_module, "_no_cuda_logged", False)
-
-
 @pytest.fixture
 def model(monkeypatch):
     """Replace the model call; the reply is set per test, the calls are recorded."""
@@ -155,18 +148,7 @@ def test_cleanup_defaults_to_off():
     assert CleanupConfig().level == "off"
 
 
-def test_cleanup_is_skipped_without_cuda_and_logs_once(model, monkeypatch, caplog):
-    monkeypatch.setattr(cleanup_module, "cuda_available", lambda: False)
-    model.reply = "Never used."
-    with caplog.at_level("WARNING", logger="nexusvox.cleanup"):
-        first = cleanup("ähm das ist ein test", LIGHT, LlmConfig())
-        second = cleanup("ähm das ist ein test", LIGHT, LlmConfig())
-    assert first.text == second.text == "ähm das ist ein test" and not first.cleaned
-    assert model.calls == []
-    assert len([r for r in caplog.records if "no CUDA GPU" in r.message]) == 1
-
-
-def test_cleanup_runs_with_cuda(model):
+def test_cleanup_does_not_depend_on_cuda(model):
     model.reply = "Das ist ein Test."
     assert cleanup("ähm das ist ein test", LIGHT, LlmConfig()).cleaned
 

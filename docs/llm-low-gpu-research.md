@@ -65,7 +65,12 @@ The cleanup code already rejects implausible replies, which limits the damage of
 over-eager small model. A blind test on German and English dictations (stage 2) is the only
 real answer.
 
-## Recommended defaults per tier (to be confirmed in stage 2)
+## Recommended defaults per tier (stage 2 changed these)
+
+**Superseded by the measurements in `docs/llm-cpu-test.md`**, which has the current table. Short form:
+no GPU and 4-8 GB VRAM use `gemma4:e2b` (on the CPU when the speech container leaves no room), 12+ GB uses
+`gemma4:e4b`. Qwen3 is superseded by Qwen3.5, and `qwen3.5:4b` is not recommended (it translates English text).
+The stage 1 table below is kept as the original estimate.
 
 | Tier | Hardware | Default | Alternative | Features |
 |---|---|---|---|---|
@@ -73,9 +78,9 @@ real answer.
 | **Small GPU** | 4-8 GB VRAM, shared with the speech model | `gemma4:e4b` | `gemma4:e2b` if VRAM is tight | All features. Mind `keep_alive` so the speech model keeps its VRAM |
 | **Large GPU** | 12+ GB VRAM | `gemma4:e4b` or a larger Gemma 4 | Qwen3 8B/14B | All features; a bigger model buys polish quality, not speed |
 
-Note: the `config.example.toml` comment mentions `gemma4:12b`. The Hugging Face listing
-shows the Gemma 4 family as E2B, E4B, 26B MoE and 31B dense; there is no 12B. Check the
-Ollama tag names before documenting larger models.
+Note: `gemma4:12b` exists in the Ollama library (7.7-8.0 GB). An earlier version of this
+note said the family has no 12B, based on the Hugging Face listing; that was wrong. Stage 2
+results and the confirmed defaults are in `docs/llm-cpu-test.md`.
 
 ## Config and UI changes that would make the choice easy
 

@@ -1,9 +1,9 @@
 """Measure Parakeet accuracy on long audio (over 20 s): raw WER and WER after the app's text pipeline.
 
-Builds long test items by joining consecutive FLEURS clips of a language (0.6 s of silence between
-them, the references joined the same way), so there are many long clips instead of the few FLEURS
-has. Every item is decoded by the in-process CPU path, or by the GPU container with --gpu-url, and
-scored twice against the reference:
+Builds long test items by joining consecutive clips of a folder (--gap-s of silence between them,
+default 0.6 s for FLEURS, 0 for LibriSpeech chapters; the references joined the same way), so there
+are many long clips instead of the few the corpus has. Every item is decoded by the in-process CPU
+path, or by the GPU container with --gpu-url, and scored twice against the reference:
 
   raw       the model output as is, normalised (lowercase, no punctuation) - comparable with the
             numbers in docs/parakeet-cpu-test.md
@@ -169,6 +169,8 @@ def main() -> None:
     ap.add_argument("--gpu-url", help="measure the GPU container at this endpoint instead of the CPU path")
     ap.add_argument("--out", type=Path)
     args = ap.parse_args()
+    if args.gap_s < 0:
+        ap.error("--gap-s must be 0 or more")
 
     from nexusvox.config import load_config
     from nexusvox.pipeline import process_text

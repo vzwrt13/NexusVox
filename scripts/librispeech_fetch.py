@@ -16,6 +16,8 @@ files plus refs.tsv ("<file>\\t<reference>" per line, in reading order). Needs f
 from __future__ import annotations
 
 import argparse
+import shutil
+import struct
 import subprocess
 import tarfile
 import urllib.request
@@ -31,19 +33,29 @@ def main() -> None:
     ap.add_argument("--min-chapter-s", type=float, default=240.0, help="skip chapters with less audio than this")
     args = ap.parse_args()
 
+    if not shutil.which("ffmpeg"):
+        raise SystemExit("ffmpeg is not on the PATH")
     root = args.out_dir
     root.mkdir(parents=True, exist_ok=True)
     archive = root / "test-clean.tar.gz"
     corpus = root / "LibriSpeech" / "test-clean"
-    if not corpus.exists():
+    done = root / "extracted.ok"
+    if not done.exists():
         if not archive.exists():
-            urllib.request.urlretrieve(URL, archive)
+            part = archive.with_suffix(".part")
+            urllib.request.urlretrieve(URL, part)
+            part.replace(archive)  # only a complete download carries the final name
+        shutil.rmtree(root / "LibriSpeech", ignore_errors=True)
         with tarfile.open(archive) as tar:
-            tar.extractall(root, filter="data")
+            if hasattr(tarfile, "data_filter"):  # absent before Python 3.11.4
+                tar.extractall(root, filter="data")
+            else:
+                tar.extractall(root)
+        done.write_text("ok")
 
     chapters = []  # (speaker, chapter, dir, utterances [(id, text)], seconds)
-    for spk in sorted(corpus.iterdir(), key=lambda p: int(p.name)):
-        for chap in sorted(spk.iterdir(), key=lambda p: int(p.name)):
+    for spk in sorted((p for p in corpus.iterdir() if p.name.isdigit()), key=lambda p: int(p.name)):
+        for chap in sorted((p for p in spk.iterdir() if p.name.isdigit()), key=lambda p: int(p.name)):
             lines = (chap / f"{spk.name}-{chap.name}.trans.txt").read_text("utf-8").splitlines()
             utts = [ln.split(" ", 1) for ln in lines if ln]
             seconds = sum(_flac_seconds(chap / f"{uid}.flac") for uid, _ in utts)
@@ -71,13 +83,12 @@ def main() -> None:
 
 
 def _flac_seconds(path: Path) -> float:
-    out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return float(out.stdout.strip())
+    """Duration from the STREAMINFO block (right after the 4-byte "fLaC" marker and a 4-byte block header)."""
+    with path.open("rb") as f:
+        head = f.read(26)
+    assert head[:4] == b"fLaC", path
+    packed = struct.unpack(">Q", head[18:26])[0]  # 20 bits rate, 3 channels, 5 bits depth, 36 bits samples
+    return (packed & ((1 << 36) - 1)) / (packed >> 44)
 
 
 if __name__ == "__main__":

@@ -3,8 +3,9 @@
 Measured 2026-10-31 for the 1.0 goal "Parakeet on CPU, without Docker, as the default".
 
 **Verdict: supported as the default for dictation on a modern desktop CPU (8 cores / 16 threads or
-similar), with one caveat.** A 4-thread machine is usable but slow. Audio longer than ~20 s is cut at
-pauses and tracks the GPU path in every language measured (English on continuous speech only). DE and EN are the supported languages; es/fr/pt are
+similar), with two caveats.** Audio longer than ~20 s is cut at pauses and is now within 3 points of
+the GPU path in every language (French is the widest gap, 11.8 vs 9.0 %); English over 20 s was
+measured on clean audiobook reading only. And a 4-thread machine is usable but slow. DE and EN are the supported languages; es/fr/pt are
 experimental, dictation only (see `docs/model-research.md`).
 
 ## Setup
@@ -115,8 +116,11 @@ normalised the same way. GPU = the Docker Parakeet container at `localhost:8002`
   matched differently); German does not, so the earlier suspicion that written-out numbers inflate DE
   WER is not what drives the gap here.
 - **English long items from joined FLEURS clips are not a valid result.** Both CPU (66 %) and GPU (25 %)
-  lose whole sentences from them, because the clips are unrelated sentences glued together. English was
-  therefore measured on real continuous reading instead (next section): it is fine.
+  lose whole sentences from joined English clips. Two joined English clips of at most 20 s, decoded in a
+  single call with no segmentation involved, already lose text on CPU (31 % WER, 6 pairs; German pairs
+  7.5 %), and single English clips score 7 %. So the cause is not the pause cutter. It is either the
+  glued-together test material or an English weakness of the model on abrupt sentence changes; the
+  next section shows that real continuous English speech is not affected.
 - Other languages: fr is 2.8 points behind the GPU on long items, es and pt within 1 point.
 - Caveat: samples are small and the cut thresholds (0.2 s pause, 0.006 RMS) are tuned on nothing but
   these clips; joined FLEURS clips have clean 0.6 s gaps, which real speech may not.
@@ -126,9 +130,10 @@ normalised the same way. GPU = the Docker Parakeet container at `localhost:8002`
 The joined FLEURS clips above cannot measure English, so this run uses real continuous reading:
 `scripts/librispeech_fetch.py` downloads LibriSpeech test-clean (CC BY 4.0, ~350 MB) and prepares six
 chapters of six different speakers (263-492 s each). `scripts/parakeet_long_bench.py ... --gap-s 0`
-joins consecutive utterances of one chapter, without inserted silence, into items of at least 45 s: 18
+joins consecutive utterances of one chapter (`--gap-s 0 --items 3`), without inserted silence, into items of at least 45 s: 18
 items, 48-55 s each (three per chapter). "Short" is every single utterance up to 20 s from the same
-chapters (294 of them). Raw / pipeline as above; values are the mean over the six chapters.
+chapters (294 of them). Raw / pipeline as above; values are the unweighted mean of the six per-chapter WERs (each chapter contributes three items of
+similar length), not a pooled corpus WER like the FLEURS rows.
 The pipeline run used the maintainer's voice-command settings (numbers as digits) with an empty
 dictionary and no snippets.
 
@@ -174,7 +179,8 @@ already resolves to this path. What is missing for "default for everyone":
 1. **On a machine with an NVIDIA GPU, `auto` still picks the Docker container.** Making the CPU
    path the default there means changing the `auto` resolution (or the first-run default) in
    `resolve_device` and the config template.
-2. ~~The >20 s accuracy problem~~ fixed by the pause cutter, see the two sections above.
+2. **Audio over 20 s**: the pause cutter closed most of the gap (see the two sections above), but French
+   is still 2.8 points behind the GPU and English was measured on clean reading only.
 3. **No speaker detection** on CPU (known, `SPEAKERS_NEED_GPU`).
 4. **First launch downloads ~670 MB** from Hugging Face; the dashboard shows the state, but a
    packaged build could bundle or pre-fetch it.

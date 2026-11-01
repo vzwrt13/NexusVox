@@ -25,7 +25,6 @@ from .config import (
     MODEL_REGISTRY,
     Config,
     InferenceConfig,
-    cuda_available,
     model_needs_docker,
     resolve_device,
     save_config,
@@ -1027,7 +1026,7 @@ class NexusVoxApp:
             if self._config.mic_guard.enabled:
                 await self._loop.run_in_executor(None, self._mic_guard.warm_up)
 
-        if self._config.cleanup.level != "off" and cuda_available():
+        if self._config.cleanup.level != "off":
             # Auto cleanup gives up after [cleanup].timeout_s; a cold model would cost the first dictations.
             llm_warm_up(self._config.llm)
 

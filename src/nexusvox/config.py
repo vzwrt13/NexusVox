@@ -512,6 +512,8 @@ class FeedbackConfig:
 
 
 LLM_PROTOCOLS = ("ollama", "openai")
+# Preselected when `[llm].model` is not set and there is no CUDA GPU (docs/llm-cpu-test.md).
+LLM_MODEL_CPU = "gemma4:e2b"
 
 
 @dataclass
@@ -522,7 +524,7 @@ class LlmConfig:
 
     url: str = "http://127.0.0.1:11434"
     protocol: str = "ollama"
-    model: str = "gemma4:e4b"
+    model: str = "gemma4:e4b"  # without a CUDA GPU and with no choice made: LLM_MODEL_CPU
     api_key: str = ""
     timeout_s: float = 60.0
     keep_alive: str = "10m"
@@ -539,6 +541,13 @@ class CleanupConfig:
 
     level: str = "off"
     timeout_s: float = 3.0
+
+
+def _llm_model(data: dict) -> str:
+    """The configured model; if none is set, gemma4:e2b without a CUDA GPU and gemma4:e4b with one."""
+    if "model" in data:
+        return str(data["model"])
+    return LLM_MODEL_CPU if not cuda_available() else LlmConfig.model
 
 
 def _cleanup_config(data: dict) -> CleanupConfig:
@@ -808,7 +817,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         llm=LlmConfig(
             url=str(llm_data.get("url", LlmConfig.url)),
             protocol=llm_data.get("protocol") if llm_data.get("protocol") in LLM_PROTOCOLS else "ollama",
-            model=str(llm_data.get("model", LlmConfig.model)),
+            model=_llm_model(llm_data),
             api_key=str(llm_data.get("api_key", "")),
             timeout_s=float(llm_data.get("timeout_s", LlmConfig.timeout_s)),
             keep_alive=str(llm_data.get("keep_alive", LlmConfig.keep_alive)),

@@ -232,7 +232,9 @@ url = "http://127.0.0.1:11434"
 protocol = "ollama"
 # gemma4:e4b: ~4.6 GB VRAM, ~0.5 s per polish on an RTX 5070 Ti, keeps tone and language.
 # Mind the VRAM the speech model needs; bigger models (e.g. gemma4:12b, ~8 GB) polish better.
-model = "gemma4:e4b"
+# Not set: gemma4:e4b with a CUDA GPU, gemma4:e2b (smaller, ~2 s per polish on the CPU) without.
+# Setting it here or in the dashboard keeps your choice. `ollama pull` the model first.
+# model = "gemma4:e4b"
 # Sent as a Bearer token when set (cloud or protected servers). Leave empty for local ones.
 api_key = ""
 timeout_s = 60.0
@@ -247,7 +249,7 @@ keep_alive = "10m"
 # Adds ~0.6 s per dictation with gemma4:e4b. The transcript is saved as spoken. A reply that
 # does not look like the dictation cleaned up (an answer, a translation, a lost line break or
 # snippet) is ignored, and dictations under 3 words are not sent. Also in the dashboard.
-# Needs a CUDA GPU: without one the dashboard greys it out and cleanup is skipped.
+# Without a CUDA GPU it runs on the CPU and adds about 2-6 s per dictation (the dashboard says so).
 level = "off"
 # A model still loading (10-50 s after [llm].keep_alive ran out) must not hold the dictation
 # up: after this many seconds it is typed unchanged. NexusVox loads the model at start and

@@ -142,7 +142,7 @@ generation than Gemma 4 (E2B, E4B, 12B, 26B, 31B) and no newer Qwen than Qwen3.5
 
 **Data.** `scripts/llm_eval_items.py`: 60 dictations (30 German, 30 English: fillers, false starts, repeated
 words, digits and number words, product names, a few questions and orders that must not be answered), each at
-both Cleanup levels, and 52 Polish selections (26 German, 26 English) with a spoken instruction. Summaries use
+both Cleanup levels, and 52 Polish selections (25 German, 27 English) with a spoken instruction. Summaries use
 three real meetings from the AMI corpus (CC BY 4.0, hand-made transcripts of spontaneous English speech with
 4 speakers, `scripts/ami_fetch.py`): ES2008a, IS1008a, TS3003a, 3,100-3,400 words, 4,358-4,842 prompt tokens,
 about 20-25 minutes of speech each.
@@ -171,7 +171,10 @@ well on Cleanup; the misses are a leftover repetition and, at `medium`, a droppe
 **Speed.** Wall time of each HTTP request, model loaded, 3 runs per item. Ollama reuses the cached prompt of an
 identical request, so runs 2 and 3 skip most of the prefill, which is a large part of a short request on the
 CPU. The first run of every item matches real dictation (the system prompt is cached, the dictation is new), so
-it is the headline number. Replies are about 20 tokens.
+it is the headline number; the other runs are kept because the ticket asks for 3 runs per item, and they made the
+CPU runs about three times longer for numbers set aside here. p90 is the nearest-rank percentile. The summary model
+is reloaded at the 8192-token context before the first summary, so no summary pays for the reload. Replies are about
+20 tokens.
 
 | Job (requests) | `gemma4:e2b` CPU | `gemma4:e4b` CPU | `gemma4:e2b` GPU | `gemma4:e4b` GPU |
 |---|---|---|---|---|
@@ -179,18 +182,20 @@ it is the headline number. Replies are about 20 tokens.
 | Cleanup, all 3 runs, median / p90 (360) | 1.3 s / 3.0 s | 2.0 s / 5.4 s | 0.48 s / 0.52 s | 0.51 s / 0.55 s |
 | Polish, 1st run, median / p90 (52) | 2.0 s / 2.6 s | 3.6 s / 4.9 s | 0.50 s / 0.55 s | 0.54 s / 0.62 s |
 | Polish, all 3 runs, median / p90 (156) | 1.6 s / 2.4 s | 2.8 s / 4.2 s | 0.49 s / 0.54 s | 0.52 s / 0.62 s |
-| Meeting summary, 1st run, 4.4-4.8k tokens (3 meetings) | 38-43 s | 66-72 s | 1.3-1.8 s, 7.5 s with a model reload | 1.9-2.0 s, 8.3 s with a reload |
+| Meeting summary, 1st run, 4.4-4.8k tokens (3 meetings) | 35-40 s | 63-66 s | 1.3-2.1 s | 1.8-2.2 s |
 
 German and English dictations of the same size differ by less than 10 %. The first table's 1.7 s for a short
 German Cleanup on `gemma4:e2b` was the cached case; the cold number on this CPU is 2.9 s.
 
 **Translation check (the `qwen3.5:4b` problem from #156).** The 26 English Polish selections that do not ask for a
-translation, three instruction styles, GPU, one reply each, "German" detected by common words:
+translation, three instruction styles, GPU, one reply each, "German" detected by common words. In the German column each
+English instruction is replaced by its own German equivalent ("Make it more formal" by "Mach es formeller"), so
+only the language of the instruction changes:
 
 | | English instruction (as the app sends it) | German instruction on English text | Default instruction (nothing spoken) |
 |---|---|---|---|
-| `qwen3.5:4b` | 4 of 26 German | 14 of 26 | 3 of 26 |
-| `gemma4:e4b` | 4 of 26 | 12 of 26 | 2 of 26 |
+| `qwen3.5:4b` | 4 of 26 German | 12 of 26 | 4 of 26 |
+| `gemma4:e4b` | 5 of 26 | 11 of 26 | 2 of 26 |
 | `gemma4:e2b` | 0 of 26 | 13 of 26 | 0 of 26 |
 
 So it is not specific to Qwen, and it is partly our prompt: the system prompt is English, but a **German
@@ -207,13 +212,13 @@ short paragraph (10-25 words in, about 20 tokens out), Ollama defaults.
 
 | Claim | Source of the number |
 |---|---|
-| "Auto Cleanup on an 8-core CPU takes about 3 s for a sentence with `gemma4:e2b` (95 % of requests under 3.3 s) and about 5 s with `gemma4:e4b`" | Cleanup 1st run, median 2.9 / 5.2 s, p90 3.2 / 5.8 s |
+| "Auto Cleanup on an 8-core CPU takes about 3 s for a sentence with `gemma4:e2b` (90 % of requests under 3.2 s) and about 5 s with `gemma4:e4b`" | Cleanup 1st run, median 2.9 / 5.2 s, p90 3.2 / 5.8 s |
 | "Auto Cleanup on a GPU takes half a second with either model" | 0.50-0.53 s median, p90 0.56 s |
-| "Cleanup kept the meaning, language and facts in 97-100 % of 120 German and English test dictations (`gemma4:e2b`), and 93-98 % came out fully clean" | rubric criteria 96.7-100 %, all 4 criteria 93.3-98.3 % (CPU) |
+| "Cleanup kept the meaning, language and facts in 97-100 % of the replies to 60 German and English test dictations at two Cleanup levels (`gemma4:e2b`), and 93-98 % came out fully clean" | rubric criteria 96.7-100 %, all 4 criteria 93.3-98.3 % (CPU) |
 | "Polish follows a spoken instruction in German or English: 96.7 % rubric score with `gemma4:e2b`, 90 % of rewrites right on every criterion" | 52 selections |
-| "A 20-minute meeting is summarised in about 40 s on an 8-core CPU (`gemma4:e2b`) and in under 2 s on the GPU" | 3 AMI meetings, 1st run |
+| "A 20-minute meeting is summarised in about 40 s on an 8-core CPU (`gemma4:e2b`) and in about 2 s on the GPU" | 3 AMI meetings, 1st run |
 | "Runs fully on the CPU: no GPU needed for Cleanup, Polish or summaries" | CPU columns |
-| **Do not claim:** that Polish never changes the language (`gemma4:e4b` and `qwen3.5:4b` returned German for 4 of 26 English selections with an English instruction in the translation check); that it runs this fast on any CPU (one CPU measured; the Parakeet CPU test saw 2x slower speech on 4 threads); a ranking of summary quality (3 items, all at the ceiling); accuracy against a human reader (the judge is a model) | |
+| **Do not claim:** that Polish never changes the language (`gemma4:e4b` and `qwen3.5:4b` returned German for 5 and 4 of 26 English selections with an English instruction in the translation check); that it runs this fast on any CPU (one CPU measured; the Parakeet CPU test saw 2x slower speech on 4 threads); a ranking of summary quality (3 items, all at the ceiling); accuracy against a human reader (the judge is a model) | |
 
 **Limits.** The judge is a local model of the same family as the two tested ones. It passed every summary and it
 makes mistakes (it flagged a cleaned "I I found" as still repeated). 19 items for a human spot check are in

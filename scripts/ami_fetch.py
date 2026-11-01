@@ -33,6 +33,8 @@ def meeting_words(archive: zipfile.ZipFile, meeting: str) -> list[tuple[float, s
             if node.tag.endswith("}w") or node.tag == "w":
                 start = float(node.get("starttime", "0"))
                 words.append((start, speaker, (node.text or "").strip(), node.get("punc") == "true"))
+    if not words:
+        raise SystemExit(f"no transcript words for {meeting!r} in the archive (check the meeting ID, e.g. ES2008a)")
     words.sort(key=lambda w: w[0])
     return [(start, speaker, (token, punc)) for start, speaker, token, punc in words]
 
@@ -65,10 +67,14 @@ def main() -> None:
     zip_path = args.out_dir / "ami_public_manual_1.6.2.zip"
     if not zip_path.exists():
         print("downloading", URL)
-        urllib.request.urlretrieve(URL, zip_path)
+        part = zip_path.with_name(zip_path.name + ".part")  # a dropped connection must not leave a truncated zip
+        urllib.request.urlretrieve(URL, part)
+        part.replace(zip_path)
     with zipfile.ZipFile(zip_path) as archive:
         for meeting in args.meetings:
             text = transcript(meeting_words(archive, meeting), args.max_words)
+            if not text:
+                raise SystemExit(f"{meeting}: the first turn is longer than --max-words, nothing to write")
             (args.out_dir / f"{meeting}.txt").write_text(text, encoding="utf-8")
             print(meeting, len(text.split()), "words")
 

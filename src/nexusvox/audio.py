@@ -64,6 +64,9 @@ class AudioCapture:
     def start(self) -> None:
         """Start capturing audio from the default microphone."""
         self._loop = asyncio.get_event_loop()
+        # A recording starts with an empty queue: chunks or an end marker an earlier one left behind
+        # (a stream that stopped reading early) would otherwise come out as this recording's audio.
+        self._queue = asyncio.Queue()
         self._chunk_count = 0
         # Calculate frames per callback to produce ~chunk_size bytes
         # Each PCM16 sample = 2 bytes, mono = 1 channel

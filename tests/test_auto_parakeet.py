@@ -32,11 +32,16 @@ class FakeCpu(BaseTranscriber):
     async def connect(self) -> None:
         self.connects += 1
         self.is_connected = True
+        self.buffer = bytearray()
 
     async def send_audio_chunk(self, pcm16_bytes: bytes) -> None:
+        if not self.is_connected:
+            raise RuntimeError("Not connected")
         self.buffer.extend(pcm16_bytes)
 
     async def finish(self, timeout: float = 30.0) -> TranscriptionResult:
+        if not self.is_connected:
+            raise RuntimeError("Not connected")
         result = TranscriptionResult()
         result.finalize(text="from cpu")
         return result
@@ -47,6 +52,9 @@ class FakeCpu(BaseTranscriber):
     @property
     def connected(self) -> bool:
         return self.is_connected
+
+
+REAL_PRELOAD_CPU = AutoParakeetTranscriber._preload_cpu
 
 
 @pytest.fixture
@@ -322,3 +330,47 @@ def test_health_probe_lines_are_dropped_from_the_httpx_log_but_posts_stay():
     assert flt.filter(record('HTTP Request: GET http://127.0.0.1:8002/health "HTTP/1.1 200 OK"')) is False
     post = 'HTTP Request: POST http://127.0.0.1:8002/v1/audio/transcriptions "HTTP/1.1 200 OK"'
     assert flt.filter(record(post)) is True
+
+
+async def test_state_change_mid_cycle_keeps_the_running_cycle_on_its_engine(server, monkeypatch):
+    """The server comes back while a take records on the CPU: the take finishes there with all its audio."""
+    server["up"] = False
+    transcriber, cpu = make(warm=False)
+    await transcriber.prepare()
+    await transcriber.connect()
+    await transcriber.send_audio_chunk(b"\x00\x01" * 100)
+
+    loaders = []
+
+    class Loader:
+        """Stands in for the throw-away preload instance; the shared CPU engine must not be touched."""
+
+        def __init__(self, config):
+            loaders.append(self)
+            self.connected_ = False
+
+        async def connect(self):
+            self.connected_ = True
+
+        async def disconnect(self):
+            self.connected_ = False
+
+    import nexusvox.transcribers.local_parakeet as lp
+
+    monkeypatch.setattr(lp, "LocalParakeetTranscriber", Loader)
+    monkeypatch.setattr(AutoParakeetTranscriber, "_preload_cpu", REAL_PRELOAD_CPU)
+    gate = threading.Event()
+    server["hold"] = gate  # the warm-up of the returned server is still running
+    server["up"] = True
+    transcriber._apply(True)  # "reachable but cold" fires mid-recording; preload starts
+    transcriber._preload_thread.join(timeout=5)
+    await transcriber.send_audio_chunk(b"\x00\x01" * 100)
+    assert cpu.is_connected is True  # the running cycle's engine was not disconnected
+    assert (await transcriber.finish()).text == "from cpu"
+    assert len(cpu.buffer) == 400  # both chunks, nothing lost
+    assert len(loaders) == 1  # the model load went through its own instance
+    gate.set()
+    join_warm_up(transcriber)
+    await transcriber.disconnect()
+    assert transcriber.engine == GPU  # the new state applies from the next cycle
+    assert await cycle(transcriber) == "from gpu"

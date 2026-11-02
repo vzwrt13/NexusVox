@@ -475,6 +475,8 @@ class NexusVoxApp:
         recording_stopped = False
         loop = asyncio.get_running_loop()
         take: tuple[int | None, float] | None = None  # (meeting token, start) while a take is open
+        audio: AudioCapture | RemoteAudioSource | None = None  # set once recording started
+        stream_task: asyncio.Task | None = None
 
         async def end_take(end: float) -> None:
             nonlocal take
@@ -675,6 +677,7 @@ class NexusVoxApp:
 
         except Exception:
             logger.exception("Transcription cycle failed")
+            await self._abort_recording(audio, stream_task, recording_stopped)
             self._tray.set_active(False)
             if not remote:
                 self._cue(None, ERROR)
@@ -968,18 +971,52 @@ class NexusVoxApp:
         return None
 
     async def _stream_audio(self, audio: AudioCapture | RemoteAudioSource) -> bytearray:
-        """Stream audio chunks from the mic or the phone to the transcription server, returning the full buffer."""
+        """Stream audio chunks from the mic or the phone to the transcription server, returning the full buffer.
+
+        When sending fails, the rest of the recording is still read up to its end marker (and kept), then the
+        error is raised. Stopping at the failure would leave the unread chunks and the marker in the audio queue,
+        and the next recording would start by reading them: every dictation after it would be the previous one.
+        """
         buffer = bytearray()
         count = 0
-        try:
-            async for chunk in audio.chunks():
+        failure: Exception | None = None
+        async for chunk in audio.chunks():
+            buffer.extend(chunk)
+            if failure is not None:
+                continue
+            try:
                 await self._transcriber.send_audio_chunk(chunk)
-                buffer.extend(chunk)
                 count += 1
-        except Exception:
-            logger.exception("Error streaming audio")
+            except Exception as exc:
+                logger.exception("Error streaming audio")
+                failure = exc
         logger.info("Streamed %d audio chunks to server", count)
+        if failure is not None:
+            raise failure
         return buffer
+
+    async def _abort_recording(
+        self,
+        audio: AudioCapture | RemoteAudioSource | None,
+        stream_task: asyncio.Task | None,
+        recording_stopped: bool,
+    ) -> None:
+        """After a failed cycle: end a stream that still runs and close the microphone it was reading.
+
+        A cycle that failed before the stop must not leave its stream task reading the audio queue (it would
+        take the next recording's chunks), nor the microphone open.
+        """
+        if audio is None:
+            return
+        try:
+            if not recording_stopped:
+                audio.stop()
+            if stream_task is not None and not stream_task.done():
+                stream_task.cancel()
+            if stream_task is not None:
+                await asyncio.gather(stream_task, return_exceptions=True)
+        except Exception:
+            logger.exception("Could not end the failed recording cleanly")
 
     def _open_dashboard(self) -> None:
         """Open the dashboard window."""

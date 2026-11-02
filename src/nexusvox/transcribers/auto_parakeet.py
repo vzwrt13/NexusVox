@@ -121,6 +121,7 @@ class AutoParakeetTranscriber(BaseTranscriber):
         self._warm = False
         self._warming = False
         self._warm_thread: threading.Thread | None = None
+        self._preload_thread: threading.Thread | None = None
         self._generation = 0  # bumped when the server is seen down, so a warm-up that began earlier is void
         self._probed_at: float | None = None  # None: never probed
         self._word_timestamps = False
@@ -208,14 +209,19 @@ class AutoParakeetTranscriber(BaseTranscriber):
         """Start loading (or downloading) the CPU model in the background, so a take on it is not lost to a load."""
 
         def run() -> None:
+            # A throw-away instance: the loaded model is shared at class level, but the instance a running take
+            # uses must never be connected or disconnected from here (that wiped its buffer mid-recording).
             try:
-                cpu = self._cpu_transcriber()
-                asyncio.run(cpu.connect())  # begins the model load in its own thread and returns
-                asyncio.run(cpu.disconnect())
+                from .local_parakeet import LocalParakeetTranscriber
+
+                loader = LocalParakeetTranscriber(self._config)
+                asyncio.run(loader.connect())  # begins the model load in its own thread and returns
+                asyncio.run(loader.disconnect())
             except Exception:
                 logger.warning("Preloading the CPU Parakeet model failed", exc_info=True)
 
-        threading.Thread(target=run, name="auto-cpu-preload", daemon=True).start()
+        self._preload_thread = threading.Thread(target=run, name="auto-cpu-preload", daemon=True)
+        self._preload_thread.start()
 
     def _cpu_transcriber(self) -> BaseTranscriber:
         with self._lock:

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import threading
+
 import pytest
 
 from nexusvox.config import InferenceConfig
@@ -62,6 +66,9 @@ def server(monkeypatch):
 
     async def fake_finish(self, timeout: float = 30.0) -> TranscriptionResult:
         state["posted"] += 1
+        if state.get("hold") is not None:
+            while not state["hold"].is_set():
+                await asyncio.sleep(0.01)
         if not state["up"]:
             raise RuntimeError("connection refused")
         result = TranscriptionResult()
@@ -74,9 +81,19 @@ def server(monkeypatch):
     return state
 
 
-def make() -> tuple[AutoParakeetTranscriber, FakeCpu]:
+def make(warm: bool = True) -> tuple[AutoParakeetTranscriber, FakeCpu]:
+    """A transcriber with a fake CPU engine; `warm=True` means the server was already warmed up."""
     cpu = FakeCpu()
-    return AutoParakeetTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"), cpu=cpu), cpu
+    transcriber = AutoParakeetTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"), cpu=cpu)
+    transcriber._warm = warm
+    return transcriber, cpu
+
+
+def join_warm_up(transcriber: AutoParakeetTranscriber) -> None:
+    thread = transcriber._warm_thread
+    if thread is not None:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
 
 
 async def cycle(transcriber: AutoParakeetTranscriber) -> str:
@@ -121,6 +138,7 @@ async def test_server_coming_back_is_used_without_restart(server):
     server["up"] = True
     server["clock"] += auto_parakeet.PROBE_TTL_S + 1
     await transcriber.prepare()  # what the monitor (or a file job) does
+    join_warm_up(transcriber)  # the returning server is warmed up first
     assert await cycle(transcriber) == "from gpu"
     assert transcriber.engine == GPU
 
@@ -173,36 +191,80 @@ async def test_hung_server_is_marked_unreachable(server):
     assert len(cpu.buffer) == 320
 
 
-async def test_warm_up_sends_silent_clip_to_server(server):
-    transcriber, cpu = make()
+async def test_warm_up_sends_silent_clip_then_uses_the_gpu(server):
+    transcriber, cpu = make(warm=False)
     await transcriber.warm_up()
     assert server["posted"] == 1
+    assert transcriber.engine == GPU
     assert cpu.connects == 0
 
 
-async def test_warm_up_does_not_touch_a_running_dictation(server):
-    transcriber, _ = make()
-    await transcriber.connect()
-    await transcriber.send_audio_chunk(b"\x00\x01" * 160)
-    await transcriber.warm_up()
-    assert transcriber._gpu.connected is True
-    assert len(transcriber._gpu._audio_buffer) == 320
-    assert (await transcriber.finish()).text == "from gpu"
+async def test_cold_server_is_not_used_until_warmed_up(server):
+    """The server just came back: takes go to the CPU while the warm-up request runs, then the GPU."""
+    gate = threading.Event()
+    server["hold"] = gate
+    transcriber, cpu = make(warm=False)
+    await transcriber.prepare()  # reachable, but cold: warm-up starts in the background
+    assert transcriber.engine == CPU
+    assert transcriber.supports_diarization is False
+    assert await cycle(transcriber) == "from cpu"  # a dictation during the warm-up
+    assert cpu.connects >= 1
+    gate.set()
+    join_warm_up(transcriber)
+    assert transcriber.engine == GPU
+    assert await cycle(transcriber) == "from gpu"
 
 
-async def test_warm_up_failure_never_raises(server, monkeypatch):
+async def test_server_returning_after_an_outage_is_warmed_before_use(server):
+    transcriber, _ = make(warm=True)
+    server["up"] = False
+    transcriber._apply(False)
+    assert transcriber._warm is False  # an outage may be a restart: the server must be warmed again
+    server["up"] = True
+    transcriber._apply(True)
+    assert transcriber.engine == CPU
+    join_warm_up(transcriber)
+    assert server["posted"] == 1
+    assert transcriber.engine == GPU
+
+
+async def test_failed_warm_up_stays_on_the_cpu_and_is_retried(server, monkeypatch):
+    real = OpenAIHttpTranscriber.finish
+
     async def boom(self, timeout: float = 30.0):
         raise RuntimeError("model still loading")
 
     monkeypatch.setattr(OpenAIHttpTranscriber, "finish", boom)
-    transcriber, _ = make()
+    transcriber, _ = make(warm=False)
     await transcriber.warm_up()  # logged, not raised
-    assert await cycle_after_failed_warm_up(transcriber) is None
+    assert transcriber.engine == CPU
+    assert transcriber._warming is False
+    monkeypatch.setattr(OpenAIHttpTranscriber, "finish", real)
+    transcriber._apply(True)  # the next probe starts another try
+    join_warm_up(transcriber)
+    assert transcriber.engine == GPU
 
 
-async def cycle_after_failed_warm_up(transcriber) -> None:
-    assert not transcriber._gpu.connected
-    return None
+async def test_warm_up_result_is_void_if_the_server_went_down_meanwhile(server):
+    gate = threading.Event()
+    server["hold"] = gate
+    transcriber, _ = make(warm=False)
+    await transcriber.prepare()
+    transcriber._apply(False)  # seen down while the warm-up request is still running
+    gate.set()
+    join_warm_up(transcriber)
+    assert transcriber._warm is False
+    assert transcriber.engine == CPU
+
+
+async def test_warm_up_request_does_not_touch_a_running_dictation(server):
+    transcriber, _ = make()
+    await transcriber.connect()
+    await transcriber.send_audio_chunk(b"\x00\x01" * 160)
+    assert await transcriber._warm_request() is True
+    assert transcriber._gpu.connected is True
+    assert len(transcriber._gpu._audio_buffer) == 320
+    assert (await transcriber.finish()).text == "from gpu"
 
 
 async def test_warm_up_with_the_server_down_starts_the_cpu_model(server):
@@ -249,3 +311,14 @@ def test_factory_wraps_only_for_auto_fallback_on_gpu():
     assert not isinstance(create_transcriber(config, device="cpu", auto_fallback=True), AutoParakeetTranscriber)
     voxtral = InferenceConfig(model="voxtral-mini-4b")
     assert not isinstance(create_transcriber(voxtral, device="cuda", auto_fallback=True), AutoParakeetTranscriber)
+
+
+def test_health_probe_lines_are_dropped_from_the_httpx_log_but_posts_stay():
+    flt = next(f for f in logging.getLogger("httpx").filters if isinstance(f, auto_parakeet._HealthProbeFilter))
+
+    def record(msg: str) -> logging.LogRecord:
+        return logging.LogRecord("httpx", logging.INFO, __file__, 1, msg, None, None)
+
+    assert flt.filter(record('HTTP Request: GET http://127.0.0.1:8002/health "HTTP/1.1 200 OK"')) is False
+    post = 'HTTP Request: POST http://127.0.0.1:8002/v1/audio/transcriptions "HTTP/1.1 200 OK"'
+    assert flt.filter(record(post)) is True

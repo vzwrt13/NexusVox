@@ -9,6 +9,9 @@ configured server (`[inference].server_url`, same host and port) with a short ti
 - `connect()` pins the engine for the whole cycle, so the monitor flipping it mid-take cannot split one
   recording across two engines.
 
+A server that has just become reachable is usually cold (its first request loads the model, ~17 s), so the
+GPU engine is only chosen after a background warm-up request has succeeded; until then takes go to the CPU.
+
 A GPU cycle that fails (connection error, server error, a hung server that returned nothing) is marked
 unreachable and its audio is replayed through the CPU engine, so the take is not lost.
 """
@@ -43,6 +46,18 @@ _WARM_UP_TIMEOUT_S = 90.0
 
 GPU = "gpu"
 CPU = "cpu"
+
+
+class _HealthProbeFilter(logging.Filter):
+    """Drops httpx's one INFO line per health probe (every few seconds, all day); POST lines stay."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/health" not in record.getMessage()
+
+
+_httpx_logger = logging.getLogger("httpx")
+if not any(isinstance(f, _HealthProbeFilter) for f in _httpx_logger.filters):
+    _httpx_logger.addFilter(_HealthProbeFilter())
 
 
 def health_url_for(config: InferenceConfig) -> str:
@@ -101,7 +116,12 @@ class AutoParakeetTranscriber(BaseTranscriber):
         self._gpu: BaseTranscriber = OpenAIHttpTranscriber(config)
         self._cpu = cpu
         self._engine = GPU  # until the first probe says otherwise
-        self._last_logged: str | None = None
+        self._last_logged: tuple[str, str] | None = None
+        # Reachable and warmed up: the only state in which the GPU engine is chosen.
+        self._warm = False
+        self._warming = False
+        self._warm_thread: threading.Thread | None = None
+        self._generation = 0  # bumped when the server is seen down, so a warm-up that began earlier is void
         self._probed_at: float | None = None  # None: never probed
         self._word_timestamps = False
         self._monitor_started = False
@@ -127,19 +147,62 @@ class AutoParakeetTranscriber(BaseTranscriber):
         return self._probed_at is None or time.monotonic() - self._probed_at >= PROBE_TTL_S
 
     def _apply(self, reachable: bool) -> None:
-        """Take a probe answer: switch the engine, log a change, load the CPU model when it is now needed."""
+        """Take a probe answer: choose the engine, log a change, load the CPU model or warm the server as needed.
+
+        The GPU needs the server reachable *and* warmed up; a reachable cold server starts a background warm-up
+        and takes go to the CPU until it has succeeded.
+        """
+        start_warm = False
         with self._lock:
             self._probed_at = time.monotonic()
-            self._engine = GPU if reachable else CPU
-            changed = self._engine != self._last_logged
-            self._last_logged = self._engine
-        if not changed:
-            return
-        if self._engine == GPU:
-            logger.info("Auto engine: Parakeet server reachable, transcribing on the GPU")
-        else:
-            logger.info("Auto engine: Parakeet server not reachable, transcribing on the CPU (no speakers)")
-            self._preload_cpu()
+            if not reachable:
+                self._warm = False
+                self._generation += 1
+                engine, note = CPU, "Parakeet server not reachable, transcribing on the CPU (no speakers)"
+            elif self._warm:
+                engine, note = GPU, "Parakeet server warmed up, transcribing on the GPU"
+            else:
+                engine, note = CPU, "Parakeet server reachable but cold, transcribing on the CPU until it is warmed up"
+                if not self._warming:
+                    self._warming = True
+                    start_warm = True
+            self._engine = engine
+            changed = self._last_logged != (engine, note)
+            self._last_logged = (engine, note)
+            generation = self._generation
+        if changed:
+            logger.info("Auto engine: %s", note)
+            if engine == CPU:
+                self._preload_cpu()
+        if start_warm:
+            self._warm_thread = threading.Thread(
+                target=self._run_warm_up, args=(generation,), name="auto-engine-warm-up", daemon=True
+            )
+            self._warm_thread.start()
+
+    async def _warm_request(self) -> bool:
+        """One silent clip through a client of its own (so a dictation's buffer is never touched)."""
+        warm = OpenAIHttpTranscriber(self._config)
+        await warm.connect()
+        await warm.send_audio_chunk(bytes(int(16_000 * _WARM_UP_SILENCE_S) * 2))
+        return (await warm.finish(timeout=_WARM_UP_TIMEOUT_S)).done
+
+    def _run_warm_up(self, generation: int) -> None:
+        """Warm the server (thread), then let `_apply` switch to the GPU. A failure is retried by the next probe."""
+        ok = False
+        try:
+            ok = asyncio.run(self._warm_request())
+            if not ok:
+                logger.warning("Parakeet server warm-up returned no result; staying on the CPU")
+        except Exception:
+            logger.warning("Parakeet server warm-up failed; staying on the CPU", exc_info=True)
+        with self._lock:
+            self._warming = False
+            current = generation == self._generation  # the server was not seen down meanwhile
+            if ok and current:
+                self._warm = True
+        if ok and current:
+            self._apply(True)
 
     def _preload_cpu(self) -> None:
         """Start loading (or downloading) the CPU model in the background, so a take on it is not lost to a load."""
@@ -270,21 +333,16 @@ class AutoParakeetTranscriber(BaseTranscriber):
     # ---- Start-up warm-up ---------------------------------------------------
 
     async def warm_up(self) -> None:
-        """Make the first dictation fast: start the monitor, then one silent clip through the server, or the CPU
-        model loading.
+        """Make the first dictation fast: start the monitor and warm the server (or let the CPU model load).
 
-        The clip goes through a client of its own, so a dictation during the (cold, ~17 s) warm-up keeps its
-        buffer. Never raises; the app runs it as a background task.
+        The warm-up request runs in a thread through a client of its own, so a dictation during the (cold,
+        ~17 s) warm-up keeps its buffer and goes to the CPU. Never raises; the app runs it as a background task.
         """
         try:
             await self.prepare()
             self._start_monitor()
-            if self._engine == GPU:
-                warm = OpenAIHttpTranscriber(self._config)
-                await warm.connect()
-                await warm.send_audio_chunk(bytes(int(16_000 * _WARM_UP_SILENCE_S) * 2))
-                await warm.finish(timeout=_WARM_UP_TIMEOUT_S)
-                logger.info("Parakeet server warmed up")
-            # On the CPU `_apply` already started the model load.
+            thread = self._warm_thread
+            if thread is not None:
+                await asyncio.get_running_loop().run_in_executor(None, thread.join)
         except Exception:
-            logger.warning("Warm-up of the %s engine failed; first dictation may be slow", self._engine, exc_info=True)
+            logger.warning("Warm-up of the auto engine failed; first dictation may be slow", exc_info=True)

@@ -21,17 +21,12 @@ def file_log(tmp_path):
     """Installs the file handler on the root logger for one test; yields (log file, full-text switch)."""
     full = {"on": False}
     root = logging.getLogger()
-    before = list(root.handlers)
     previous = root.level
     root.setLevel(logging.INFO)
     path = setup_file_logging(lambda: full["on"], directory=tmp_path / "logs")
     try:
         yield path, full
-    finally:
-        for handler in list(root.handlers):
-            if handler not in before:
-                root.removeHandler(handler)
-                handler.close()
+    finally:  # the handler itself is removed by the autouse fixture in conftest.py
         root.setLevel(previous)
 
 
@@ -91,19 +86,11 @@ def test_setup_removes_old_files_and_survives_an_unwritable_folder(tmp_path):
     stale = folder / "nexusvox.log.2025-01-01"
     stale.write_text("x")
     os.utime(stale, (1, 1))
-    root = logging.getLogger()
-    before = list(root.handlers)
-    try:
-        assert setup_file_logging(lambda: False, directory=folder) is not None
-        assert not stale.exists()
-        blocker = tmp_path / "file"
-        blocker.write_text("x")
-        assert setup_file_logging(lambda: False, directory=blocker / "sub") is None
-    finally:
-        for handler in list(root.handlers):
-            if handler not in before:
-                root.removeHandler(handler)
-                handler.close()
+    assert setup_file_logging(lambda: False, directory=folder) is not None  # handler removed by conftest.py
+    assert not stale.exists()
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    assert setup_file_logging(lambda: False, directory=blocker / "sub") is None
 
 
 def test_shorten_keeps_the_start_and_the_length():

@@ -524,6 +524,15 @@ def test_an_installed_distribution_is_discovered_through_importlib_metadata(tmp_
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.delitem(__import__("sys").modules, "fake_ext_pkg", raising=False)
 
+    # The lookup is real, but only this throw-away distribution counts: a dev venv may have the real
+    # nexusvox-pro add-on installed, which registers its own entry point in the same group.
+    real_entry_points = ext.entry_points
+    monkeypatch.setattr(
+        ext,
+        "entry_points",
+        lambda **kwargs: [ep for ep in real_entry_points(**kwargs) if ep.value.startswith("fake_ext_pkg:")],
+    )
+
     reg = ExtensionRegistry()
     reg.load()
 

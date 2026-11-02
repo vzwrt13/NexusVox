@@ -109,3 +109,4 @@ extend-immutable-calls = ["fastapi.File", "fastapi.Form"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["desktop: drives the real desktop (clipboard, windows); skipped unless run with -m desktop"]

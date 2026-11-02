@@ -13,6 +13,12 @@ Since #173 the app allows it: without a CUDA GPU `[llm].model` defaults to `gemm
 (`config._llm_model`; an existing choice is kept), Cleanup can be switched on in the dashboard, and the
 Settings tab then shows the latency hint. The numbers here were taken by calling Ollama directly, not through the app.
 
+> **Update (#172).** The sections below come from a first, small run (16 Cleanup samples, 4 Polish samples, a
+> synthetic meeting, repeated identical requests). The [second run](#second-run-112-items-real-meetings-rubric-score)
+> has 112 items, real meetings, a rubric score and median/p90 timings, and is the source for anything published.
+> Its CPU timings are higher because Ollama reuses the cached prompt of an identical request: the medians of
+> three identical requests below were too optimistic on the CPU.
+
 ## Setup
 
 | | |
@@ -125,6 +131,111 @@ default here, and `qwen3.5:4b` is clearly worse. Four selections are a small sam
 two-instruction comparison came from an ad-hoc run with the same prompts; `llm_bench.py` now records them
 as `polish_language` (3 replies per instruction, German detected by common words), but that part of the script
 has not been re-run since it was added, so the numbers above are not yet reproduced by it.
+
+## Second run: 112 items, real meetings, rubric score
+
+Measured 2026-11-01 (#172) on the same machine as above (Ryzen 7 5800X, RTX 5070 Ti with the Parakeet container
+idle, Ollama default quantisation, `think: false`), with nothing else running. Models: the installed
+`gemma4:e2b` (4.6 GB) and `gemma4:e4b` (6.6 GB), each on the CPU only (`num_gpu = 0`) and on the GPU; judge:
+the installed `gemma4:12b-it-qat` (7.2 GB). Nothing was downloaded. The Ollama library lists no newer Gemma
+generation than Gemma 4 (E2B, E4B, 12B, 26B, 31B) and no newer Qwen than Qwen3.5 (0.8b to 122b).
+
+**Data.** `scripts/llm_eval_items.py`: 60 dictations (30 German, 30 English: fillers, false starts, repeated
+words, digits and number words, product names, a few questions and orders that must not be answered), each at
+both Cleanup levels, and 52 Polish selections (25 German, 27 English) with a spoken instruction. Summaries use
+three real meetings from the AMI corpus (CC BY 4.0, hand-made transcripts of spontaneous English speech with
+4 speakers, `scripts/ami_fetch.py`): ES2008a, IS1008a, TS3003a, 3,100-3,400 words, 4,358-4,842 prompt tokens,
+about 20-25 minutes of speech each.
+
+**Quality.** The judge scores each first reply 0/1 on four criteria: meaning kept, language kept, nothing
+invented, formatting (fillers gone, punctuation, instruction followed, reply only). The table is the share of
+items that meet each criterion (CPU / GPU run); "rubric" is the mean of the four, "all 4" the share of items
+that meet all of them. The plausibility guard rejected none of the 480 Cleanup replies.
+
+| | Items | Meaning | Language | Nothing invented | Formatting | Rubric | All 4 |
+|---|---|---|---|---|---|---|---|
+| Cleanup light, `gemma4:e2b` | 60 | 100 / 100 | 100 / 100 | 100 / 100 | 98.3 / 98.3 | 99.6 / 99.6 | 98.3 / 98.3 |
+| Cleanup light, `gemma4:e4b` | 60 | 100 / 100 | 100 / 100 | 100 / 100 | 96.7 / 96.7 | 99.2 / 99.2 | 96.7 / 96.7 |
+| Cleanup medium, `gemma4:e2b` | 60 | 96.7 / 98.3 | 100 / 100 | 98.3 / 98.3 | 98.3 / 98.3 | 98.3 / 98.7 | 93.3 / 95.0 |
+| Cleanup medium, `gemma4:e4b` | 60 | 95.0 / 98.3 | 100 / 100 | 100 / 100 | 96.7 / 96.7 | 97.9 / 98.8 | 91.7 / 95.0 |
+| Polish, `gemma4:e2b` | 52 | 98.1 / 98.1 | 100 / 100 | 96.2 / 96.2 | 92.3 / 92.3 | 96.7 / 96.7 | 90.4 / 90.4 |
+| Polish, `gemma4:e4b` | 52 | 100 / 98.1 | 84.6 / 90.4 | 98.1 / 98.1 | 96.2 / 98.1 | 94.7 / 96.2 | 80.8 / 86.5 |
+| Meeting summary (3 meetings), both models | 3 | 100 | 100 | 100 | 100 | 100 | 100 |
+
+CPU and GPU run the same model, so the differences between them are sampling noise (temperature 0.2, one reply
+judged per item): one item is 1.7 points at Cleanup. The real difference is **Polish language keeping**:
+`gemma4:e4b` lost the language on 5 (GPU run) to 8 (CPU run) of the 52 selections (formal-register instructions such as "Make it
+more formal", "Turn this into an invitation", "Write it for a customer"), `gemma4:e2b` for none. Both models did
+well on Cleanup; the misses are a leftover repetition and, at `medium`, a dropped detail.
+
+**Speed.** Wall time of each HTTP request, model loaded, 3 runs per item. Ollama reuses the cached prompt of an
+identical request, so runs 2 and 3 skip most of the prefill, which is a large part of a short request on the
+CPU. The first run of every item matches real dictation (the system prompt is cached, the dictation is new), so
+it is the headline number; the other runs are kept because the ticket asks for 3 runs per item, and they made the
+CPU runs about three times longer for numbers set aside here. p90 is the nearest-rank percentile. The summary model
+is reloaded at the 8192-token context before the first summary, so no summary pays for the reload. Replies are about
+20 tokens.
+
+| Job (requests) | `gemma4:e2b` CPU | `gemma4:e4b` CPU | `gemma4:e2b` GPU | `gemma4:e4b` GPU |
+|---|---|---|---|---|
+| Cleanup, 1st run, median / p90 (120) | 2.9 s / 3.2 s | 5.2 s / 5.8 s | 0.50 s / 0.53 s | 0.53 s / 0.56 s |
+| Cleanup, all 3 runs, median / p90 (360) | 1.3 s / 3.0 s | 2.0 s / 5.4 s | 0.48 s / 0.52 s | 0.51 s / 0.55 s |
+| Polish, 1st run, median / p90 (52) | 2.0 s / 2.6 s | 3.6 s / 4.9 s | 0.50 s / 0.55 s | 0.54 s / 0.62 s |
+| Polish, all 3 runs, median / p90 (156) | 1.6 s / 2.4 s | 2.8 s / 4.2 s | 0.49 s / 0.54 s | 0.52 s / 0.62 s |
+| Meeting summary, 1st run, 4.4-4.8k tokens (3 meetings) | 35-40 s | 63-66 s | 1.3-2.1 s | 1.8-2.2 s |
+
+German and English dictations of the same size differ by less than 10 %. The first table's 1.7 s for a short
+German Cleanup on `gemma4:e2b` was the cached case; the cold number on this CPU is 2.9 s.
+
+**Translation check (the `qwen3.5:4b` problem from #156).** The 26 English Polish selections that do not ask for a
+translation, three instruction styles, GPU, one reply each, "German" detected by common words. In the German column each
+English instruction is replaced by its own German equivalent ("Make it more formal" by "Mach es formeller"), so
+only the language of the instruction changes:
+
+| | English instruction (as the app sends it) | German instruction on English text | Default instruction (nothing spoken) |
+|---|---|---|---|
+| `qwen3.5:4b` | 4 of 26 German | 12 of 26 | 4 of 26 |
+| `gemma4:e4b` | 5 of 26 | 11 of 26 | 2 of 26 |
+| `gemma4:e2b` | 0 of 26 | 13 of 26 | 0 of 26 |
+
+So it is not specific to Qwen, and it is partly our prompt: the system prompt is English, but a **German
+instruction on an English selection** turns about half of the replies German with all three models (they follow the
+language of the instruction in spite of "Keep the text's language"), and a formal or customer-facing instruction
+pulls `qwen3.5:4b` and `gemma4:e4b` into German even with an English instruction. `gemma4:e2b` never switched with
+an English or default instruction. Changing the prompts is out of scope here; a candidate fix is to tell the model the
+selection's language in the user message ("Reply in English").
+
+### Claims we can make
+
+Machine: 8-core / 16-thread Ryzen 7 5800X (CPU rows) or RTX 5070 Ti (GPU rows), model loaded, a sentence to a
+short paragraph (10-25 words in, about 20 tokens out), Ollama defaults.
+
+| Claim | Source of the number |
+|---|---|
+| "Auto Cleanup on an 8-core CPU takes about 3 s for a sentence with `gemma4:e2b` (90 % of requests under 3.2 s) and about 5 s with `gemma4:e4b`" | Cleanup 1st run, median 2.9 / 5.2 s, p90 3.2 / 5.8 s |
+| "Auto Cleanup on a GPU takes half a second with either model" | 0.50-0.53 s median, p90 0.56 s |
+| "Cleanup kept the meaning, language and facts in 97-100 % of the replies to 60 German and English test dictations at two Cleanup levels (`gemma4:e2b`), and 93-98 % came out fully clean" | rubric criteria 96.7-100 %, all 4 criteria 93.3-98.3 % (CPU) |
+| "Polish follows a spoken instruction in German or English: 96.7 % rubric score with `gemma4:e2b`, 90 % of rewrites right on every criterion" | 52 selections |
+| "A 20-minute meeting is summarised in about 40 s on an 8-core CPU (`gemma4:e2b`) and in about 2 s on the GPU" | 3 AMI meetings, 1st run |
+| "Runs fully on the CPU: no GPU needed for Cleanup, Polish or summaries" | CPU columns |
+| **Do not claim:** that Polish never changes the language (`gemma4:e4b` and `qwen3.5:4b` returned German for 5 and 4 of 26 English selections with an English instruction in the translation check); that it runs this fast on any CPU (one CPU measured; the Parakeet CPU test saw 2x slower speech on 4 threads); a ranking of summary quality (3 items, all at the ceiling); accuracy against a human reader (the judge is a model) | |
+
+**Limits.** The judge is a local model of the same family as the two tested ones. It passed every summary and it
+makes mistakes (it flagged a cleaned "I I found" as still repeated). 19 items for a human spot check are in
+`docs/llm-spot-check.md` (15 where the judge found a problem, 4 that it passed). The three meetings are English
+(the AMI corpus has no German ones), so German summaries are covered only by the first run's synthetic meeting. The
+Cleanup and Polish items were written for this test, not recorded from users. One CPU, one GPU.
+
+### Reproduce (second run)
+
+```bash
+python scripts/ami_fetch.py benchmarks/llm/ami                          # AMI meetings, CC BY 4.0
+python scripts/llm_eval.py gen --model gemma4:e2b --mode cpu            # and --mode gpu, and gemma4:e4b
+python scripts/llm_eval.py judge                                        # gemma4:12b-it-qat on the GPU, after all gen runs
+python scripts/llm_eval.py language && python scripts/llm_eval.py flag && python scripts/llm_eval.py report
+```
+
+Run `gen` alone, one model and mode at a time, with NexusVox closed; the four runs took 4.5, 4.8, 18 and 31 minutes.
 
 ## Recommendation per hardware tier
 

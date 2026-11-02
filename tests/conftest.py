@@ -23,6 +23,16 @@ def _isolated_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
 
+def pytest_collection_modifyitems(config, items):
+    """Tests marked ``desktop`` drive the real desktop (clipboard, windows); they run only with ``-m desktop``."""
+    if "desktop" in (config.getoption("-m") or ""):
+        return
+    skip = pytest.mark.skip(reason="needs a real desktop; run with -m desktop")
+    for item in items:
+        if "desktop" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.fixture(autouse=True)
 def _tests_never_touch_the_real_log(tmp_path, monkeypatch):
     """Point %LOCALAPPDATA% at a throw-away folder and drop any file handler a test leaves on the root logger.
@@ -30,7 +40,11 @@ def _tests_never_touch_the_real_log(tmp_path, monkeypatch):
     ``nexusvox.__main__.main`` attaches a rotating file handler to the root logger. Left in place, every later
     test that logs ("boom", "dummy-tab", ...) wrote into the user's real ``nexusvox.log``.
     """
+    # Every place the app resolves a per-user folder from, including the fallbacks to the home folder.
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     root = logging.getLogger()
     before = list(root.handlers)
     yield
@@ -38,6 +52,17 @@ def _tests_never_touch_the_real_log(tmp_path, monkeypatch):
         if handler not in before and isinstance(handler, logging.FileHandler):
             root.removeHandler(handler)
             handler.close()
+
+
+@pytest.fixture(autouse=True)
+def _tests_never_play_sound(monkeypatch):
+    """No test makes the speakers chime: the app's start/stop/error beeps go through ``sounddevice.play``."""
+    try:
+        import sounddevice
+    except (ImportError, OSError):  # no PortAudio on this runner: nothing can play
+        return
+    monkeypatch.setattr(sounddevice, "play", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sounddevice, "wait", lambda *args, **kwargs: None)
 
 
 @pytest.fixture(autouse=True)

@@ -414,7 +414,6 @@ def test_main_applies_the_configured_log_level(monkeypatch):
     previous = own.level
     monkeypatch.setattr(entry, "load_config", lambda: Config(log_level="DEBUG"))
     monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
-    monkeypatch.setattr(entry, "setup_file_logging", lambda *args, **kwargs: None)  # not the user's real log
     try:
         with pytest.raises(SystemExit) as exit_:
             entry.main()

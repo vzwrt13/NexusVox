@@ -355,10 +355,9 @@ What the build cannot do yet:
   the file log starts after the imports. A launcher-level crash log is worth adding with ticket 2.
 - **The real Pro add-on** was not tested. A stand-in with the same entry point and panel API passed.
 - **Not signed, no custom bootloader, no installer.** Tickets 3 and 4.
-- **A dependency bug found on the way, unrelated to packaging:** `faster-whisper` 1.2.1 passes `metadata_errors`
-  to `av.open`, which `av` 19 no longer accepts, so Whisper fails on the first transcription in any fresh
-  environment (`pip install .` gives `av` 19.0.2 today). The build environment pinned `av<19` (18.1.0). The fix
-  is a pin `av<19` in `pyproject.toml`; it is not part of this ticket.
+- **A dependency bug found on the way, fixed in this PR:** `faster-whisper` 1.2.1 (the newest release) passes
+  `metadata_errors` to `av.open`, which `av` 19 no longer accepts, so Whisper failed on the first transcription in any
+  fresh environment. `pyproject.toml` now has `av<19`; verified in a clean venv and in the frozen build.
 
 ## Open questions
 

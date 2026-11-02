@@ -484,3 +484,155 @@ def test_no_sender_means_no_injection_in_unit_tests():
     assert hk._mask_sender is None
     _press_combo(hk)
     assert events == ["start"]
+
+
+# -- Alt release re-injection ----------------------------------------------------
+#
+# The Alt key-up that ends the dictation chord is swallowed and sent again behind a mask key (one
+# batch, `_alt_release(vk, True)`); a timer sends a plain release when the twin never comes back.
+
+
+def _reinjecting(modifiers=("ctrl", "shift", "alt"), enabled: bool = True, timeout_s: float = 0.05):
+    hk, _, config = _listener("hold", modifiers=modifiers)
+    config.reinject_alt_release = enabled
+    calls: list[tuple[int, bool]] = []
+    hk._alt_release = lambda vk, masked: calls.append((vk, masked)) or True
+    hk._alt_timeout_s = timeout_s
+    return hk, calls
+
+
+def _complete_chord(hk):
+    for vk in (LCTRL, LSHIFT, LALT):
+        hk._handle(vk, True)
+
+
+def test_own_chord_alt_release_is_swallowed_and_reinjected_as_one_batch():
+    hk, calls = _reinjecting()
+    _complete_chord(hk)
+    assert hk._handle(LCTRL, False) is False
+    assert hk._handle(LSHIFT, False) is False
+    assert hk._handle(LALT, False) is True  # swallowed
+    assert calls == [(LALT, True)]  # mask + Alt-up together, nothing sent separately
+    assert hk._handle(LALT, False) is False  # the re-injected twin passes through
+    assert hk._alt_pending is None
+    hk.release_pending_alt()
+    assert calls == [(LALT, True)]  # nothing left to flush
+
+
+def test_right_alt_is_reinjected_with_its_own_code():
+    hk, calls = _reinjecting()
+    for vk in (LCTRL, LSHIFT, RALT):
+        hk._handle(vk, True)
+    assert hk._handle(RALT, False) is True
+    assert calls == [(RALT, True)]
+    hk._handle(RALT, False)
+
+
+def test_alt_alone_and_alt_tab_pass_through():
+    hk, calls = _reinjecting()
+    assert hk._handle(LALT, True) is False
+    assert hk._handle(0x09, True) is False  # Tab
+    assert hk._handle(0x09, False) is False
+    assert hk._handle(LALT, False) is False
+    assert calls == []
+
+
+def test_alt_pressed_in_an_incomplete_chord_passes_through():
+    hk, calls = _reinjecting()
+    hk._handle(LCTRL, True)
+    hk._handle(LALT, True)  # Shift never joins: the chord never completes
+    assert hk._handle(LALT, False) is False
+    assert calls == []
+
+
+def test_only_the_release_that_ends_the_chord_is_taken():
+    hk, calls = _reinjecting()
+    _complete_chord(hk)
+    hk._handle(LCTRL, False)
+    hk._handle(LSHIFT, False)
+    assert hk._handle(LALT, False) is True
+    hk._handle(LALT, False)  # twin
+    # Alt pressed again on its own later is ordinary use
+    assert hk._handle(LALT, True) is False
+    assert hk._handle(LALT, False) is False
+    assert calls == [(LALT, True)]
+
+
+def test_binding_without_alt_never_reinjects():
+    hk, calls = _reinjecting(modifiers=("ctrl", "shift"))
+    for vk in (LCTRL, LSHIFT):
+        hk._handle(vk, True)
+    assert hk._handle(LALT, True) is False
+    assert hk._handle(LALT, False) is False
+    assert calls == []
+
+
+def test_switch_off_restores_the_plain_release():
+    hk, calls = _reinjecting(enabled=False)
+    _complete_chord(hk)
+    assert hk._handle(LALT, False) is False
+    assert calls == []
+
+
+def test_fallback_sends_a_plain_release_when_the_twin_never_arrives():
+    import time
+
+    hk, calls = _reinjecting(timeout_s=0.05)
+    _complete_chord(hk)
+    assert hk._handle(LALT, False) is True
+    deadline = time.monotonic() + 2
+    while len(calls) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert calls == [(LALT, True), (LALT, False)]
+    assert hk._alt_pending is None
+
+
+def test_twin_seen_in_time_cancels_the_fallback():
+    import time
+
+    hk, calls = _reinjecting(timeout_s=0.05)
+    _complete_chord(hk)
+    hk._handle(LALT, False)
+    hk._handle(LALT, False)
+    time.sleep(0.15)
+    assert calls == [(LALT, True)]
+
+
+def test_failed_reinjection_lets_the_real_release_through():
+    hk, calls = _reinjecting()
+    hk._alt_release = lambda vk, masked: False
+    _complete_chord(hk)
+    assert hk._handle(LALT, False) is False
+    assert hk._alt_pending is None
+
+
+def test_raising_reinjection_lets_the_real_release_through():
+    hk, _ = _reinjecting()
+
+    def boom(vk, masked):
+        raise OSError("no")
+
+    hk._alt_release = boom
+    _complete_chord(hk)
+    assert hk._handle(LALT, False) is False
+    assert hk._alt_pending is None
+
+
+def test_shutdown_flushes_a_pending_release():
+    hk, calls = _reinjecting(timeout_s=30)
+    _complete_chord(hk)
+    assert hk._handle(LALT, False) is True
+    hk.stop()
+    assert calls == [(LALT, True), (LALT, False)]
+    assert hk._alt_pending is None
+
+
+def test_config_switch_roundtrip(tmp_path):
+    from nexusvox.config import load_config, save_config
+
+    path = tmp_path / "config.toml"
+    config = load_config(path)
+    assert config.hotkey.reinject_alt_release is True
+    config.hotkey.reinject_alt_release = False
+    save_config(config, path)
+    assert load_config(path).hotkey.reinject_alt_release is False

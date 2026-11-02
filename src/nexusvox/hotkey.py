@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import atexit
 import ctypes
 import logging
+import threading
 from collections.abc import Callable
 
 from pynput import keyboard
@@ -33,6 +35,9 @@ _PRESS_MESSAGES = (_WM_KEYDOWN, _WM_SYSKEYDOWN)
 
 # Modifiers whose lone release opens a menu (the app's for Alt, Start for Win)
 _MENU_MODIFIERS = frozenset({"alt", "win"})
+
+# How long a swallowed Alt key-up may wait for its re-injection before it is sent as a plain release
+ALT_REINJECT_TIMEOUT_S = 0.5
 
 
 class HotkeyListener:
@@ -86,6 +91,14 @@ class HotkeyListener:
         self._combo_down = False  # complete combo currently pressed (edge detection)
         self._key_swallowed = False  # trigger key is held since a swallowed key-down
         self._mask_sender: Callable[[], None] | None = None  # set by start(); tests leave it unset
+        # Alt release re-injection: `(vk, masked) -> sent`, set by start(); tests leave it unset
+        self._alt_release: Callable[[int, bool], bool] | None = None
+        self._alt_timeout_s = ALT_REINJECT_TIMEOUT_S
+        self._chord_alt = False  # an Alt completed NexusVox's own chord and has not been released yet
+        self._alt_down: set[int] = set()  # Alt keys (virtual-key codes) currently down
+        self._alt_pending: int | None = None  # swallowed Alt key-up waiting for its re-injected twin
+        self._alt_timer: threading.Timer | None = None
+        self._alt_lock = threading.Lock()
         self._sync_binding()
 
         self._active = False
@@ -124,11 +137,14 @@ class HotkeyListener:
         self._pressed_modifiers = set()
         self._combo_down = False
         self._key_swallowed = False
+        self._chord_alt = False
+        self._alt_down = set()
 
     # -- core -----------------------------------------------------------------
 
     def _complete_press(self) -> None:
         self._combo_down = True
+        self._chord_alt = "alt" in self._modifiers
         self._mask_menu_keys()
         if self._active:
             if self.mode == "toggle":
@@ -208,6 +224,14 @@ class HotkeyListener:
         modifier = _VK_TO_MODIFIER.get(vk)
         if modifier is None or modifier not in self._modifiers:
             return False
+        if modifier == "alt":
+            if pressed:
+                self._alt_down.add(vk)
+            elif self._take_alt_release(vk):
+                self._pressed_modifiers.discard(modifier)
+                if self._combo_down:
+                    self._combo_broken()
+                return True
         if pressed:
             self._pressed_modifiers.add(modifier)
             if self._combo_down:
@@ -221,6 +245,75 @@ class HotkeyListener:
         if self._combo_down:
             self._combo_broken()
         return False
+
+    def _take_alt_release(self, vk: int) -> bool:
+        """An Alt key-up inside the hook. True when it is swallowed to be sent again behind a mask key.
+
+        Only the release that ends NexusVox's own chord is taken (`_chord_alt`); Alt alone, Alt+Tab and
+        app shortcuts never set it. The re-injected twin comes back through the hook and is let through
+        (`_alt_pending`); a timer sends a plain release if it never does.
+        """
+        with self._alt_lock:
+            if self._alt_pending == vk:  # our own re-injected key-up
+                self._alt_pending = None
+                self._cancel_alt_timer()
+                return False
+            self._alt_down.discard(vk)
+            own_chord = self._chord_alt
+            if not self._alt_down:
+                self._chord_alt = False
+            if not own_chord or not self._config.reinject_alt_release or self._alt_release is None:
+                return False
+            if self._alt_pending is not None:
+                return False  # one at a time; the second release goes through as it is
+            self._alt_pending = vk
+            self._alt_timer = threading.Timer(self._alt_timeout_s, self._alt_timed_out, args=(vk,))
+            self._alt_timer.daemon = True
+            self._alt_timer.start()
+        try:
+            sent = self._alt_release(vk, True)
+        except Exception:
+            logger.exception("Could not re-inject the Alt release")
+            sent = False
+        if not sent:
+            with self._alt_lock:  # let the real key-up through instead
+                self._alt_pending = None
+                self._cancel_alt_timer()
+            return False
+        return True
+
+    def _cancel_alt_timer(self) -> None:
+        if self._alt_timer is not None:
+            self._alt_timer.cancel()
+            self._alt_timer = None
+
+    def _alt_timed_out(self, vk: int) -> None:
+        """The re-injected Alt release never arrived: send it as a plain one so Alt cannot stay held."""
+        with self._alt_lock:
+            if self._alt_pending != vk:
+                return
+            self._alt_pending = None
+            self._alt_timer = None
+        logger.warning(
+            "Re-injected Alt release not seen within %.1fs, sending a plain Alt release", self._alt_timeout_s
+        )
+        self._send_plain_alt_release(vk)
+
+    def release_pending_alt(self) -> None:
+        """Send a swallowed Alt release now (shutdown); nothing to do when none is waiting."""
+        with self._alt_lock:
+            vk, self._alt_pending = self._alt_pending, None
+            self._cancel_alt_timer()
+        if vk is not None:
+            self._send_plain_alt_release(vk)
+
+    def _send_plain_alt_release(self, vk: int) -> None:
+        if self._alt_release is None:
+            return
+        try:
+            self._alt_release(vk, False)
+        except Exception:
+            logger.exception("Could not send the plain Alt release")
 
     def _mask_menu_keys(self) -> None:
         """Type a neutral key while Alt or Win is certainly down.
@@ -280,9 +373,11 @@ class HotkeyListener:
         """Start listening for the hotkey. Runs the listener in a daemon thread."""
         try:
             # Imported here (injector binds Win32 at import) and outside the hook, which has a tight timeout.
-            from .injector import send_menu_mask
+            from .injector import send_alt_release, send_menu_mask
 
             self._mask_sender = send_menu_mask
+            self._alt_release = send_alt_release
+            atexit.register(self.release_pending_alt)
         except Exception:
             logger.exception("Menu mask key unavailable; releasing Alt or Win last may open a menu")
         self._listener = keyboard.Listener(win32_event_filter=self._win32_event_filter)
@@ -291,6 +386,7 @@ class HotkeyListener:
 
     def stop(self) -> None:
         """Stop the hotkey listener."""
+        self.release_pending_alt()
         if self._listener is not None:
             self._listener.stop()
             self._listener = None

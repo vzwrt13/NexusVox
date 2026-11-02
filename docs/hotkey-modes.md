@@ -18,6 +18,11 @@ Code paths: `hotkey.py` (`HotkeyListener`, runs inside the keyboard hook), `app.
   turns the recording into something else (`_handle_marker_key`, `hotkey.py:160`): command
   key (`[os_control]`), paste key (`[hotkey].paste_key`, default `V`), polish key
   (`[hotkey].polish_key`, default off). The first marker wins; the key is swallowed.
+- **Alt release**: with Alt in the binding, the Alt key-up that ends the chord is swallowed in the hook and sent
+  again in one `SendInput` batch behind a neutral mask key (`_take_alt_release`, `injector.send_alt_release`), so
+  menu-bar apps never see a lone Alt release. Only that release is touched. The re-injected key-up passes through
+  when it comes back; a 0.5 s timer, `stop()` and `atexit` send a plain release if it does not.
+  `[hotkey].reinject_alt_release = false` turns it off.
 
 ## What starts and stops a recording
 

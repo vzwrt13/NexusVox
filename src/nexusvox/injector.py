@@ -124,6 +124,23 @@ def send_menu_mask() -> bool:
     return _send_inputs(menu_mask_inputs(), "menu mask")
 
 
+KEYEVENTF_EXTENDEDKEY = 0x0001
+_RIGHT_ALT_VK = 0xA5  # VK_RMENU, an extended key
+
+
+def _alt_up_input(vk: int) -> INPUT:
+    flags = KEYEVENTF_KEYUP | (KEYEVENTF_EXTENDEDKEY if vk == _RIGHT_ALT_VK else 0)
+    return _make_key_input(vk, SCAN_ALT, flags)
+
+
+def send_alt_release(vk: int, masked: bool = True) -> bool:
+    """Send the Alt key-up `vk` (VK_LMENU / VK_RMENU); with `masked` the menu mask keystroke goes in
+    front of it in the same atomic SendInput batch, so no other input can land between them."""
+    inputs = menu_mask_inputs() if masked else []
+    inputs.append(_alt_up_input(vk))
+    return _send_inputs(inputs, "alt release")
+
+
 def _release_inputs(menu_key_down: bool) -> list[INPUT]:
     """Key-ups for every modifier; with Alt or Win still down, the menu mask goes in before the Alt key-up."""
     inputs: list[INPUT] = []

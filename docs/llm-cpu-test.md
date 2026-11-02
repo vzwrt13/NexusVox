@@ -198,12 +198,24 @@ only the language of the instruction changes:
 | `gemma4:e4b` | 5 of 26 | 11 of 26 | 2 of 26 |
 | `gemma4:e2b` | 0 of 26 | 13 of 26 | 0 of 26 |
 
-So it is not specific to Qwen, and it is partly our prompt: the system prompt is English, but a **German
-instruction on an English selection** turns about half of the replies German with all three models (they follow the
-language of the instruction in spite of "Keep the text's language"), and a formal or customer-facing instruction
-pulls `qwen3.5:4b` and `gemma4:e4b` into German even with an English instruction. `gemma4:e2b` never switched with
-an English or default instruction. Changing the prompts is out of scope here; a candidate fix is to tell the model the
-selection's language in the user message ("Reply in English").
+So it is not specific to Qwen, and it was partly our prompt: a **German instruction on an English selection** turned
+about half of the replies German with all three models (they followed the language of the instruction in spite of
+"Keep the text's language").
+
+**Fix and re-run (#182).** The Polish user message now names the language of the selected text (detected from the
+text with lingua, not from the instruction) and says "Write the reply in English, even if the instruction is in
+another language. Do not translate." When the detector is unsure the line says "in the language of the text". An
+instruction that asks for a translation ("Translate this into German", "Übersetz das ins Englische") gets no such line.
+Same 26 selections, same three instruction styles, GPU, one reply each, `scripts/llm_eval.py language`:
+
+| | English instruction | German instruction on English text | Default instruction |
+|---|---|---|---|
+| `gemma4:e4b` | 0 of 26 German (was 5) | 0 of 26 (was 11) | 0 of 26 (was 2) |
+| `gemma4:e2b` | 0 of 26 (was 0) | 0 of 26 (was 13) | 0 of 26 (was 0) |
+
+Side checks with the same prompt, both models: the two translation selections ("Translate this into German",
+"Übersetze das ins Englische") still came back translated, and all 24 German selections of the Polish set stayed
+German (lingua). `qwen3.5:4b` was not re-run; it is not a supported model choice here.
 
 ### Claims we can make
 
@@ -217,12 +229,15 @@ short paragraph (10-25 words in, about 20 tokens out), Ollama defaults.
 | "Cleanup kept the meaning, language and facts in 97-100 % of the replies to 60 German and English test dictations at two Cleanup levels (`gemma4:e2b`), and 93-98 % came out fully clean" | rubric criteria 96.7-100 %, all 4 criteria 93.3-98.3 % (CPU) |
 | "Polish follows a spoken instruction in German or English: 96.7 % rubric score with `gemma4:e2b`, 90 % of rewrites right on every criterion" | 52 selections |
 | "A 20-minute meeting is summarised in about 40 s on an 8-core CPU (`gemma4:e2b`) and in about 2 s on the GPU" | 3 AMI meetings, 1st run |
+| "Polish keeps the language of the selected text, also when the spoken instruction is in the other language, unless you ask for a translation (`gemma4:e2b`, `gemma4:e4b`)" | 0 of 26 English selections came back German in each of three instruction styles (was up to 13 of 26) |
 | "Runs fully on the CPU: no GPU needed for Cleanup, Polish or summaries" | CPU columns |
-| **Do not claim:** that Polish never changes the language (`gemma4:e4b` and `qwen3.5:4b` returned German for 5 and 4 of 26 English selections with an English instruction in the translation check); that it runs this fast on any CPU (one CPU measured; the Parakeet CPU test saw 2x slower speech on 4 threads); a ranking of summary quality (3 items, all at the ceiling); accuracy against a human reader (the judge is a model) | |
+| **Do not claim:** that Polish never changes the language on any model (the 26-selection check, three instruction styles, is clean for `gemma4:e2b` and `gemma4:e4b` only; `qwen3.5:4b` was not re-run after the fix); that it runs this fast on any CPU (one CPU measured; the Parakeet CPU test saw 2x slower speech on 4 threads); a ranking of summary quality (3 items, all at the ceiling); accuracy against a human reader (the judge is a model) | |
 
 **Limits.** The judge is a local model of the same family as the two tested ones. It passed every summary and it
 makes mistakes (it flagged a cleaned "I I found" as still repeated). 19 items for a human spot check are in
-`docs/llm-spot-check.md` (15 where the judge found a problem, 4 that it passed). The three meetings are English
+`docs/llm-spot-check.md` (15 where the judge found a problem, 4 that it passed). **Human spot check (#172):** the
+maintainer read all 19 and agreed with the judge on 18; item 6 is a judge false negative (the doubled "I" is removed
+after Cleanup, so the output is correct). The judge scores above stay judge scores. The three meetings are English
 (the AMI corpus has no German ones), so German summaries are covered only by the first run's synthetic meeting. The
 Cleanup and Polish items were written for this test, not recorded from users. One CPU, one GPU.
 

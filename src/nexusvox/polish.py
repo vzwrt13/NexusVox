@@ -11,8 +11,10 @@ tested with the code.
 from __future__ import annotations
 
 import logging
+import re
 
 from .config import LlmConfig
+from .lang_detect import language_guess
 from .llm import LlmError, clean_reply, complete
 from .mic_guard import _ensure_com
 from .uia import read_focus
@@ -35,8 +37,41 @@ SYSTEM_PROMPT = (
 logger = logging.getLogger(__name__)
 
 
+# An instruction that asks for another language, e.g. "translate this" or "übersetz das ins Deutsche".
+_TRANSLATION_REQUEST = re.compile(
+    r"\btranslat|\b[uü]e?bersetz|\b(?:in|ins|into|to|auf)\s+(?:the\s+)?(?:english|german|englisch\w*|deutsch\w*)\b",
+    re.IGNORECASE,
+)
+_LANGUAGE_NAME = {"en": "English", "de": "German"}
+_MIN_CONFIDENCE = 0.6
+
+
+def asks_for_translation(instruction: str) -> bool:
+    return bool(_TRANSLATION_REQUEST.search(instruction))
+
+
+def language_line(selection: str, instruction: str) -> str:
+    """The prompt line that pins the reply language to the selection's, "" for an explicit translation request.
+
+    The language comes from the selected text, never from the spoken instruction: a German instruction on
+    English text must still give English back."""
+    if asks_for_translation(instruction):
+        return ""
+    code, confidence = language_guess(selection)
+    name = _LANGUAGE_NAME.get(code) if confidence >= _MIN_CONFIDENCE else None
+    if name is None:
+        return "Write the reply in the language of the text, whatever language the instruction is in. Do not translate."
+    return (
+        f"The text is in {name}. Write the reply in {name}, even if the instruction is in another language. "
+        "Do not translate."
+    )
+
+
 def build_user_message(selection: str, instruction: str) -> str:
-    return f"Instruction: {instruction.strip() or DEFAULT_INSTRUCTION}\n\nText:\n{selection}"
+    instruction = instruction.strip() or DEFAULT_INSTRUCTION
+    line = language_line(selection, instruction)
+    header = f"Instruction: {instruction}" + (f"\n{line}" if line else "")
+    return f"{header}\n\nText:\n{selection}"
 
 
 def polish(selection: str, instruction: str, config: LlmConfig) -> str:

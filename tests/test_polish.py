@@ -11,7 +11,14 @@ import pytest
 from nexusvox import llm
 from nexusvox.config import LlmConfig
 from nexusvox.llm import LlmError, complete
-from nexusvox.polish import DEFAULT_INSTRUCTION, build_user_message, clean_reply, polish, read_selection
+from nexusvox.polish import (
+    DEFAULT_INSTRUCTION,
+    asks_for_translation,
+    build_user_message,
+    clean_reply,
+    polish,
+    read_selection,
+)
 
 
 class FakeServer:
@@ -81,8 +88,41 @@ def test_llm_error_tells_a_timeout_from_other_failures(monkeypatch, error, timed
 
 
 def test_user_message_uses_the_default_instruction_when_nothing_was_said():
-    assert build_user_message("Hallo Welt", "  ") == f"Instruction: {DEFAULT_INSTRUCTION}\n\nText:\nHallo Welt"
+    assert build_user_message("Hallo Welt", "  ").startswith(f"Instruction: {DEFAULT_INSTRUCTION}\n")
     assert build_user_message("Hallo Welt", "mach es formeller").startswith("Instruction: mach es formeller")
+
+
+ENGLISH = "Hi team, I finished the report yesterday and it still needs a review before we send it to the client."
+GERMAN = "Hallo Team, ich habe den Bericht gestern fertig gemacht und er muss noch geprüft werden."
+
+
+def test_german_instruction_on_english_text_pins_english():
+    message = build_user_message(ENGLISH, "Mach es formeller")
+    assert "The text is in English. Write the reply in English" in message
+    assert message.endswith(f"Text:\n{ENGLISH}")
+
+
+def test_english_instruction_on_german_text_pins_german():
+    assert "The text is in German. Write the reply in German" in build_user_message(GERMAN, "Make it more formal")
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    ["Translate this into German", "translate this to English", "Übersetz das ins Deutsche", "Schreib es auf Englisch"],
+)
+def test_explicit_translation_request_is_not_pinned(instruction):
+    message = build_user_message(ENGLISH, instruction)
+    assert "Do not translate" not in message
+    assert message.startswith(f"Instruction: {instruction}\n\nText:")
+
+
+@pytest.mark.parametrize("instruction", ["Mach es formeller", "Make it shorter", "Fasse das zusammen", ""])
+def test_ordinary_instructions_are_not_translation_requests(instruction):
+    assert not asks_for_translation(instruction)
+
+
+def test_unsure_language_falls_back_to_the_language_of_the_text():
+    assert "in the language of the text" in build_user_message("ok", "Mach es formeller")
 
 
 def test_clean_reply_strips_a_code_fence():

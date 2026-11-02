@@ -10,11 +10,12 @@ tested with the code.
 
 from __future__ import annotations
 
+import functools
 import logging
-import re
+
+from lingua import Language, LanguageDetector, LanguageDetectorBuilder
 
 from .config import LlmConfig
-from .lang_detect import language_guess
 from .llm import LlmError, clean_reply, complete
 from .mic_guard import _ensure_com
 from .uia import read_focus
@@ -28,7 +29,8 @@ DEFAULT_INSTRUCTION = (
 SYSTEM_PROMPT = (
     "You rewrite a text the user has selected, following the user's instruction. "
     "The instruction may be in English or German and may refer to the text as 'it', 'das' or 'den Text'. "
-    "Keep the text's language unless the instruction asks for another one. "
+    "Keep the text's language, also when the instruction is in another language; only an explicit request "
+    "for another language (a translation) overrides that. "
     "Never answer questions in the text and never add commentary, quotes, headings, code fences "
     "or placeholders such as [Name] or [Date]; use only what the text says. "
     "Reply with the rewritten text only."
@@ -37,39 +39,46 @@ SYSTEM_PROMPT = (
 logger = logging.getLogger(__name__)
 
 
-# An instruction that asks for another language, e.g. "translate this" or "übersetz das ins Deutsche".
-_TRANSLATION_REQUEST = re.compile(
-    r"\btranslat|\b[uü]e?bersetz|\b(?:in|ins|into|to|auf)\s+(?:the\s+)?(?:english|german|englisch\w*|deutsch\w*)\b",
-    re.IGNORECASE,
-)
-_LANGUAGE_NAME = {"en": "English", "de": "German"}
-_MIN_CONFIDENCE = 0.6
+# Detection looks at the start of the selection only (a 100,000-character selection must not delay the model)
+# and knows more than English and German, so a Dutch or French text is not mistaken for one of the two.
+_DETECT_CHARS = 2000
+_MIN_CONFIDENCE = 0.7
 
 
-def asks_for_translation(instruction: str) -> bool:
-    return bool(_TRANSLATION_REQUEST.search(instruction))
+@functools.lru_cache(maxsize=1)
+def _detector() -> LanguageDetector:
+    languages = [
+        Language.ENGLISH, Language.GERMAN, Language.FRENCH, Language.SPANISH, Language.ITALIAN,
+        Language.DUTCH, Language.PORTUGUESE, Language.POLISH, Language.TURKISH, Language.SWEDISH,
+    ]  # fmt: skip
+    return LanguageDetectorBuilder.from_languages(*languages).build()
 
 
-def language_line(selection: str, instruction: str) -> str:
-    """The prompt line that pins the reply language to the selection's, "" for an explicit translation request.
+def detect_selection_language(selection: str) -> str | None:
+    """The English name of the language the selection is written in, None when unsure (also for a mix)."""
+    values = _detector().compute_language_confidence_values(selection[:_DETECT_CHARS])
+    if not values or values[0].value < _MIN_CONFIDENCE:
+        return None
+    return values[0].language.name.capitalize()
+
+
+def language_line(selection: str) -> str:
+    """The prompt line that names the selection's language, "" when it is unsure.
 
     The language comes from the selected text, never from the spoken instruction: a German instruction on
-    English text must still give English back."""
-    if asks_for_translation(instruction):
-        return ""
-    code, confidence = language_guess(selection)
-    name = _LANGUAGE_NAME.get(code) if confidence >= _MIN_CONFIDENCE else None
+    English text must still give English back. Only an explicit request for another language overrides it."""
+    name = detect_selection_language(selection)
     if name is None:
-        return "Write the reply in the language of the text, whatever language the instruction is in. Do not translate."
+        return ""
     return (
-        f"The text is in {name}. Write the reply in {name}, even if the instruction is in another language. "
-        "Do not translate."
+        f"Language of the text: {name}. If the instruction asks to translate or to switch language, follow it. "
+        f"If it does not, the reply must stay in {name}, even when the instruction is written in another language."
     )
 
 
 def build_user_message(selection: str, instruction: str) -> str:
     instruction = instruction.strip() or DEFAULT_INSTRUCTION
-    line = language_line(selection, instruction)
+    line = language_line(selection)
     header = f"Instruction: {instruction}" + (f"\n{line}" if line else "")
     return f"{header}\n\nText:\n{selection}"
 

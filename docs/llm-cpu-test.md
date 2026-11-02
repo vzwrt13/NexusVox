@@ -203,19 +203,24 @@ about half of the replies German with all three models (they followed the langua
 "Keep the text's language").
 
 **Fix and re-run (#182).** The Polish user message now names the language of the selected text (detected from the
-text with lingua, not from the instruction) and says "Write the reply in English, even if the instruction is in
-another language. Do not translate." When the detector is unsure the line says "in the language of the text". An
-instruction that asks for a translation ("Translate this into German", "Übersetz das ins Englische") gets no such line.
-Same 26 selections, same three instruction styles, GPU, one reply each, `scripts/llm_eval.py language`:
+first 2,000 characters with lingua, ten languages, not from the instruction) and says that an instruction asking to
+translate or switch language is followed, otherwise "the reply must stay in English, even when the instruction is
+written in another language". When the detector is not at least 70 % sure (a mix of languages, a very short text) the
+line is left out and the system prompt's "keep the text's language" applies alone. There is no keyword list for
+translation requests: the model decides, because a first version with a regex gate missed phrasings ("Mach das
+Englisch") and fired on "keep it in English". A first wording without the "follow a translation request" clause fixed
+the language but made `gemma4:e4b` ignore 5 of 8 explicit translations. Same 26 selections, same three instruction styles, GPU, one reply each, `scripts/llm_eval.py language`:
 
 | | English instruction | German instruction on English text | Default instruction |
 |---|---|---|---|
 | `gemma4:e4b` | 0 of 26 German (was 5) | 0 of 26 (was 11) | 0 of 26 (was 2) |
 | `gemma4:e2b` | 0 of 26 (was 0) | 0 of 26 (was 13) | 0 of 26 (was 0) |
 
-Side checks with the same prompt, both models: the two translation selections ("Translate this into German",
-"Übersetze das ins Englische") still came back translated, and all 24 German selections of the Polish set stayed
-German (lingua). `qwen3.5:4b` was not re-run; it is not a supported model choice here.
+Side checks with the final prompt, both models: 10 of 10 explicit requests did what they asked ("Translate this into
+German", "Übersetze das ins Deutsche", "Mach das auf Deutsch", "Make it German", "Schreib es auf Französisch",
+"Translate this to English", "Mach das Englisch", "Übersetze das ins Englische"; "Keep it in English and make it
+shorter" and "Bleib auf Deutsch, mach es kürzer" stayed in their language), and all 24 German selections of the Polish
+set stayed German (lingua). One selection per case, so these are spot checks, not rates. `qwen3.5:4b` was not re-run; it is not a supported model choice here.
 
 ### Claims we can make
 

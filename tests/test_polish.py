@@ -9,11 +9,12 @@ import urllib.error
 import pytest
 
 from nexusvox import llm
+from nexusvox import polish as polish_module
 from nexusvox.config import LlmConfig
 from nexusvox.llm import LlmError, complete
 from nexusvox.polish import (
     DEFAULT_INSTRUCTION,
-    asks_for_translation,
+    SYSTEM_PROMPT,
     build_user_message,
     clean_reply,
     polish,
@@ -93,36 +94,64 @@ def test_user_message_uses_the_default_instruction_when_nothing_was_said():
 
 
 ENGLISH = "Hi team, I finished the report yesterday and it still needs a review before we send it to the client."
+DUTCH = "Hallo team, ik heb het rapport gisteren afgemaakt en het moet nog worden nagekeken voordat we het versturen."
+FRENCH = (
+    "Bonjour à tous, j'ai terminé le rapport hier et il doit encore être relu avant que nous l'envoyions au client."
+)
 GERMAN = "Hallo Team, ich habe den Bericht gestern fertig gemacht und er muss noch geprüft werden."
 
 
 def test_german_instruction_on_english_text_pins_english():
     message = build_user_message(ENGLISH, "Mach es formeller")
-    assert "The text is in English. Write the reply in English" in message
+    assert "Language of the text: English." in message and "must stay in English" in message
     assert message.endswith(f"Text:\n{ENGLISH}")
 
 
 def test_english_instruction_on_german_text_pins_german():
-    assert "The text is in German. Write the reply in German" in build_user_message(GERMAN, "Make it more formal")
+    assert "Language of the text: German." in build_user_message(GERMAN, "Make it more formal")
 
 
-@pytest.mark.parametrize(
-    "instruction",
-    ["Translate this into German", "translate this to English", "Übersetz das ins Deutsche", "Schreib es auf Englisch"],
-)
-def test_explicit_translation_request_is_not_pinned(instruction):
-    message = build_user_message(ENGLISH, instruction)
-    assert "Do not translate" not in message
-    assert message.startswith(f"Instruction: {instruction}\n\nText:")
+def test_other_languages_are_named_not_mistaken_for_german():
+    assert "Language of the text: Dutch." in build_user_message(DUTCH, "Make it shorter")
+    assert "Language of the text: French." in build_user_message(FRENCH, "Mach es kürzer")
 
 
-@pytest.mark.parametrize("instruction", ["Mach es formeller", "Make it shorter", "Fasse das zusammen", ""])
-def test_ordinary_instructions_are_not_translation_requests(instruction):
-    assert not asks_for_translation(instruction)
+def test_the_pin_leaves_room_for_an_explicit_request():
+    message = build_user_message(ENGLISH, "Translate this into German")
+    assert message.startswith("Instruction: Translate this into German\n")
+    assert "asks to translate or to switch language, follow it" in message
+    assert "explicit request" in SYSTEM_PROMPT
 
 
-def test_unsure_language_falls_back_to_the_language_of_the_text():
-    assert "in the language of the text" in build_user_message("ok", "Mach es formeller")
+def test_unsure_detection_adds_no_line(monkeypatch):
+    monkeypatch.setattr(polish_module, "detect_selection_language", lambda _selection: None)
+    assert build_user_message("ok", "Mach es formeller") == "Instruction: Mach es formeller\n\nText:\nok"
+
+
+def test_a_mixed_selection_is_not_pinned(monkeypatch):
+    class Value:
+        def __init__(self, name, value):
+            self.language, self.value = type("L", (), {"name": name})(), value
+
+    class Detector:
+        def compute_language_confidence_values(self, _text):
+            return [Value("GERMAN", 0.55), Value("ENGLISH", 0.45)]
+
+    monkeypatch.setattr(polish_module, "_detector", lambda: Detector())
+    assert polish_module.detect_selection_language("Danke!\n> Thanks a lot for the update.") is None
+
+
+def test_detection_looks_at_the_start_of_a_huge_selection(monkeypatch):
+    seen = []
+
+    class Detector:
+        def compute_language_confidence_values(self, text):
+            seen.append(len(text))
+            return []
+
+    monkeypatch.setattr(polish_module, "_detector", lambda: Detector())
+    polish_module.detect_selection_language("x" * 100_000)
+    assert seen == [polish_module._DETECT_CHARS]
 
 
 def test_clean_reply_strips_a_code_fence():

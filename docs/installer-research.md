@@ -1,6 +1,7 @@
 # Packaging NexusVox as a Windows installer
 
-Status: research only, 2026-10-31 (issue #149). No packaging code was written and nothing was built.
+Status: research 2026-10-31 (issue #149); the PyInstaller spike of 2026-11-02 (issue #161) is
+[below](#spike-result-pyinstaller-onedir-build-ticket-1-issue-161) and confirmed the size and build estimates.
 Free release is planned for 2026-11-13, 13 days after this document.
 
 Method: sizes marked **measured** come from the maintainer's development venv and Hugging Face cache on
@@ -301,6 +302,61 @@ Order matters. Tickets 1 to 4 are the critical path to 2026-11-13.
 
 If the date slips, 1.0 is tickets 1, 2, 3 (4 optional). Tickets 5 and 7 are strongly wanted but can
 land in 1.0.1 without making the first install worse than today's `pip install`.
+
+## Spike result: PyInstaller onedir build (ticket 1, issue #161)
+
+Measured 2026-11-02 on the maintainer's PC (Windows 11, Python 3.12.10, PyInstaller 6.x,
+fresh build environment, `pip install .` not editable). Build with `python packaging/build.py`; the spec is
+`packaging/nexusvox.spec`, the entry point `packaging/launcher.py` (windowed, `console=False`, no UPX).
+The frozen self-test is `NexusVox.exe --selftest <folder> [--download]` (`packaging/frozen_selftest.py`).
+
+| Measure | Result |
+|---|---|
+| Frozen folder, no model | **601 MB** (573 MiB, 1,200 files). The estimate was 600-700 MB |
+| Parakeet model, downloaded on first use | **640 MiB** (671 MB). Whisper base for the test: 142 MiB |
+| Folder with Parakeet | about **1.27 GB** |
+| Compressed folder | **288 MB** deflate (zip), **217 MB** LZMA (tar.xz, preset 5). The Inno LZMA installer will land near the second figure; the estimate was 250-400 MB |
+| Build time | **83 s** cold (first build, `--clean`), **43-51 s** with the analysis cache |
+| Biggest parts | `lingua` 291 MB (48 percent, as predicted), `av.libs` 63 MB, `ctranslate2` 62 MB, `onnxruntime` 43 MB |
+| Windows Defender (local scan, no upload) | no threats found. No VirusTotal or other online scan was run |
+
+Verified from the frozen exe (self-test, all green in the last run): the tray icon thread starts; the dashboard
+serves `/`, its script, style, chart, font and API from the bundled files (with the session-cookie guard); an
+add-on unpacked next to the exe is found by its entry point and its panel script and API are served (a stand-in
+package, because the real Pro add-on is private); the CPU Parakeet model **downloads from Hugging Face into an
+empty cache (27 s on this line) and transcribes a spoken sentence word for word**; `lingua`, PortAudio, the WASAPI
+capture-session enumeration of the mic guard, the WASAPI loopback device of the meeting recorder, the pynput
+low-level hook, Tk (the dictation overlay) and CPU Whisper (`ctranslate2`) all load and work. The real app
+(`NexusVox.exe` without arguments) starts, logs "NexusVox started" and holds about 120 MB with the model unloaded.
+
+What the spec needed (the "missing hooks and data files"): `collect_all` for `nexusvox` (dashboard assets,
+config template), `onnx_asr`, `onnxruntime`, `faster_whisper` (Silero VAD), `ctranslate2`, `av`, `lingua`,
+`pycaw`, `comtypes`, `pyaudiowpatch`, `sounddevice` (plus `_sounddevice_data` for the PortAudio DLL), `pystray`
+and `pynput`; `copy_metadata("nexusvox")` so entry points resolve. The launcher gives a windowed process a null
+`stdout`/`stderr` (they are `None` without a console) and adds an `extensions` folder next to the exe (and
+`NEXUSVOX_EXTENSIONS`) to `sys.path`, which is how an add-on with its `.dist-info` is found in a build that has
+no site-packages. Of the possible savings, `av.libs` (63 MB) belongs to PyAV, which `faster-whisper` uses only to
+decode audio files, and `lingua` is ticket 9.
+
+What the build cannot do yet:
+
+- **Paths.** `config.toml`, the database and `audio/` still resolve against the working directory; the self-test
+  and the real-app run used a scratch folder as the working directory. Ticket 2.
+- **Docker/GPU path.** `DOCKER_DIR` points outside the build, so the Docker start from the dashboard is
+  not shipped; with `device = "auto"` this PC resolves to `cuda` (through `ctranslate2`, which is the CPU-only
+  wheel but still counts the GPU) and the app then goes for the server. Not exercised from the build.
+  Users of the installer must run `device = "cpu"` until ticket 5 sets that on first start.
+- **Not exercised by a script:** the real hotkey and typing into another app, a real microphone recording,
+  a click on the tray icon, meeting recording end to end, upload conversion (needs `ffmpeg` on `PATH`, as
+  with `pip`), and the dashboard rendered in a browser (only the HTTP responses were checked).
+- **Unhandled start-up errors** show a PyInstaller message box and then wait for the user, with no log, because
+  the file log starts after the imports. A launcher-level crash log is worth adding with ticket 2.
+- **The real Pro add-on** was not tested. A stand-in with the same entry point and panel API passed.
+- **Not signed, no custom bootloader, no installer.** Tickets 3 and 4.
+- **A dependency bug found on the way, unrelated to packaging:** `faster-whisper` 1.2.1 passes `metadata_errors`
+  to `av.open`, which `av` 19 no longer accepts, so Whisper fails on the first transcription in any fresh
+  environment (`pip install .` gives `av` 19.0.2 today). The build environment pinned `av<19` (18.1.0). The fix
+  is a pin `av<19` in `pyproject.toml`; it is not part of this ticket.
 
 ## Open questions
 

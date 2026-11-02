@@ -97,7 +97,7 @@ async function api(path) {
 function activateTab(name) {
   const btn = document.querySelector(`.tab[data-tab="${name}"]`);
   const panel = document.getElementById("tab-" + name);
-  if (!btn || !panel) return false;
+  if (!btn || !panel || btn.hidden) return false;
 
   document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
   document.querySelectorAll(".tab-content").forEach((s) => s.classList.remove("active"));
@@ -213,7 +213,7 @@ function openExtensionPanel(id) {
 
 function restoreTabFromHash() {
   const name = window.location.hash.replace(/^#/, "");
-  if (!name || (name === "dev" && !DEV_MODE)) return;
+  if (!name) return;
   activateTab(name);
 }
 
@@ -868,6 +868,7 @@ osCommandsToggle.addEventListener("change", async () => {
 });
 
 async function loadOsCommands() {
+  if (!FEATURES.os_commands) return; // experimental: the card is hidden and the endpoint is not registered
   const data = await fetch("/api/os-commands").then((r) => r.json());
   osCommandsToggle.checked = data.enabled;
 
@@ -2893,17 +2894,29 @@ async function openMeetingsTab() {
   }, 3000);
 }
 
-// ── Dev Mode Detection ───────────────────────────────────────────────
-const DEV_MODE = new URLSearchParams(window.location.search).has("dev");
+// ── Experimental features ────────────────────────────────────────────
+// Features that are not part of v1 are hidden in index.html (`data-feature`) and have no endpoint unless
+// `[experimental]` in config.toml turns them on; the page shows what the server says is on.
+let FEATURES = {};
+
+async function loadFeatures() {
+  try {
+    FEATURES = await fetch("/api/features").then((r) => r.json());
+  } catch (err) {
+    FEATURES = {};
+  }
+  document.querySelectorAll("[data-feature]").forEach((el) => {
+    el.hidden = !FEATURES[el.dataset.feature];
+  });
+}
 
 // ── Init ─────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  loadSettings();
-  loadMeetingSettings();
-  if (DEV_MODE) {
-    document.querySelectorAll("[data-dev-only]").forEach((el) => (el.style.display = ""));
-  }
-  loadExtensions().then(restoreTabFromHash);
+  loadFeatures().then(() => {
+    loadSettings();
+    loadMeetingSettings();
+    loadExtensions().then(restoreTabFromHash);
+  });
 });
 
 // ── Benchmarks (Dev Tab) ─────────────────────────────────────────────
@@ -2912,7 +2925,7 @@ let benchmarkCache = null;
 let currentBenchmarkDetail = null;
 
 async function loadBenchmarks() {
-  if (!DEV_MODE) return;
+  if (!FEATURES.dev_tab) return;
   try {
     const comparison = await fetch("/api/benchmarks/compare").then((r) => r.json());
     benchmarkCache = comparison;

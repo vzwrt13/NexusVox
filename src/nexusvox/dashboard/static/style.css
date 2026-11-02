@@ -151,6 +151,7 @@ body::before {
   z-index: -1;
 }
 
+[data-feature][hidden] { display: none !important; } /* experimental features, see [experimental] */
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 

@@ -443,6 +443,22 @@ class OSCommandsConfig:
 
 
 @dataclass
+class ExperimentalConfig:
+    """Features that are finished in code but not part of v1; each is off (hidden and unreachable) by default.
+
+    - ``os_commands``: Nexus OS commands (voice window management) and their Settings card.
+    - ``flag_command``: the "nexus flag" voice command and the Edit tab ("Flagged Transcriptions").
+    - ``github_snippets``: the Snippets button "Fill from GitHub" and its endpoint.
+    - ``dev_tab``: the developer benchmark page of the dashboard.
+    """
+
+    os_commands: bool = False
+    flag_command: bool = False
+    github_snippets: bool = False
+    dev_tab: bool = False
+
+
+@dataclass
 class AssistantConfig:
     """Where "nexus assistant <text>" is forwarded: a local TCP port that answers
     `send <service> <text>` (the personal-tooling Controller's control port)."""
@@ -658,6 +674,7 @@ class Config:
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     os_commands: OSCommandsConfig = field(default_factory=OSCommandsConfig)
+    experimental: ExperimentalConfig = field(default_factory=ExperimentalConfig)
     voice_commands: VoiceCommandsConfig = field(default_factory=VoiceCommandsConfig)
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
     os_control: OsControlConfig = field(default_factory=OsControlConfig)
@@ -725,6 +742,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     custom_protocol = custom_data.get("protocol", "http")
     db_data = data.get("database", {})
     os_cmd_data = data.get("os_commands", {})
+    experimental_data = data.get("experimental", {})
     vc_data = data.get("voice_commands", None)
     assistant_data = data.get("assistant", {})
     switcher_data = data.get("os_control", {})
@@ -804,6 +822,12 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         os_commands=OSCommandsConfig(
             enabled=os_cmd_data.get("enabled", False),
             apps=dict(os_cmd_data.get("apps", {})),
+        ),
+        experimental=ExperimentalConfig(
+            os_commands=bool(experimental_data.get("os_commands", False)),
+            flag_command=bool(experimental_data.get("flag_command", False)),
+            github_snippets=bool(experimental_data.get("github_snippets", False)),
+            dev_tab=bool(experimental_data.get("dev_tab", False)),
         ),
         voice_commands=vc_config,
         assistant=AssistantConfig(
@@ -919,6 +943,12 @@ def save_config(config: Config, path: Path | None = None) -> None:
             "",
             "[os_commands.apps]",
             *[f'{name} = "{exe}"' for name, exe in config.os_commands.apps.items()],
+            "",
+            "[experimental]",
+            f"os_commands = {'true' if config.experimental.os_commands else 'false'}",
+            f"flag_command = {'true' if config.experimental.flag_command else 'false'}",
+            f"github_snippets = {'true' if config.experimental.github_snippets else 'false'}",
+            f"dev_tab = {'true' if config.experimental.dev_tab else 'false'}",
             "",
             "[voice_commands]",
             f"enabled = {'true' if config.voice_commands.enabled else 'false'}",

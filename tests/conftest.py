@@ -7,7 +7,7 @@ import wave
 
 import pytest
 
-from nexusvox.config import Config, DatabaseConfig
+from nexusvox.config import Config, DatabaseConfig, ExperimentalConfig
 from nexusvox.dashboard import _PORT, _create_app
 from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.dashboard.guard import COOKIE_NAME
@@ -100,8 +100,13 @@ def sample_transcriptions(db):
 
 @pytest.fixture
 def flask_client(db, session_factory, monkeypatch):
-    """Flask test client backed by the in-memory database."""
-    config = Config()
+    """Flask test client backed by the in-memory database, with every experimental feature on.
+
+    ``test_experimental.py`` covers the default (hidden) state.
+    """
+    config = Config(
+        experimental=ExperimentalConfig(os_commands=True, flag_command=True, github_snippets=True, dev_tab=True)
+    )
     api = DashboardAPI(session_factory, config, db=db)
     app = _create_app(api)
     app.config["TESTING"] = True

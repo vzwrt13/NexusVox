@@ -7,6 +7,7 @@ import logging
 import re
 import threading
 import webbrowser
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote
@@ -50,6 +51,14 @@ def _create_app(api: DashboardAPI) -> Flask:
     @app.route("/")
     def index():
         return app.send_static_file("index.html")
+
+    # Features that are not part of v1: their routes below are only registered when the flag is on, and the page
+    # asks which ones to show. Read once at start, so a change needs a restart.
+    experimental = api.experimental
+
+    @app.route("/api/features")
+    def get_features():
+        return jsonify(asdict(experimental))
 
     # ---- Model endpoints ---------------------------------------------------
 
@@ -317,21 +326,23 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_voice_commands_bypass_structural(data.get("enabled", False)))
 
-    # ---- OS Commands endpoints ---------------------------------------------
+    # ---- OS Commands endpoints (experimental) ------------------------------
 
-    @app.route("/api/os-commands")
-    def get_os_commands():
-        return jsonify(api.get_os_commands())
+    if experimental.os_commands:
 
-    @app.route("/api/os-commands/enabled", methods=["POST"])
-    def set_os_commands_enabled():
-        data = request.get_json(force=True)
-        return jsonify(api.set_os_commands_enabled(data.get("enabled", False)))
+        @app.route("/api/os-commands")
+        def get_os_commands():
+            return jsonify(api.get_os_commands())
 
-    @app.route("/api/os-commands/apps", methods=["POST"])
-    def set_os_commands_apps():
-        data = request.get_json(force=True)
-        return jsonify(api.set_os_commands_apps(data.get("apps", {})))
+        @app.route("/api/os-commands/enabled", methods=["POST"])
+        def set_os_commands_enabled():
+            data = request.get_json(force=True)
+            return jsonify(api.set_os_commands_enabled(data.get("enabled", False)))
+
+        @app.route("/api/os-commands/apps", methods=["POST"])
+        def set_os_commands_apps():
+            data = request.get_json(force=True)
+            return jsonify(api.set_os_commands_apps(data.get("apps", {})))
 
     # ---- Analytics endpoints -----------------------------------------------
 
@@ -373,14 +384,16 @@ def _create_app(api: DashboardAPI) -> Flask:
 
     # ---- Flagged / Corrections endpoints -----------------------------------
 
-    @app.route("/api/flagged")
-    def flagged_transcriptions():
-        return jsonify(api.get_flagged_transcriptions())
+    if experimental.flag_command:
 
-    @app.route("/api/flagged/<int:tid>/correct", methods=["POST"])
-    def correct_transcription(tid):
-        data = request.get_json(force=True)
-        return jsonify(api.update_correction(tid, data.get("corrected_text", "")))
+        @app.route("/api/flagged")
+        def flagged_transcriptions():
+            return jsonify(api.get_flagged_transcriptions())
+
+        @app.route("/api/flagged/<int:tid>/correct", methods=["POST"])
+        def correct_transcription(tid):
+            data = request.get_json(force=True)
+            return jsonify(api.update_correction(tid, data.get("corrected_text", "")))
 
     @app.route("/api/audio/<int:tid>")
     def serve_audio(tid):
@@ -433,9 +446,11 @@ def _create_app(api: DashboardAPI) -> Flask:
             )
         )
 
-    @app.route("/api/snippets/github-repos")
-    def get_github_repos():
-        return jsonify(api.get_github_repos())
+    if experimental.github_snippets:
+
+        @app.route("/api/snippets/github-repos")
+        def get_github_repos():
+            return jsonify(api.get_github_repos())
 
     @app.route("/api/snippets/<int:snippet_id>", methods=["DELETE"])
     def delete_snippet(snippet_id):
@@ -579,22 +594,24 @@ def _create_app(api: DashboardAPI) -> Flask:
         except Exception:  # a clashing blueprint name or a bad route must not take the dashboard down
             logger.exception("Could not mount the API of dashboard panel %r; the panel stays without it", panel.id)
 
-    # ---- Benchmark endpoints (Dev tab) -------------------------------------
+    # ---- Benchmark endpoints (Dev tab, experimental) -----------------------
 
-    @app.route("/api/benchmarks")
-    def benchmarks_list():
-        return jsonify(api.get_benchmarks())
+    if experimental.dev_tab:
 
-    @app.route("/api/benchmarks/compare")
-    def benchmarks_compare():
-        return jsonify(api.get_benchmark_comparison())
+        @app.route("/api/benchmarks")
+        def benchmarks_list():
+            return jsonify(api.get_benchmarks())
 
-    @app.route("/api/benchmarks/<filename>")
-    def benchmark_detail(filename):
-        data = api.get_benchmark(filename)
-        if data is None:
-            return jsonify({"error": "Benchmark not found"}), 404
-        return jsonify(data)
+        @app.route("/api/benchmarks/compare")
+        def benchmarks_compare():
+            return jsonify(api.get_benchmark_comparison())
+
+        @app.route("/api/benchmarks/<filename>")
+        def benchmark_detail(filename):
+            data = api.get_benchmark(filename)
+            if data is None:
+                return jsonify({"error": "Benchmark not found"}), 404
+            return jsonify(data)
 
     return app
 

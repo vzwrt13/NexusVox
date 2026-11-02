@@ -598,7 +598,7 @@ class NexusVoxApp:
             # A phone recording only wants its text back, never a PC action.
             if not remote:
                 nexus_cmd = parse_nexus_command(raw_text)
-                if nexus_cmd is not None and nexus_cmd.action == "flag":
+                if nexus_cmd is not None and nexus_cmd.action == "flag" and self._config.experimental.flag_command:
                     self._flag_last_transcription()
                     await self._transcriber.disconnect()
                     return
@@ -914,7 +914,7 @@ class NexusVoxApp:
         await asyncio.get_running_loop().run_in_executor(None, save)
 
     def _flag_last_transcription(self) -> None:
-        """ "nexus flag" - always available, flags the most recent transcription for review."""
+        """ "nexus flag" (``[experimental].flag_command``): flags the most recent transcription for review."""
         last_tid = self._db.get_last_transcription_id()
         if last_tid is None:
             logger.info("Nexus flag: no transcription to flag")
@@ -958,7 +958,12 @@ class NexusVoxApp:
                     self._cue(beep_error, ERROR)
                 return f"[assistant] {assistant_text}"
 
-        if nexus_cmd is not None and self._config.os_commands.enabled:
+        if (
+            nexus_cmd is not None
+            and nexus_cmd.action != "flag"
+            and self._config.experimental.os_commands
+            and self._config.os_commands.enabled
+        ):
             await loop.run_in_executor(None, execute_nexus_command, nexus_cmd, self._config.os_commands)
             logger.info("Nexus command: %s %s", nexus_cmd.action, nexus_cmd.app_name)
             return f"[nexus] {nexus_cmd.action} {nexus_cmd.app_name}"

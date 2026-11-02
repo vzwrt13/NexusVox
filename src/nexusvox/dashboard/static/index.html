@@ -16,11 +16,11 @@
     <nav class="tabs">
       <button class="tab active" data-tab="settings">Settings</button>
       <button class="tab" data-tab="analytics">Analytics</button>
-      <button class="tab" data-tab="edit">Edit</button>
+      <button class="tab" data-tab="edit" data-feature="flag_command" hidden>Edit</button>
       <button class="tab" data-tab="meetings">Meetings</button>
       <button class="tab" data-tab="upload">Upload</button>
       <button class="tab" data-tab="review">Review</button>
-      <button class="tab tab-dev" data-tab="dev" data-dev-only style="display:none">Dev</button>
+      <button class="tab tab-dev" data-tab="dev" data-feature="dev_tab" hidden>Dev</button>
     </nav>
   </header>
 
@@ -125,7 +125,7 @@
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
             <h3>Store Audio Recordings</h3>
-            <p>Keeps a WAV file of every recording next to the database (<code>audio/</code>) so you can play it back in the Review and Edit tabs. Off: only the transcript is saved, nothing is written to disk for the audio. Recordings already stored stay.</p>
+            <p>Keeps a WAV file of every recording next to the database (<code>audio/</code>) so you can play it back in the Review tab. Off: only the transcript is saved, nothing is written to disk for the audio. Recordings already stored stay.</p>
           </div>
           <label class="toggle">
             <input type="checkbox" id="store-audio-toggle">
@@ -309,7 +309,7 @@
         <div id="model-overview-grid" class="overview-grid"></div>
       </div>
 
-      <div class="settings-card" style="margin-top: 12px;">
+      <div class="settings-card" style="margin-top: 12px;" data-feature="os_commands" hidden>
         <div class="setting-row">
           <div class="setting-info">
             <h3>Nexus OS Commands</h3>
@@ -370,7 +370,7 @@
           <input type="text" id="snippet-trigger" class="dict-input" placeholder="Trigger, e.g. my address / meine Adresse" required>
           <textarea id="snippet-expansion" class="dict-input snippet-expansion" rows="3" placeholder="Text to insert (optional with options: used when no option matches)"></textarea>
           <textarea id="snippet-options" class="dict-input snippet-expansion" rows="3" placeholder="Options, one per line: name = text"></textarea>
-          <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-github">Fill from GitHub</button>
+          <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-github" data-feature="github_snippets" hidden>Fill from GitHub</button>
           <button type="submit" class="flagged-play-btn dict-add-btn" id="snippet-save">Add</button>
           <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-cancel" hidden>Cancel</button>
         </form>
@@ -665,7 +665,7 @@
     </section>
 
     <!-- Edit Tab -->
-    <section id="tab-edit" class="tab-content">
+    <section id="tab-edit" class="tab-content" data-feature="flag_command" hidden>
       <h2 class="edit-heading">Flagged Transcriptions</h2>
       <p class="settings-hint" style="margin-bottom: 16px;">Transcriptions flagged as incorrect via hotkey. Enter the correct text and save to build ground-truth data.</p>
       <div id="flagged-list" class="flagged-list"></div>
@@ -803,10 +803,10 @@
       <button id="review-load-more" class="flagged-play-btn review-load-more" hidden onclick="loadMoreReviewTranscriptions()">Load more</button>
     </section>
 
-    <!-- Dev Tab (hidden unless ?dev query param) -->
-    <section id="tab-dev" class="tab-content" data-dev-only style="display:none">
+    <!-- Dev Tab (hidden unless [experimental] dev_tab) -->
+    <section id="tab-dev" class="tab-content" data-feature="dev_tab" hidden>
       <h2 class="edit-heading">Benchmark Analytics</h2>
-      <p class="settings-hint" style="margin-bottom: 16px;">Model accuracy and performance benchmarks from FLEURS dataset runs. Visible in dev mode only (<code>?dev</code>).</p>
+      <p class="settings-hint" style="margin-bottom: 16px;">Model accuracy and performance benchmarks from FLEURS dataset runs. Visible only with <code>[experimental] dev_tab</code> in <code>config.toml</code>.</p>
 
       <div id="dev-empty" class="empty-state" style="display:none;">
         <p>No benchmark files found in <code>benchmarks/</code>. Run <code>python scripts/benchmark.py</code> to generate results.</p>

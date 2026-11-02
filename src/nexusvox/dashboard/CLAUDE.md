@@ -7,7 +7,7 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 - `guard.py` — access control, one `before_request` hook installed first in `_create_app`, so every route (extension blueprints included) is covered: the Host header must be `127.0.0.1`/`localhost` with the dashboard port (DNS rebinding), an `Origin` header must be one of those origins, `Sec-Fetch-Site` must be `same-origin` or `none`, and every request needs the `HttpOnly`, `SameSite=Strict` session cookie (random per run) or gets 403 (JSON with an `X-NexusVox-Denied` header for `/api/*`, which a `fetch` wrapper at the top of `dashboard.js` turns into a reopen-from-tray banner). The cookie comes from `GET /?launch=<secret>`: `open_dashboard` builds that URL with a single-use secret (60 s TTL) held in memory; the server is bound with `make_server` before `_server_started` is set, and a busy port opens no browser, so a program that only requests `/` gets nothing. After a restart an old tab is refused until it is reopened from the tray. Tests: `test_dashboard_guard.py`; `tests/conftest.py` makes every `app.test_client()` signed in.
 - `analytics.py` — all SQLAlchemy query functions
 - `api.py` — Flask route wrappers around analytics queries
-- `benchmarks.py` — benchmark JSON file I/O and cross-model comparison (Dev tab)
+- `benchmarks.py` — benchmark JSON file I/O and cross-model comparison (Dev tab, experimental)
 - `file_jobs.py` — in-memory registry of file transcription jobs (Upload tab progress)
 
 ## Look
@@ -31,7 +31,7 @@ Aurora Precision theme, shared with the website. Tokens are the `:root` variable
 - Nexus OS Commands card: toggle enable/disable, lists supported actions and registered apps.
 - Voice Commands card: master enable/disable toggle; Numbers as Digits toggle; Press Enter Command toggle (`POST /api/voice-commands/press-enter`); Bypass Structural Commands toggle + structural command chips (`new line`, `new paragraph`, `tab`, `all caps`; `POST /api/voice-commands/structural`); Bypass Symbol Commands toggle + symbol command chips (click to activate/deactivate individual symbols, persisted immediately via `POST /api/voice-commands/symbols`).
 
-**Edit (tab 3)** — flagged transcriptions with editable correction textarea and audio playback. Saves via `POST /api/flagged/<id>/correct`. Audio served via `GET /api/audio/<tid>`.
+**Edit (tab 3, experimental: `[experimental].flag_command`)** — flagged transcriptions with editable correction textarea and audio playback. Saves via `POST /api/flagged/<id>/correct`. Audio served via `GET /api/audio/<tid>`.
 
 **Meetings (tab 4)** — Start/Stop button with a timer (`GET /api/meetings/status` every 3 s while the tab is shown, the page counts seconds in between) and a red indicator; Start shows the in-page consent hint ("Inform all participants before you record", *Don't show this again* sets `[meeting].consent_hint` off; never a browser dialog) unless it is off; Stop (`POST /api/meetings/stop`) starts the transcription job and the tab polls `GET /api/file-transcribe/<job_id>` for the progress bar. Meeting hotkey editor (modifier checkboxes + key, `POST /api/settings/meeting-hotkey`, 400 with `error` on an unusable one), microphone and output device selects (`GET /api/meetings/devices`, `POST /api/settings/meeting-devices`, empty = system default), consent hint toggle (`POST /api/settings/meeting-consent-hint`), *Leave dictation out of the meeting transcript* toggle (`POST /api/settings/meeting-leave-dictation-out`, `meeting_leave_dictation_out` in `GET /api/settings`, `[meeting].leave_dictation_out`), *Store meeting audio* toggle (`POST /api/settings/meeting-store-audio`, `meeting_store_audio`, `[meeting].store_audio`, default on: `meeting.wav` is kept after a successful transcription; off deletes it too; the per-track WAVs are always deleted then; a row without audio has no player). *Live transcript* box under the timer (`#meeting-live`, polled every 2 s by `GET /api/meetings/live?after=<n>` (one request in flight, segments below the shown `n` skipped, a generation counter drops a response from a previous meeting) until the meeting is over and the worker has ended, also when it was stopped from another tab, text only via `textContent`; own-voice label / `Others` labels (live only), a model-load line and a note when audio was skipped) and the *Show a live transcript while recording* toggle (`POST /api/settings/meeting-live-transcript`, `meeting_live_transcript` in `GET /api/settings`, `[meeting].live_transcript`, off by default, from the next meeting). *Recorded, not yet transcribed* (`GET /api/meetings/pending`, hidden when empty) lists recordings without a transcript with Transcribe (`POST /api/meetings/pending/<name>/transcribe`, 409 while another file is transcribing) and Delete (`DELETE /api/meetings/pending/<name>`, in-card confirmation; only folders `meeting-*` holding `meeting.json` that are neither recording nor transcribing, else 404). The progress poll treats a vanished job (404) as lost contact, never as success. *Previous Meetings* is the file-transcription list narrowed to `?kind=meeting` (audio player, Delete). See `src/nexusvox/CLAUDE.md`, Meeting Session.
 
@@ -41,7 +41,7 @@ Aurora Precision theme, shared with the website. Tokens are the `:root` variable
 
 **Review (tab 5)** — unreviewed recordings that have audio files, oldest first. Each card has *Retry* (`POST /api/review/<tid>/retry`): the stored WAV is transcribed again with the current model (same path as file upload, `transcribe_file`) and the result goes into the correction box; nothing is saved until the user submits. It needs the WAV, i.e. `[database].store_audio`, which the tab says. Users confirm correctness via checkbox or provide corrected text. Flagged-but-unreviewed items highlighted red with checkbox defaulting to incorrect. `reviewed` column on `Transcription` is tri-state: `0`=unreviewed, `1`=correct, `2`=incorrect.
 
-**Dev (tab 6, dev-only)** — hidden unless `?dev` query param is present. Reads benchmark JSON files from `benchmarks/` directory. Two views: comparison mode (table + WER bar chart + RTF bar chart across all benchmarks) and detail mode (WER distribution histogram, latency scatter plot, sample explorer with word-level diff). WER targets from roadmap: EN <8%, DE <12%. Orange accent distinguishes from production tabs. Backend logic in `benchmarks.py`.
+**Dev (tab 6, experimental: `[experimental].dev_tab`)** — hidden and its `/api/benchmarks*` routes not registered unless the flag is on (`?dev` does nothing). Reads benchmark JSON files from `benchmarks/` directory. Two views: comparison mode (table + WER bar chart + RTF bar chart across all benchmarks) and detail mode (WER distribution histogram, latency scatter plot, sample explorer with word-level diff). WER targets from roadmap: EN <8%, DE <12%. Orange accent distinguishes from production tabs. Backend logic in `benchmarks.py`.
 
 ## API Endpoints
 
@@ -69,7 +69,8 @@ Aurora Precision theme, shared with the website. Tokens are the `:root` variable
 | POST | `/api/voice-commands/bypass-symbols` | Toggle bypass symbol commands |
 | POST | `/api/voice-commands/structural` | Update active structural command list |
 | POST | `/api/voice-commands/bypass-structural` | Toggle bypass structural commands |
-| GET | `/api/os-commands` | OS commands config |
+| GET | `/api/features` | The `[experimental]` flags; the page shows `data-feature="<flag>"` elements only when on |
+| GET | `/api/os-commands` | OS commands config (only with `[experimental].os_commands`) |
 | POST | `/api/os-commands/enabled` | Toggle OS commands |
 | POST | `/api/os-commands/apps` | Update registered apps |
 | GET | `/api/flagged/<id>` | Get flagged transcription |
@@ -113,7 +114,7 @@ Aurora Precision theme, shared with the website. Tokens are the `:root` variable
 | DELETE | `/api/dictionary/<id>` | Remove an entry |
 | GET | `/api/snippets` | List snippets (sorted by trigger) |
 | POST | `/api/snippets` | Add, or update with `id` (`trigger`, `expansion`, `options` as `[{name, text}]`) |
-| GET | `/api/snippets/github-repos` | The user's GitHub repos as options `[{name, text: url}]` (GitHub CLI) |
+| GET | `/api/snippets/github-repos` | (only with `[experimental].github_snippets`) The user's GitHub repos as options `[{name, text: url}]` (GitHub CLI) |
 | DELETE | `/api/snippets/<id>` | Remove a snippet |
 | GET | `/api/polish-presets` | List polish presets (sorted by name) |
 | POST | `/api/polish-presets` | Add, or update with `id` (`name`, `instruction`, `is_default`; 400 on a clash or blank field) |

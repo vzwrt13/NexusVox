@@ -150,6 +150,8 @@ class BaseTranscriber(ABC):
 
     model: str
     needs_docker: bool = True
+    # True when the app should call `warm_up()` in the background at start and after a switch to this engine.
+    warms_up_at_start: bool = False
     # True when the engine can report per-word timing; `word_timestamps` then asks for it.
     supports_word_timestamps: bool = False
     word_timestamps: bool = False

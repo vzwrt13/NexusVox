@@ -50,7 +50,6 @@ from .polish_presets import resolve_instruction
 from .remote_mic import RemoteAudioSource, RemoteMicServer
 from .snippets import Snippet, resolve_open_target
 from .transcriber import create_transcriber
-from .transcribers.auto_parakeet import AutoParakeetTranscriber
 from .tray import SystemTray
 
 
@@ -389,7 +388,7 @@ class NexusVoxApp:
 
             self._switch_status = "ready"
             logger.info("Switched to model: %s", model_id)
-            if self._is_inprocess():
+            if self._warms_up():
                 asyncio.create_task(self._preload_transcriber())
 
             async def _reset_status():
@@ -1038,7 +1037,7 @@ class NexusVoxApp:
         # so the first hotkey press doesn't pay the full load + download latency.
         # A custom server is remote and has nothing to preload.
         # Engine "auto" on a GPU machine warms up the Docker server (or the CPU model while it is down).
-        if self._is_inprocess() or isinstance(self._transcriber, AutoParakeetTranscriber):
+        if self._warms_up():
             asyncio.create_task(self._preload_transcriber())
 
         if self._config.remote_mic.enabled:
@@ -1078,6 +1077,10 @@ class NexusVoxApp:
     def _is_inprocess(self) -> bool:
         """Whether the active model runs in this process; a custom server is remote and has nothing to load."""
         return not self._transcriber.needs_docker and not MODEL_REGISTRY[self._config.inference.model].get("custom")
+
+    def _warms_up(self) -> bool:
+        """Whether the active engine is warmed up in the background: in-process models load, "auto" warms the server."""
+        return self._is_inprocess() or self._transcriber.warms_up_at_start
 
     async def _preload_transcriber(self) -> None:
         """Warm up an in-process transcriber so the first hotkey press is snappy."""

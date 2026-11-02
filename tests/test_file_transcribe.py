@@ -89,6 +89,9 @@ class _RecordingTranscriber:
 
     needs_docker = False
 
+    async def prepare(self):
+        pass
+
     def __init__(self, text="hello from cpu"):
         self._text = text
         self.connect_calls = 0

@@ -7,8 +7,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nexusvox.app import NexusVoxApp
 from nexusvox.config import AudioConfig
+
+try:
+    import nexusvox.audio as audio_module
+    from nexusvox.app import NexusVoxApp
+except Exception:  # Windows-only imports (pynput hook, PortAudio) on other platforms
+    pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
 
 
 class QueueAudio:
@@ -88,8 +93,6 @@ async def test_the_whole_recording_is_kept_when_sending_fails_midway():
 
 
 async def test_audio_capture_starts_every_recording_with_an_empty_queue(monkeypatch):
-    import nexusvox.audio as audio_module
-
     stream = MagicMock()
     monkeypatch.setattr(audio_module.sd, "InputStream", lambda **kw: stream)
     monkeypatch.setattr(audio_module.sd, "query_devices", lambda kind=None: {"name": "mic"})

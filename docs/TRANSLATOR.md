@@ -6,7 +6,7 @@ That server is **not part of NexusVox**: you run it yourself, and you can use an
 program that speaks the contract below.
 
 The toggle is off by default. With it on and no server listening, the original text is
-typed and the dashboard's *Language & Translation* card shows
+typed and the dashboard's *Text & Polish* group (*Translate to English*) shows
 "No translator at &lt;url&gt;".
 
 ## Configuration

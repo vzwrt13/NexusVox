@@ -30,7 +30,19 @@ def test_advanced_is_collapsed_and_holds_rare_options():
 
 def test_every_script_lookup_has_an_element():
     ids = set(re.findall(r'\bid="([^"]+)"', HTML))
-    wanted = set(re.findall(r'getElementById\("([^"]+)"\)', JS))
+    wanted = set(re.findall(r"""getElementById\(["']([^"']+)["']\)""", JS))
+    wanted |= set(re.findall(r"""querySelector(?:All)?\(["']#([\w-]+)""", JS))
     # Elements the script creates itself are not in the static page.
     created = set(re.findall(r'\.id = "([^"]+)"', JS))
     assert not (wanted - ids - created), sorted(wanted - ids - created)
+
+
+def test_stylesheet_has_no_control_characters():
+    css = (STATIC / "style.css").read_text(encoding="utf-8")
+    bad = [c for c in css if ord(c) < 32 and c not in "\r\n\t"]
+    assert not bad, bad
+
+
+def test_settings_divs_are_balanced():
+    section = _settings_section()
+    assert len(re.findall(r"<div[\s>]", section)) == len(re.findall(r"</div>", section))

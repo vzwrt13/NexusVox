@@ -169,6 +169,8 @@ Open the dashboard from the NexusVox tray icon (left-click) while NexusVox is ru
 | Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg); optional speaker detection with Parakeet; optional text cleanup with the local language model; download as TXT, SRT or VTT (subtitles need Parakeet's word timing) |
 | Review | Flag and replay recordings |
 
+*(Screenshot from before the Settings tab was grouped: the compute device selector now sits in the collapsed **Advanced** card, and automatic language detection in **Dictation**.)*
+
 ![The NexusVox settings tab: toggles for automatic language detection, a compute device selector resolved to GPU (CUDA), a transcription model selector set to Parakeet TDT 0.6B, and a model overview listing architecture, parameter count, protocol, runtime, supported languages and VRAM.](docs/images/settings.png)
 
 **Speaker detection (Parakeet on GPU only).** In the Upload tab, choose a file, switch on *Detect speakers* and click *Transcribe*; the transcript comes back as `Speaker 1: …` paragraphs, one per turn. The Parakeet container runs NVIDIA's [Streaming Sortformer](https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2) (`nvidia/diar_streaming_sortformer_4spk-v2`, CC-BY-4.0, ~0.5 GB download, no token) once over the whole file; it is loaded on the first upload that asks for it and only occupies the GPU while it runs, so a dictation made during that run waits a few seconds. It tells **at most 4 speakers** apart — with more, voices get merged. If the container was built before this feature, rebuild it (`docker compose --profile parakeet up --build`).

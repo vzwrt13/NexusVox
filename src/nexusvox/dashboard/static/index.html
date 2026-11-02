@@ -157,148 +157,148 @@
           </label>
         </div>
 
-      <div class="settings-sub">
-        <div class="setting-row">
-          <div class="setting-info">
-            <h3>Voice Commands</h3>
-            <p>Format injected text with spoken phrases: <code>new line</code>, <code>tab</code>, <code>all caps</code>, symbols, and more (English and German).</p>
+        <div class="settings-sub">
+          <div class="setting-row">
+            <div class="setting-info">
+              <h3>Voice Commands</h3>
+              <p>Format injected text with spoken phrases: <code>new line</code>, <code>tab</code>, <code>all caps</code>, symbols, and more (English and German).</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="voice-commands-toggle">
+              <span class="toggle-slider"></span>
+            </label>
           </div>
-          <label class="toggle">
-            <input type="checkbox" id="voice-commands-toggle">
-            <span class="toggle-slider"></span>
-          </label>
+
+          <div id="voice-commands-details" class="voice-commands-details">
+            <div class="setting-row" style="margin-top: 16px;">
+              <div class="setting-info">
+                <h3>Numbers as Digits</h3>
+                <p>Convert spoken numbers to digits, English and German: "twenty five" / "fünfundzwanzig" → "25".</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="voice-numbers-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-row" style="margin-top: 16px;">
+              <div class="setting-info">
+                <h3>Press Enter Command</h3>
+                <p>End a dictation with "press enter" / "Enter drücken" to paste the text and then press Enter, e.g. to send a chat message.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="voice-press-enter-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-row" style="margin-top: 16px;">
+              <div class="setting-info">
+                <h3>Bypass Symbol Commands</h3>
+                <p>Skip symbol substitutions without clearing your list. Structural commands still apply. Useful for benchmarking.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="voice-bypass-symbols-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-row" style="margin-top: 16px;">
+              <div class="setting-info">
+                <h3>Bypass Structural Commands</h3>
+                <p>Skip new line, new paragraph, tab and all caps without clearing your list. Useful for benchmarking.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="voice-bypass-structural-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div style="margin-top: 20px;">
+              <h4 class="nexus-section-title">Structural Commands</h4>
+              <p class="settings-hint" style="margin-top: 6px;">Click to toggle formatting phrases: <code>new line</code> / <code>neue Zeile</code>, <code>new paragraph</code> / <code>neuer Absatz</code>, <code>tab</code> / <code>Tabulator</code>, <code>all caps</code> / <code>alles groß</code>. English and German are always both recognised.</p>
+              <div id="voice-structural-grid" class="voice-symbols-grid"></div>
+            </div>
+
+            <div style="margin-top: 20px;">
+              <h4 class="nexus-section-title">Symbol Commands</h4>
+              <p class="settings-hint" style="margin-top: 6px;">Click to toggle symbols you want recognised as voice commands. <span class="symbol-ambiguous-label">Ambiguous</span> symbols share common English words and may fire accidentally.</p>
+              <div id="voice-symbols-grid" class="voice-symbols-grid"></div>
+            </div>
+          </div>
         </div>
-
-        <div id="voice-commands-details" class="voice-commands-details">
-          <div class="setting-row" style="margin-top: 16px;">
-            <div class="setting-info">
-              <h3>Numbers as Digits</h3>
-              <p>Convert spoken numbers to digits, English and German: "twenty five" / "fünfundzwanzig" → "25".</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="voice-numbers-toggle">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-row" style="margin-top: 16px;">
-            <div class="setting-info">
-              <h3>Press Enter Command</h3>
-              <p>End a dictation with "press enter" / "Enter drücken" to paste the text and then press Enter, e.g. to send a chat message.</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="voice-press-enter-toggle">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-row" style="margin-top: 16px;">
-            <div class="setting-info">
-              <h3>Bypass Symbol Commands</h3>
-              <p>Skip symbol substitutions without clearing your list. Structural commands still apply. Useful for benchmarking.</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="voice-bypass-symbols-toggle">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-row" style="margin-top: 16px;">
-            <div class="setting-info">
-              <h3>Bypass Structural Commands</h3>
-              <p>Skip new line, new paragraph, tab and all caps without clearing your list. Useful for benchmarking.</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="voice-bypass-structural-toggle">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div style="margin-top: 20px;">
-            <h4 class="nexus-section-title">Structural Commands</h4>
-            <p class="settings-hint" style="margin-top: 6px;">Click to toggle formatting phrases: <code>new line</code> / <code>neue Zeile</code>, <code>new paragraph</code> / <code>neuer Absatz</code>, <code>tab</code> / <code>Tabulator</code>, <code>all caps</code> / <code>alles groß</code>. English and German are always both recognised.</p>
-            <div id="voice-structural-grid" class="voice-symbols-grid"></div>
-          </div>
-
-          <div style="margin-top: 20px;">
-            <h4 class="nexus-section-title">Symbol Commands</h4>
-            <p class="settings-hint" style="margin-top: 6px;">Click to toggle symbols you want recognised as voice commands. <span class="symbol-ambiguous-label">Ambiguous</span> symbols share common English words and may fire accidentally.</p>
-            <div id="voice-symbols-grid" class="voice-symbols-grid"></div>
-          </div>
-        </div>
-      </div>
       </div>
 
       <div class="settings-card">
         <h4 class="nexus-section-title">Vocabulary</h4>
         <p class="settings-hint" style="margin-top: 6px;">Words and phrases NexusVox should know: corrections, text shortcuts and rewrite instructions.</p>
 
-      <div class="settings-sub">
-        <div class="setting-info">
-          <h3>Correction Dictionary</h3>
-          <p>Words the model keeps getting wrong. Every match (whole word, any case) is replaced before the text is typed.</p>
-        </div>
-        <form id="dict-form" class="dict-form">
-          <input type="text" id="dict-wrong" class="dict-input" placeholder="As transcribed, e.g. nexus fox" required>
-          <span class="dict-arrow">&rarr;</span>
-          <input type="text" id="dict-right" class="dict-input" placeholder="Should be, e.g. NexusVox" required>
-          <button type="submit" class="flagged-play-btn dict-add-btn">Add</button>
-        </form>
-        <div id="dict-list" class="dict-list"></div>
-        <p class="settings-hint">Tip: correcting a recording in the Review tab suggests entries automatically.</p>
-
-        <div class="setting-row" style="margin-top: 16px;">
+        <div class="settings-sub">
           <div class="setting-info">
-            <h3>Learn From Edits</h3>
-            <p>After a paste, NexusVox reads the text field for a while (20 seconds by default, <code>[learn_from_edits].window_s</code>). Words you correct there show up below as suggestions; nothing is added without your OK. Password fields and terminals are never read, and nothing is learned from a dictation that auto cleanup or translation changed.</p>
+            <h3>Correction Dictionary</h3>
+            <p>Words the model keeps getting wrong. Every match (whole word, any case) is replaced before the text is typed.</p>
           </div>
-          <label class="toggle">
-            <input type="checkbox" id="learn-from-edits-toggle">
-            <span class="toggle-slider"></span>
-          </label>
+          <form id="dict-form" class="dict-form">
+            <input type="text" id="dict-wrong" class="dict-input" placeholder="As transcribed, e.g. nexus fox" required>
+            <span class="dict-arrow">&rarr;</span>
+            <input type="text" id="dict-right" class="dict-input" placeholder="Should be, e.g. NexusVox" required>
+            <button type="submit" class="flagged-play-btn dict-add-btn">Add</button>
+          </form>
+          <div id="dict-list" class="dict-list"></div>
+          <p class="settings-hint">Tip: correcting a recording in the Review tab suggests entries automatically.</p>
+
+          <div class="setting-row" style="margin-top: 16px;">
+            <div class="setting-info">
+              <h3>Learn From Edits</h3>
+              <p>After a paste, NexusVox reads the text field for a while (20 seconds by default, <code>[learn_from_edits].window_s</code>). Words you correct there show up below as suggestions; nothing is added without your OK. Password fields and terminals are never read, and nothing is learned from a dictation that auto cleanup or translation changed.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="learn-from-edits-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <p class="status-line" id="learn-status"></p>
+          <div id="dict-suggestions" class="dict-list"></div>
         </div>
-        <p class="status-line" id="learn-status"></p>
-        <div id="dict-suggestions" class="dict-list"></div>
-      </div>
-      <div class="settings-sub">
-        <div class="setting-info">
-          <h3>Snippets</h3>
-          <p>Say a trigger phrase anywhere in a dictation and it is replaced by your stored text - an address, a signature, a link, a template. The text is inserted exactly as stored, line breaks included. Pick triggers you would not say by accident, in any language.</p>
-          <p>Options turn one trigger into a choice: with <code>open remote repo</code> and options like <code>NexusVox = https://github.com/...</code>, saying "open remote repo nexus vox" inserts that URL - the best-matching name wins, spaces and small mishearings do not matter. Say <code>nexus open ...</code> / <code>nexus öffne ...</code> in front to open the URL in your browser instead of typing it.</p>
+        <div class="settings-sub">
+          <div class="setting-info">
+            <h3>Snippets</h3>
+            <p>Say a trigger phrase anywhere in a dictation and it is replaced by your stored text - an address, a signature, a link, a template. The text is inserted exactly as stored, line breaks included. Pick triggers you would not say by accident, in any language.</p>
+            <p>Options turn one trigger into a choice: with <code>open remote repo</code> and options like <code>NexusVox = https://github.com/...</code>, saying "open remote repo nexus vox" inserts that URL - the best-matching name wins, spaces and small mishearings do not matter. Say <code>nexus open ...</code> / <code>nexus öffne ...</code> in front to open the URL in your browser instead of typing it.</p>
+          </div>
+          <form id="snippet-form" class="dict-form snippet-form">
+            <input type="hidden" id="snippet-id">
+            <input type="text" id="snippet-trigger" class="dict-input" placeholder="Trigger, e.g. my address / meine Adresse" required>
+            <textarea id="snippet-expansion" class="dict-input snippet-expansion" rows="3" placeholder="Text to insert (optional with options: used when no option matches)"></textarea>
+            <textarea id="snippet-options" class="dict-input snippet-expansion" rows="3" placeholder="Options, one per line: name = text"></textarea>
+            <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-github" data-feature="github_snippets" hidden>Fill from GitHub</button>
+            <button type="submit" class="flagged-play-btn dict-add-btn" id="snippet-save">Add</button>
+            <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-cancel" hidden>Cancel</button>
+          </form>
+          <div id="snippet-list" class="dict-list"></div>
         </div>
-        <form id="snippet-form" class="dict-form snippet-form">
-          <input type="hidden" id="snippet-id">
-          <input type="text" id="snippet-trigger" class="dict-input" placeholder="Trigger, e.g. my address / meine Adresse" required>
-          <textarea id="snippet-expansion" class="dict-input snippet-expansion" rows="3" placeholder="Text to insert (optional with options: used when no option matches)"></textarea>
-          <textarea id="snippet-options" class="dict-input snippet-expansion" rows="3" placeholder="Options, one per line: name = text"></textarea>
-          <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-github" data-feature="github_snippets" hidden>Fill from GitHub</button>
-          <button type="submit" class="flagged-play-btn dict-add-btn" id="snippet-save">Add</button>
-          <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-cancel" hidden>Cancel</button>
-        </form>
-        <div id="snippet-list" class="dict-list"></div>
-      </div>
-      <div class="settings-sub">
-        <div class="setting-info">
-          <h3>Polish Presets</h3>
-          <p>Instructions you use often, under a short name. Select text, hold the hotkey, tap your polish key and say the name - "prompt engineer", "formal email" - and the stored instruction is used; words after the name are added to it ("formal email, and keep it short"). The default preset applies when you tap the polish key without saying anything. Names in any language; close spellings match.</p>
+        <div class="settings-sub">
+          <div class="setting-info">
+            <h3>Polish Presets</h3>
+            <p>Instructions you use often, under a short name. Select text, hold the hotkey, tap your polish key and say the name - "prompt engineer", "formal email" - and the stored instruction is used; words after the name are added to it ("formal email, and keep it short"). The default preset applies when you tap the polish key without saying anything. Names in any language; close spellings match.</p>
+          </div>
+          <form id="preset-form" class="dict-form snippet-form">
+            <input type="hidden" id="preset-id">
+            <input type="text" id="preset-name" class="dict-input" placeholder="Name, e.g. prompt engineer" required>
+            <textarea id="preset-instruction" class="dict-input snippet-expansion" rows="3" placeholder="Instruction, e.g. Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." required></textarea>
+            <label class="settings-hint"><input type="checkbox" id="preset-default"> Default when nothing is said</label>
+            <button type="submit" class="flagged-play-btn dict-add-btn" id="preset-save">Add</button>
+            <button type="button" class="flagged-play-btn dict-add-btn" id="preset-cancel" hidden>Cancel</button>
+          </form>
+          <div id="preset-list" class="dict-list"></div>
         </div>
-        <form id="preset-form" class="dict-form snippet-form">
-          <input type="hidden" id="preset-id">
-          <input type="text" id="preset-name" class="dict-input" placeholder="Name, e.g. prompt engineer" required>
-          <textarea id="preset-instruction" class="dict-input snippet-expansion" rows="3" placeholder="Instruction, e.g. Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." required></textarea>
-          <label class="settings-hint"><input type="checkbox" id="preset-default"> Default when nothing is said</label>
-          <button type="submit" class="flagged-play-btn dict-add-btn" id="preset-save">Add</button>
-          <button type="button" class="flagged-play-btn dict-add-btn" id="preset-cancel" hidden>Cancel</button>
-        </form>
-        <div id="preset-list" class="dict-list"></div>
-      </div>
       </div>
 
       <div class="settings-card">
         <h4 class="nexus-section-title">Models</h4>
         <p class="settings-hint" style="margin-top: 6px;">Which speech model turns your voice into text.</p>
 
-        <div class="setting-row">
+        <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
             <h3>Transcription Model</h3>
             <p>Select which model to use for speech-to-text.</p>
@@ -311,10 +311,10 @@
           <span id="model-status-text"></span>
         </div>
         <p class="settings-hint model-caution">Switching GPU-backed models restarts Docker containers and reloads weights. CPU (in-process Whisper) switches reload the model directly — may take 5–20s on first load.</p>
-      <div class="settings-sub" id="model-overview-card">
-        <h3 class="overview-title">Model Overview</h3>
-        <div id="model-overview-grid" class="overview-grid"></div>
-      </div>
+        <div class="settings-sub" id="model-overview-card">
+          <h3 class="overview-title">Model Overview</h3>
+          <div id="model-overview-grid" class="overview-grid"></div>
+        </div>
       </div>
 
       <div class="settings-card" id="meeting-settings-card">
@@ -421,7 +421,7 @@
         <summary>Advanced</summary>
         <p class="settings-hint" style="margin-top: 6px;">Rarely needed. The defaults work for most people.</p>
 
-        <div class="setting-row">
+        <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
             <h3>Compute Device</h3>
             <p>CPU runs Whisper in-process with no Docker. GPU enables all models via Docker-backed inference servers.</p>
@@ -454,27 +454,27 @@
           <input type="text" id="llm-model-input" class="dict-input" style="max-width: 220px;">
         </div>
 
-      <div class="settings-sub" data-feature="os_commands" hidden>
-        <div class="setting-row">
-          <div class="setting-info">
-            <h3>Nexus OS Commands</h3>
-            <p>Voice-triggered window management. Say <code>nexus &lt;action&gt; &lt;app&gt;</code> while recording.</p>
+        <div class="settings-sub" data-feature="os_commands" hidden>
+          <div class="setting-row">
+            <div class="setting-info">
+              <h3>Nexus OS Commands</h3>
+              <p>Voice-triggered window management. Say <code>nexus &lt;action&gt; &lt;app&gt;</code> while recording.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="os-commands-toggle">
+              <span class="toggle-slider"></span>
+            </label>
           </div>
-          <label class="toggle">
-            <input type="checkbox" id="os-commands-toggle">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
 
-        <div id="nexus-details" class="nexus-details">
-          <h4 class="nexus-section-title">Supported Commands</h4>
-          <div id="nexus-actions" class="nexus-actions"></div>
+          <div id="nexus-details" class="nexus-details">
+            <h4 class="nexus-section-title">Supported Commands</h4>
+            <div id="nexus-actions" class="nexus-actions"></div>
 
-          <h4 class="nexus-section-title" style="margin-top: 14px;">Registered Apps</h4>
-          <div id="nexus-apps" class="nexus-apps"></div>
-          <p class="settings-hint">Edit <code>config.toml</code> under <code>[os_commands.apps]</code> to add or remove apps.</p>
+            <h4 class="nexus-section-title" style="margin-top: 14px;">Registered Apps</h4>
+            <div id="nexus-apps" class="nexus-apps"></div>
+            <p class="settings-hint">Edit <code>config.toml</code> under <code>[os_commands.apps]</code> to add or remove apps.</p>
+          </div>
         </div>
-      </div>
       </details>
 
     </section>

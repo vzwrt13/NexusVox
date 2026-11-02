@@ -17,7 +17,6 @@ import faulthandler
 import json
 import os
 import subprocess
-import sys
 import time
 import traceback
 import urllib.request
@@ -29,11 +28,12 @@ SENTENCE = "Hello world. This is a test of the frozen application."
 
 def _speak(path: Path) -> None:
     """Render SENTENCE to a 16 kHz mono PCM16 WAV with the Windows speech synthesiser."""
+    target = str(path).replace("'", "''")  # a quote in the folder name must not end the PowerShell string
     script = (
         "Add-Type -AssemblyName System.Speech;"
         "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
         "$f = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, 'Sixteen', 'Mono');"
-        f"$s.SetOutputToWaveFile('{path}', $f); $s.Speak('{SENTENCE}'); $s.Dispose()"
+        f"$s.SetOutputToWaveFile('{target}', $f); $s.Speak('{SENTENCE}'); $s.Dispose()"
     )
     subprocess.run(["powershell", "-NoProfile", "-Command", script], check=True, creationflags=0x08000000)
 
@@ -41,7 +41,7 @@ def _speak(path: Path) -> None:
 def _fake_pro(folder: Path) -> None:
     """A stand-in for the Pro add-on: a package with an entry point and one dashboard panel."""
     package = folder / "fake_pro"
-    (package / "static").mkdir(parents=True)
+    (package / "static").mkdir(parents=True, exist_ok=True)
     (package / "static" / "panel.js").write_text("NexusVoxExt.registerPanel('fake-pro', c => {});\n")
     (package / "__init__.py").write_text(
         "from pathlib import Path\n"
@@ -57,7 +57,7 @@ def _fake_pro(folder: Path) -> None:
         "static_dir=Path(__file__).parent / 'static', blueprint=bp)]\n"
     )
     info = folder / "fake_pro-1.0.dist-info"
-    info.mkdir()
+    info.mkdir(exist_ok=True)
     (info / "METADATA").write_text("Metadata-Version: 2.1\nName: fake-pro\nVersion: 1.0\n")
     (info / "entry_points.txt").write_text("[nexusvox.extensions]\nfake_pro = fake_pro:FakePro\n")
 
@@ -88,23 +88,43 @@ def run(work: Path, download: bool) -> int:
         os.environ["HF_HOME"] = str(work / "hf")
         os.environ["HF_HUB_CACHE"] = str(work / "hf" / "hub")
     crumb("start")
-    os.chdir(work)
-    ext = work / "extensions"
-    _fake_pro(ext)
-    sys.path.append(str(ext))  # what the launcher does for an `extensions` folder next to the exe
+    state: dict = {}
 
-    (work / "config.toml").write_text('[inference]\ndevice = "cpu"\nmodel = "parakeet-tdt-0.6b"\n', encoding="utf-8")
+    def setup() -> None:
+        os.chdir(work)
+        ext = work / "extensions"
+        _fake_pro(ext)
+        # The launcher already added the folder next to the exe; this exercises the same function for the
+        # self-test's own folder.
+        from extension_folders import add_extension_folders
 
-    crumb("importing config")
-    from nexusvox.config import load_config
-    from nexusvox.db import Database
+        add_extension_folders((str(ext),))
+        (work / "config.toml").write_text(
+            '[inference]\ndevice = "cpu"\nmodel = "parakeet-tdt-0.6b"\n',
+            encoding="utf-8",
+        )
+        from nexusvox.config import load_config
+        from nexusvox.db import Database
 
-    crumb("loading config")
-    config = load_config(work / "config.toml")
-    config.database.path = str(work / "nexusvox.db")
-    crumb("opening database")
-    db = Database(config.database)
-    crumb("database open")
+        state["config"] = load_config(work / "config.toml")
+        state["config"].database.path = str(work / "nexusvox.db")
+        state["db"] = Database(state["config"].database)
+        record("setup", True)
+
+    guarded("setup", setup)
+    if "config" not in state:
+        return finish(work, checks)
+    config, db = state["config"], state["db"]
+
+    def speech() -> None:
+        _speak(work / "speech.wav")
+        record("speech sample rendered", (work / "speech.wav").stat().st_size > 32000)
+
+    guarded("speech", speech)
+
+    def pcm_of_speech() -> bytes:
+        with wave.open(str(work / "speech.wav")) as handle:
+            return handle.readframes(handle.getnframes())
 
     def tray() -> None:
         from nexusvox.tray import SystemTray
@@ -133,6 +153,8 @@ def run(work: Path, download: bool) -> int:
         # the browser does when the tray opens the dashboard.
         import nexusvox.dashboard as dashboard_module
 
+        if dashboard_module._guard is None:
+            raise RuntimeError("port 47392 is taken (another NexusVox running?); close it and run again")
         opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())
         secret = dashboard_module._guard.new_launch_secret()
         opener.open(f"{base}/?launch={secret}", timeout=15).read()
@@ -164,11 +186,7 @@ def run(work: Path, download: bool) -> int:
     def parakeet() -> None:
         from nexusvox.transcribers.local_parakeet import LocalParakeetTranscriber
 
-        wav = work / "speech.wav"
-        _speak(wav)
-        with wave.open(str(wav)) as handle:
-            pcm = handle.readframes(handle.getnframes())
-        record("speech sample rendered", len(pcm) > 16000, f"{len(pcm) / 32000:.1f} s")
+        pcm = pcm_of_speech()
 
         async def go():
             transcriber = LocalParakeetTranscriber(config.inference)
@@ -183,6 +201,9 @@ def run(work: Path, download: bool) -> int:
                     break
                 await asyncio.sleep(0.5)
             checks["model load states"] = "INFO " + " -> ".join(seen)
+            status = LocalParakeetTranscriber.load_status()
+            if status["state"] != "ready":
+                raise RuntimeError(f"model did not load: {status}")
             await transcriber.send_audio_chunk(pcm)
             return await transcriber.finish(timeout=120)
 
@@ -233,9 +254,7 @@ def run(work: Path, download: bool) -> int:
         from nexusvox.transcribers.local_whisper import LocalWhisperTranscriber
 
         config.inference.model = "whisper-base"
-        wav = work / "speech.wav"
-        with wave.open(str(wav)) as handle:
-            pcm = handle.readframes(handle.getnframes())
+        pcm = pcm_of_speech()
 
         async def go():
             transcriber = LocalWhisperTranscriber(config.inference, "cpu", "int8", language="en")
@@ -248,10 +267,19 @@ def run(work: Path, download: bool) -> int:
 
     guarded("whisper", whisper)
 
+    return finish(work, checks)
+
+
+def finish(work: Path, checks: dict[str, str]) -> int:
     failed = [name for name, value in checks.items() if value.startswith("FAIL")]
     (work / "selftest.json").write_text(json.dumps({"failed": failed, "checks": checks}, indent=2), encoding="utf-8")
     os._exit(1 if failed else 0)  # tray and server threads are daemons, but make sure nothing lingers
 
 
 def main(argv: list[str]) -> int:
-    return run(Path(argv[argv.index("--selftest") + 1]), "--download" in argv)
+    position = argv.index("--selftest") + 1
+    if position >= len(argv) or argv[position].startswith("--"):
+        # No console to print to: leave the usage where a person would look.
+        Path("selftest-usage.txt").write_text("usage: NexusVox.exe --selftest <work-dir> [--download]\n")
+        return 2
+    return run(Path(argv[position]), "--download" in argv)

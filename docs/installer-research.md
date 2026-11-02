@@ -308,7 +308,9 @@ land in 1.0.1 without making the first install worse than today's `pip install`.
 Measured 2026-11-02 on the maintainer's PC (Windows 11, Python 3.12.10, PyInstaller 6.x,
 fresh build environment, `pip install .` not editable). Build with `python packaging/build.py`; the spec is
 `packaging/nexusvox.spec`, the entry point `packaging/launcher.py` (windowed, `console=False`, no UPX).
-The frozen self-test is `NexusVox.exe --selftest <folder> [--download]` (`packaging/frozen_selftest.py`).
+The frozen self-test (`packaging/frozen_selftest.py`) is built in only with `python packaging/build.py --selftest`
+and run as `NexusVox.exe --selftest <folder> [--download]`; it downloads the model and binds the dashboard port,
+so that build is never shipped (a normal build leaves it out and exits with code 2 on `--selftest`).
 
 | Measure | Result |
 |---|---|
@@ -333,8 +335,8 @@ What the spec needed (the "missing hooks and data files"): `collect_all` for `ne
 config template), `onnx_asr`, `onnxruntime`, `faster_whisper` (Silero VAD), `ctranslate2`, `av`, `lingua`,
 `pycaw`, `comtypes`, `pyaudiowpatch`, `sounddevice` (plus `_sounddevice_data` for the PortAudio DLL), `pystray`
 and `pynput`; `copy_metadata("nexusvox")` so entry points resolve. The launcher gives a windowed process a null
-`stdout`/`stderr` (they are `None` without a console) and adds an `extensions` folder next to the exe (and
-`NEXUSVOX_EXTENSIONS`) to `sys.path`, which is how an add-on with its `.dist-info` is found in a build that has
+`stdout`/`stderr` (they are `None` without a console) and adds an `extensions` folder next to the exe to
+`sys.path` (`packaging/extension_folders.py`; no environment variable, see its security note), which is how an add-on with its `.dist-info` is found in a build that has
 no site-packages. Of the possible savings, `av.libs` (63 MB) belongs to PyAV, which `faster-whisper` uses only to
 decode audio files, and `lingua` is ticket 9.
 

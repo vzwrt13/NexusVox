@@ -2,6 +2,7 @@
 
     python packaging/build.py              # build into dist/NexusVox
     python packaging/build.py --clean      # drop PyInstaller's cache first
+    python packaging/build.py --selftest   # test build with `NexusVox.exe --selftest <dir>`; never ship it
 
 Run it with the Python environment that has NexusVox and PyInstaller installed. Install NexusVox as a
 regular package (`pip install .`), not editable: the build must contain what a wheel contains.
@@ -10,6 +11,7 @@ regular package (`pip install .`), not editable: the build must contain what a w
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -25,6 +27,7 @@ def folder_size_mb(folder: Path) -> float:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--selftest", action="store_true", help="build in the --selftest mode (never ship that build)")
     parser.add_argument("--clean", action="store_true", help="remove PyInstaller's cache before building")
     args = parser.parse_args()
 
@@ -37,8 +40,11 @@ def main() -> int:
     if args.clean:
         command.append("--clean")
 
+    env = dict(os.environ)
+    if args.selftest:
+        env["NEXUSVOX_BUILD_SELFTEST"] = "1"
     started = time.perf_counter()
-    result = subprocess.run(command, cwd=ROOT)
+    result = subprocess.run(command, cwd=ROOT, env=env)
     elapsed = time.perf_counter() - started
     if result.returncode != 0:
         return result.returncode

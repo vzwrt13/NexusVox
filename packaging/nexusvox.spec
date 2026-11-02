@@ -29,11 +29,7 @@ for package in (
     "pystray",
     "pynput",
 ):
-    try:
-        d, b, h = collect_all(package)
-    except Exception as exc:  # a package missing from the build environment is reported, not fatal
-        print(f"WARNING: collect_all({package!r}) failed: {exc}")
-        continue
+    d, b, h = collect_all(package)  # no try/except: a missing package must fail the build, not ship without it
     datas += d
     binaries += b
     hiddenimports += h
@@ -45,8 +41,18 @@ datas += collect_data_files("_sounddevice_data")
 # .dist-info folders. Keep nexusvox's own so `entry_points(group="nexusvox.extensions")` works.
 datas += copy_metadata("nexusvox")
 
-# Dropped to save space: test suites and docs of the bundled packages are never read at run time.
+# Kept out of the bundle even if the build environment happens to have them (none is a dependency of NexusVox):
+#  - pytest: test runner, development only
+#  - IPython, matplotlib, scipy, pandas: heavy, never imported by the app. If a future feature imports one,
+#    the build fails its self-test on that import instead of the exclusion hiding it, so remove it from here.
 excludes = ["pytest", "IPython", "matplotlib", "scipy", "pandas"]
+
+# The self-test (NexusVox.exe --selftest) downloads ~640 MiB and binds the dashboard port, so it is only
+# built in on request (`python packaging/build.py --selftest`) and never ships to end users.
+import os  # noqa: E402
+
+if not os.environ.get("NEXUSVOX_BUILD_SELFTEST"):
+    excludes.append("frozen_selftest")
 
 a = Analysis(
     [str(HERE / "launcher.py")],

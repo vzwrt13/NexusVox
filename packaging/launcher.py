@@ -18,27 +18,16 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
 
 
-def _add_extension_folders() -> None:
-    """Make add-on packages (the Pro edition) importable and visible to `importlib.metadata`.
-
-    A frozen app has no site-packages to `pip install` into, so an add-on is unpacked, with its
-    `.dist-info` folder, into `extensions` next to the exe (or the folder named by NEXUSVOX_EXTENSIONS).
-    Its entry point in the `nexusvox.extensions` group is then found like in a normal install.
-    """
-    folders = [os.path.join(os.path.dirname(sys.executable), "extensions")]
-    if os.environ.get("NEXUSVOX_EXTENSIONS"):
-        folders.append(os.environ["NEXUSVOX_EXTENSIONS"])
-    for folder in folders:
-        if os.path.isdir(folder) and folder not in sys.path:
-            sys.path.append(folder)
-
-
 if __name__ == "__main__":
-    if "--selftest" in sys.argv:
-        import frozen_selftest
+    from extension_folders import add_extension_folders
 
+    add_extension_folders()
+    if "--selftest" in sys.argv:
+        try:
+            import frozen_selftest  # only in a build made with `build.py --selftest`
+        except ImportError:
+            sys.exit(2)
         sys.exit(frozen_selftest.main(sys.argv))
-    _add_extension_folders()
     from nexusvox.__main__ import main
 
     main()

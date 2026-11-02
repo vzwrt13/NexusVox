@@ -636,3 +636,19 @@ def test_config_switch_roundtrip(tmp_path):
     config.hotkey.reinject_alt_release = False
     save_config(config, path)
     assert load_config(path).hotkey.reinject_alt_release is False
+
+
+@pytest.mark.parametrize("marker_first_release", ["alt", "ctrl"])
+def test_polish_chord_alt_release_is_reinjected_too(marker_first_release):
+    hk, calls = _reinjecting()
+    hk._config.polish_key = "P"
+    _complete_chord(hk)
+    assert hk._handle(ord("P"), True) is True  # the polish key is swallowed ...
+    assert hk._handle(ord("P"), False) is True
+    assert hk.mark == POLISH
+    order = (LALT, LCTRL, LSHIFT) if marker_first_release == "alt" else (LCTRL, LSHIFT, LALT)
+    swallowed = [hk._handle(vk, False) for vk in order]
+    assert swallowed == [vk == LALT for vk in order]  # ... and the Alt release still goes through the batch
+    assert calls == [(LALT, True)]
+    hk._handle(LALT, False)  # twin
+    assert hk._alt_pending is None

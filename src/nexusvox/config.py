@@ -9,6 +9,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .paths import default_config_path, resolve_data_path
+
 DEFAULT_CONFIG_PATH = Path("config.toml")
 # Resolved next to this module, not relative to the repository root. The template
 # ships inside the package (see [tool.setuptools.package-data]), so an installed
@@ -693,10 +695,16 @@ def _own_voice_label(raw: object) -> str:
     return DEFAULT_OWN_VOICE_LABEL if own_voice_label_problem(label) else label
 
 
-def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
-    """Load configuration from a TOML file. Creates from example if missing."""
+def load_config(path: Path | None = None) -> Config:
+    """Load configuration from a TOML file. Creates from example if missing.
+
+    *path* defaults to ``config.toml`` in the working directory, or to the config folder in the installed app.
+    """
+    if path is None:
+        path = default_config_path()
     if not path.exists():
         if EXAMPLE_CONFIG_PATH.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(EXAMPLE_CONFIG_PATH, path)
         else:
             return with_hardware_defaults(Config())
@@ -797,7 +805,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             ),
         ),
         database=DatabaseConfig(
-            path=db_data.get("path", "nexusvox.db"),
+            path=resolve_data_path(db_data.get("path", "nexusvox.db")),
             audio_dir=db_data.get("audio_dir", "audio"),
             store_audio=bool(db_data.get("store_audio", True)),
         ),
@@ -863,7 +871,7 @@ _config_lock = threading.Lock()
 
 def save_config(config: Config, path: Path | None = None) -> None:
     """Write the current configuration back to TOML: to *path*, else to the file it was loaded from."""
-    path = path or config.source_path or DEFAULT_CONFIG_PATH
+    path = path or config.source_path or default_config_path()
     with _config_lock:
         symbols_toml = "[{}]".format(", ".join(f'"{s}"' for s in config.voice_commands.symbols))
         structural_toml = "[{}]".format(", ".join(f'"{s}"' for s in config.voice_commands.structural))

@@ -16,9 +16,16 @@ import threading
 
 from ..config import MODEL_REGISTRY, InferenceConfig
 from ..logsetup import Text
+from ..paths import models_dir
 from ..transcriber import BaseTranscriber, TranscriptionResult, pcm16_to_wav_bytes
 
 logger = logging.getLogger(__name__)
+
+
+def _download_root() -> str | None:
+    """The models folder of the installed app; None from source, which keeps the Hugging Face cache."""
+    folder = models_dir()
+    return str(folder) if folder is not None else None
 
 
 class LocalWhisperTranscriber(BaseTranscriber):
@@ -65,6 +72,7 @@ class LocalWhisperTranscriber(BaseTranscriber):
                     hf_name,
                     device=device,
                     compute_type=compute_type,
+                    download_root=_download_root(),
                 )
                 logger.info("faster-whisper model ready")
             return cls._model_cache[key]

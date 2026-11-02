@@ -5,11 +5,14 @@ import sys
 from pathlib import Path
 
 from .app import NexusVoxApp
-from .config import DEFAULT_CONFIG_PATH, load_config
+from .config import load_config
 from .logsetup import setup_file_logging
+from .paths import apply_models_dir, default_config_path, ensure_dirs
 
 
 def main() -> None:
+    ensure_dirs()
+    apply_models_dir()
     config = load_config()
     level = getattr(logging, config.log_level)
     # DEBUG is for NexusVox's own loggers: comtypes and urllib3 log every COM call and request at DEBUG
@@ -26,7 +29,7 @@ def main() -> None:
     # otherwise only noticed as a setting that does nothing.
     logging.getLogger(__name__).info(
         "Config: %s, database: %s, cleanup: %s, log file: %s",
-        config.source_path or DEFAULT_CONFIG_PATH.resolve(),
+        config.source_path or default_config_path().resolve(),
         Path(config.database.path).resolve(),
         config.cleanup.level,
         log_file or "(none, the log folder is not writable)",

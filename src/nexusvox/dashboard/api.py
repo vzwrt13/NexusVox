@@ -1067,6 +1067,7 @@ class DashboardAPI:
             device=None,
             language=self._config.language,
             auto_detect_language=self._config.auto_language_detection,
+            auto_fallback=self._config.inference.device == "auto",
         )
 
     def begin_dictation(self, start: float) -> int | None:

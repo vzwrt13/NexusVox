@@ -91,6 +91,8 @@ transcription_delay_ms = 480
 # See the model table in README.md for resources and model licenses.
 model = "parakeet-tdt-0.6b"
 # Compute device: "auto" (detect CUDA, fall back to CPU), "cuda", or "cpu".
+# With "auto" on a CUDA machine, Parakeet uses the Docker server while it answers and CPU Parakeet
+# (no speaker detection) while it does not; "cuda" and "cpu" never switch.
 # Use "cpu" to force in-process Whisper, including for benchmarking on a GPU machine.
 device = "auto"
 # Optional compute type override. Defaults: "int8" on CPU, "float16" on GPU.

@@ -89,6 +89,9 @@ class _RecordingTranscriber:
 
     needs_docker = False
 
+    async def prepare(self):
+        pass
+
     def __init__(self, text="hello from cpu"):
         self._text = text
         self.connect_calls = 0
@@ -151,7 +154,7 @@ async def test_transcribe_file_passes_language_and_device_to_factory(monkeypatch
 
     captured: dict = {}
 
-    def fake_factory(config, *, device=None, language=None, auto_detect_language=False):
+    def fake_factory(config, *, device=None, language=None, auto_detect_language=False, auto_fallback=False):
         captured["device"] = device
         captured["language"] = language
         captured["auto"] = auto_detect_language

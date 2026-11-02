@@ -142,6 +142,7 @@ class NexusVoxApp:
             device=self._device,
             language=config.language,
             auto_detect_language=config.auto_language_detection,
+            auto_fallback=config.inference.device == "auto",
         )
         self._db = Database(config.database)
         # Statistics writes (dictionary hits, learn-from-edits outcomes) run here, one at a time and in order,
@@ -384,12 +385,13 @@ class NexusVoxApp:
                 device=self._device,
                 language=self._config.language,
                 auto_detect_language=self._config.auto_language_detection,
+                auto_fallback=self._config.inference.device == "auto",
             )
             save_config(self._config)
 
             self._switch_status = "ready"
             logger.info("Switched to model: %s", model_id)
-            if self._is_inprocess():
+            if self._warms_up():
                 asyncio.create_task(self._preload_transcriber())
 
             async def _reset_status():
@@ -416,6 +418,7 @@ class NexusVoxApp:
                     device=self._device,
                     language=self._config.language,
                     auto_detect_language=self._config.auto_language_detection,
+                    auto_fallback=self._config.inference.device == "auto",
                 )
             except Exception:
                 logger.exception("Fallback restart also failed")
@@ -475,6 +478,8 @@ class NexusVoxApp:
         recording_stopped = False
         loop = asyncio.get_running_loop()
         take: tuple[int | None, float] | None = None  # (meeting token, start) while a take is open
+        audio: AudioCapture | RemoteAudioSource | None = None  # set once recording started
+        stream_task: asyncio.Task | None = None
 
         async def end_take(end: float) -> None:
             nonlocal take
@@ -675,6 +680,7 @@ class NexusVoxApp:
 
         except Exception:
             logger.exception("Transcription cycle failed")
+            await self._abort_recording(audio, stream_task, recording_stopped)
             self._tray.set_active(False)
             if not remote:
                 self._cue(None, ERROR)
@@ -973,18 +979,52 @@ class NexusVoxApp:
         return None
 
     async def _stream_audio(self, audio: AudioCapture | RemoteAudioSource) -> bytearray:
-        """Stream audio chunks from the mic or the phone to the transcription server, returning the full buffer."""
+        """Stream audio chunks from the mic or the phone to the transcription server, returning the full buffer.
+
+        When sending fails, the rest of the recording is still read up to its end marker (and kept), then the
+        error is raised. Stopping at the failure would leave the unread chunks and the marker in the audio queue,
+        and the next recording would start by reading them: every dictation after it would be the previous one.
+        """
         buffer = bytearray()
         count = 0
-        try:
-            async for chunk in audio.chunks():
+        failure: Exception | None = None
+        async for chunk in audio.chunks():
+            buffer.extend(chunk)
+            if failure is not None:
+                continue
+            try:
                 await self._transcriber.send_audio_chunk(chunk)
-                buffer.extend(chunk)
                 count += 1
-        except Exception:
-            logger.exception("Error streaming audio")
+            except Exception as exc:
+                logger.exception("Error streaming audio")
+                failure = exc
         logger.info("Streamed %d audio chunks to server", count)
+        if failure is not None:
+            raise failure
         return buffer
+
+    async def _abort_recording(
+        self,
+        audio: AudioCapture | RemoteAudioSource | None,
+        stream_task: asyncio.Task | None,
+        recording_stopped: bool,
+    ) -> None:
+        """After a failed cycle: end a stream that still runs and close the microphone it was reading.
+
+        A cycle that failed before the stop must not leave its stream task reading the audio queue (it would
+        take the next recording's chunks), nor the microphone open.
+        """
+        if audio is None:
+            return
+        try:
+            if not recording_stopped:
+                audio.stop()
+            if stream_task is not None and not stream_task.done():
+                stream_task.cancel()
+            if stream_task is not None:
+                await asyncio.gather(stream_task, return_exceptions=True)
+        except Exception:
+            logger.exception("Could not end the failed recording cleanly")
 
     def _open_dashboard(self) -> None:
         """Open the dashboard window."""
@@ -1041,7 +1081,8 @@ class NexusVoxApp:
         # For in-process transcribers (Whisper on CPU), eagerly load the model
         # so the first hotkey press doesn't pay the full load + download latency.
         # A custom server is remote and has nothing to preload.
-        if self._is_inprocess():
+        # Engine "auto" on a GPU machine warms up the Docker server (or the CPU model while it is down).
+        if self._warms_up():
             asyncio.create_task(self._preload_transcriber())
 
         if self._config.remote_mic.enabled:
@@ -1082,12 +1123,15 @@ class NexusVoxApp:
         """Whether the active model runs in this process; a custom server is remote and has nothing to load."""
         return not self._transcriber.needs_docker and not MODEL_REGISTRY[self._config.inference.model].get("custom")
 
+    def _warms_up(self) -> bool:
+        """Whether the active engine is warmed up in the background: in-process models load, "auto" warms the server."""
+        return self._is_inprocess() or self._transcriber.warms_up_at_start
+
     async def _preload_transcriber(self) -> None:
         """Warm up an in-process transcriber so the first hotkey press is snappy."""
         try:
             logger.info("Preloading in-process transcriber model (first run may download)")
-            await self._transcriber.connect()
-            await self._transcriber.disconnect()
+            await self._transcriber.warm_up()
             logger.info("Preload complete")
         except Exception:
             logger.exception("Preloading transcriber failed")

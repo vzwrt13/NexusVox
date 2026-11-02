@@ -97,7 +97,10 @@ async def transcribe_file(
         device=device,
         language=language,
         auto_detect_language=auto_detect_language,
+        auto_fallback=config.device == "auto",
     )
+    # An engine that chooses between a server and the CPU settles on one before its flags are read.
+    await transcriber.prepare()
     # Both the model's registry entry and the client must support words; a custom server or Cohere
     # shares the Parakeet client but never sees the fields.
     entry = MODEL_REGISTRY.get(config.model, {})

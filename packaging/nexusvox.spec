@@ -5,9 +5,10 @@
 #
 # The CPU speech path is bundled (onnx-asr/onnxruntime for Parakeet, faster-whisper/ctranslate2 for Whisper).
 # No model is bundled: the models are downloaded on first use.
+import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metadata
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 HERE = Path(SPECPATH)  # noqa: F821 - injected by PyInstaller
 
@@ -37,9 +38,7 @@ for package in (
 # `_sounddevice_data` carries the PortAudio DLL.
 datas += collect_data_files("_sounddevice_data")
 
-# Extensions (the Pro add-on) are found through importlib.metadata entry points, which read the
-# .dist-info folders. Keep nexusvox's own so `entry_points(group="nexusvox.extensions")` works.
-datas += copy_metadata("nexusvox")
+# Note: collect_all("nexusvox") above also copies nexusvox's own .dist-info, which importlib.metadata needs.
 
 # Kept out of the bundle even if the build environment happens to have them (none is a dependency of NexusVox):
 #  - pytest: test runner, development only
@@ -48,9 +47,7 @@ datas += copy_metadata("nexusvox")
 excludes = ["pytest", "IPython", "matplotlib", "scipy", "pandas"]
 
 # The self-test (NexusVox.exe --selftest) downloads ~640 MiB and binds the dashboard port, so it is only
-# built in on request (`python packaging/build.py --selftest`) and never ships to end users.
-import os  # noqa: E402
-
+# built in on request (`python packaging/build.py --selftest`, which writes to dist/selftest) and never ships.
 if not os.environ.get("NEXUSVOX_BUILD_SELFTEST"):
     excludes.append("frozen_selftest")
 

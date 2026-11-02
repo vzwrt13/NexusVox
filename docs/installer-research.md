@@ -309,8 +309,10 @@ Measured 2026-11-02 on the maintainer's PC (Windows 11, Python 3.12.10, PyInstal
 fresh build environment, `pip install .` not editable). Build with `python packaging/build.py`; the spec is
 `packaging/nexusvox.spec`, the entry point `packaging/launcher.py` (windowed, `console=False`, no UPX).
 The frozen self-test (`packaging/frozen_selftest.py`) is built in only with `python packaging/build.py --selftest`
-and run as `NexusVox.exe --selftest <folder> [--download]`; it downloads the model and binds the dashboard port,
-so that build is never shipped (a normal build leaves it out and exits with code 2 on `--selftest`).
+and run as `NexusVox.exe --selftest <folder> [--download]`; it keeps everything, the Hugging Face cache included,
+in that folder, downloads the models only with `--download`, and binds the dashboard port. That build goes to
+`dist/selftest`, never to `dist/NexusVox`, and is never shipped (a normal build leaves the test out; it exits with
+code 2 on `--selftest` and leaves a note in the temp folder).
 
 | Measure | Result |
 |---|---|
@@ -334,7 +336,7 @@ low-level hook, Tk (the dictation overlay) and CPU Whisper (`ctranslate2`) all l
 What the spec needed (the "missing hooks and data files"): `collect_all` for `nexusvox` (dashboard assets,
 config template), `onnx_asr`, `onnxruntime`, `faster_whisper` (Silero VAD), `ctranslate2`, `av`, `lingua`,
 `pycaw`, `comtypes`, `pyaudiowpatch`, `sounddevice` (plus `_sounddevice_data` for the PortAudio DLL), `pystray`
-and `pynput`; `copy_metadata("nexusvox")` so entry points resolve. The launcher gives a windowed process a null
+and `pynput` (`collect_all("nexusvox")` also copies its `.dist-info`, so entry points resolve). The launcher gives a windowed process a null
 `stdout`/`stderr` (they are `None` without a console) and adds an `extensions` folder next to the exe to
 `sys.path` (`packaging/extension_folders.py`; no environment variable, see its security note), which is how an add-on with its `.dist-info` is found in a build that has
 no site-packages. Of the possible savings, `av.libs` (63 MB) belongs to PyAV, which `faster-whisper` uses only to
@@ -343,7 +345,8 @@ decode audio files, and `lingua` is ticket 9.
 What the build cannot do yet:
 
 - **Paths.** `config.toml`, the database and `audio/` still resolve against the working directory; the self-test
-  and the real-app run used a scratch folder as the working directory. Ticket 2.
+  and the real-app run used a scratch folder as the working directory. Started from a read-only install folder
+  the app fails with a PermissionError behind the crash box. Ticket 2 (per-user data folder).
 - **Docker/GPU path.** `DOCKER_DIR` points outside the build, so the Docker start from the dashboard is
   not shipped; with `device = "auto"` this PC resolves to `cuda` (through `ctranslate2`, which is the CPU-only
   wheel but still counts the GPU) and the app then goes for the server. Not exercised from the build.

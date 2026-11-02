@@ -2,8 +2,9 @@
 
 A windowed build has no console, so the result goes to `<work-dir>/selftest.json` and the process exit code
 (0 = every check passed). The test never touches the user's own config, database or model cache: everything
-lives under <work-dir>. With --download the Parakeet model is fetched from Hugging Face into
-<work-dir>/hf (a real first-run download); without it the model must already be in the default cache.
+lives under <work-dir>, the Hugging Face cache included (<work-dir>/hf). With --download the models are fetched
+from Hugging Face into it (a real first-run download, ~780 MiB); without it the test runs offline and the model
+steps fail unless an earlier run already filled <work-dir>/hf.
 
 It covers what the tray menu and the hotkey cannot show to a script: the system tray icon starts, the
 dashboard serves its pages and API from the bundled files, extensions found next to the exe load, and the
@@ -17,11 +18,14 @@ import faulthandler
 import json
 import os
 import subprocess
+import sys
+import tempfile
 import time
 import traceback
 import urllib.request
 import wave
 from pathlib import Path
+from typing import NoReturn
 
 SENTENCE = "Hello world. This is a test of the frozen application."
 
@@ -62,7 +66,7 @@ def _fake_pro(folder: Path) -> None:
     (info / "entry_points.txt").write_text("[nexusvox.extensions]\nfake_pro = fake_pro:FakePro\n")
 
 
-def run(work: Path, download: bool) -> int:
+def run(work: Path, download: bool) -> NoReturn:
     def crumb(text: str) -> None:
         with open(work / "progress.txt", "a", encoding="utf-8") as handle:
             handle.write(f"{time.strftime('%H:%M:%S')} {text}\n")
@@ -72,21 +76,28 @@ def run(work: Path, download: bool) -> int:
     def record(name: str, ok: bool, detail: str = "") -> None:
         checks[name] = ("PASS " if ok else "FAIL ") + detail
 
-    def guarded(name: str, func) -> None:
+    work.mkdir(parents=True, exist_ok=True)
+    hang_file = open(work / "hang.txt", "w")  # noqa: SIM115 - stays open for the whole run
+
+    def guarded(name: str, func, timeout: float = 120) -> None:
         crumb(f"step {name}")
         started = time.perf_counter()
+        # A step that runs past its budget must leave a trace (a windowed build has no console to Ctrl+C in),
+        # but a healthy long step must not fill the file: the timer is armed per step and cancelled after.
+        faulthandler.dump_traceback_later(timeout, file=hang_file)
         try:
             func()
         except Exception as exc:  # the test reports a failing step and goes on to the next
             record(name, False, f"{type(exc).__name__}: {exc}\n" + "".join(traceback.format_tb(exc.__traceback__)[-4:]))
+        finally:
+            faulthandler.cancel_dump_traceback_later()
         checks[f"({name} took)"] = f"INFO {time.perf_counter() - started:.1f} s"
 
-    work.mkdir(parents=True, exist_ok=True)
-    # A hung step must leave a trace: a windowed build has no console to Ctrl+C in.
-    faulthandler.dump_traceback_later(90, repeat=True, file=open(work / "hang.txt", "w"))  # noqa: SIM115
-    if download:
-        os.environ["HF_HOME"] = str(work / "hf")
-        os.environ["HF_HUB_CACHE"] = str(work / "hf" / "hub")
+    # Never touch the user's real Hugging Face cache; without --download nothing may reach the network.
+    os.environ["HF_HOME"] = str(work / "hf")
+    os.environ["HF_HUB_CACHE"] = str(work / "hf" / "hub")
+    if not download:
+        os.environ["HF_HUB_OFFLINE"] = "1"
     crumb("start")
     state: dict = {}
 
@@ -113,7 +124,7 @@ def run(work: Path, download: bool) -> int:
 
     guarded("setup", setup)
     if "config" not in state:
-        return finish(work, checks)
+        finish(work, checks)
     config, db = state["config"], state["db"]
 
     def speech() -> None:
@@ -163,6 +174,7 @@ def run(work: Path, download: bool) -> int:
             with opener.open(base + path, timeout=15) as response:
                 return response.status, response.read()
 
+        bodies: dict[str, bytes] = {}
         for path in (
             "/",
             "/dashboard.js",
@@ -173,8 +185,9 @@ def run(work: Path, download: bool) -> int:
             "/api/extensions",
         ):
             status, body = get(path)
+            bodies[path] = body
             record(f"dashboard GET {path}", status == 200 and len(body) > 0, f"{status}, {len(body)} bytes")
-        _, body = get("/api/extensions")
+        body = bodies["/api/extensions"]
         record("extension found next to the exe", "fake-pro" in body.decode(), body.decode()[:120])
         status, body = get("/ext/fake-pro/panel.js")
         record("extension panel script served", status == 200, f"{status}")
@@ -211,24 +224,35 @@ def run(work: Path, download: bool) -> int:
         text = result.text.lower()
         record("Parakeet transcribes", "hello world" in text and "frozen" in text, repr(result.text))
 
-    guarded("parakeet", parakeet)
+    guarded("parakeet", parakeet, timeout=1800)
 
-    def native() -> None:
+    # One guarded step per native library: a machine without an output device must not hide the others.
+    def lingua() -> None:
         from nexusvox.lang_detect import detect_language
 
         record("lingua detects German", detect_language("Das ist ein kurzer deutscher Satz zum Testen.") == "de")
+
+    def portaudio() -> None:
         import sounddevice
 
         record("sounddevice sees PortAudio", len(sounddevice.query_devices()) > 0, sounddevice.__version__)
+
+    def wasapi_sessions() -> None:
         from nexusvox.mic_guard import enumerate_capture_sessions
 
         record("mic guard enumerates WASAPI sessions", isinstance(enumerate_capture_sessions(), list))
+
+    def loopback() -> None:
         import pyaudiowpatch
 
         pa = pyaudiowpatch.PyAudio()
-        loopback = pa.get_default_wasapi_loopback()
-        pa.terminate()
-        record("WASAPI loopback device found", bool(loopback), str(loopback.get("name")))
+        try:
+            device = pa.get_default_wasapi_loopback()
+        finally:
+            pa.terminate()
+        record("WASAPI loopback device found", bool(device), str(device.get("name")))
+
+    def hook() -> None:
         from pynput import keyboard
 
         listener = keyboard.Listener(on_press=lambda key: None, win32_event_filter=lambda m, d: True)
@@ -238,7 +262,14 @@ def run(work: Path, download: bool) -> int:
         listener.stop()
         record("pynput low-level hook starts", alive)
 
-    guarded("native", native)
+    for step_name, step in (
+        ("lingua", lingua),
+        ("sounddevice", portaudio),
+        ("mic guard", wasapi_sessions),
+        ("WASAPI loopback", loopback),
+        ("pynput", hook),
+    ):
+        guarded(step_name, step)
 
     def overlay() -> None:
         import tkinter
@@ -265,21 +296,31 @@ def run(work: Path, download: bool) -> int:
         result = asyncio.run(go())
         record("Whisper (ctranslate2) transcribes", "hello world" in result.text.lower(), repr(result.text))
 
-    guarded("whisper", whisper)
+    guarded("whisper", whisper, timeout=300)
 
-    return finish(work, checks)
+    finish(work, checks)
 
 
-def finish(work: Path, checks: dict[str, str]) -> int:
+def finish(work: Path, checks: dict[str, str]) -> NoReturn:
     failed = [name for name, value in checks.items() if value.startswith("FAIL")]
     (work / "selftest.json").write_text(json.dumps({"failed": failed, "checks": checks}, indent=2), encoding="utf-8")
     os._exit(1 if failed else 0)  # tray and server threads are daemons, but make sure nothing lingers
 
 
-def main(argv: list[str]) -> int:
+def leave_note(name: str, text: str) -> None:
+    """No console to print to: leave a message where a person would look. The working directory may be
+    read-only (Program Files), so fall back to the temp folder; never let this raise."""
+    for folder in (Path.cwd(), Path(tempfile.gettempdir())):
+        try:
+            (folder / name).write_text(text, encoding="utf-8")
+            return
+        except OSError:
+            continue
+
+
+def main(argv: list[str]) -> NoReturn:
     position = argv.index("--selftest") + 1
     if position >= len(argv) or argv[position].startswith("--"):
-        # No console to print to: leave the usage where a person would look.
-        Path("selftest-usage.txt").write_text("usage: NexusVox.exe --selftest <work-dir> [--download]\n")
-        return 2
-    return run(Path(argv[position]), "--download" in argv)
+        leave_note("selftest-usage.txt", "usage: NexusVox.exe --selftest <work-dir> [--download]\n")
+        sys.exit(2)
+    run(Path(argv[position]), "--download" in argv)

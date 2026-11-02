@@ -26,8 +26,17 @@ if __name__ == "__main__":
         try:
             import frozen_selftest  # only in a build made with `build.py --selftest`
         except ImportError:
+            # No console to print to, so say why in a file (the temp folder: the exe folder may be read-only).
+            try:
+                import tempfile
+
+                note = os.path.join(tempfile.gettempdir(), "nexusvox-no-selftest.txt")
+                with open(note, "w", encoding="utf-8") as handle:
+                    handle.write("This NexusVox build has no self-test. Build with `packaging/build.py --selftest`.\n")
+            except OSError:
+                pass
             sys.exit(2)
-        sys.exit(frozen_selftest.main(sys.argv))
+        frozen_selftest.main(sys.argv)
     from nexusvox.__main__ import main
 
     main()

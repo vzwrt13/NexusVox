@@ -50,6 +50,7 @@ from .polish_presets import resolve_instruction
 from .remote_mic import RemoteAudioSource, RemoteMicServer
 from .snippets import Snippet, resolve_open_target
 from .transcriber import create_transcriber
+from .transcribers.auto_parakeet import AutoParakeetTranscriber
 from .tray import SystemTray
 
 
@@ -141,6 +142,7 @@ class NexusVoxApp:
             device=self._device,
             language=config.language,
             auto_detect_language=config.auto_language_detection,
+            auto_fallback=config.inference.device == "auto",
         )
         self._db = Database(config.database)
         # Statistics writes (dictionary hits, learn-from-edits outcomes) run here, one at a time and in order,
@@ -381,6 +383,7 @@ class NexusVoxApp:
                 device=self._device,
                 language=self._config.language,
                 auto_detect_language=self._config.auto_language_detection,
+                auto_fallback=self._config.inference.device == "auto",
             )
             save_config(self._config)
 
@@ -413,6 +416,7 @@ class NexusVoxApp:
                     device=self._device,
                     language=self._config.language,
                     auto_detect_language=self._config.auto_language_detection,
+                    auto_fallback=self._config.inference.device == "auto",
                 )
             except Exception:
                 logger.exception("Fallback restart also failed")
@@ -1033,7 +1037,8 @@ class NexusVoxApp:
         # For in-process transcribers (Whisper on CPU), eagerly load the model
         # so the first hotkey press doesn't pay the full load + download latency.
         # A custom server is remote and has nothing to preload.
-        if self._is_inprocess():
+        # Engine "auto" on a GPU machine warms up the Docker server (or the CPU model while it is down).
+        if self._is_inprocess() or isinstance(self._transcriber, AutoParakeetTranscriber):
             asyncio.create_task(self._preload_transcriber())
 
         if self._config.remote_mic.enabled:
@@ -1078,8 +1083,7 @@ class NexusVoxApp:
         """Warm up an in-process transcriber so the first hotkey press is snappy."""
         try:
             logger.info("Preloading in-process transcriber model (first run may download)")
-            await self._transcriber.connect()
-            await self._transcriber.disconnect()
+            await self._transcriber.warm_up()
             logger.info("Preload complete")
         except Exception:
             logger.exception("Preloading transcriber failed")

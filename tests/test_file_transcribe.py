@@ -151,7 +151,7 @@ async def test_transcribe_file_passes_language_and_device_to_factory(monkeypatch
 
     captured: dict = {}
 
-    def fake_factory(config, *, device=None, language=None, auto_detect_language=False):
+    def fake_factory(config, *, device=None, language=None, auto_detect_language=False, auto_fallback=False):
         captured["device"] = device
         captured["language"] = language
         captured["auto"] = auto_detect_language

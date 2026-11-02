@@ -12,6 +12,7 @@ from collections.abc import Callable
 from .config import MODEL_REGISTRY, InferenceConfig
 from .diarization import diarization_timeout, format_transcript, label_words, speaker_detection_models
 from .transcriber import BaseTranscriber, SpeakerTurn, TranscriptionResult, Word, create_transcriber
+from .transcribers.auto_parakeet import AutoParakeetTranscriber
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,11 @@ async def transcribe_file(
         device=device,
         language=language,
         auto_detect_language=auto_detect_language,
+        auto_fallback=config.device == "auto",
     )
+    # An engine that chooses between a server and the CPU settles on one before its flags are read.
+    if isinstance(transcriber, AutoParakeetTranscriber):
+        await transcriber.prepare()
     # Both the model's registry entry and the client must support words; a custom server or Cohere
     # shares the Parakeet client but never sees the fields.
     entry = MODEL_REGISTRY.get(config.model, {})

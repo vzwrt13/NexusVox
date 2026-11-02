@@ -125,7 +125,7 @@ See [GettingStarted.md](GettingStarted.md) for the full setup guide including co
 
 Model licenses are **separate from NexusVox's own license** — NexusVox is AGPL-3.0, but no model weights ship with it; each model is downloaded from Hugging Face under its own terms. Check the license of the model you pick, especially for commercial use.
 
-Select your device in the dashboard Settings tab: `Auto` (detect CUDA, fall back to CPU), `GPU (CUDA)`, or `CPU`. On CPU, only the entries that run in-process are shown (Parakeet among them, without speaker detection).
+Select your device in the dashboard Settings tab: `Auto` (detect CUDA, fall back to CPU; with Parakeet on a CUDA machine each dictation, meeting and upload uses the Docker server while it answers and CPU Parakeet when it does not, without speaker detection, and the app warms the server up at start), `GPU (CUDA)`, or `CPU`. On CPU, only the entries that run in-process are shown (Parakeet among them, without speaker detection).
 
 ---
 

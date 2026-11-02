@@ -179,6 +179,7 @@ def test_a_busy_port_means_no_browser_and_no_started_flag(db, monkeypatch):
 
     opened: list[str] = []
     monkeypatch.setattr(dashboard, "make_server", busy)
+    monkeypatch.setattr(dashboard, "show_message", lambda *a, **k: None)
     monkeypatch.setattr(dashboard.webbrowser, "open", opened.append)
     monkeypatch.setattr(dashboard, "_server_started", False)
     monkeypatch.setattr(dashboard, "_guard", None)
@@ -188,3 +189,53 @@ def test_a_busy_port_means_no_browser_and_no_started_flag(db, monkeypatch):
 
     assert opened == []
     assert dashboard._server_started is False
+
+
+def _fresh_dashboard(db, monkeypatch):
+    import nexusvox.dashboard as dashboard
+
+    shown: list[str] = []
+    opened: list[str] = []
+    monkeypatch.setattr(dashboard, "show_message", shown.append)
+    monkeypatch.setattr(dashboard.webbrowser, "open", opened.append)
+    monkeypatch.setattr(dashboard, "_server_started", False)
+    monkeypatch.setattr(dashboard, "_guard", None)
+    monkeypatch.setattr(dashboard, "_port", dashboard._PORT)
+    monkeypatch.setattr(dashboard.DashboardAPI, "sweep_meeting_leftovers", lambda self: None)
+    return dashboard, shown, opened
+
+
+def test_a_held_port_falls_back_to_another_and_opens_that_one(db, monkeypatch):
+    import socket
+
+    dashboard, shown, opened = _fresh_dashboard(db, monkeypatch)
+    started: list[int] = []
+
+    class FakeServer:
+        def serve_forever(self):
+            pass
+
+    def fake_make_server(host, port, app, threaded):
+        started.append(port)
+        return FakeServer()
+
+    monkeypatch.setattr(dashboard, "make_server", fake_make_server)
+    monkeypatch.setattr(dashboard, "_FALLBACK_PORTS", (47400, 47401))
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", dashboard._PORT))
+        dashboard.open_dashboard(db, Config())
+
+    assert started == [47400]
+    assert len(opened) == 1 and opened[0].startswith("http://127.0.0.1:47400/?launch=")
+    assert shown == []
+
+
+def test_every_port_held_shows_a_message_and_opens_nothing(db, monkeypatch):
+    dashboard, shown, opened = _fresh_dashboard(db, monkeypatch)
+    monkeypatch.setattr(dashboard, "_pick_port", lambda: None)
+
+    dashboard.open_dashboard(db, Config())
+
+    assert opened == []
+    assert dashboard._server_started is False
+    assert len(shown) == 1 and "port" in shown[0]

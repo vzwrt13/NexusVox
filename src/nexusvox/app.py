@@ -1030,6 +1030,11 @@ class NexusVoxApp:
         """Open the dashboard window."""
         open_dashboard(self._db, self._config, app=self)
 
+    def open_dashboard_from_second_start(self) -> None:
+        """A second start of NexusVox rang the doorbell: show the dashboard of this instance."""
+        logger.info("A second NexusVox start was detected; opening the dashboard of this instance")
+        self._open_dashboard()
+
     def _toggle_language(self) -> None:
         """Toggle between English and German."""
         self._config.language = "de" if self._config.language == "en" else "en"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import socket
 import threading
 import webbrowser
 from dataclasses import asdict
@@ -18,6 +19,7 @@ from werkzeug.serving import make_server
 from ..config import Config
 from ..db import Database
 from ..extensions import load_extensions
+from ..single_instance import show_message
 from .api import DashboardAPI
 from .guard import LAUNCH_PARAM, DashboardGuard, install_guard
 
@@ -28,6 +30,8 @@ logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _PORT = 47392  # Uncommon port to avoid collisions.
+_FALLBACK_PORTS = tuple(range(47400, 47410))  # used when _PORT is held by another program; 47393 is the remote mic
+_port = _PORT  # the port this process serves on; differs from _PORT only after a fallback
 _server_started = False
 _api: DashboardAPI | None = None
 _guard: DashboardGuard | None = None
@@ -40,9 +44,22 @@ def _attachment(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
-def _create_app(api: DashboardAPI) -> Flask:
+def _pick_port() -> int | None:
+    """The first free dashboard port: the usual one, else a fallback. None when all are held."""
+    for port in (_PORT, *_FALLBACK_PORTS):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                logger.warning("Dashboard port %d is held by another program", port)
+                continue
+        return port
+    return None
+
+
+def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     app = Flask(__name__, static_folder=str(_STATIC_DIR), static_url_path="")
-    install_guard(app, _PORT)  # before any route, so the extension blueprints below are covered too
+    install_guard(app, port)  # before any route, so the extension blueprints below are covered too
 
     # Suppress Flask request logging in production.
     wlog = logging.getLogger("werkzeug")
@@ -618,7 +635,7 @@ def _create_app(api: DashboardAPI) -> Flask:
 
 def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None = None) -> DashboardAPI:
     """Start the Flask server (once) without opening the browser, and return its API object."""
-    global _server_started, _api, _guard
+    global _server_started, _api, _guard, _port
 
     with _lock:
         if not _server_started:
@@ -656,19 +673,32 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 benchmarks_dir=benchmarks_dir,
                 extensions=load_extensions(),
             )
-            flask_app = _create_app(_api)
+            port = _pick_port()
+            if port is None:
+                message = (
+                    f"The dashboard could not start: port {_PORT} and the fallback ports {_FALLBACK_PORTS[0]}-"
+                    f"{_FALLBACK_PORTS[-1]} are all held by other programs. Dictation still works."
+                )
+                logger.error(message)
+                show_message(message)
+                return _api
+            flask_app = _create_app(_api, port)
             _guard = flask_app.extensions["nexusvox_guard"]
             threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
 
-            try:  # bind here rather than in the thread, so a port held by another process is noticed
-                server = make_server("127.0.0.1", _PORT, flask_app, threaded=True)
+            try:  # bind here rather than in the thread, so a port taken since the probe is noticed
+                server = make_server("127.0.0.1", port, flask_app, threaded=True)
             except OSError:
-                logger.exception("Dashboard port %d is in use (another NexusVox running?); no dashboard", _PORT)
+                logger.exception("Dashboard port %d is in use; no dashboard", port)
                 _guard = None
+                show_message(f"The dashboard could not start: port {port} is in use. Dictation still works.")
             else:
                 threading.Thread(target=server.serve_forever, daemon=True, name="dashboard-server").start()
                 _server_started = True
-                logger.info("Dashboard server started on http://127.0.0.1:%d", _PORT)
+                _port = port
+                if port != _PORT:
+                    logger.warning("Dashboard port %d is held by another program; using %d instead", _PORT, port)
+                logger.info("Dashboard server started on http://127.0.0.1:%d", port)
         assert _api is not None
         return _api
 
@@ -685,4 +715,4 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None,
         logger.error("The dashboard server is not running, so the dashboard was not opened")
         return
     query = f"?{LAUNCH_PARAM}={_guard.new_launch_secret()}" + (f"&tab={quote(tab)}" if tab else "")
-    webbrowser.open(f"http://127.0.0.1:{_PORT}/{query}")
+    webbrowser.open(f"http://127.0.0.1:{_port}/{query}")

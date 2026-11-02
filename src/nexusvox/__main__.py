@@ -8,9 +8,17 @@ from .app import NexusVoxApp
 from .config import load_config
 from .logsetup import setup_file_logging
 from .paths import apply_models_dir, default_config_path, ensure_dirs
+from .single_instance import SingleInstance, show_message
 
 
 def main() -> None:
+    # Before anything heavy: a second start must not build a second tray icon or hotkey hook.
+    instance = SingleInstance()
+    if not instance.acquire():
+        if not instance.ring_running_instance():
+            show_message("NexusVox is already running. Use its tray icon to open the dashboard.")
+        sys.exit(0)
+
     ensure_dirs()
     apply_models_dir()
     config = load_config()
@@ -36,6 +44,7 @@ def main() -> None:
     )
 
     app = NexusVoxApp(config)
+    instance.watch(app.open_dashboard_from_second_start)
 
     try:
         app.run()

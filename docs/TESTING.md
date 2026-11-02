@@ -85,7 +85,8 @@ tests/
 ├── test_file_jobs.py              # Background job registry behind the Upload tab progress bar
 ├── test_extensions.py             # Extension interface: entry points, failing extensions, the three hooks (dummy extension)
 ├── test_os_commands.py            # Nexus OS command parsing and dispatch
-├── test_experimental.py           # [experimental] features hidden by default, back with the flag
+├── test_experimental.py           # [experimental] dashboard side: endpoints not registered and elements hidden by default, back with the flag
+├── test_experimental_voice.py     # [experimental] voice side: OS commands and "nexus flag" typed as text by default
 ├── test_hotkey.py                 # Hotkey modes, bindings, swallowing, command and paste marker keys
 ├── test_app_os_control.py         # Transcription cycle: os-control hide on skipped/failed cycles, paste last
 ├── test_edit_watch.py             # Learn from edits: span mapping, suggestions, watcher thread
@@ -115,7 +116,8 @@ tests/
 | `test_file_jobs.py` | `dashboard/file_jobs.py` | Upload job stages and progress, done/error mapping, one running job at a time, pruning, unread finished job |
 | `test_extensions.py` | `extensions.py` | Entry-point loading, a failing / mis-versioned / badly named extension skipped, the upload hook with a dummy extension, the dictation hook (order, chaining, failure and timeout fallback) and the selected-text command hook, panel static files and blueprint, export download |
 | `test_os_commands.py` | `os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
-| `test_experimental.py` | `config.py`, `dashboard/__init__.py`, `app.py` | `[experimental]` flags: endpoints not registered and page elements hidden by default, the voice commands typed as text, each flag bringing back only its feature |
+| `test_experimental.py` | `config.py`, `dashboard/__init__.py` | `[experimental]` flags: strict bool parsing, endpoints not registered and page elements hidden by default, each flag bringing back only its feature |
+| `test_experimental_voice.py` | `app.py` | The voice commands "nexus <window action>" and "nexus flag" are typed as text by default and run with their flag |
 | `test_hotkey.py` | `hotkey.py` | Hold/toggle modes, key bindings and swallowing, the command key and the paste key (first marker wins, typed normally outside a recording) |
 | `test_app_os_control.py` | `app.py` | The cycle's control flow with mocked collaborators: `::hide` after a skipped or failed command recording, pasting the last text |
 | `test_edit_watch.py` | `edit_watch.py` | Locating the pasted span, ignoring text typed around it, rejecting rewrites and language mix-ups (English and German), watcher thread with fake fields |

@@ -1,16 +1,17 @@
 """The voice side of `[experimental]`: OS commands and "nexus flag" do nothing unless their flag is on."""
 
 import asyncio
+import sys
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nexusvox.config import Config, ExperimentalConfig
 
-try:
-    import nexusvox.app as app_module
-except Exception:  # Windows-only imports (pynput hook, tray, SendInput, PortAudio) on other platforms
+if sys.platform != "win32":  # pynput hook, tray, SendInput and PortAudio imports; on Windows a failure must show
     pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
+
+import nexusvox.app as app_module  # noqa: E402
 
 
 def _app(flags: ExperimentalConfig):

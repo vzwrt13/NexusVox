@@ -214,7 +214,8 @@ function openExtensionPanel(id) {
 function restoreTabFromHash() {
   const name = window.location.hash.replace(/^#/, "");
   if (!name) return;
-  activateTab(name);
+  // A hash for a tab that is off (an experimental one, or an extension that is gone) must not stay in the URL.
+  if (!activateTab(name)) history.replaceState(null, "", window.location.pathname + window.location.search);
 }
 
 window.addEventListener("hashchange", restoreTabFromHash);
@@ -868,6 +869,7 @@ osCommandsToggle.addEventListener("change", async () => {
 });
 
 async function loadOsCommands() {
+  await featuresReady;
   if (!FEATURES.os_commands) return; // experimental: the card is hidden and the endpoint is not registered
   const data = await fetch("/api/os-commands").then((r) => r.json());
   osCommandsToggle.checked = data.enabled;
@@ -2899,10 +2901,16 @@ async function openMeetingsTab() {
 // `[experimental]` in config.toml turns them on; the page shows what the server says is on.
 let FEATURES = {};
 
+// Resolves when the flags are known; started at page load next to the other loaders, awaited where one is needed.
+let featuresReady = Promise.resolve();
+
 async function loadFeatures() {
   try {
-    FEATURES = await fetch("/api/features").then((r) => r.json());
+    const r = await fetch("/api/features");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    FEATURES = await r.json();
   } catch (err) {
+    console.error("Could not load the experimental feature flags; experimental features stay hidden:", err);
     FEATURES = {};
   }
   document.querySelectorAll("[data-feature]").forEach((el) => {
@@ -2912,11 +2920,10 @@ async function loadFeatures() {
 
 // ── Init ─────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  loadFeatures().then(() => {
-    loadSettings();
-    loadMeetingSettings();
-    loadExtensions().then(restoreTabFromHash);
-  });
+  featuresReady = loadFeatures();
+  loadSettings();
+  loadMeetingSettings();
+  Promise.all([featuresReady, loadExtensions()]).then(restoreTabFromHash);
 });
 
 // ── Benchmarks (Dev Tab) ─────────────────────────────────────────────
@@ -2925,6 +2932,7 @@ let benchmarkCache = null;
 let currentBenchmarkDetail = null;
 
 async function loadBenchmarks() {
+  await featuresReady;
   if (!FEATURES.dev_tab) return;
   try {
     const comparison = await fetch("/api/benchmarks/compare").then((r) => r.json());

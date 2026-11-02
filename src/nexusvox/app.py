@@ -42,7 +42,7 @@ from .llm import warm_up as llm_warm_up
 from .logsetup import Text
 from .mic_guard import MicGuard, create_mic_guard
 from .models import COMMAND_APP
-from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
+from .os_commands import WINDOW_ACTIONS, NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
 from .overlay import CONFIRMED, ERROR, PROCESSING, RECORDING, Overlay, level_from_rms
 from .pipeline import process_text
 from .polish import polish, read_selection
@@ -960,7 +960,7 @@ class NexusVoxApp:
 
         if (
             nexus_cmd is not None
-            and nexus_cmd.action != "flag"
+            and nexus_cmd.action in WINDOW_ACTIONS
             and self._config.experimental.os_commands
             and self._config.os_commands.enabled
         ):

@@ -58,7 +58,17 @@ def test_shipped_template_keeps_everything_off():
 @pytest.mark.parametrize(("method", "path"), _HIDDEN_ENDPOINTS)
 def test_hidden_endpoints_are_not_registered_by_default(db, session_factory, method, path):
     client = _client(db, session_factory)
-    assert getattr(client, method)(path).status_code in (404, 405)  # 405: the static catch-all answers GET only
+    # A POST to an unregistered path hits the static catch-all, which answers GET only (405); a GET must be 404.
+    assert getattr(client, method)(path).status_code == (405 if method == "post" else 404)
+
+
+@pytest.mark.parametrize("value", ['"false"', '"true"', "1", '"yes"'])
+def test_a_flag_that_is_not_a_real_bool_stays_off(tmp_path, value):
+    path = tmp_path / "config.toml"
+    path.write_text("[experimental]\nos_commands = " + value + "\ndev_tab = true\n", encoding="utf-8")
+    loaded = load_config(path).experimental
+    assert loaded.os_commands is False
+    assert loaded.dev_tab is True
 
 
 def test_features_endpoint_reports_the_flags(db, session_factory):

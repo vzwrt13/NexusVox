@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import threading
 import tomllib
@@ -691,6 +692,18 @@ class Config:
     source_path: Path | None = field(default=None, repr=False, compare=False)
 
 
+def _experimental_flag(section: dict, key: str) -> bool:
+    """An `[experimental]` switch: only a real TOML `true` turns a feature on.
+
+    `"false"` or `1` must not count as on (a non-empty string is truthy), so anything but a bool means off.
+    """
+    value = section.get(key, False)
+    if isinstance(value, bool):
+        return value
+    logging.getLogger(__name__).warning("[experimental].%s must be true or false, got %r; keeping it off", key, value)
+    return False
+
+
 def _log_level(value: object) -> str:
     """`[general].log_level` in upper case; INFO when it is not one of `LOG_LEVELS`."""
     level = str(value).strip().upper()
@@ -824,10 +837,10 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
             apps=dict(os_cmd_data.get("apps", {})),
         ),
         experimental=ExperimentalConfig(
-            os_commands=bool(experimental_data.get("os_commands", False)),
-            flag_command=bool(experimental_data.get("flag_command", False)),
-            github_snippets=bool(experimental_data.get("github_snippets", False)),
-            dev_tab=bool(experimental_data.get("dev_tab", False)),
+            os_commands=_experimental_flag(experimental_data, "os_commands"),
+            flag_command=_experimental_flag(experimental_data, "flag_command"),
+            github_snippets=_experimental_flag(experimental_data, "github_snippets"),
+            dev_tab=_experimental_flag(experimental_data, "dev_tab"),
         ),
         voice_commands=vc_config,
         assistant=AssistantConfig(

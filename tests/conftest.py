@@ -98,15 +98,7 @@ def sample_transcriptions(db):
     return records
 
 
-@pytest.fixture
-def flask_client(db, session_factory, monkeypatch):
-    """Flask test client backed by the in-memory database, with every experimental feature on.
-
-    ``test_experimental.py`` covers the default (hidden) state.
-    """
-    config = Config(
-        experimental=ExperimentalConfig(os_commands=True, flag_command=True, github_snippets=True, dev_tab=True)
-    )
+def _dashboard_client(db, session_factory, monkeypatch, config):
     api = DashboardAPI(session_factory, config, db=db)
     app = _create_app(api)
     app.config["TESTING"] = True
@@ -121,6 +113,19 @@ def flask_client(db, session_factory, monkeypatch):
 
     with app.test_client() as client:
         yield client
+
+
+@pytest.fixture
+def flask_client(db, session_factory, monkeypatch):
+    """Flask test client backed by the in-memory database, with the default config (experimental features off)."""
+    yield from _dashboard_client(db, session_factory, monkeypatch, Config())
+
+
+@pytest.fixture
+def experimental_client(db, session_factory, monkeypatch):
+    """Like ``flask_client``, with every `[experimental]` feature on (OS commands, Edit tab, GitHub, Dev)."""
+    flags = ExperimentalConfig(os_commands=True, flag_command=True, github_snippets=True, dev_tab=True)
+    yield from _dashboard_client(db, session_factory, monkeypatch, Config(experimental=flags))
 
 
 @pytest.fixture

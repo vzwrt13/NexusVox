@@ -21,6 +21,9 @@ NEXUS_ACTIONS: list[dict[str, str]] = [
     {"action": "flag", "syntax": "nexus flag", "description": "Flag the last transcription for review"},
 ]
 
+# What `execute_nexus_command` can run: the window actions. "flag" is a command too, but it is not one of these.
+WINDOW_ACTIONS = frozenset(a["action"] for a in NEXUS_ACTIONS if a["action"] != "flag")
+
 _NEXUS_PATTERN = re.compile(
     r"^\s*nexus\s+(snap\s+(?:left|right)|open|close|focus|fullscreen|minimize)\s+(.+?)\s*$",
     re.IGNORECASE,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import wave
 
 import pytest
@@ -20,6 +21,23 @@ def _isolated_cwd(tmp_path, monkeypatch):
     working directory, and a test that saved there left a config (with a throw-away database path) in the
     checkout that the app then loaded."""
     monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _tests_never_touch_the_real_log(tmp_path, monkeypatch):
+    """Point %LOCALAPPDATA% at a throw-away folder and drop any file handler a test leaves on the root logger.
+
+    ``nexusvox.__main__.main`` attaches a rotating file handler to the root logger. Left in place, every later
+    test that logs ("boom", "dummy-tab", ...) wrote into the user's real ``nexusvox.log``.
+    """
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+    root = logging.getLogger()
+    before = list(root.handlers)
+    yield
+    for handler in list(root.handlers):
+        if handler not in before and isinstance(handler, logging.FileHandler):
+            root.removeHandler(handler)
+            handler.close()
 
 
 @pytest.fixture(autouse=True)

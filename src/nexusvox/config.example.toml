@@ -117,7 +117,20 @@ audio_dir = "audio"
 # Also switchable in the dashboard Settings tab. Transcripts are saved either way.
 store_audio = true
 
+[experimental]
+# Features that are not part of v1. Each is hidden and cannot be triggered while it is false;
+# the dashboard endpoints behind it are not registered. Restart NexusVox after changing these.
+# Nexus OS commands ([os_commands] below) and their Settings card.
+os_commands = false
+# The "nexus flag" voice command and the dashboard Edit tab (Flagged Transcriptions).
+flag_command = false
+# The Snippets button "Fill from GitHub" (reads the repository list of the GitHub CLI account).
+github_snippets = false
+# The developer benchmark page of the dashboard.
+dev_tab = false
+
 [os_commands]
+# Needs [experimental] os_commands = true.
 # Enable "nexus" voice commands for OS-level window management.
 # Say "nexus open chrome" to launch, "nexus focus discord" to bring to front, etc.
 # Supported actions: open, close, focus, fullscreen, minimize, snap left, snap right

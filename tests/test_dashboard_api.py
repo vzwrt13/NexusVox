@@ -232,18 +232,18 @@ def test_top_words_endpoint(flask_client):
     assert "labels" in data
 
 
-def test_flagged_endpoint(flask_client):
-    resp = flask_client.get("/api/flagged")
+def test_flagged_endpoint(experimental_client):
+    resp = experimental_client.get("/api/flagged")
 
     assert resp.status_code == 200
     assert isinstance(resp.get_json(), list)
 
 
-def test_flagged_includes_audio_path(flask_client, db):
+def test_flagged_includes_audio_path(experimental_client, db):
     record = db.save_transcription("test audio", "en", 1000, audio_path="audio/1_123.wav")
     db.flag_transcription(record.id)
 
-    resp = flask_client.get("/api/flagged")
+    resp = experimental_client.get("/api/flagged")
     data = resp.get_json()
     assert len(data) == 1
     assert data[0]["audio_path"] == "audio/1_123.wav"
@@ -254,11 +254,11 @@ def test_audio_endpoint_not_found(flask_client):
     assert resp.status_code == 404
 
 
-def test_correct_transcription_endpoint(flask_client, db):
+def test_correct_transcription_endpoint(experimental_client, db):
     record = db.save_transcription("tset", "en", 1000)
     db.flag_transcription(record.id)
 
-    resp = flask_client.post(
+    resp = experimental_client.post(
         f"/api/flagged/{record.id}/correct",
         data=json.dumps({"corrected_text": "test"}),
         content_type="application/json",
@@ -708,8 +708,8 @@ def test_file_transcriptions_empty(flask_client):
 # ── OS Commands endpoints ────────────────────────────────────────────
 
 
-def test_get_os_commands(flask_client):
-    resp = flask_client.get("/api/os-commands")
+def test_get_os_commands(experimental_client):
+    resp = experimental_client.get("/api/os-commands")
 
     assert resp.status_code == 200
     data = resp.get_json()
@@ -724,8 +724,8 @@ def test_get_os_commands(flask_client):
     assert "flag" in actions
 
 
-def test_set_os_commands_enabled(flask_client):
-    resp = flask_client.post(
+def test_set_os_commands_enabled(experimental_client):
+    resp = experimental_client.post(
         "/api/os-commands/enabled",
         data=json.dumps({"enabled": True}),
         content_type="application/json",
@@ -736,7 +736,7 @@ def test_set_os_commands_enabled(flask_client):
     assert data["enabled"] is True
 
     # Verify it persists on subsequent GET
-    resp = flask_client.get("/api/os-commands")
+    resp = experimental_client.get("/api/os-commands")
     assert resp.get_json()["enabled"] is True
 
 
@@ -813,9 +813,9 @@ def test_review_submit_nonexistent(flask_client):
     assert resp.get_json()["ok"] is False
 
 
-def test_set_os_commands_apps(flask_client):
+def test_set_os_commands_apps(experimental_client):
     apps = {"chrome": "chrome.exe", "terminal": "wt.exe"}
-    resp = flask_client.post(
+    resp = experimental_client.post(
         "/api/os-commands/apps",
         data=json.dumps({"apps": apps}),
         content_type="application/json",
@@ -1053,14 +1053,14 @@ def test_snippet_options_list(flask_client):
     assert resp["snippet"]["options"] == [{"name": "NexusVox", "text": "https://a"}]
 
 
-def test_github_repos_reports_a_missing_cli(flask_client, monkeypatch):
+def test_github_repos_reports_a_missing_cli(experimental_client, monkeypatch):
     import subprocess
 
     def missing(*_a, **_k):
         raise FileNotFoundError("gh")
 
     monkeypatch.setattr(subprocess, "run", missing)
-    resp = flask_client.get("/api/snippets/github-repos").get_json()
+    resp = experimental_client.get("/api/snippets/github-repos").get_json()
     assert resp["ok"] is False and "GitHub CLI" in resp["error"]
 
 

@@ -530,6 +530,11 @@ class DashboardAPI:
         save_config(self._config)
         return self.get_voice_commands()
 
+    @property
+    def experimental(self):
+        """The ``[experimental]`` switches: features that are hidden and unreachable in v1 unless turned on."""
+        return self._config.experimental
+
     # ---- OS Commands -------------------------------------------------------
 
     def get_os_commands(self) -> dict:

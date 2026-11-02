@@ -42,7 +42,7 @@ from .llm import warm_up as llm_warm_up
 from .logsetup import Text
 from .mic_guard import MicGuard, create_mic_guard
 from .models import COMMAND_APP
-from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
+from .os_commands import WINDOW_ACTIONS, NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
 from .overlay import CONFIRMED, ERROR, PROCESSING, RECORDING, Overlay, level_from_rms
 from .paths import DOCKER_UNAVAILABLE_MSG, is_frozen
 from .pipeline import process_text
@@ -601,7 +601,7 @@ class NexusVoxApp:
             # A phone recording only wants its text back, never a PC action.
             if not remote:
                 nexus_cmd = parse_nexus_command(raw_text)
-                if nexus_cmd is not None and nexus_cmd.action == "flag":
+                if nexus_cmd is not None and nexus_cmd.action == "flag" and self._config.experimental.flag_command:
                     self._flag_last_transcription()
                     await self._transcriber.disconnect()
                     return
@@ -917,7 +917,7 @@ class NexusVoxApp:
         await asyncio.get_running_loop().run_in_executor(None, save)
 
     def _flag_last_transcription(self) -> None:
-        """ "nexus flag" - always available, flags the most recent transcription for review."""
+        """ "nexus flag" (``[experimental].flag_command``): flags the most recent transcription for review."""
         last_tid = self._db.get_last_transcription_id()
         if last_tid is None:
             logger.info("Nexus flag: no transcription to flag")
@@ -961,7 +961,12 @@ class NexusVoxApp:
                     self._cue(beep_error, ERROR)
                 return f"[assistant] {assistant_text}"
 
-        if nexus_cmd is not None and self._config.os_commands.enabled:
+        if (
+            nexus_cmd is not None
+            and nexus_cmd.action in WINDOW_ACTIONS
+            and self._config.experimental.os_commands
+            and self._config.os_commands.enabled
+        ):
             await loop.run_in_executor(None, execute_nexus_command, nexus_cmd, self._config.os_commands)
             logger.info("Nexus command: %s %s", nexus_cmd.action, nexus_cmd.app_name)
             return f"[nexus] {nexus_cmd.action} {nexus_cmd.app_name}"

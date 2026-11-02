@@ -210,15 +210,6 @@ audio_dir = "audio"
 # Keep a WAV file of every recording (needed for playback in the Review tab)
 store_audio = true
 
-[os_commands]
-# Enable "nexus" voice commands for OS-level window management
-enabled = false
-
-[os_commands.apps]
-# Map app aliases to executable paths. Use the alias in voice commands.
-# chrome = "C:/Program Files/Google/Chrome/Application/chrome.exe"
-# discord = "C:/Users/YourUser/AppData/Local/Discord/Update.exe"
-
 [voice_commands]
 # Enable voice command text formatting substitutions
 enabled = true
@@ -303,7 +294,7 @@ Your own spoken shortcuts, created in the dashboard under Settings → Snippets 
 | `open remote repo` with options | "open remote repo nexus vox" | the URL of the best-matching option |
 | `open remote repo` with options | "nexus open remote repo nexus vox" / "nexus öffne …" | opens that URL in your browser (new tab) |
 
-Options are one `name = text` per line under a snippet; *Fill from GitHub* imports your repositories via the GitHub CLI (`gh`). The best-matching name wins - spaces, dashes and small mishearings do not matter. "nexus open" only opens URLs and existing paths, and does not need Nexus OS Commands turned on.
+Options are one `name = text` per line under a snippet. The best-matching name wins - spaces, dashes and small mishearings do not matter. "nexus open" only opens URLs and existing paths.
 
 ### Learn From Edits
 

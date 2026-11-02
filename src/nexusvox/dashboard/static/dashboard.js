@@ -97,7 +97,7 @@ async function api(path) {
 function activateTab(name) {
   const btn = document.querySelector(`.tab[data-tab="${name}"]`);
   const panel = document.getElementById("tab-" + name);
-  if (!btn || !panel) return false;
+  if (!btn || !panel || btn.hidden) return false;
 
   document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
   document.querySelectorAll(".tab-content").forEach((s) => s.classList.remove("active"));
@@ -213,8 +213,9 @@ function openExtensionPanel(id) {
 
 function restoreTabFromHash() {
   const name = window.location.hash.replace(/^#/, "");
-  if (!name || (name === "dev" && !DEV_MODE)) return;
-  activateTab(name);
+  if (!name) return;
+  // A hash for a tab that is off (an experimental one, or an extension that is gone) must not stay in the URL.
+  if (!activateTab(name)) history.replaceState(null, "", window.location.pathname + window.location.search);
 }
 
 window.addEventListener("hashchange", restoreTabFromHash);
@@ -868,6 +869,8 @@ osCommandsToggle.addEventListener("change", async () => {
 });
 
 async function loadOsCommands() {
+  await featuresReady;
+  if (!FEATURES.os_commands) return; // experimental: the card is hidden and the endpoint is not registered
   const data = await fetch("/api/os-commands").then((r) => r.json());
   osCommandsToggle.checked = data.enabled;
 
@@ -2893,17 +2896,34 @@ async function openMeetingsTab() {
   }, 3000);
 }
 
-// ── Dev Mode Detection ───────────────────────────────────────────────
-const DEV_MODE = new URLSearchParams(window.location.search).has("dev");
+// ── Experimental features ────────────────────────────────────────────
+// Features that are not part of v1 are hidden in index.html (`data-feature`) and have no endpoint unless
+// `[experimental]` in config.toml turns them on; the page shows what the server says is on.
+let FEATURES = {};
+
+// Resolves when the flags are known; started at page load next to the other loaders, awaited where one is needed.
+let featuresReady = Promise.resolve();
+
+async function loadFeatures() {
+  try {
+    const r = await fetch("/api/features");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    FEATURES = await r.json();
+  } catch (err) {
+    console.error("Could not load the experimental feature flags; experimental features stay hidden:", err);
+    FEATURES = {};
+  }
+  document.querySelectorAll("[data-feature]").forEach((el) => {
+    el.hidden = !FEATURES[el.dataset.feature];
+  });
+}
 
 // ── Init ─────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
+  featuresReady = loadFeatures();
   loadSettings();
   loadMeetingSettings();
-  if (DEV_MODE) {
-    document.querySelectorAll("[data-dev-only]").forEach((el) => (el.style.display = ""));
-  }
-  loadExtensions().then(restoreTabFromHash);
+  Promise.all([featuresReady, loadExtensions()]).then(restoreTabFromHash);
 });
 
 // ── Benchmarks (Dev Tab) ─────────────────────────────────────────────
@@ -2912,7 +2932,8 @@ let benchmarkCache = null;
 let currentBenchmarkDetail = null;
 
 async function loadBenchmarks() {
-  if (!DEV_MODE) return;
+  await featuresReady;
+  if (!FEATURES.dev_tab) return;
   try {
     const comparison = await fetch("/api/benchmarks/compare").then((r) => r.json());
     benchmarkCache = comparison;

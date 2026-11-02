@@ -99,12 +99,12 @@ Symbol commands do not break `all caps` mode; structural commands do. Pattern is
 
 ## Nexus OS Command Layer
 
-`os_commands.py` + `window_manager.py` — checked before voice commands. If transcription matches a nexus pattern, executes the command and skips text injection entirely.
+**Experimental, off in v1** (`[experimental].os_commands` and `.flag_command`, both default false; see `ExperimentalConfig`). `os_commands.py` + `window_manager.py` — checked before voice commands. If transcription matches a nexus pattern, executes the command and skips text injection entirely.
 
 - Window management: `"nexus <action> <app>"` — open, close, focus, fullscreen, minimize, snap left/right
-- Requires `os_commands.enabled = true` and app registered under `[os_commands.apps]` in `config.toml`
+- Requires `[experimental].os_commands = true`, `os_commands.enabled = true` and app registered under `[os_commands.apps]` in `config.toml`
 - Force-foreground uses AttachThreadInput + Alt key trick + SPI timeout fallback (Vista+ restriction workaround)
-- **"nexus flag"** is always available regardless of `os_commands.enabled` — flags most recent transcription for review, no DB record for the flag itself
+- **"nexus flag"** needs `[experimental].flag_command = true` (independent of `os_commands.enabled`); without it the phrase is typed like any text. Flags most recent transcription for review, no DB record for the flag itself
 
 ## Assistant Forward
 

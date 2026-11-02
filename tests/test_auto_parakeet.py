@@ -67,8 +67,8 @@ def server(monkeypatch):
     async def fake_finish(self, timeout: float = 30.0) -> TranscriptionResult:
         state["posted"] += 1
         if state.get("hold") is not None:
-            while not state["hold"].is_set():
-                await asyncio.sleep(0.01)
+            # Not asyncio.sleep: the fixture freezes time.monotonic, which the loop's timers run on.
+            await asyncio.get_running_loop().run_in_executor(None, state["hold"].wait)
         if not state["up"]:
             raise RuntimeError("connection refused")
         result = TranscriptionResult()

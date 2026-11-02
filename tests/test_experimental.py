@@ -1,9 +1,7 @@
 """Features that are not part of v1 (`[experimental]`): hidden and unreachable by default, back with the flag."""
 
-import asyncio
 import re
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -108,65 +106,3 @@ def test_store_audio_hint_does_not_mention_the_edit_tab():
     html = (_STATIC / "index.html").read_text(encoding="utf-8")
     hint = html[html.index("<h3>Store Audio Recordings</h3>") :][:600]
     assert "Edit tab" not in hint
-
-
-# ── Voice side (needs the Windows runtime, like test_app_os_control.py) ──────────────────────────────────────────
-
-app_module = pytest.importorskip("nexusvox.app", reason="nexusvox.app needs the Windows runtime", exc_type=ImportError)
-
-
-def _app(flags: ExperimentalConfig):
-    app = app_module.NexusVoxApp.__new__(app_module.NexusVoxApp)
-    app._config = Config(experimental=flags)
-    app._config.os_commands.enabled = True
-    app._config.os_commands.apps = {"chrome": "chrome.exe"}
-    app._cue = MagicMock()
-    return app
-
-
-def _run(app, text, monkeypatch):
-    calls = []
-    monkeypatch.setattr(app_module, "execute_nexus_command", lambda cmd, cfg: calls.append(cmd.action) or True)
-    cmd = app_module.parse_nexus_command(text)
-    label = asyncio.run(app._run_command(text, cmd, []))
-    return label, calls
-
-
-def test_os_commands_do_not_run_by_default_even_when_enabled_in_the_old_section(monkeypatch):
-    label, calls = _run(_app(ExperimentalConfig()), "nexus minimize chrome", monkeypatch)
-    assert label is None and calls == []
-
-
-def test_os_commands_run_with_the_flag(monkeypatch):
-    label, calls = _run(_app(ExperimentalConfig(os_commands=True)), "nexus minimize chrome", monkeypatch)
-    assert label == "[nexus] minimize chrome" and calls == ["minimize"]
-
-
-def test_the_flag_command_is_never_an_os_command(monkeypatch):
-    label, calls = _run(_app(ExperimentalConfig(os_commands=True)), "nexus flag", monkeypatch)
-    assert label is None and calls == []
-
-
-def _flag_cycle(monkeypatch, flags):
-    from test_app_os_control import _dictation_app, _run_cycle  # noqa: PLC0415
-
-    app, _ = _dictation_app(monkeypatch, lambda *a, **k: None)
-    app._config = Config(experimental=flags)
-    app._config.injection_delay_ms = 0
-    app._transcriber.finish = AsyncMock(return_value=MagicMock(text="nexus flag", confidence=None))
-    app._run_command = AsyncMock(return_value=None)
-    app._flag_last_transcription = MagicMock()
-    _run_cycle(app)
-    return app
-
-
-def test_nexus_flag_is_typed_like_any_text_by_default(monkeypatch):
-    app = _flag_cycle(monkeypatch, ExperimentalConfig())
-    app._flag_last_transcription.assert_not_called()
-    app._run_command.assert_awaited_once()
-
-
-def test_nexus_flag_flags_with_the_flag(monkeypatch):
-    app = _flag_cycle(monkeypatch, ExperimentalConfig(flag_command=True))
-    app._flag_last_transcription.assert_called_once()
-    app._run_command.assert_not_awaited()

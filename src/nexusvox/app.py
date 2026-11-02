@@ -44,6 +44,7 @@ from .mic_guard import MicGuard, create_mic_guard
 from .models import COMMAND_APP
 from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
 from .overlay import CONFIRMED, ERROR, PROCESSING, RECORDING, Overlay, level_from_rms
+from .paths import DOCKER_UNAVAILABLE_MSG, is_frozen
 from .pipeline import process_text
 from .polish import polish, read_selection
 from .polish_presets import resolve_instruction
@@ -357,6 +358,8 @@ class NexusVoxApp:
 
         new_needs_docker = model_needs_docker(model_id, self._device)
         old_was_docker = self._transcriber.needs_docker
+        if new_needs_docker and is_frozen():
+            raise RuntimeError(DOCKER_UNAVAILABLE_MSG)
 
         try:
             self._switch_status = "stopping"

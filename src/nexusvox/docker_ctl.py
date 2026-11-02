@@ -9,6 +9,8 @@ from pathlib import Path
 
 import httpx
 
+from .paths import DOCKER_UNAVAILABLE_MSG, is_frozen
+
 logger = logging.getLogger(__name__)
 
 DOCKER_DIR = Path(__file__).resolve().parent.parent.parent / "docker"
@@ -20,6 +22,9 @@ _MISSING_DOCKER_MSG = (
 
 
 def _run_compose(args: list[str]) -> subprocess.CompletedProcess[str]:
+    if is_frozen():
+        # The compose files are not shipped in the installed app.
+        raise RuntimeError(DOCKER_UNAVAILABLE_MSG)
     try:
         return subprocess.run(
             ["docker", "compose", *args],

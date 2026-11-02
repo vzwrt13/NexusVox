@@ -164,6 +164,32 @@ body::before {
   padding: 20px 24px;
 }
 
+/* Settings tab: one card per group, sub-blocks inside a group, a collapsed Advanced card at the end. */
+#tab-settings > .settings-card + .settings-card { margin-top: 12px; }
+.settings-sub {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.settings-advanced > summary {
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 500;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-advanced > summary::-webkit-details-marker { display: none; }
+.settings-advanced > summary::before {
+  content: "B8";
+  color: var(--text-dim);
+  transition: transform 0.15s;
+}
+.settings-advanced[open] > summary::before { transform: rotate(90deg); }
+.settings-advanced > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.settings-advanced > .settings-sub { margin-top: 20px; }
+
 .setting-row {
   display: flex;
   align-items: center;

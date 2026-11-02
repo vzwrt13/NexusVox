@@ -21,7 +21,7 @@ python -m nexusvox
 
 That runs the model in-process — Parakeet (ONNX, int8) by default, Whisper if you pick it. The model downloads from HuggingFace on first use (~670 MB for Parakeet, ~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Parakeet on CPU has no speaker detection for uploads — that needs the GPU container.
 
-To stay on CPU even if you later add a GPU, open the dashboard from the tray icon → Settings → **Compute Device** → set to `CPU`.
+To stay on CPU even if you later add a GPU, open the dashboard from the tray icon → Settings → **Advanced** → **Compute Device** → set to `CPU`.
 
 ---
 
@@ -256,13 +256,13 @@ A system tray icon also appears, where you can toggle the language or quit the a
 3. **Release** any of the modifier keys — recording stops (second beep)
 4. The transcribed text is automatically pasted at your cursor position
 
-To paste the last text again, hold `Ctrl + Shift + Alt`, tap `V`, let go: the recording is dropped and the text NexusVox pasted last is pasted once more (key in Settings → Voice Input, `[hotkey].paste_key`; empty turns it off).
+To paste the last text again, hold `Ctrl + Shift + Alt`, tap `V`, let go: the recording is dropped and the text NexusVox pasted last is pasted once more (key in Settings → Text & Polish, `[hotkey].paste_key`; empty turns it off).
 
-To rewrite selected text by voice, pick a *Polish Selected Text Key* in Settings → Voice Input (e.g. `P`), install [Ollama](https://ollama.com) and run `ollama pull gemma4:e4b` (`gemma4:e2b` on a PC without an NVIDIA GPU: that is the model NexusVox asks for there unless you set `[llm].model`). Then select text in any app, hold `Ctrl + Shift + Alt`, tap `P`, say what to do ("make it shorter", "mach es formeller", "translate to English") or nothing, and let go: the selection is replaced by the rewritten text (Ctrl+Z undoes it). The model shares the GPU with the speech model - the dashboard shows whether the model server answers. Other servers (LM Studio, llama.cpp, vLLM, a cloud API) work through `[llm]` with `protocol = "openai"`. Terminals are skipped by default, because a terminal does not report its selection and polish would have to send Ctrl+C, which stops the running program when nothing is selected. Turn on *Polish In Terminals Too* (`[polish].in_terminals`) to polish there as well; the rewritten text is then pasted at the prompt.
+To rewrite selected text by voice, pick a *Polish Selected Text Key* in Settings → Text & Polish (e.g. `P`), install [Ollama](https://ollama.com) and run `ollama pull gemma4:e4b` (`gemma4:e2b` on a PC without an NVIDIA GPU: that is the model NexusVox asks for there unless you set `[llm].model`). Then select text in any app, hold `Ctrl + Shift + Alt`, tap `P`, say what to do ("make it shorter", "mach es formeller", "translate to English") or nothing, and let go: the selection is replaced by the rewritten text (Ctrl+Z undoes it). The model shares the GPU with the speech model - the dashboard shows whether the model server answers. Other servers (LM Studio, llama.cpp, vLLM, a cloud API) work through `[llm]` with `protocol = "openai"`. Terminals are skipped by default, because a terminal does not report its selection and polish would have to send Ctrl+C, which stops the running program when nothing is selected. Turn on *Polish In Terminals Too* (Settings → Advanced) (`[polish].in_terminals`) to polish there as well; the rewritten text is then pasted at the prompt.
 
-Instructions you use often go into Settings → *Polish Presets*: a name such as `prompt engineer` and the instruction, e.g. "Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." Then say just the name after tapping the polish key; words after it are added ("prompt engineer, in English"). Close spellings match, names can be in any language, and the preset marked *Default* is used when you say nothing.
+Instructions you use often go into Settings → Vocabulary → *Polish Presets*: a name such as `prompt engineer` and the instruction, e.g. "Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." Then say just the name after tapping the polish key; words after it are added ("prompt engineer, in English"). Close spellings match, names can be in any language, and the preset marked *Default* is used when you say nothing.
 
-To tidy every dictation, set *Auto Cleanup* in Settings → Voice Input (or `[cleanup].level`) to *Light* (fillers such as "um" and "äh", false starts and repeated words go, punctuation is fixed, your wording stays) or *Medium* (also grammar, slightly more concise). It uses the same model server as polish and adds about half a second per dictation. NexusVox loads the model at start; while it is still loading, or when the model's reply looks like an answer or a rewrite rather than your words cleaned up, the dictation is typed unchanged. Dictations under three words are not sent, and the transcript is saved as you said it.
+To tidy every dictation, set *Auto Cleanup* in Settings → Text & Polish (or `[cleanup].level`) to *Light* (fillers such as "um" and "äh", false starts and repeated words go, punctuation is fixed, your wording stays) or *Medium* (also grammar, slightly more concise). It uses the same model server as polish and adds about half a second per dictation. NexusVox loads the model at start; while it is still loading, or when the model's reply looks like an answer or a rewrite rather than your words cleaned up, the dictation is typed unchanged. Dictations under three words are not sent, and the transcript is saved as you said it.
 
 Prefer not to keep the keys down? Switch **Hotkey Mode** to *Toggle* in the dashboard's Settings tab (or `mode = "toggle"` in `config.toml`): press `Ctrl + Shift + Alt` once to start, press it again to stop. The change takes effect immediately.
 
@@ -282,11 +282,11 @@ With `[voice_commands].enabled = true`, certain spoken phrases are converted bef
 | "period", "comma", etc. | `.`, `,`, etc. (configurable via `symbols`) |
 | "[text], press enter" / "[Text], Enter drücken" (with `press_enter`) | pastes `text`, then presses Enter |
 
-The press enter command only fires at the very end of a dictation ("press enter to continue" stays text). Also accepted: "hit enter", "drück Enter", "drücke Enter". Turn it on in the dashboard under Settings → Voice Commands → Press Enter Command.
+The press enter command only fires at the very end of a dictation ("press enter to continue" stays text). Also accepted: "hit enter", "drück Enter", "drücke Enter". Turn it on in the dashboard under Settings → Text & Polish → Voice Commands → Press Enter Command.
 
 ### Snippets
 
-Your own spoken shortcuts, created in the dashboard under Settings → Snippets (none ship with NexusVox). Say the trigger anywhere in a dictation and the stored text is inserted exactly as saved, line breaks included:
+Your own spoken shortcuts, created in the dashboard under Settings → Vocabulary → Snippets (none ship with NexusVox). Say the trigger anywhere in a dictation and the stored text is inserted exactly as saved, line breaks included:
 
 | Trigger | Say | Result |
 |---|---|---|
@@ -298,13 +298,13 @@ Options are one `name = text` per line under a snippet. The best-matching name w
 
 ### Learn From Edits
 
-Turn on Settings → Correction Dictionary → Learn From Edits (or `[learn_from_edits].enabled`). After each paste NexusVox reads the text field for 20 seconds (`window_s`); fix a misheard word there and it shows up below the toggle as a suggestion to add or dismiss - nothing enters the dictionary on its own. Password fields and terminals are never read (terminals expose no readable text), and nothing is learned from a dictation that auto cleanup or translation changed. The line under the toggle says how the last paste ended, so you can tell "nothing corrected" from "this app cannot be read". The console log (`[general].log_level`, `INFO` by default) names the reason for every paste that taught nothing: the field could not be read, the edit was too small, there were too many changes, no word was replaced, and whether the watch ended because the time window ran out or the next dictation arrived. If a read fails (a browser rebuilds its address bar, for example) NexusVox fetches the focused field again before it gives up, and the last text it saw is still compared.
+Turn on Settings → Vocabulary → Correction Dictionary → Learn From Edits (or `[learn_from_edits].enabled`). After each paste NexusVox reads the text field for 20 seconds (`window_s`); fix a misheard word there and it shows up below the toggle as a suggestion to add or dismiss - nothing enters the dictionary on its own. Password fields and terminals are never read (terminals expose no readable text), and nothing is learned from a dictation that auto cleanup or translation changed. The line under the toggle says how the last paste ended, so you can tell "nothing corrected" from "this app cannot be read". The console log (`[general].log_level`, `INFO` by default) names the reason for every paste that taught nothing: the field could not be read, the edit was too small, there were too many changes, no word was replaced, and whether the watch ended because the time window ran out or the next dictation arrived. If a read fails (a browser rebuilds its address bar, for example) NexusVox fetches the focused field again before it gives up, and the last text it saw is still compared.
 
 ---
 
 ## Troubleshooting
 
-NexusVox writes its log to `%LOCALAPPDATA%\NexusVox\logs` (one file per day, the last 7 days are kept); Settings → Voice Input → *Open log folder* opens it. Send the newest file when you report a problem. Dictated text is shortened in the file to its first 20 characters and its length, unless `[general].log_full_text` is on.
+NexusVox writes its log to `%LOCALAPPDATA%\NexusVox\logs` (one file per day, the last 7 days are kept); Settings → Privacy → *Open log folder* opens it. Send the newest file when you report a problem. Dictated text is shortened in the file to its first 20 characters and its length, unless `[general].log_full_text` is on.
 
 | Problem | Solution |
 |---|---|

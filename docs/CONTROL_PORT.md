@@ -37,7 +37,7 @@ timeout_s = 5.0
 The command key only counts when it is pressed during a recording with every hotkey
 modifier held, so it completes the chord. Anything else — `Shift+Y`, `AltGr+Y`, or `Y`
 pressed before the last modifier — types normally. If you change the voice hotkey in
-Settings → Voice Input, the command chord changes with it (`Ctrl+Alt` makes it
+Settings → Dictation, the command chord changes with it (`Ctrl+Alt` makes it
 `Ctrl+Alt+Y`).
 
 Both features may share one port: the `service` name tells your program which one is

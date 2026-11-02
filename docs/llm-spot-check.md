@@ -1,5 +1,9 @@
 # Spot check: 20 items for a human read
 
+**Result of the human read (#172):** the maintainer agreed with the judge on 18 of the 19 items. Item 6 is a judge
+false negative: the doubled "I" at the start is removed after Cleanup, so the output is correct. The judge scores
+below stay judge scores.
+
 ## 1. Polish, `gemma4:e2b` on cpu (judge found a problem)
 - Input: Anna kümmert sich um die Vorlage, Ben um den Upload-Fehler und ich spreche mit dem Kunden.
 - Instruction: Mach daraus eine Aufgabenliste
@@ -33,7 +37,7 @@
 - Output: Sind Sie heute Abend dabei? Wir bestellen Pizza.
 - Judge: meaning 1, language 0, invented-nothing 1, formatting 1 - The output is in German while the input text was in English.
 
-## 6. Cleanup light, `gemma4:e2b` on cpu (judge found a problem)
+## 6. Cleanup light, `gemma4:e2b` on cpu (judge found a problem; human read: judge false negative, output is correct)
 - Input: I I found the bug in the upload last night it only happens with files larger than twenty megabytes
 - Output: I found the bug in the upload last night. It only happens with files larger than twenty megabytes.
 - Judge: meaning 1, language 1, invented-nothing 1, formatting 0 - The output retains the accidental repetition of 'I' at the beginning.

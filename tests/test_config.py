@@ -79,7 +79,7 @@ def test_load_config_copies_example(tmp_path, monkeypatch):
     """When config is missing but example exists, copy example and load it."""
     example = tmp_path / "config.example.toml"
     example.write_text(
-        '[general]\ninjection_delay_ms = 300\n'
+        "[general]\ninjection_delay_ms = 300\n"
         "[hotkey]\n"
         'modifiers = ["ctrl", "alt"]\n'
         "[audio]\n"

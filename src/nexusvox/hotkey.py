@@ -257,7 +257,7 @@ class HotkeyListener:
             if self._alt_pending == vk:  # our own re-injected key-up
                 self._alt_pending = None
                 self._cancel_alt_timer()
-                logger.debug("Alt release %#x: re-injected twin seen, passed through", vk)
+                logger.info("Alt release %#x: re-injected twin seen, passed through", vk)
                 return False
             self._alt_down.discard(vk)
             own_chord = self._chord_alt
@@ -279,7 +279,7 @@ class HotkeyListener:
             self._alt_timer = threading.Timer(self._alt_timeout_s, self._alt_timed_out, args=(vk,))
             self._alt_timer.daemon = True
             self._alt_timer.start()
-        logger.debug("Alt release %#x masked: swallowed, re-injecting behind the mask key", vk)
+        logger.info("Alt release %#x masked: swallowed, re-injecting behind the mask key", vk)
         try:
             sent = self._alt_release(vk, True)
         except Exception:
@@ -385,7 +385,10 @@ class HotkeyListener:
         """Start listening for the hotkey. Runs the listener in a daemon thread."""
         try:
             # Imported here (injector binds Win32 at import) and outside the hook, which has a tight timeout.
+            from . import injector
             from .injector import send_alt_release, send_menu_mask
+
+            injector.menu_guard_enabled = lambda: self._config.reinject_alt_release
 
             self._mask_sender = send_menu_mask
             self._alt_release = send_alt_release

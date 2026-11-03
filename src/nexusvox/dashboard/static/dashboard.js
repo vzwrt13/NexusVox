@@ -257,6 +257,8 @@ const logFullTextToggle = document.getElementById("log-full-text-toggle");
 const openLogFolderButton = document.getElementById("open-log-folder");
 const logOpenError = document.getElementById("log-open-error");
 const logDirLabel = document.getElementById("log-dir");
+const feedbackCard = document.getElementById("feedback-card");
+const sendFeedbackLink = document.getElementById("send-feedback");
 const learnFromEditsToggle = document.getElementById("learn-from-edits-toggle");
 const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
 const hotkeyMods = Array.from(document.querySelectorAll("#hotkey-mods input"));
@@ -577,6 +579,8 @@ async function loadSettings() {
   storeAudioToggle.checked = s.store_audio;
   logFullTextToggle.checked = s.log_full_text;
   logDirLabel.textContent = s.log_dir;
+  feedbackCard.hidden = !s.feedback_url;
+  if (s.feedback_url) sendFeedbackLink.href = s.feedback_url;
   learnFromEditsToggle.checked = s.learn_from_edits;
   loadLearnStatus();
   polishTerminalsToggle.checked = s.polish_in_terminals;

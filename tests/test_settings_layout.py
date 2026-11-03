@@ -46,3 +46,10 @@ def test_stylesheet_has_no_control_characters():
 def test_settings_divs_are_balanced():
     section = _settings_section()
     assert len(re.findall(r"<div[\s>]", section)) == len(re.findall(r"</div>", section))
+
+
+def test_feedback_card_is_hidden_until_the_script_has_a_url():
+    section = _settings_section()
+    assert re.search(r'<div class="settings-card" id="feedback-card" hidden>', section)
+    assert 'id="send-feedback"' in section
+    assert "feedbackCard.hidden = !s.feedback_url" in JS

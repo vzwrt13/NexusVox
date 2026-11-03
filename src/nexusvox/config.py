@@ -630,6 +630,18 @@ class RemoteMicConfig:
     token: str = ""
 
 
+FEEDBACK_FORM_URL = "https://nexusvox.nightshift-ai.de/feedback"
+
+
+@dataclass
+class SupportConfig:
+    """`feedback_form_url`: the page the dashboard's "Send feedback" button opens in the browser
+    (app version, Windows version and hardware tier are added as URL parameters). Empty hides
+    the button."""
+
+    feedback_form_url: str = FEEDBACK_FORM_URL
+
+
 _DEFAULT_SYMBOLS: list[str] = [
     "slash",
     "backslash",
@@ -689,6 +701,7 @@ class Config:
     polish: PolishConfig = field(default_factory=PolishConfig)
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
     remote_mic: RemoteMicConfig = field(default_factory=RemoteMicConfig)
+    support: SupportConfig = field(default_factory=SupportConfig)
     # The file `load_config` read, as an absolute path; `save_config` writes back to it, whatever the working
     # directory is by then. None for a Config that was not loaded from a file.
     source_path: Path | None = field(default=None, repr=False, compare=False)
@@ -776,6 +789,7 @@ def load_config(path: Path | None = None) -> Config:
     polish_data = data.get("polish", {})
     cleanup_data = data.get("cleanup", {})
     remote_mic_data = data.get("remote_mic", {})
+    support_data = data.get("support", {})
 
     # Backward compat: old configs use general.voice_commands_enabled (bool only)
     if vc_data is not None:
@@ -897,6 +911,9 @@ def load_config(path: Path | None = None) -> Config:
             host=remote_mic_data.get("host", "127.0.0.1"),
             port=int(remote_mic_data.get("port", 47393)),
             token=str(remote_mic_data.get("token", "")),
+        ),
+        support=SupportConfig(
+            feedback_form_url=str(support_data.get("feedback_form_url", FEEDBACK_FORM_URL)),
         ),
     )
     config.source_path = path.resolve()
@@ -1042,6 +1059,9 @@ def save_config(config: Config, path: Path | None = None) -> None:
             f"port = {config.remote_mic.port}",
             # A free-form secret: escape it, a `"` or `\` would break the file.
             f"token = {json.dumps(config.remote_mic.token)}",
+            "",
+            "[support]",
+            f"feedback_form_url = {json.dumps(config.support.feedback_form_url)}",
             "",
         ]
         path.write_text("\n".join(lines), encoding="utf-8")

@@ -8,6 +8,7 @@ Flask server starts once on first tray click (left-click on the icon or the Dash
 - `analytics.py` — all SQLAlchemy query functions
 - `api.py` — Flask route wrappers around analytics queries
 - `benchmarks.py` — benchmark JSON file I/O and cross-model comparison (Dev tab, experimental)
+- Settings tab "Feedback" card: `get_settings()["feedback_url"]` (from `feedback_form.build_feedback_url`) is the link target of `#send-feedback`; an empty URL hides the card.
 - `file_jobs.py` — in-memory registry of file transcription jobs (Upload tab progress)
 
 ## Look

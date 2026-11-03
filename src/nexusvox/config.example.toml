@@ -295,3 +295,11 @@ enabled = false
 host = "127.0.0.1"
 port = 47393
 token = ""
+
+[support]
+# The page the dashboard's "Send feedback" button opens in your browser. NexusVox adds three
+# URL parameters (app_version, windows_version, hardware = "CPU-only" or "NVIDIA GPU") and
+# makes no network call itself; no transcript, audio or log content is ever sent. Attach a
+# log file by hand if it helps. Empty (the default) hides the button; set it to your
+# form's URL, e.g. "https://example.org/feedback".
+feedback_form_url = ""

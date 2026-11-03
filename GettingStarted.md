@@ -43,7 +43,6 @@ ffmpeg -version               # verify — open a new terminal first so PATH is 
 **GPU path** (Parakeet, plus faster Whisper):
 - **NVIDIA GPU** with CUDA runtime installed (VRAM depends on model — see table below)
 - **Docker Desktop** with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-- **Hugging Face token** (optional) — no model needs one; a token only raises the download rate limit ([create one here](https://huggingface.co/settings/tokens)).
 
 ---
 
@@ -68,22 +67,7 @@ Model licenses are separate from NexusVox's own PolyForm Noncommercial 1.0.0 lic
 
 > **CPU users: skip this section.** Parakeet and Whisper run in-process — no Docker container needed.
 
-### 1.1 Configure the Hugging Face Token
-
-> Optional. No model needs a token; skip this step unless you hit Hugging Face download rate limits.
-
-```bash
-cd docker
-cp .env.example .env
-```
-
-Open `docker/.env` and replace the placeholder with your token:
-
-```
-HF_TOKEN=hf_your_actual_token_here
-```
-
-### 1.2 Build and Start the Container
+### 1.1 Build and Start the Container
 
 Use `--profile` to select your model:
 
@@ -292,7 +276,7 @@ NexusVox writes its log to `%LOCALAPPDATA%\NexusVox\logs` (one file per day, the
 |---|---|
 | `Connection refused` on start | Make sure the Docker container is running and healthy. Check `docker compose logs`. |
 | No audio captured | Verify your default microphone is set correctly in Windows Sound settings. |
-| Model download fails | No model needs a token, so a failure is usually network or disk space. A Hugging Face token in `docker/.env` raises the rate limit. |
+| Model download fails | No model needs a token, so a failure is usually network or disk space. |
 | Text not appearing at cursor | Some applications block simulated Ctrl+V. Try a standard text editor first. |
 | `Audio conversion failed` on upload | ffmpeg is missing from your `PATH`. Install it (`winget install Gyan.FFmpeg`), then restart NexusVox. WAV files upload without ffmpeg. |
 | Starting NexusVox again while it runs | The second start opens the running instance's dashboard and exits; there is only ever one tray icon and one hotkey hook. |
@@ -311,9 +295,7 @@ NexusVox/
 │   ├── Dockerfile.whisper      # faster-whisper image
 │   ├── docker-compose.yml      # Container orchestration (4 profiles)
 │   ├── parakeet_server.py      # FastAPI wrapper for Parakeet
-│   ├── whisper_server.py       # FastAPI wrapper for Whisper
-│   ├── .env.example            # HF_TOKEN template
-│   └── .env                    # Your HF token (git-ignored)
+│   └── whisper_server.py       # FastAPI wrapper for Whisper
 └── src/nexusvox/
     ├── config.example.toml     # Configuration template, shipped inside the package
     ├── __main__.py             # Entry point

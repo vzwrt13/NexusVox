@@ -18,8 +18,6 @@ services:
       - "8002:8000"
     volumes:
       - huggingface-cache:/root/.cache/huggingface
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
     ipc: host
     restart: unless-stopped
 

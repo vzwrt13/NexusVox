@@ -632,10 +632,10 @@ def test_config_switch_roundtrip(tmp_path):
 
     path = tmp_path / "config.toml"
     config = load_config(path)
-    assert config.hotkey.reinject_alt_release is True
-    config.hotkey.reinject_alt_release = False
+    assert config.hotkey.reinject_alt_release is False  # opt-in
+    config.hotkey.reinject_alt_release = True
     save_config(config, path)
-    assert load_config(path).hotkey.reinject_alt_release is False
+    assert load_config(path).hotkey.reinject_alt_release is True
 
 
 @pytest.mark.parametrize("marker_first_release", ["alt", "ctrl"])

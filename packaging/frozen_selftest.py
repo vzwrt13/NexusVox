@@ -142,8 +142,6 @@ def run(work: Path, download: bool) -> NoReturn:
 
         icon = SystemTray(
             on_quit=lambda: None,
-            on_toggle_language=lambda: None,
-            get_language=lambda: "en",
             on_open_dashboard=lambda: None,
         )
         icon.start()
@@ -295,7 +293,7 @@ def run(work: Path, download: bool) -> NoReturn:
         pcm = pcm_of_speech()
 
         async def go():
-            transcriber = LocalWhisperTranscriber(config.inference, "cpu", "int8", language="en")
+            transcriber = LocalWhisperTranscriber(config.inference, "cpu", "int8")
             await transcriber.connect()
             await transcriber.send_audio_chunk(pcm)
             return await transcriber.finish(timeout=300)

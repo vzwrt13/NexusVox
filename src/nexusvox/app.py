@@ -37,7 +37,7 @@ from .extensions import ActiveApp, load_extensions, loaded_extensions
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, MeetingHotkey, describe_hotkey
 from .injector import foreground_window, inject_text
-from .lang_detect import detect_language
+from .lang_detect import stored_language
 from .llm import LlmError
 from .llm import warm_up as llm_warm_up
 from .logsetup import Text
@@ -138,8 +138,6 @@ class NexusVoxApp:
         self._transcriber = create_transcriber(
             config.inference,
             device=self._device,
-            language=config.language,
-            auto_detect_language=config.auto_language_detection,
             auto_fallback=config.inference.device == "auto",
         )
         self._db = Database(config.database)
@@ -177,8 +175,6 @@ class NexusVoxApp:
 
         self._tray = SystemTray(
             on_quit=self._on_quit,
-            on_toggle_language=self._toggle_language,
-            get_language=lambda: self._config.language,
             on_toggle_translate=self._toggle_translate,
             get_translate=lambda: self._config.translator.enabled,
             on_open_dashboard=self._open_dashboard,
@@ -381,8 +377,6 @@ class NexusVoxApp:
             self._transcriber = create_transcriber(
                 self._config.inference,
                 device=self._device,
-                language=self._config.language,
-                auto_detect_language=self._config.auto_language_detection,
                 auto_fallback=self._config.inference.device == "auto",
             )
             save_config(self._config)
@@ -414,8 +408,6 @@ class NexusVoxApp:
                 self._transcriber = create_transcriber(
                     self._config.inference,
                     device=self._device,
-                    language=self._config.language,
-                    auto_detect_language=self._config.auto_language_detection,
                     auto_fallback=self._config.inference.device == "auto",
                 )
             except Exception:
@@ -654,9 +646,11 @@ class NexusVoxApp:
                             processed.typed, self._config.learn_from_edits.window_s, processed.spoken
                         )
             latency_ms = int(((done_at or time.monotonic()) - stop_time) * 1000)
+            # lingua loads its models on first use: keep that off the event loop.
+            language = await loop.run_in_executor(None, stored_language, raw_text)
             record = self._db.save_transcription(
                 text=processed.saved,
-                language=self._language_of(raw_text),
+                language=language,
                 duration_ms=duration_ms,
                 confidence=result.confidence,
                 model=self._transcriber.model,
@@ -766,9 +760,6 @@ class NexusVoxApp:
             return text
         return registry.dictation(text, self._active_app())
 
-    def _language_of(self, spoken: str) -> str:
-        return detect_language(spoken) if self._config.auto_language_detection else self._config.language
-
     def _save_command(
         self,
         recording: _Recording | None,
@@ -784,7 +775,7 @@ class NexusVoxApp:
         """
         record = self._db.save_transcription(
             text=label,
-            language=self._language_of(spoken) if spoken else self._config.language,
+            language=stored_language(spoken),
             duration_ms=recording.duration_ms if recording else 0,
             confidence=recording.confidence if recording else None,
             model=self._transcriber.model if recording else None,
@@ -1032,12 +1023,6 @@ class NexusVoxApp:
         """A second start of NexusVox rang the doorbell: show the dashboard of this instance."""
         logger.info("A second NexusVox start was detected; opening the dashboard of this instance")
         self._open_dashboard()
-
-    def _toggle_language(self) -> None:
-        """Toggle between English and German."""
-        self._config.language = "de" if self._config.language == "en" else "en"
-        save_config(self._config)
-        logger.info("Language switched to: %s", self._config.language)
 
     def _toggle_translate(self) -> None:
         """Switch translate-before-inject on or off, and keep it across restarts."""

@@ -140,17 +140,6 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     def get_settings():
         return jsonify(api.get_settings())
 
-    @app.route("/api/settings/auto-language-detection", methods=["POST"])
-    def set_auto_lang():
-        data = request.get_json(force=True)
-        return jsonify(api.set_auto_language_detection(data.get("enabled", False)))
-
-    @app.route("/api/settings/language", methods=["POST"])
-    def set_language():
-        data = request.get_json(force=True)
-        result = api.set_language(data.get("language", ""))
-        return jsonify(result), (400 if "error" in result else 200)
-
     @app.route("/api/settings/hotkey-mode", methods=["POST"])
     def set_hotkey_mode():
         data = request.get_json(force=True)

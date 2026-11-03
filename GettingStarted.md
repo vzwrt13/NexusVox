@@ -136,12 +136,8 @@ cp src/nexusvox/config.example.toml config.toml
 
 ```toml
 [general]
-# Language for transcription: "en" or "de"
-language = "en"
 # Delay in ms between releasing modifier keys and sending Ctrl+V paste
 injection_delay_ms = 500
-# Enable automatic language detection per recording (experimental)
-auto_language_detection = false
 # How much the console log says: "DEBUG", "INFO", "WARNING" or "ERROR" (takes effect on the next start)
 log_level = "INFO"
 # The log is also written to %LOCALAPPDATA%\NexusVox\logs (one file per day, 7 days kept).
@@ -213,7 +209,7 @@ bypass_symbols = false
 symbols = ["period", "comma", "question mark", "exclamation mark"]
 ```
 
-The defaults work out of the box — you only need to edit `config.toml` if you want to change the model, language, or tweak audio/inference settings.
+The defaults work out of the box — you only need to edit `config.toml` if you want to change the model or tweak audio/inference settings.
 
 ---
 
@@ -231,7 +227,7 @@ You should see:
 NexusVox started. Hold Ctrl+Shift+Alt to talk.
 ```
 
-A system tray icon also appears, where you can toggle the language or quit the app. Open the dashboard from the tray icon (left-click) for analytics, settings, and transcription history.
+A system tray icon also appears, where you can toggle translation or quit the app. Open the dashboard from the tray icon (left-click) for analytics, settings, and transcription history.
 
 ---
 

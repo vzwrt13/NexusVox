@@ -58,7 +58,7 @@ ffmpeg -version               # verify — open a new terminal first so PATH is 
 ¹ **Attribution required** — CC-BY-4.0 obliges you to credit NVIDIA if you redistribute the model.
 ² **Your own backend** — a server you run that speaks the OpenAI-compatible HTTP or realtime WebSocket protocol, set under `[inference.custom]`. Unlike every other entry, audio leaves this PC if that server is remote. Setup and protocol contract: [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md).
 
-Model licenses are separate from NexusVox's own AGPL-3.0 license; no model weights ship with NexusVox. Check the terms of the model you pick, especially for commercial use.
+Model licenses are separate from NexusVox's own PolyForm Noncommercial 1.0.0 license; no model weights ship with NexusVox. Check the terms of the model you pick, especially for commercial use.
 
 **Parakeet** is the default: the fastest and most accurate of the measured models, 25 European languages with automatic detection. **Whisper Large V3 Turbo** covers 99 languages — pick it for a language Parakeet does not know; on CPU it is several times slower than Parakeet, on a GPU it is fast. The dashboard marks each model as downloaded or not, with its size. A config that still names a removed model (Voxtral, Cohere, the smaller Whisper sizes, Distil-Whisper) starts on Parakeet.
 

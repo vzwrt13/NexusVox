@@ -66,3 +66,28 @@ def test_main_exits_on_a_second_start_before_building_the_app(monkeypatch):
         sys.modules.pop("nexusvox.__main__", None)
     assert exit_.value.code == 0
     assert rung == [1] and built == [] and messages == []
+
+
+def test_release_hands_the_mutex_back_for_a_restart():
+    first, second = SingleInstance(), SingleInstance()
+    assert first.acquire()
+    first.watch(lambda: None)
+    first.release()
+
+    assert second.acquire() is True
+    second.release()
+
+
+def test_access_denied_on_the_mutex_counts_as_already_running(monkeypatch):
+    class Denied:
+        def CreateEventW(self, *args):  # noqa: N802
+            return None
+
+        def CreateMutexW(self, *args):  # noqa: N802
+            return None
+
+        CloseHandle = staticmethod(lambda handle: True)  # noqa: N815
+
+    monkeypatch.setattr(single_instance, "_kernel32", lambda: Denied())
+    monkeypatch.setattr(single_instance.ctypes, "get_last_error", lambda: 5)
+    assert SingleInstance().acquire() is False

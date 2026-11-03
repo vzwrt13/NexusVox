@@ -418,7 +418,9 @@ def test_main_applies_the_configured_log_level(monkeypatch):
     monkeypatch.setattr(entry, "load_config", lambda: Config(log_level="DEBUG"))
     # A NexusVox that really runs on this machine must not turn this test into a second start.
     monkeypatch.setattr(
-        entry, "SingleInstance", lambda: types.SimpleNamespace(acquire=lambda: True, watch=lambda cb: None)
+        entry,
+        "SingleInstance",
+        lambda: types.SimpleNamespace(acquire=lambda: True, watch=lambda cb: None, release=lambda: None),
     )
     monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
     try:

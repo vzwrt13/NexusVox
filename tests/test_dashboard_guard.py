@@ -178,10 +178,12 @@ def test_a_busy_port_means_no_browser_and_no_started_flag(db, monkeypatch):
         raise OSError("address in use")
 
     opened: list[str] = []
-    monkeypatch.setattr(dashboard, "make_server", busy)
+    monkeypatch.setattr(dashboard, "_make_server", busy)
     monkeypatch.setattr(dashboard, "show_message", lambda *a, **k: None)
     monkeypatch.setattr(dashboard.webbrowser, "open", opened.append)
     monkeypatch.setattr(dashboard, "_server_started", False)
+    monkeypatch.setattr(dashboard, "_start_failed", False)
+    monkeypatch.setattr(dashboard, "_api", None)
     monkeypatch.setattr(dashboard, "_guard", None)
     monkeypatch.setattr(dashboard.DashboardAPI, "sweep_meeting_leftovers", lambda self: None)
 
@@ -199,6 +201,8 @@ def _fresh_dashboard(db, monkeypatch):
     monkeypatch.setattr(dashboard, "show_message", shown.append)
     monkeypatch.setattr(dashboard.webbrowser, "open", opened.append)
     monkeypatch.setattr(dashboard, "_server_started", False)
+    monkeypatch.setattr(dashboard, "_start_failed", False)
+    monkeypatch.setattr(dashboard, "_api", None)
     monkeypatch.setattr(dashboard, "_guard", None)
     monkeypatch.setattr(dashboard, "_port", dashboard._PORT)
     monkeypatch.setattr(dashboard.DashboardAPI, "sweep_meeting_leftovers", lambda self: None)
@@ -215,27 +219,46 @@ def test_a_held_port_falls_back_to_another_and_opens_that_one(db, monkeypatch):
         def serve_forever(self):
             pass
 
-    def fake_make_server(host, port, app, threaded):
+    def fake_make_server(port, wsgi_app):
         started.append(port)
         return FakeServer()
 
-    monkeypatch.setattr(dashboard, "make_server", fake_make_server)
-    monkeypatch.setattr(dashboard, "_FALLBACK_PORTS", (47400, 47401))
-    with socket.socket() as holder:
-        holder.bind(("127.0.0.1", dashboard._PORT))
-        dashboard.open_dashboard(db, Config())
+    with socket.socket() as probe:  # a port nobody holds, standing in for the usual one
+        probe.bind(("127.0.0.1", 0))
+        free = probe.getsockname()[1]
+    monkeypatch.setattr(dashboard, "_PORT", free)
+    monkeypatch.setattr(dashboard, "_FALLBACK_PORTS", (free + 1, free + 2))
 
-    assert started == [47400]
-    assert len(opened) == 1 and opened[0].startswith("http://127.0.0.1:47400/?launch=")
+    def make(port, wsgi_app):
+        if port == free:
+            raise OSError("address in use")
+        return fake_make_server(port, wsgi_app)
+
+    monkeypatch.setattr(dashboard, "_make_server", make)
+    dashboard.open_dashboard(db, Config())
+
+    assert started == [free + 1]
+    assert len(opened) == 1 and opened[0].startswith(f"http://127.0.0.1:{free + 1}/?launch=")
     assert shown == []
 
 
-def test_every_port_held_shows_a_message_and_opens_nothing(db, monkeypatch):
+def test_every_port_held_shows_one_message_and_is_not_retried(db, monkeypatch):
     dashboard, shown, opened = _fresh_dashboard(db, monkeypatch)
-    monkeypatch.setattr(dashboard, "_pick_port", lambda: None)
+    attempts: list[int] = []
 
+    def busy(port, wsgi_app):
+        attempts.append(port)
+        raise OSError("address in use")
+
+    monkeypatch.setattr(dashboard, "_make_server", busy)
+
+    dashboard.open_dashboard(db, Config())
+    first_api = dashboard.running_dashboard_api()
+    tried = len(attempts)
     dashboard.open_dashboard(db, Config())
 
     assert opened == []
     assert dashboard._server_started is False
     assert len(shown) == 1 and "port" in shown[0]
+    assert len(attempts) == tried  # not probed again
+    assert dashboard.running_dashboard_api() is first_api  # one API, so one meeting session

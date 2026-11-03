@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 import socket
+import sys
 import threading
 import webbrowser
 from dataclasses import asdict
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
-from werkzeug.serving import make_server
+from werkzeug.serving import ThreadedWSGIServer
 
 from ..config import Config
 from ..db import Database
@@ -33,6 +34,7 @@ _PORT = 47392  # Uncommon port to avoid collisions.
 _FALLBACK_PORTS = tuple(range(47400, 47410))  # used when _PORT is held by another program; 47393 is the remote mic
 _port = _PORT  # the port this process serves on; differs from _PORT only after a fallback
 _server_started = False
+_start_failed = False  # every port was held: the API is built, there is no server, and it is not retried
 _api: DashboardAPI | None = None
 _guard: DashboardGuard | None = None
 _lock = threading.Lock()
@@ -44,16 +46,28 @@ def _attachment(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
-def _pick_port() -> int | None:
-    """The first free dashboard port: the usual one, else a fallback. None when all are held."""
+class _DashboardServer(ThreadedWSGIServer):
+    """Binds exclusively on Windows: with SO_REUSEADDR a second socket may share a port another program holds."""
+
+    allow_reuse_address = sys.platform != "win32"
+
+    def server_bind(self) -> None:
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def _make_server(port: int, wsgi_app) -> _DashboardServer:
+    return _DashboardServer("127.0.0.1", port, wsgi_app)
+
+
+def _bind_server(wsgi_app) -> tuple[int, _DashboardServer] | None:
+    """Bind the first free dashboard port (the usual one, else a fallback) once; None when all are held."""
     for port in (_PORT, *_FALLBACK_PORTS):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            try:
-                probe.bind(("127.0.0.1", port))
-            except OSError:
-                logger.warning("Dashboard port %d is held by another program", port)
-                continue
-        return port
+        try:
+            return port, _make_server(port, wsgi_app)
+        except OSError:
+            logger.debug("Dashboard port %d is held by another program", port)
     return None
 
 
@@ -635,10 +649,10 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
 
 def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None = None) -> DashboardAPI:
     """Start the Flask server (once) without opening the browser, and return its API object."""
-    global _server_started, _api, _guard, _port
+    global _server_started, _api, _guard, _port, _start_failed
 
     with _lock:
-        if not _server_started:
+        if _api is None:
             # Build the thread→async bridge for model switching
             on_model_switch = None
             get_switch_status = None
@@ -673,33 +687,35 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 benchmarks_dir=benchmarks_dir,
                 extensions=load_extensions(),
             )
-            port = _pick_port()
-            if port is None:
+        if not _server_started and not _start_failed:
+            # The Flask app needs the port (host check), the port needs the bind: bind first, hand the
+            # requests to the app once it exists.
+            flask_holder: list[Flask] = []
+
+            def wsgi_app(environ, start_response):
+                return flask_holder[0](environ, start_response)
+
+            bound = _bind_server(wsgi_app)
+            if bound is None:
+                _start_failed = True
                 message = (
                     f"The dashboard could not start: port {_PORT} and the fallback ports {_FALLBACK_PORTS[0]}-"
                     f"{_FALLBACK_PORTS[-1]} are all held by other programs. Dictation still works."
                 )
                 logger.error(message)
                 show_message(message)
-                return _api
-            flask_app = _create_app(_api, port)
-            _guard = flask_app.extensions["nexusvox_guard"]
-            threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
-
-            try:  # bind here rather than in the thread, so a port taken since the probe is noticed
-                server = make_server("127.0.0.1", port, flask_app, threaded=True)
-            except OSError:
-                logger.exception("Dashboard port %d is in use; no dashboard", port)
-                _guard = None
-                show_message(f"The dashboard could not start: port {port} is in use. Dictation still works.")
             else:
+                port, server = bound
+                flask_app = _create_app(_api, port)
+                flask_holder.append(flask_app)
+                _guard = flask_app.extensions["nexusvox_guard"]
+                threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
                 threading.Thread(target=server.serve_forever, daemon=True, name="dashboard-server").start()
                 _server_started = True
                 _port = port
                 if port != _PORT:
                     logger.warning("Dashboard port %d is held by another program; using %d instead", _PORT, port)
                 logger.info("Dashboard server started on http://127.0.0.1:%d", port)
-        assert _api is not None
         return _api
 
 

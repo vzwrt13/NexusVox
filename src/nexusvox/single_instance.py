@@ -9,6 +9,7 @@ exits before it builds a tray icon or installs the hotkey hook. The names are pe
 from __future__ import annotations
 
 import ctypes
+import functools
 import logging
 import sys
 import threading
@@ -19,15 +20,32 @@ logger = logging.getLogger(__name__)
 MUTEX_NAME = "Local\\NexusVox-single-instance"
 EVENT_NAME = "Local\\NexusVox-open-dashboard"
 
+_ERROR_ACCESS_DENIED = 5
 _ERROR_ALREADY_EXISTS = 183
 _EVENT_MODIFY_STATE = 0x0002
-_SYNCHRONIZE = 0x00100000
 _WAIT_OBJECT_0 = 0
 _POLL_MS = 500
 
 
+@functools.cache
 def _kernel32():
-    return ctypes.WinDLL("kernel32", use_last_error=True)
+    """kernel32 with the prototypes declared once, so a 64-bit handle is never truncated to an int."""
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+    k32.CreateMutexW.restype = ctypes.c_void_p
+    k32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+    k32.CreateEventW.restype = ctypes.c_void_p
+    k32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    k32.OpenEventW.restype = ctypes.c_void_p
+    k32.SetEvent.argtypes = [ctypes.c_void_p]
+    k32.SetEvent.restype = wintypes.BOOL
+    k32.CloseHandle.argtypes = [ctypes.c_void_p]
+    k32.CloseHandle.restype = wintypes.BOOL
+    k32.WaitForSingleObject.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+    k32.WaitForSingleObject.restype = wintypes.DWORD
+    return k32
 
 
 class SingleInstance:
@@ -36,6 +54,7 @@ class SingleInstance:
     def __init__(self) -> None:
         self._mutex = None
         self._event = None
+        self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
     def acquire(self) -> bool:
@@ -43,17 +62,26 @@ class SingleInstance:
         if sys.platform != "win32":
             return True
         k32 = _kernel32()
-        k32.CreateMutexW.restype = ctypes.c_void_p
-        k32.CreateEventW.restype = ctypes.c_void_p
+        # The doorbell first: whoever sees the mutex can then always find the event.
+        event = k32.CreateEventW(None, False, False, EVENT_NAME)  # auto-reset
+        if not event:
+            logger.warning("Could not create the dashboard doorbell (error %d)", ctypes.get_last_error())
         mutex = k32.CreateMutexW(None, False, MUTEX_NAME)
+        error = ctypes.get_last_error()
         if not mutex:
-            logger.warning("Could not create the single-instance mutex; starting without the check")
+            if event:
+                k32.CloseHandle(event)
+            if error == _ERROR_ACCESS_DENIED:  # the running instance is elevated and we are not
+                return False
+            logger.warning("Could not create the single-instance mutex (error %d); starting without it", error)
             return True
-        if ctypes.get_last_error() == _ERROR_ALREADY_EXISTS:
-            k32.CloseHandle(ctypes.c_void_p(mutex))
+        if error == _ERROR_ALREADY_EXISTS:
+            k32.CloseHandle(mutex)
+            if event:
+                k32.CloseHandle(event)
             return False
         self._mutex = mutex
-        self._event = k32.CreateEventW(None, False, False, EVENT_NAME)  # auto-reset
+        self._event = event
         return True
 
     def ring_running_instance(self) -> bool:
@@ -61,33 +89,46 @@ class SingleInstance:
         if sys.platform != "win32":
             return False
         k32 = _kernel32()
-        k32.OpenEventW.restype = ctypes.c_void_p
         handle = k32.OpenEventW(_EVENT_MODIFY_STATE, False, EVENT_NAME)
         if not handle:
             return False
         try:
-            return bool(k32.SetEvent(ctypes.c_void_p(handle)))
+            return bool(k32.SetEvent(handle))
         finally:
-            k32.CloseHandle(ctypes.c_void_p(handle))
+            k32.CloseHandle(handle)
 
     def watch(self, on_ring: Callable[[], None]) -> None:
         """Call `on_ring` (from a daemon thread) each time a second start rings the doorbell."""
         if self._event is None:
             return
-        threading.Thread(target=self._wait_loop, args=(on_ring,), name="single-instance", daemon=True).start()
+        self._thread = threading.Thread(target=self._wait_loop, args=(on_ring,), name="single-instance", daemon=True)
+        self._thread.start()
 
     def _wait_loop(self, on_ring: Callable[[], None]) -> None:
         k32 = _kernel32()
-        event = ctypes.c_void_p(self._event)
         while not self._stop.is_set():
-            if k32.WaitForSingleObject(event, _POLL_MS) == _WAIT_OBJECT_0:
+            if k32.WaitForSingleObject(self._event, _POLL_MS) == _WAIT_OBJECT_0 and not self._stop.is_set():
                 try:
                     on_ring()
                 except Exception:
                     logger.exception("Could not open the dashboard for a second start")
 
     def release(self) -> None:
+        """Stop watching and give the mutex and the doorbell back, so a restart can take over."""
         self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=(_POLL_MS / 1000) + 1)
+            if self._thread.is_alive():  # still inside a handle wait: leaking beats closing it underneath
+                return
+            self._thread = None
+        if sys.platform != "win32":
+            return
+        k32 = _kernel32()
+        for name in ("_event", "_mutex"):
+            handle = getattr(self, name)
+            if handle:
+                k32.CloseHandle(handle)
+                setattr(self, name, None)
 
 
 def show_message(text: str, title: str = "NexusVox") -> None:

@@ -63,7 +63,6 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "streaming": "false",
         "vram_gb": "~4 GB",
         "inprocess_supported": True,
-        "download_repo": "deepdml/faster-whisper-large-v3-turbo-ct2",
         "download_probe": "model.bin",
         "download_size": "~1.6 GB",
     },
@@ -92,6 +91,10 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
 # model that cannot start on this machine.
 DEFAULT_MODEL = "parakeet-tdt-0.6b"
 
+# Default URLs of the removed Voxtral and Cohere containers.
+_REMOVED_MODEL_URLS = {"ws://localhost:8000/v1/realtime", "http://localhost:8001/v1/audio/transcriptions"}
+_WARNED_REMOVED_MODELS: set[str] = set()
+
 # Wire protocols a custom server can speak, mapped to the registry protocol they reuse.
 CUSTOM_PROTOCOLS = {"http": "openai_http", "realtime": "realtime_ws"}
 
@@ -104,7 +107,8 @@ def model_download_state(model_id: str, cache_dir: str | Path | None = None) -> 
     source: the Hugging Face cache).
     """
     info = MODEL_REGISTRY.get(model_id, {})
-    repo, probe = info.get("download_repo"), info.get("download_probe")
+    # The repo defaults to the model's own Hugging Face name; only the ONNX Parakeet build lives elsewhere.
+    repo, probe = info.get("download_repo") or info.get("hf_name"), info.get("download_probe")
     if not repo or not probe:
         return {"downloaded": None, "size": ""}
     try:
@@ -683,9 +687,15 @@ def load_config(path: Path | None = None) -> Config:
     if model not in MODEL_REGISTRY:
         # A model that was removed from the list (Voxtral, Cohere, the small Whisper sizes, Distil-Whisper):
         # use Parakeet, and its server URL too, since the saved one belongs to the old model.
-        logger.warning("Model %r is no longer available; using %s instead.", model, DEFAULT_MODEL)
+        # The file is not rewritten, so say it once per process, not on every load.
+        if model not in _WARNED_REMOVED_MODELS:
+            _WARNED_REMOVED_MODELS.add(model)
+            logger.warning("Model %r is no longer available; using %s instead.", model, DEFAULT_MODEL)
         model = DEFAULT_MODEL
-        server_url = str(MODEL_REGISTRY[DEFAULT_MODEL]["default_url"])
+        # The saved URL is kept unless it is one of the removed servers' own defaults (Voxtral's WebSocket,
+        # Cohere's port), which Parakeet cannot answer; a deliberate address of another host stays.
+        if server_url in _REMOVED_MODEL_URLS or server_url.startswith(("ws:", "wss:")):
+            server_url = str(MODEL_REGISTRY[DEFAULT_MODEL]["default_url"])
     custom_data = inference_data.get("custom", {})
     custom_protocol = custom_data.get("protocol", "http")
     db_data = data.get("database", {})

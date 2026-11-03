@@ -1044,8 +1044,10 @@ function renderModelOverview(modelId) {
   let runtimeLabel;
   if (m.custom) {
     runtimeLabel = "External server (no Docker)";
-  } else {
+  } else if (m.inprocess_supported) {
     runtimeLabel = "CPU in-process · GPU via Docker";
+  } else {
+    runtimeLabel = "GPU (Docker)";
   }
   const rows = [
     ["Description", escapeHtml(m.description)],
@@ -1123,6 +1125,8 @@ function pollModelStatus(prevModel) {
         clearInterval(interval);
         modelSelect.dataset.prev = modelSelect.value;
         modelSelect.disabled = false;
+        // The switch downloaded the model: redraw the list so its mark follows.
+        loadModelSwitcher();
         setTimeout(hideModelStatus, 2000);
       } else if (data.status === "error") {
         clearInterval(interval);

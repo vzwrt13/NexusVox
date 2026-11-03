@@ -751,6 +751,27 @@ model = "{removed}"
         f"Model {removed!r} is no longer available; using parakeet-tdt-0.6b instead."
     ]
 
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="nexusvox.config"):
+        load_config(config_path)  # the file still names the old model: no second line
+    assert not [r for r in caplog.records if removed in r.getMessage()]
+
+
+def test_a_removed_model_keeps_a_deliberate_server_address(tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """[inference]
+server_url = "http://gpu-box.lan:9000/v1/audio/transcriptions"
+model = "cohere-transcribe"
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(config_path)
+
+    assert cfg.inference.model == "parakeet-tdt-0.6b"
+    assert cfg.inference.server_url == "http://gpu-box.lan:9000/v1/audio/transcriptions"
+
 
 def test_the_registry_keeps_only_parakeet_whisper_turbo_and_the_custom_slot():
     from nexusvox.config import MODEL_REGISTRY

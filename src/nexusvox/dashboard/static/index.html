@@ -28,8 +28,8 @@
     <!-- Settings Tab -->
     <section id="tab-settings" class="tab-content active">
       <div class="settings-card">
-        <h4 class="nexus-section-title">Voice Input</h4>
-        <p class="settings-hint" style="margin-top: 6px;">Which keys start a recording, and how. Takes effect immediately.</p>
+        <h4 class="nexus-section-title">Dictation</h4>
+        <p class="settings-hint" style="margin-top: 6px;">The everyday basics: how you start a recording, what you speak and what you see while it runs.</p>
 
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
@@ -67,115 +67,6 @@
 
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
-            <h3>Paste Last Text Key</h3>
-            <p>Start a recording with the hotkey, tap this key while every modifier is still down, let go: nothing is transcribed and the text NexusVox pasted last is pasted again.</p>
-          </div>
-          <select id="paste-key-select" class="select-input"></select>
-        </div>
-
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Polish Selected Text Key</h3>
-            <p>Select text, start a recording with the hotkey, tap this key and say what to do ("make it shorter", "mach es formeller") - or nothing for a general polish. A local language model rewrites the selection and pastes it over it; Ctrl+Z in the app undoes it.</p>
-            <p id="llm-status" class="status-line"></p>
-          </div>
-          <select id="polish-key-select" class="select-input"></select>
-        </div>
-        <div class="setting-row" style="margin-top: 8px;">
-          <div class="setting-info">
-            <h3>Polish In Terminals Too</h3>
-            <p>Terminals do not tell NexusVox what is selected, so polish copies the selection with Ctrl+C there - which interrupts the running program when nothing is selected. The rewritten text is pasted at the prompt, not over the selection. Off: polish plays the error beep in terminals.</p>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="polish-terminals-toggle">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="setting-row" style="margin-top: 8px;">
-          <div class="setting-info">
-            <h3>Polish Model</h3>
-            <p>The model name on the language model server in <code>[llm]</code> (default Ollama, e.g. <code>gemma4:e4b</code>). It shares the GPU with the speech model - mind the VRAM.</p>
-          </div>
-          <input type="text" id="llm-model-input" class="dict-input" style="max-width: 220px;">
-        </div>
-        <div class="setting-row" style="margin-top: 8px;">
-          <div class="setting-info">
-            <h3>Auto Cleanup</h3>
-            <p>Tidies every dictation through the same model before it is typed. Light: removes fillers ("um", "äh"), false starts and repeated words, fixes punctuation, keeps your wording. Medium: also grammar, slightly more concise. Adds about half a second with a GPU; while the model is still loading, or when its reply does not look like your text cleaned up, the dictation is typed unchanged. Saved as spoken.</p>
-            <p class="settings-hint" id="cleanup-cpu-hint" hidden>No CUDA GPU found: Cleanup runs on the CPU and adds about 2-6 s per dictation.</p>
-          </div>
-          <select id="cleanup-level-select" class="select-input">
-            <option value="off">Off</option>
-            <option value="light">Light</option>
-            <option value="medium">Medium</option>
-          </select>
-        </div>
-
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Mute Other Apps While Recording</h3>
-            <p>Mutes every other app's microphone session (Teams, browser calls, ...) while you record, so your dictation is not broadcast to a call, and puts each one back as it was afterwards. An app you muted yourself stays muted. Discord's desktop app ignores this: bind Discord's own <em>Push to Mute</em> keybind to the NexusVox hotkey instead.</p>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="mic-guard-toggle">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Store Audio Recordings</h3>
-            <p>Keeps a WAV file of every recording next to the database (<code>audio/</code>) so you can play it back in the Review tab. Off: only the transcript is saved, nothing is written to disk for the audio. Recordings already stored stay.</p>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="store-audio-toggle">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Log File</h3>
-            <p>NexusVox also writes its log to <code id="log-dir">%LOCALAPPDATA%\NexusVox\logs</code> (one file per day, the last 7 days are kept). Send the file when you report a problem. Dictated text is shortened there to its first 20 characters and its length.</p>
-            <p id="log-open-error" class="settings-hint" hidden></p>
-          </div>
-          <button type="button" class="btn" id="open-log-folder">Open log folder</button>
-        </div>
-
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Log Full Text (debugging)</h3>
-            <p>Writes what you dictated into the log file in full. Turn it on only to track down a problem, and check the file before you send it. The console always shows full text.</p>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="log-full-text-toggle">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-      </div>
-
-      <div class="settings-card" style="margin-top: 12px;">
-        <h4 class="nexus-section-title">Dictation feedback</h4>
-        <p class="settings-hint" style="margin-top: 6px;">How a dictation shows that it is recording and typing. Takes effect immediately.</p>
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Feedback</h3>
-            <p>Sound: the start and stop chimes. Visual: a small live waveform at the bottom centre of the screen while you speak, a short processing state until the text is typed, and a red bar for an error. It never takes focus and ignores the mouse, so your dictation still lands in the app you were in. Meeting recordings never show it.</p>
-          </div>
-          <select id="feedback-mode-select" class="select-input">
-            <option value="sound">Sound</option>
-            <option value="visual">Visual</option>
-            <option value="both">Sound and visual</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="settings-card" style="margin-top: 12px;">
-        <h4 class="nexus-section-title">Language &amp; Translation</h4>
-        <p class="settings-hint" style="margin-top: 6px;">Which language you speak, and which language ends up at the cursor.</p>
-
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
             <h3>Spoken Language</h3>
             <p>Language used for transcription while auto detection is off.</p>
           </div>
@@ -198,6 +89,64 @@
 
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
+            <h3>Feedback</h3>
+            <p>Sound: the start and stop chimes. Visual: a small live waveform at the bottom centre of the screen while you speak, a short processing state until the text is typed, and a red bar for an error. It never takes focus and ignores the mouse, so your dictation still lands in the app you were in. Meeting recordings never show it.</p>
+          </div>
+          <select id="feedback-mode-select" class="select-input">
+            <option value="sound">Sound</option>
+            <option value="visual">Visual</option>
+            <option value="both">Sound and visual</option>
+          </select>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Mute Other Apps While Recording</h3>
+            <p>Mutes every other app's microphone session (Teams, browser calls, ...) while you record, so your dictation is not broadcast to a call, and puts each one back as it was afterwards. An app you muted yourself stays muted. Discord's desktop app ignores this: bind Discord's own <em>Push to Mute</em> keybind to the NexusVox hotkey instead.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="mic-guard-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h4 class="nexus-section-title">Text &amp; Polish</h4>
+        <p class="settings-hint" style="margin-top: 6px;">What happens to the words after you speak them: tidying, rewriting, translating and spoken formatting.</p>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Paste Last Text Key</h3>
+            <p>Start a recording with the hotkey, tap this key while every modifier is still down, let go: nothing is transcribed and the text NexusVox pasted last is pasted again.</p>
+          </div>
+          <select id="paste-key-select" class="select-input"></select>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Polish Selected Text Key</h3>
+            <p>Select text, start a recording with the hotkey, tap this key and say what to do ("make it shorter", "mach es formeller") - or nothing for a general polish. A local language model rewrites the selection and pastes it over it; Ctrl+Z in the app undoes it.</p>
+            <p id="llm-status" class="status-line"></p>
+          </div>
+          <select id="polish-key-select" class="select-input"></select>
+        </div>
+
+        <div class="setting-row" style="margin-top: 8px;">
+          <div class="setting-info">
+            <h3>Auto Cleanup</h3>
+            <p>Tidies every dictation through the same model before it is typed. Light: removes fillers ("um", "äh"), false starts and repeated words, fixes punctuation, keeps your wording. Medium: also grammar, slightly more concise. Adds about half a second with a GPU; while the model is still loading, or when its reply does not look like your text cleaned up, the dictation is typed unchanged. Saved as spoken.</p>
+            <p class="settings-hint" id="cleanup-cpu-hint" hidden>No CUDA GPU found: Cleanup runs on the CPU and adds about 2-6 s per dictation.</p>
+          </div>
+          <select id="cleanup-level-select" class="select-input">
+            <option value="off">Off</option>
+            <option value="light">Light</option>
+            <option value="medium">Medium</option>
+          </select>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
             <h3>Translate to English <span class="badge">external service</span></h3>
             <p>Sends the transcript to a local translator server and types what comes back. NexusVox does not translate on its own: the server is a separate program you run yourself (<code>[translator]</code> in <code>config.toml</code>). If it does not answer, the original text is typed. The stored transcript stays in the spoken language.</p>
             <p class="status-line" id="translator-status"></p>
@@ -207,10 +156,170 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+
+        <div class="settings-sub">
+          <div class="setting-row">
+            <div class="setting-info">
+              <h3>Voice Commands</h3>
+              <p>Format injected text with spoken phrases: <code>new line</code>, <code>tab</code>, <code>all caps</code>, symbols, and more (English and German).</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="voice-commands-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div id="voice-commands-details" class="voice-commands-details">
+            <div class="setting-row" style="margin-top: 16px;">
+              <div class="setting-info">
+                <h3>Numbers as Digits</h3>
+                <p>Convert spoken numbers to digits, English and German: "twenty five" / "fünfundzwanzig" → "25".</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="voice-numbers-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-row" style="margin-top: 16px;">
+              <div class="setting-info">
+                <h3>Press Enter Command</h3>
+                <p>End a dictation with "press enter" / "Enter drücken" to paste the text and then press Enter, e.g. to send a chat message.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="voice-press-enter-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-row" style="margin-top: 16px;">
+              <div class="setting-info">
+                <h3>Bypass Symbol Commands</h3>
+                <p>Skip symbol substitutions without clearing your list. Structural commands still apply. Useful for benchmarking.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="voice-bypass-symbols-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-row" style="margin-top: 16px;">
+              <div class="setting-info">
+                <h3>Bypass Structural Commands</h3>
+                <p>Skip new line, new paragraph, tab and all caps without clearing your list. Useful for benchmarking.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="voice-bypass-structural-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+
+            <div style="margin-top: 20px;">
+              <h4 class="nexus-section-title">Structural Commands</h4>
+              <p class="settings-hint" style="margin-top: 6px;">Click to toggle formatting phrases: <code>new line</code> / <code>neue Zeile</code>, <code>new paragraph</code> / <code>neuer Absatz</code>, <code>tab</code> / <code>Tabulator</code>, <code>all caps</code> / <code>alles groß</code>. English and German are always both recognised.</p>
+              <div id="voice-structural-grid" class="voice-symbols-grid"></div>
+            </div>
+
+            <div style="margin-top: 20px;">
+              <h4 class="nexus-section-title">Symbol Commands</h4>
+              <p class="settings-hint" style="margin-top: 6px;">Click to toggle symbols you want recognised as voice commands. <span class="symbol-ambiguous-label">Ambiguous</span> symbols share common English words and may fire accidentally.</p>
+              <div id="voice-symbols-grid" class="voice-symbols-grid"></div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div class="settings-card" id="meeting-settings-card" style="margin-top: 12px;">
+      <div class="settings-card">
+        <h4 class="nexus-section-title">Vocabulary</h4>
+        <p class="settings-hint" style="margin-top: 6px;">Words and phrases NexusVox should know: corrections, text shortcuts and rewrite instructions.</p>
+
+        <div class="settings-sub">
+          <div class="setting-info">
+            <h3>Correction Dictionary</h3>
+            <p>Words the model keeps getting wrong. Every match (whole word, any case) is replaced before the text is typed.</p>
+          </div>
+          <form id="dict-form" class="dict-form">
+            <input type="text" id="dict-wrong" class="dict-input" placeholder="As transcribed, e.g. nexus fox" required>
+            <span class="dict-arrow">&rarr;</span>
+            <input type="text" id="dict-right" class="dict-input" placeholder="Should be, e.g. NexusVox" required>
+            <button type="submit" class="flagged-play-btn dict-add-btn">Add</button>
+          </form>
+          <div id="dict-list" class="dict-list"></div>
+          <p class="settings-hint">Tip: correcting a recording in the Review tab suggests entries automatically.</p>
+
+          <div class="setting-row" style="margin-top: 16px;">
+            <div class="setting-info">
+              <h3>Learn From Edits</h3>
+              <p>After a paste, NexusVox reads the text field for a while (20 seconds by default, <code>[learn_from_edits].window_s</code>). Words you correct there show up below as suggestions; nothing is added without your OK. Password fields and terminals are never read, and nothing is learned from a dictation that auto cleanup or translation changed.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="learn-from-edits-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <p class="status-line" id="learn-status"></p>
+          <div id="dict-suggestions" class="dict-list"></div>
+        </div>
+        <div class="settings-sub">
+          <div class="setting-info">
+            <h3>Snippets</h3>
+            <p>Say a trigger phrase anywhere in a dictation and it is replaced by your stored text - an address, a signature, a link, a template. The text is inserted exactly as stored, line breaks included. Pick triggers you would not say by accident, in any language.</p>
+            <p>Options turn one trigger into a choice: with <code>open remote repo</code> and options like <code>NexusVox = https://github.com/...</code>, saying "open remote repo nexus vox" inserts that URL - the best-matching name wins, spaces and small mishearings do not matter. Say <code>nexus open ...</code> / <code>nexus öffne ...</code> in front to open the URL in your browser instead of typing it.</p>
+          </div>
+          <form id="snippet-form" class="dict-form snippet-form">
+            <input type="hidden" id="snippet-id">
+            <input type="text" id="snippet-trigger" class="dict-input" placeholder="Trigger, e.g. my address / meine Adresse" required>
+            <textarea id="snippet-expansion" class="dict-input snippet-expansion" rows="3" placeholder="Text to insert (optional with options: used when no option matches)"></textarea>
+            <textarea id="snippet-options" class="dict-input snippet-expansion" rows="3" placeholder="Options, one per line: name = text"></textarea>
+            <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-github" data-feature="github_snippets" hidden>Fill from GitHub</button>
+            <button type="submit" class="flagged-play-btn dict-add-btn" id="snippet-save">Add</button>
+            <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-cancel" hidden>Cancel</button>
+          </form>
+          <div id="snippet-list" class="dict-list"></div>
+        </div>
+        <div class="settings-sub">
+          <div class="setting-info">
+            <h3>Polish Presets</h3>
+            <p>Instructions you use often, under a short name. Select text, hold the hotkey, tap your polish key and say the name - "prompt engineer", "formal email" - and the stored instruction is used; words after the name are added to it ("formal email, and keep it short"). The default preset applies when you tap the polish key without saying anything. Names in any language; close spellings match.</p>
+          </div>
+          <form id="preset-form" class="dict-form snippet-form">
+            <input type="hidden" id="preset-id">
+            <input type="text" id="preset-name" class="dict-input" placeholder="Name, e.g. prompt engineer" required>
+            <textarea id="preset-instruction" class="dict-input snippet-expansion" rows="3" placeholder="Instruction, e.g. Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." required></textarea>
+            <label class="settings-hint"><input type="checkbox" id="preset-default"> Default when nothing is said</label>
+            <button type="submit" class="flagged-play-btn dict-add-btn" id="preset-save">Add</button>
+            <button type="button" class="flagged-play-btn dict-add-btn" id="preset-cancel" hidden>Cancel</button>
+          </form>
+          <div id="preset-list" class="dict-list"></div>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h4 class="nexus-section-title">Models</h4>
+        <p class="settings-hint" style="margin-top: 6px;">Which speech model turns your voice into text.</p>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Transcription Model</h3>
+            <p>Select which model to use for speech-to-text.</p>
+          </div>
+          <select id="model-select" class="select-input">
+          </select>
+        </div>
+        <div id="model-switch-status" class="model-status" style="display: none;">
+          <span class="model-status-spinner"></span>
+          <span id="model-status-text"></span>
+        </div>
+        <p class="settings-hint model-caution">Switching GPU-backed models restarts Docker containers and reloads weights. CPU (in-process Whisper) switches reload the model directly — may take 5–20s on first load.</p>
+        <div class="settings-sub" id="model-overview-card">
+          <h3 class="overview-title">Model Overview</h3>
+          <div id="model-overview-grid" class="overview-grid"></div>
+        </div>
+      </div>
+
+      <div class="settings-card" id="meeting-settings-card">
         <h4 class="nexus-section-title">Meetings</h4>
+        <p class="settings-hint" style="margin-top: 6px;">Recording calls: how you are named in the transcript, the meeting hotkey and the audio devices.</p>
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
             <h3>Meetings: name for your own voice</h3>
@@ -272,8 +381,47 @@
         </div>
       </div>
 
-      <div class="settings-card" style="margin-top: 12px;">
-        <div class="setting-row">
+      <div class="settings-card">
+        <h4 class="nexus-section-title">Privacy</h4>
+        <p class="settings-hint" style="margin-top: 6px;">What NexusVox keeps on this computer.</p>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Store Audio Recordings</h3>
+            <p>Keeps a WAV file of every recording next to the database (<code>audio/</code>) so you can play it back in the Review tab. Off: only the transcript is saved, nothing is written to disk for the audio. Recordings already stored stay.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="store-audio-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Log File</h3>
+            <p>NexusVox also writes its log to <code id="log-dir">%LOCALAPPDATA%\NexusVox\logs</code> (one file per day, the last 7 days are kept). Send the file when you report a problem. Dictated text is shortened there to its first 20 characters and its length.</p>
+            <p id="log-open-error" class="settings-hint" hidden></p>
+          </div>
+          <button type="button" class="btn" id="open-log-folder">Open log folder</button>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Log Full Text (debugging)</h3>
+            <p>Writes what you dictated into the log file in full. Turn it on only to track down a problem, and check the file before you send it. The console always shows full text.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="log-full-text-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <details class="settings-card settings-advanced" id="settings-advanced">
+        <summary>Advanced</summary>
+        <p class="settings-hint" style="margin-top: 6px;">Rarely needed. The defaults work for most people.</p>
+
+        <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
             <h3>Compute Device</h3>
             <p>CPU runs Whisper in-process with no Docker. GPU enables all models via Docker-backed inference servers.</p>
@@ -286,183 +434,49 @@
         </div>
         <p id="device-resolved" class="settings-hint"></p>
         <p class="settings-hint">Changing the device takes effect after restarting NexusVox.</p>
-      </div>
 
-      <div class="settings-card" style="margin-top: 12px;">
-        <div class="setting-row">
+        <div class="setting-row" style="margin-top: 8px;">
           <div class="setting-info">
-            <h3>Transcription Model</h3>
-            <p>Select which model to use for speech-to-text.</p>
-          </div>
-          <select id="model-select" class="select-input">
-          </select>
-        </div>
-        <div id="model-switch-status" class="model-status" style="display: none;">
-          <span class="model-status-spinner"></span>
-          <span id="model-status-text"></span>
-        </div>
-        <p class="settings-hint model-caution">Switching GPU-backed models restarts Docker containers and reloads weights. CPU (in-process Whisper) switches reload the model directly — may take 5–20s on first load.</p>
-      </div>
-
-      <div class="settings-card" id="model-overview-card" style="margin-top: 12px;">
-        <h3 class="overview-title">Model Overview</h3>
-        <div id="model-overview-grid" class="overview-grid"></div>
-      </div>
-
-      <div class="settings-card" style="margin-top: 12px;" data-feature="os_commands" hidden>
-        <div class="setting-row">
-          <div class="setting-info">
-            <h3>Nexus OS Commands</h3>
-            <p>Voice-triggered window management. Say <code>nexus &lt;action&gt; &lt;app&gt;</code> while recording.</p>
+            <h3>Polish In Terminals Too</h3>
+            <p>Terminals do not tell NexusVox what is selected, so polish copies the selection with Ctrl+C there - which interrupts the running program when nothing is selected. The rewritten text is pasted at the prompt, not over the selection. Off: polish plays the error beep in terminals.</p>
           </div>
           <label class="toggle">
-            <input type="checkbox" id="os-commands-toggle">
+            <input type="checkbox" id="polish-terminals-toggle">
             <span class="toggle-slider"></span>
           </label>
         </div>
 
-        <div id="nexus-details" class="nexus-details">
-          <h4 class="nexus-section-title">Supported Commands</h4>
-          <div id="nexus-actions" class="nexus-actions"></div>
-
-          <h4 class="nexus-section-title" style="margin-top: 14px;">Registered Apps</h4>
-          <div id="nexus-apps" class="nexus-apps"></div>
-          <p class="settings-hint">Edit <code>config.toml</code> under <code>[os_commands.apps]</code> to add or remove apps.</p>
-        </div>
-      </div>
-
-      <div class="settings-card" style="margin-top: 12px;">
-        <div class="setting-info">
-          <h3>Correction Dictionary</h3>
-          <p>Words the model keeps getting wrong. Every match (whole word, any case) is replaced before the text is typed.</p>
-        </div>
-        <form id="dict-form" class="dict-form">
-          <input type="text" id="dict-wrong" class="dict-input" placeholder="As transcribed, e.g. nexus fox" required>
-          <span class="dict-arrow">&rarr;</span>
-          <input type="text" id="dict-right" class="dict-input" placeholder="Should be, e.g. NexusVox" required>
-          <button type="submit" class="flagged-play-btn dict-add-btn">Add</button>
-        </form>
-        <div id="dict-list" class="dict-list"></div>
-        <p class="settings-hint">Tip: correcting a recording in the Review tab suggests entries automatically.</p>
-
-        <div class="setting-row" style="margin-top: 16px;">
+        <div class="setting-row" style="margin-top: 8px;">
           <div class="setting-info">
-            <h3>Learn From Edits</h3>
-            <p>After a paste, NexusVox reads the text field for a while (20 seconds by default, <code>[learn_from_edits].window_s</code>). Words you correct there show up below as suggestions; nothing is added without your OK. Password fields and terminals are never read, and nothing is learned from a dictation that auto cleanup or translation changed.</p>
+            <h3>Polish Model</h3>
+            <p>The model name on the language model server in <code>[llm]</code> (default Ollama, e.g. <code>gemma4:e4b</code>). It shares the GPU with the speech model - mind the VRAM.</p>
           </div>
-          <label class="toggle">
-            <input type="checkbox" id="learn-from-edits-toggle">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <p class="status-line" id="learn-status"></p>
-        <div id="dict-suggestions" class="dict-list"></div>
-      </div>
-
-      <div class="settings-card" style="margin-top: 12px;">
-        <div class="setting-info">
-          <h3>Snippets</h3>
-          <p>Say a trigger phrase anywhere in a dictation and it is replaced by your stored text - an address, a signature, a link, a template. The text is inserted exactly as stored, line breaks included. Pick triggers you would not say by accident, in any language.</p>
-          <p>Options turn one trigger into a choice: with <code>open remote repo</code> and options like <code>NexusVox = https://github.com/...</code>, saying "open remote repo nexus vox" inserts that URL - the best-matching name wins, spaces and small mishearings do not matter. Say <code>nexus open ...</code> / <code>nexus öffne ...</code> in front to open the URL in your browser instead of typing it.</p>
-        </div>
-        <form id="snippet-form" class="dict-form snippet-form">
-          <input type="hidden" id="snippet-id">
-          <input type="text" id="snippet-trigger" class="dict-input" placeholder="Trigger, e.g. my address / meine Adresse" required>
-          <textarea id="snippet-expansion" class="dict-input snippet-expansion" rows="3" placeholder="Text to insert (optional with options: used when no option matches)"></textarea>
-          <textarea id="snippet-options" class="dict-input snippet-expansion" rows="3" placeholder="Options, one per line: name = text"></textarea>
-          <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-github" data-feature="github_snippets" hidden>Fill from GitHub</button>
-          <button type="submit" class="flagged-play-btn dict-add-btn" id="snippet-save">Add</button>
-          <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-cancel" hidden>Cancel</button>
-        </form>
-        <div id="snippet-list" class="dict-list"></div>
-      </div>
-
-      <div class="settings-card" style="margin-top: 12px;">
-        <div class="setting-info">
-          <h3>Polish Presets</h3>
-          <p>Instructions you use often, under a short name. Select text, hold the hotkey, tap your polish key and say the name - "prompt engineer", "formal email" - and the stored instruction is used; words after the name are added to it ("formal email, and keep it short"). The default preset applies when you tap the polish key without saying anything. Names in any language; close spellings match.</p>
-        </div>
-        <form id="preset-form" class="dict-form snippet-form">
-          <input type="hidden" id="preset-id">
-          <input type="text" id="preset-name" class="dict-input" placeholder="Name, e.g. prompt engineer" required>
-          <textarea id="preset-instruction" class="dict-input snippet-expansion" rows="3" placeholder="Instruction, e.g. Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." required></textarea>
-          <label class="settings-hint"><input type="checkbox" id="preset-default"> Default when nothing is said</label>
-          <button type="submit" class="flagged-play-btn dict-add-btn" id="preset-save">Add</button>
-          <button type="button" class="flagged-play-btn dict-add-btn" id="preset-cancel" hidden>Cancel</button>
-        </form>
-        <div id="preset-list" class="dict-list"></div>
-      </div>
-
-      <div class="settings-card" style="margin-top: 12px;">
-        <div class="setting-row">
-          <div class="setting-info">
-            <h3>Voice Commands</h3>
-            <p>Format injected text with spoken phrases: <code>new line</code>, <code>tab</code>, <code>all caps</code>, symbols, and more (English and German).</p>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="voice-commands-toggle">
-            <span class="toggle-slider"></span>
-          </label>
+          <input type="text" id="llm-model-input" class="dict-input" style="max-width: 220px;">
         </div>
 
-        <div id="voice-commands-details" class="voice-commands-details">
-          <div class="setting-row" style="margin-top: 16px;">
+        <div class="settings-sub" data-feature="os_commands" hidden>
+          <div class="setting-row">
             <div class="setting-info">
-              <h3>Numbers as Digits</h3>
-              <p>Convert spoken numbers to digits, English and German: "twenty five" / "fünfundzwanzig" → "25".</p>
+              <h3>Nexus OS Commands</h3>
+              <p>Voice-triggered window management. Say <code>nexus &lt;action&gt; &lt;app&gt;</code> while recording.</p>
             </div>
             <label class="toggle">
-              <input type="checkbox" id="voice-numbers-toggle">
+              <input type="checkbox" id="os-commands-toggle">
               <span class="toggle-slider"></span>
             </label>
           </div>
 
-          <div class="setting-row" style="margin-top: 16px;">
-            <div class="setting-info">
-              <h3>Press Enter Command</h3>
-              <p>End a dictation with "press enter" / "Enter drücken" to paste the text and then press Enter, e.g. to send a chat message.</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="voice-press-enter-toggle">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
+          <div id="nexus-details" class="nexus-details">
+            <h4 class="nexus-section-title">Supported Commands</h4>
+            <div id="nexus-actions" class="nexus-actions"></div>
 
-          <div class="setting-row" style="margin-top: 16px;">
-            <div class="setting-info">
-              <h3>Bypass Symbol Commands</h3>
-              <p>Skip symbol substitutions without clearing your list. Structural commands still apply. Useful for benchmarking.</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="voice-bypass-symbols-toggle">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-row" style="margin-top: 16px;">
-            <div class="setting-info">
-              <h3>Bypass Structural Commands</h3>
-              <p>Skip new line, new paragraph, tab and all caps without clearing your list. Useful for benchmarking.</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="voice-bypass-structural-toggle">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div style="margin-top: 20px;">
-            <h4 class="nexus-section-title">Structural Commands</h4>
-            <p class="settings-hint" style="margin-top: 6px;">Click to toggle formatting phrases: <code>new line</code> / <code>neue Zeile</code>, <code>new paragraph</code> / <code>neuer Absatz</code>, <code>tab</code> / <code>Tabulator</code>, <code>all caps</code> / <code>alles groß</code>. English and German are always both recognised.</p>
-            <div id="voice-structural-grid" class="voice-symbols-grid"></div>
-          </div>
-
-          <div style="margin-top: 20px;">
-            <h4 class="nexus-section-title">Symbol Commands</h4>
-            <p class="settings-hint" style="margin-top: 6px;">Click to toggle symbols you want recognised as voice commands. <span class="symbol-ambiguous-label">Ambiguous</span> symbols share common English words and may fire accidentally.</p>
-            <div id="voice-symbols-grid" class="voice-symbols-grid"></div>
+            <h4 class="nexus-section-title" style="margin-top: 14px;">Registered Apps</h4>
+            <div id="nexus-apps" class="nexus-apps"></div>
+            <p class="settings-hint">Edit <code>config.toml</code> under <code>[os_commands.apps]</code> to add or remove apps.</p>
           </div>
         </div>
-      </div>
+      </details>
+
     </section>
 
     <!-- Analytics Tab -->
@@ -796,7 +810,7 @@
       <p class="settings-hint review-keys">
         <kbd>Space</kbd> play / stop &nbsp; <kbd>Enter</kbd> correct &nbsp; <kbd>E</kbd> wrong, edit &nbsp; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> submit correction &nbsp; <kbd>Esc</kbd> revert
       </p>
-      <p class="settings-hint"><strong>Retry</strong> transcribes a recording's stored audio again with the current model and puts the result in the correction box. It needs the WAV, so it only works while <em>Store Audio Recordings</em> (Settings → Voice Input) is on; recordings saved without audio do not show up here at all.</p>
+      <p class="settings-hint"><strong>Retry</strong> transcribes a recording's stored audio again with the current model and puts the result in the correction box. It needs the WAV, so it only works while <em>Store Audio Recordings</em> (Settings → Privacy) is on; recordings saved without audio do not show up here at all.</p>
       <p id="review-progress" class="review-progress"></p>
       <div id="review-suggestions" class="review-suggestions" hidden></div>
       <div id="review-list" class="flagged-list"></div>

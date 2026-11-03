@@ -48,8 +48,30 @@ def test_settings_divs_are_balanced():
     assert len(re.findall(r"<div[\s>]", section)) == len(re.findall(r"</div>", section))
 
 
-def test_feedback_card_starts_hidden_with_a_button():
-    section = _settings_section()
-    opening = re.search(r'<div[^>]*id="feedback-card"[^>]*>', section)
-    assert opening and " hidden" in opening.group(0)
-    assert re.search(r'<button[^>]*id="send-feedback"', section[opening.end() :])
+def _feedback_tab() -> str:
+    start = HTML.index('<section id="tab-feedback"')
+    return HTML[start : HTML.index("</section>", start)]
+
+
+def test_feedback_is_its_own_tab_not_a_settings_card():
+    assert 'id="send-feedback"' not in _settings_section()
+    assert 'id="feedback-card"' not in HTML
+
+
+def test_feedback_entry_and_tab_start_hidden_at_the_sidebar_bottom():
+    nav = re.search(r'<nav class="tabs tabs-footer">(.*?)</nav>', HTML, re.S)
+    assert nav, "footer nav missing"
+    button = re.search(r"<button[^>]*data-tab=\"feedback\"[^>]*>", nav.group(1))
+    assert button and " hidden" in button.group(0)
+    assert HTML.index("tabs-footer") > HTML.index('data-tab="review"')
+    assert " hidden" in re.search(r'<section id="tab-feedback"[^>]*>', HTML).group(0)
+
+
+def test_feedback_tab_content():
+    tab = _feedback_tab()
+    assert "Feedback &amp; bug reports" in tab
+    assert "Send feedback or report a bug" in tab
+    assert "nexusvox@nightshift-ai.de" in tab
+    assert re.search(r'<button[^>]*id="send-feedback"', tab)
+    assert re.search(r'<button[^>]*id="open-log-folder-feedback"', tab)
+    assert 'id="feedback-log-dir"' in tab

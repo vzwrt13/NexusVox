@@ -97,3 +97,12 @@ def test_malformed_form_url_is_logged_and_unset(tmp_path, caplog):
     with caplog.at_level("WARNING"):
         assert load_config(path).support.feedback_form_url == ""
     assert "feedback_form_url" in caplog.text
+
+
+def test_feedback_tab_opens_the_log_folder_through_the_existing_endpoint(flask_client, monkeypatch, tmp_path):
+    opened = []
+    monkeypatch.setattr("nexusvox.dashboard.api.log_dir", lambda: tmp_path)
+    monkeypatch.setattr("os.startfile", opened.append, raising=False)
+    assert flask_client.post("/api/log-folder/open").get_json()["ok"] is True
+    assert opened == [tmp_path]
+    assert flask_client.get("/api/settings").get_json()["log_dir"] == str(tmp_path)

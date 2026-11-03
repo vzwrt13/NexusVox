@@ -255,7 +255,11 @@ const logFullTextToggle = document.getElementById("log-full-text-toggle");
 const openLogFolderButton = document.getElementById("open-log-folder");
 const logOpenError = document.getElementById("log-open-error");
 const logDirLabel = document.getElementById("log-dir");
-const feedbackCard = document.getElementById("feedback-card");
+const feedbackTabButton = document.getElementById("feedback-tab-button");
+const feedbackPanel = document.getElementById("tab-feedback");
+const feedbackLogDirLabel = document.getElementById("feedback-log-dir");
+const feedbackLogError = document.getElementById("feedback-log-error");
+const openLogFolderFeedbackButton = document.getElementById("open-log-folder-feedback");
 const sendFeedbackButton = document.getElementById("send-feedback");
 let feedbackUrl = "";
 const learnFromEditsToggle = document.getElementById("learn-from-edits-toggle");
@@ -438,16 +442,18 @@ logFullTextToggle.addEventListener("change", () => postSetting("/api/settings/lo
 sendFeedbackButton.addEventListener("click", () => {
   if (feedbackUrl) window.open(feedbackUrl, "_blank", "noopener,noreferrer");
 });
-openLogFolderButton.addEventListener("click", async () => {
-  logOpenError.hidden = true;
+async function openLogFolder(errorLine) {
+  errorLine.hidden = true;
   try {
     const r = await fetch("/api/log-folder/open", { method: "POST" });
     if (!r.ok) throw new Error((await r.json()).error || "The log folder could not be opened.");
   } catch (e) {
-    logOpenError.textContent = e.message;
-    logOpenError.hidden = false;
+    errorLine.textContent = e.message;
+    errorLine.hidden = false;
   }
-});
+}
+openLogFolderButton.addEventListener("click", () => openLogFolder(logOpenError));
+openLogFolderFeedbackButton.addEventListener("click", () => openLogFolder(feedbackLogError));
 learnFromEditsToggle.addEventListener("change", async () => {
   await postSetting("/api/settings/learn-from-edits", { enabled: learnFromEditsToggle.checked });
   loadLearnStatus();
@@ -577,8 +583,10 @@ async function loadSettings() {
   storeAudioToggle.checked = s.store_audio;
   logFullTextToggle.checked = s.log_full_text;
   logDirLabel.textContent = s.log_dir;
-  feedbackCard.hidden = !s.feedback_url;
+  feedbackLogDirLabel.textContent = s.log_dir;
   feedbackUrl = s.feedback_url || "";
+  feedbackTabButton.hidden = !feedbackUrl;
+  feedbackPanel.hidden = !feedbackUrl;
   learnFromEditsToggle.checked = s.learn_from_edits;
   loadLearnStatus();
   polishTerminalsToggle.checked = s.polish_in_terminals;

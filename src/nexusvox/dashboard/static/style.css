@@ -95,6 +95,15 @@ header h1 {
   gap: 2px;
 }
 
+/* Feedback sits alone at the bottom of the sidebar, apart from the working tabs */
+.tabs-footer {
+  position: static;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.tabs-footer .tab[hidden] { display: none; }
+
 .tab {
   display: flex;
   align-items: center;
@@ -154,6 +163,7 @@ body::before {
 [data-feature][hidden] { display: none !important; } /* experimental features, see [experimental] */
 .tab-content { display: none; }
 .tab-content.active { display: block; }
+.tab-content[hidden] { display: none; }
 
 
 /* Settings */
@@ -1224,6 +1234,7 @@ canvas { width: 100% !important; max-height: 260px; }
     border-bottom: 1px solid var(--border);
   }
   .tabs { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .tabs-footer { margin-top: 0; padding-top: 0; border-top: none; }
   .tab { width: auto; padding: 9px 12px; }
   main { padding: 24px 16px 40px; }
   .charts-grid { grid-template-columns: minmax(0, 1fr); }

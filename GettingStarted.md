@@ -310,6 +310,8 @@ NexusVox writes its log to `%LOCALAPPDATA%\NexusVox\logs` (one file per day, the
 | High GPU memory usage | The default `--gpu-memory-utilization 0.70` reserves 70% of VRAM. Lower it in `docker-compose.yml` if needed. |
 | Text not appearing at cursor | Some applications block simulated Ctrl+V. Try a standard text editor first. |
 | `Audio conversion failed` on upload | ffmpeg is missing from your `PATH`. Install it (`winget install Gyan.FFmpeg`), then restart NexusVox. WAV files upload without ffmpeg. |
+| Starting NexusVox again while it runs | The second start opens the running instance's dashboard and exits; there is only ever one tray icon and one hotkey hook. |
+| The dashboard does not open | Port 47392 is held by another program. NexusVox then uses the next free port in 47400-47409 and logs a warning; if all are held it shows a message and logs the reason. Dictation keeps working. |
 
 ---
 

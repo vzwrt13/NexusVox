@@ -1021,6 +1021,11 @@ class NexusVoxApp:
         """Open the dashboard window."""
         open_dashboard(self._db, self._config, app=self)
 
+    def open_dashboard_from_second_start(self) -> None:
+        """A second start of NexusVox rang the doorbell: show the dashboard of this instance."""
+        logger.info("A second NexusVox start was detected; opening the dashboard of this instance")
+        self._open_dashboard()
+
     def _toggle_translate(self) -> None:
         """Switch translate-before-inject on or off, and keep it across restarts."""
         self._config.translator.enabled = not self._config.translator.enabled

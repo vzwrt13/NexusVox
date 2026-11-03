@@ -94,7 +94,9 @@ async function api(path) {
 // ── Tab Switching ────────────────────────────────────────────────────
 // The active tab is mirrored into the URL hash (e.g. "#analytics") so a page
 // refresh, bookmark, or back/forward navigation lands on the same tab.
-function activateTab(name) {
+// Every switch opens the tab at the top; only a deliberate jump (`keepScroll`, e.g. the "Meeting settings"
+// link) scrolls on its own afterwards.
+function activateTab(name, { keepScroll = false } = {}) {
   const btn = document.querySelector(`.tab[data-tab="${name}"]`);
   const panel = document.getElementById("tab-" + name);
   if (!btn || !panel || btn.hidden) return false;
@@ -103,6 +105,7 @@ function activateTab(name) {
   document.querySelectorAll(".tab-content").forEach((s) => s.classList.remove("active"));
   btn.classList.add("active");
   panel.classList.add("active");
+  if (!keepScroll) window.scrollTo(0, 0);
 
   if (name === "analytics") loadAnalytics();
   if (name === "edit") loadFlaggedTranscriptions();
@@ -150,6 +153,11 @@ window.NexusVoxExt = {
   // A panel script registers what its upload action does: handler(upload, button).
   registerUploadAction(id, handler) {
     uploadActionHandlers[id] = handler;
+  },
+  // Opens the transcript card of a stored upload or meeting (a summary links to its transcript this way):
+  // meetings in the Meetings tab, everything else in the Upload tab. Resolves with false when there is no such card.
+  showTranscript(id) {
+    return showTranscriptCard(id);
   },
 };
 
@@ -2289,6 +2297,24 @@ async function loadFileTranscriptions(poll = false) {
   if (generation === loadGeneration) pendingPoller.update(pendingLists.size > 0);
 }
 
+// Jump to one transcript card: load the lists, open the tab that holds the card, scroll it in and flash it.
+async function showTranscriptCard(id) {
+  await loadFileTranscriptions();
+  const selector = `> .flagged-card[data-id="${String(id).replace(/"/g, "")}"]`;
+  const inMeetings = document.querySelector("#meeting-list " + selector);
+  const card = inMeetings || document.querySelector("#upload-list " + selector);
+  if (!card) return false;
+  const tab = inMeetings ? "meetings" : "upload";
+  history.replaceState(null, "", "#" + tab);
+  activateTab(tab, { keepScroll: true });
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  card.classList.remove("flash-highlight");
+  void card.offsetWidth; // restart the animation when the link is used again
+  card.classList.add("flash-highlight");
+  setTimeout(() => card.classList.remove("flash-highlight"), 2000);
+  return true;
+}
+
 // One history list: `kind` "" shows every entry, "meeting" only meetings. Each card can be deleted, with the
 // confirmation inside the card (never a browser dialog). A `poll` keeps every card whose data did not change.
 function renderFileTranscriptions(container, data, emptyText, poll) {
@@ -2870,7 +2896,7 @@ function renderMeetingDevicesInfo() {
 document.getElementById("meeting-settings-link").addEventListener("click", (e) => {
   e.preventDefault();
   history.replaceState(null, "", "#settings");
-  activateTab("settings");
+  activateTab("settings", { keepScroll: true });
   const card = document.getElementById("meeting-settings-card");
   card.scrollIntoView({ behavior: "smooth", block: "start" });
   card.classList.remove("flash-highlight");

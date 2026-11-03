@@ -24,12 +24,13 @@ from ..config import (
     HOTKEY_MODES,
     HOTKEY_MODIFIERS,
     MODEL_REGISTRY,
-    SUPPORTED_LANGUAGES,
     Config,
     HotkeyConfig,
     MeetingConfig,
     cuda_available,
     meeting_hotkey_clash,
+    model_download_state,
+    model_needs_docker,
     normalize_hotkey_key,
     normalize_speaker_label,
     numbered_speaker_label,
@@ -55,6 +56,7 @@ from ..file_transcribe import (
     convert_to_wav,
     transcribe_file,
 )
+from ..lang_detect import stored_language
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
 from ..logsetup import log_dir
@@ -76,6 +78,7 @@ from ..meeting_transcribe import (
     track_shifts,
 )
 from ..os_commands import NEXUS_ACTIONS
+from ..paths import models_dir
 from ..polish_presets import PolishPreset
 from ..snippets import Snippet, SnippetOption
 from ..transcriber import BaseTranscriber, create_transcriber
@@ -144,6 +147,10 @@ def _remove_folder(folder: Path) -> None:
     folder.rmdir()
 
 
+# How long a model's downloaded-or-not answer is reused (seconds).
+DOWNLOAD_STATE_TTL_S = 10.0
+
+
 class DashboardAPI:
     """Methods callable from JavaScript as ``pywebview.api.<method>(...)``."""
 
@@ -171,6 +178,7 @@ class DashboardAPI:
         self._on_feedback_mode = on_feedback_mode
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
         self._file_jobs = FileJobs()
+        self._download_cache: dict[str, tuple[float, dict]] = {}
         self.extensions = extensions if extensions is not None else ExtensionRegistry()
         self._meeting = meeting or MeetingSession(
             config.meeting,
@@ -185,9 +193,25 @@ class DashboardAPI:
 
     # ---- Models -------------------------------------------------------------
 
+    def _download_state(self, model_id: str, resolved: str) -> dict:
+        """`downloaded`/`size` of the in-process copy; no verdict when the model runs in a container.
+
+        On a GPU the model lives in the container's own volume, which this process cannot see, so a mark
+        from the local cache would mislead. The cache probe is kept for a few seconds (every dashboard load
+        asks) and dropped when a model finishes loading (`get_model_status`).
+        """
+        if MODEL_REGISTRY[model_id].get("custom") or model_needs_docker(model_id, resolved):
+            return {"downloaded": None, "size": ""}
+        cached = self._download_cache.get(model_id)
+        if cached and time.monotonic() - cached[0] < DOWNLOAD_STATE_TTL_S:
+            return cached[1]
+        state = model_download_state(model_id, models_dir())
+        self._download_cache[model_id] = (time.monotonic(), state)
+        return state
+
     def get_available_models(self) -> list[dict]:
-        resolved = resolve_device(self._config.inference.device)
         custom = self._config.inference.custom
+        resolved = resolve_device(self._config.inference.device)
         return [
             {
                 "id": model_id,
@@ -205,11 +229,11 @@ class DashboardAPI:
                 else info.get("streaming", "false") == "true",
                 "vram_gb": info.get("vram_gb", "—"),
                 "hf_name": info["hf_name"],
-                "requires_gpu": bool(info.get("requires_gpu", True)),
                 "inprocess_supported": bool(info.get("inprocess_supported", False)),
+                # `downloaded` (None: not applicable or unknown) and `size` of the in-process copy.
+                **self._download_state(model_id, resolved),
             }
             for model_id, info in MODEL_REGISTRY.items()
-            if not (resolved == "cpu" and info.get("requires_gpu"))
         ]
 
     def get_current_model(self) -> dict:
@@ -232,12 +256,6 @@ class DashboardAPI:
         if model_id not in MODEL_REGISTRY:
             return {"ok": False, "error": f"Unknown model: {model_id}"}
         info = MODEL_REGISTRY[model_id]
-        resolved = resolve_device(self._config.inference.device)
-        if resolved == "cpu" and info.get("requires_gpu"):
-            return {
-                "ok": False,
-                "error": f"Model {model_id} requires a GPU and is not available on CPU.",
-            }
         if self._on_model_switch:
             self._on_model_switch(model_id)
             return {"ok": True, "status": "switching"}
@@ -250,9 +268,10 @@ class DashboardAPI:
         return {"ok": True, "model": model_id}
 
     def get_model_status(self) -> dict:
-        if self._get_switch_status:
-            return self._get_switch_status()
-        return {"status": "idle"}
+        status = self._get_switch_status() if self._get_switch_status else {"status": "idle"}
+        if status.get("status") == "ready":
+            self._download_cache.clear()  # a model just finished loading, so it is on disk now
+        return status
 
     # ---- Device ------------------------------------------------------------
 
@@ -279,8 +298,6 @@ class DashboardAPI:
 
     def get_settings(self) -> dict:
         return {
-            "auto_language_detection": self._config.auto_language_detection,
-            "language": self._config.language,
             "translate_enabled": self._config.translator.enabled,
             "translator_url": self._config.translator.url,
             "hotkey_mode": self._config.hotkey.mode,
@@ -325,18 +342,6 @@ class DashboardAPI:
             "url": self._config.translator.url,
             "reachable": is_reachable(self._config.translator),
         }
-
-    def set_auto_language_detection(self, enabled: bool) -> dict:
-        self._config.auto_language_detection = enabled
-        save_config(self._config)
-        return self.get_settings()
-
-    def set_language(self, language: str) -> dict:
-        if language not in SUPPORTED_LANGUAGES:
-            return {"error": f"Unsupported language: {language}", **self.get_settings()}
-        self._config.language = language
-        save_config(self._config)
-        return self.get_settings()
 
     def set_hotkey_mode(self, mode: str) -> dict:
         """The listener reads the shared config on every key event, so this is live."""
@@ -866,13 +871,13 @@ class DashboardAPI:
     def _store_file_transcription(self, filename: str, notes: list[str], progress, **fields) -> dict:
         """Save a finished file transcription, run the extension hook and build the job result (blocking).
 
-        `fields` go to `Database.save_file_transcription`; the language and model are the current settings.
+        `fields` go to `Database.save_file_transcription`; the language is detected from the text.
         """
         if progress:
             progress("saving")
         try:
             record = self._db.save_file_transcription(
-                language=self._config.language,
+                language=stored_language(fields.get("text", ""), strip_labels=True),
                 original_filename=filename,
                 model=self._config.inference.model,
                 **fields,
@@ -1065,12 +1070,10 @@ class DashboardAPI:
         }
 
     def _make_live_transcriber(self) -> BaseTranscriber:
-        """The transcriber one live transcript uses for all its windows (current model and language)."""
+        """The transcriber one live transcript uses for all its windows (current model)."""
         return create_transcriber(
             self._config.inference,
             device=None,
-            language=self._config.language,
-            auto_detect_language=self._config.auto_language_detection,
             auto_fallback=self._config.inference.device == "auto",
         )
 
@@ -1372,13 +1375,11 @@ class DashboardAPI:
         diarize: bool = False,
         on_progress: Callable[..., None] | None = None,
     ):
-        """Transcribe WAV chunks with the current model and language settings (blocking)."""
+        """Transcribe WAV chunks with the current model (blocking)."""
         return asyncio.run(
             transcribe_file(
                 wav_chunks,
                 self._config.inference,
-                language=self._config.language,
-                auto_detect_language=self._config.auto_language_detection,
                 word_timestamps=word_timestamps,
                 diarize=diarize,
                 on_progress=on_progress,

@@ -48,9 +48,7 @@ def test_example_config_ships_inside_the_package():
 
 def test_config_dataclass_defaults():
     cfg = Config()
-    assert cfg.language == "en"
     assert cfg.injection_delay_ms == 500
-    assert cfg.auto_language_detection is False
     assert cfg.voice_commands.enabled is True
     assert "slash" in cfg.voice_commands.symbols
     assert "plus" not in cfg.voice_commands.symbols
@@ -73,7 +71,6 @@ def test_load_config_defaults_when_no_file(tmp_path, monkeypatch):
 
     cfg = load_config(tmp_path / "config.toml")
 
-    assert cfg.language == "en"
     assert cfg.audio.sample_rate == 16_000
     assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
 
@@ -82,7 +79,7 @@ def test_load_config_copies_example(tmp_path, monkeypatch):
     """When config is missing but example exists, copy example and load it."""
     example = tmp_path / "config.example.toml"
     example.write_text(
-        '[general]\nlanguage = "de"\ninjection_delay_ms = 300\nauto_language_detection = true\n'
+        "[general]\ninjection_delay_ms = 300\n"
         "[hotkey]\n"
         'modifiers = ["ctrl", "alt"]\n'
         "[audio]\n"
@@ -101,7 +98,6 @@ def test_load_config_copies_example(tmp_path, monkeypatch):
     cfg = load_config(config_path)
 
     assert config_path.exists()
-    assert cfg.language == "de"
     assert cfg.injection_delay_ms == 300
     assert cfg.audio.sample_rate == 48000
 
@@ -110,9 +106,7 @@ def test_load_config_from_valid_toml(tmp_path):
     """Full TOML with non-default values is parsed correctly."""
     toml_content = """\
 [general]
-language = "de"
 injection_delay_ms = 200
-auto_language_detection = true
 
 [hotkey]
 modifiers = ["ctrl", "alt"]
@@ -122,9 +116,9 @@ sample_rate = 44100
 chunk_size = 2048
 
 [inference]
-server_url = "ws://gpu-server:8000/v1/realtime"
+server_url = "http://gpu-server:8003/v1/audio/transcriptions"
 transcription_delay_ms = 240
-model = "cohere-transcribe"
+model = "whisper-large-v3-turbo"
 
 [database]
 path = "test.db"
@@ -134,26 +128,24 @@ path = "test.db"
 
     cfg = load_config(config_path)
 
-    assert cfg.language == "de"
     assert cfg.injection_delay_ms == 200
-    assert cfg.auto_language_detection is True
     assert cfg.hotkey.modifiers == ["ctrl", "alt"]
     assert cfg.audio.sample_rate == 44100
     assert cfg.audio.chunk_size == 2048
-    assert cfg.inference.server_url == "ws://gpu-server:8000/v1/realtime"
+    assert cfg.inference.server_url == "http://gpu-server:8003/v1/audio/transcriptions"
     assert cfg.inference.transcription_delay_ms == 240
-    assert cfg.inference.model == "cohere-transcribe"
+    assert cfg.inference.model == "whisper-large-v3-turbo"
     assert cfg.database.path == "test.db"
 
 
 def test_load_config_missing_sections_uses_defaults(tmp_path):
     """Partial TOML with only [general] — other sections get defaults."""
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[general]\nlanguage = "de"\n', encoding="utf-8")
+    config_path.write_text("[general]\ninjection_delay_ms = 300\n", encoding="utf-8")
 
     cfg = load_config(config_path)
 
-    assert cfg.language == "de"
+    assert cfg.injection_delay_ms == 300
     assert cfg.audio.sample_rate == 16_000
     assert cfg.audio.chunk_size == 4096
     assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
@@ -176,14 +168,14 @@ def test_save_config_roundtrip(tmp_path):
     from nexusvox.config import VoiceCommandsConfig
 
     original = Config(
-        language="de",
         injection_delay_ms=200,
-        auto_language_detection=True,
         voice_commands=VoiceCommandsConfig(enabled=False, symbols=["slash", "plus"]),
         hotkey=HotkeyConfig(modifiers=["ctrl", "alt"], mode="toggle"),
         audio=AudioConfig(sample_rate=44100, chunk_size=2048),
         inference=InferenceConfig(
-            server_url="ws://test:8000/v1/realtime", transcription_delay_ms=160, model="cohere-transcribe"
+            server_url="http://test:8003/v1/audio/transcriptions",
+            transcription_delay_ms=160,
+            model="whisper-large-v3-turbo",
         ),
         database=DatabaseConfig(path="roundtrip.db", audio_dir="recordings"),
     )
@@ -192,9 +184,7 @@ def test_save_config_roundtrip(tmp_path):
     save_config(original, config_path)
     loaded = load_config(config_path)
 
-    assert loaded.language == original.language
     assert loaded.injection_delay_ms == original.injection_delay_ms
-    assert loaded.auto_language_detection == original.auto_language_detection
     assert loaded.voice_commands.enabled == original.voice_commands.enabled
     assert loaded.voice_commands.symbols == original.voice_commands.symbols
     assert loaded.hotkey.modifiers == original.hotkey.modifiers
@@ -405,6 +395,9 @@ def test_main_applies_the_configured_log_level(monkeypatch):
         def run(self):
             raise KeyboardInterrupt
 
+        def open_dashboard_from_second_start(self):
+            pass
+
     # The real app module binds PortAudio at import, which CI runners on Linux do not have.
     monkeypatch.setitem(sys.modules, "nexusvox.app", types.SimpleNamespace(NexusVoxApp=App))
     monkeypatch.delitem(sys.modules, "nexusvox.__main__", raising=False)
@@ -413,6 +406,12 @@ def test_main_applies_the_configured_log_level(monkeypatch):
     own = logging.getLogger("nexusvox")
     previous = own.level
     monkeypatch.setattr(entry, "load_config", lambda: Config(log_level="DEBUG"))
+    # A NexusVox that really runs on this machine must not turn this test into a second start.
+    monkeypatch.setattr(
+        entry,
+        "SingleInstance",
+        lambda: types.SimpleNamespace(acquire=lambda: True, watch=lambda cb: None, release=lambda: None),
+    )
     monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
     try:
         with pytest.raises(SystemExit) as exit_:
@@ -716,3 +715,93 @@ def test_save_config_writes_back_to_the_file_that_was_loaded(tmp_path, monkeypat
 
     assert not (elsewhere / "config.toml").exists()
     assert load_config(loaded).cleanup.level == "medium"
+
+
+def test_old_language_keys_are_ignored_and_not_written(tmp_path):
+    """A config.toml from before the language setting was removed still loads, and is saved without the keys."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[general]\nlanguage = "de"\nauto_language_detection = true\ninjection_delay_ms = 300\n', encoding="utf-8"
+    )
+
+    cfg = load_config(config_path)
+    save_config(cfg, config_path)
+
+    saved = config_path.read_text(encoding="utf-8")
+    assert cfg.injection_delay_ms == 300
+    assert "language" not in saved
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [
+        "voxtral-mini-4b",
+        "cohere-transcribe",
+        "distil-whisper-large-v3",
+        "distil-whisper-medium-en",
+        "whisper-small",
+        "whisper-medium",
+        "whisper-base",
+    ],
+)
+def test_a_removed_model_falls_back_to_parakeet_with_one_log_line(tmp_path, caplog, removed):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f"""[inference]
+server_url = "ws://localhost:8000/v1/realtime"
+model = "{removed}"
+""",
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING", logger="nexusvox.config"):
+        cfg = load_config(config_path)
+
+    assert cfg.inference.model == "parakeet-tdt-0.6b"
+    assert cfg.inference.server_url == "http://localhost:8002/v1/audio/transcriptions"
+    assert [r.getMessage() for r in caplog.records if removed in r.getMessage()] == [
+        f"Model {removed!r} is no longer available; using parakeet-tdt-0.6b instead."
+    ]
+
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="nexusvox.config"):
+        load_config(config_path)  # the file still names the old model: no second line
+    assert not [r for r in caplog.records if removed in r.getMessage()]
+
+
+def test_a_removed_model_keeps_a_deliberate_server_address(tmp_path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """[inference]
+server_url = "http://gpu-box.lan:9000/v1/audio/transcriptions"
+model = "cohere-transcribe"
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(config_path)
+
+    assert cfg.inference.model == "parakeet-tdt-0.6b"
+    assert cfg.inference.server_url == "http://gpu-box.lan:9000/v1/audio/transcriptions"
+
+
+def test_the_registry_keeps_only_parakeet_whisper_turbo_and_the_custom_slot():
+    from nexusvox.config import MODEL_REGISTRY
+
+    assert list(MODEL_REGISTRY) == ["parakeet-tdt-0.6b", "whisper-large-v3-turbo", "custom-server"]
+
+
+def test_download_state_of_the_in_process_models(tmp_path):
+    from nexusvox.config import model_download_state
+
+    assert model_download_state("custom-server") == {"downloaded": None, "size": ""}
+    assert model_download_state("parakeet-tdt-0.6b", tmp_path) == {"downloaded": False, "size": "~670 MB"}
+    assert model_download_state("whisper-large-v3-turbo", tmp_path)["size"] == "~1.6 GB"
+
+    snapshot = tmp_path / "models--istupakov--parakeet-tdt-0.6b-v3-onnx"
+    (snapshot / "snapshots" / "abc").mkdir(parents=True)
+    (snapshot / "snapshots" / "abc" / "encoder-model.int8.onnx").write_bytes(b"x")
+    (snapshot / "refs").mkdir()
+    (snapshot / "refs" / "main").write_text("abc")
+
+    assert model_download_state("parakeet-tdt-0.6b", tmp_path)["downloaded"] is True

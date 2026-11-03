@@ -19,16 +19,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from ..config import MODEL_REGISTRY, InferenceConfig
+from ..config import MODEL_REGISTRY, InferenceConfig, model_download_state
 from ..logsetup import Text
 from ..transcriber import SPEAKERS_NEED_GPU, BaseTranscriber, TranscriptionResult, Word
 
 logger = logging.getLogger(__name__)
-
-# Where onnx-asr fetches the model from, and the file whose presence in the Hugging Face cache
-# means the download is done (the encoder is the big one).
-MODEL_REPO = "istupakov/parakeet-tdt-0.6b-v3-onnx"
-_CACHE_PROBE_FILE = "encoder-model.int8.onnx"
 
 SAMPLE_RATE = 16_000
 # Audio up to this long goes to the model in one call; longer audio is cut at pauses into segments
@@ -238,12 +233,9 @@ class LocalParakeetTranscriber(BaseTranscriber):
 
     @staticmethod
     def _is_downloaded() -> bool:
-        try:
-            from huggingface_hub import try_to_load_from_cache
-
-            return isinstance(try_to_load_from_cache(MODEL_REPO, _CACHE_PROBE_FILE), str)
-        except Exception:
-            return True  # cannot tell; report "loading" rather than a download that may not happen
+        # The registry names the repo and the file that proves the download (the same check the dashboard uses).
+        downloaded = model_download_state("parakeet-tdt-0.6b")["downloaded"]
+        return downloaded is not False  # cannot tell: report "loading" rather than a download that may not happen
 
     @classmethod
     def _get_model(cls, onnx_model: str, quantization: str):

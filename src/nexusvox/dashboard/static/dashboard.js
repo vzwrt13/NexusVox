@@ -247,9 +247,7 @@ document.getElementById("btn-clear-dates").addEventListener("click", () => {
 });
 
 // ── Settings ─────────────────────────────────────────────────────────
-const toggle = document.getElementById("auto-lang-toggle");
 const translateToggle = document.getElementById("translate-toggle");
-const languageSelect = document.getElementById("language-select");
 const hotkeyModeSelect = document.getElementById("hotkey-mode-select");
 const micGuardToggle = document.getElementById("mic-guard-toggle");
 const storeAudioToggle = document.getElementById("store-audio-toggle");
@@ -406,7 +404,6 @@ function postSetting(path, body) {
   });
 }
 
-toggle.addEventListener("change", () => postSetting("/api/settings/auto-language-detection", { enabled: toggle.checked }));
 translateToggle.addEventListener("change", async () => {
   await postSetting("/api/settings/translate", { enabled: translateToggle.checked });
   loadTranslatorStatus();
@@ -435,7 +432,6 @@ async function loadTranslatorStatus() {
       "○ No translator at " + s.url + (translateToggle.checked ? " — text is typed untranslated" : "");
   }
 }
-languageSelect.addEventListener("change", () => postSetting("/api/settings/language", { language: languageSelect.value }));
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 storeAudioToggle.addEventListener("change", () => postSetting("/api/settings/store-audio", { enabled: storeAudioToggle.checked }));
 logFullTextToggle.addEventListener("change", () => postSetting("/api/settings/log-full-text", { enabled: logFullTextToggle.checked }));
@@ -558,9 +554,7 @@ hotkeyResetBtn.addEventListener("click", () => {
 
 async function loadSettings() {
   const s = await api("/api/settings");
-  toggle.checked = s.auto_language_detection;
   translateToggle.checked = s.translate_enabled;
-  languageSelect.value = s.language;
   hotkeyModeSelect.value = s.hotkey_mode;
   renderHotkey(s);
   if (!pasteKeySelect.options.length) {
@@ -1027,6 +1021,14 @@ async function saveSymbols() {
 // ── Model Switcher ──────────────────────────────────────────────────
 const modelSelect = document.getElementById("model-select");
 
+// " ✓ downloaded" or " · not downloaded (~670 MB)" for a model with a copy on this PC; nothing for the
+// custom server, or when the cache could not be read.
+function modelDownloadMark(m) {
+  if (m.downloaded === true) return " ✓ downloaded";
+  if (m.downloaded === false) return ` · not downloaded${m.size ? ` (${m.size})` : ""}`;
+  return "";
+}
+
 async function loadModelSwitcher() {
   const [models, current] = await Promise.all([
     fetch("/api/models").then((r) => r.json()),
@@ -1034,7 +1036,7 @@ async function loadModelSwitcher() {
   ]);
   modelSpecs = Object.fromEntries(models.map((m) => [m.id, m]));
   modelSelect.innerHTML = models.map((m) =>
-    `<option value="${m.id}"${m.id === current.model ? " selected" : ""}>${m.name}</option>`
+    `<option value="${m.id}"${m.id === current.model ? " selected" : ""}>${m.name}${modelDownloadMark(m)}</option>`
   ).join("");
   renderModelOverview(current.model);
   // An in-process model (Parakeet on CPU) may still be downloading or loading from the start.
@@ -1052,12 +1054,10 @@ function renderModelOverview(modelId) {
   let runtimeLabel;
   if (m.custom) {
     runtimeLabel = "External server (no Docker)";
-  } else if (m.inprocess_supported && !m.requires_gpu) {
+  } else if (m.inprocess_supported) {
     runtimeLabel = "CPU in-process · GPU via Docker";
-  } else if (m.requires_gpu) {
-    runtimeLabel = "GPU only (Docker)";
   } else {
-    runtimeLabel = "CPU in-process";
+    runtimeLabel = "GPU (Docker)";
   }
   const rows = [
     ["Description", escapeHtml(m.description)],
@@ -1135,6 +1135,8 @@ function pollModelStatus(prevModel) {
         clearInterval(interval);
         modelSelect.dataset.prev = modelSelect.value;
         modelSelect.disabled = false;
+        // The switch downloaded the model: redraw the list so its mark follows.
+        loadModelSwitcher();
         setTimeout(hideModelStatus, 2000);
       } else if (data.status === "error") {
         clearInterval(interval);

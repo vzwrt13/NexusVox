@@ -21,6 +21,7 @@ from .assistant import parse_assistant_command, send_to_assistant, send_to_servi
 from .audio import AudioCapture
 from .clipboard import ClipboardError
 from .config import (
+    DEFAULT_MODEL,
     FEEDBACK_MODES,
     MODEL_REGISTRY,
     Config,
@@ -36,7 +37,7 @@ from .extensions import ActiveApp, load_extensions, loaded_extensions
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, MeetingHotkey, describe_hotkey
 from .injector import foreground_window, inject_text
-from .lang_detect import detect_language
+from .lang_detect import stored_language
 from .llm import LlmError
 from .llm import warm_up as llm_warm_up
 from .logsetup import Text
@@ -75,7 +76,6 @@ class _Recording:
     transcribe_ms: int
 
 
-_CPU_FALLBACK_MODEL = "whisper-large-v3-turbo"
 # A key press older than this before the recording started is not the start of this take.
 MAX_TAKE_LEAD_S = 10.0
 
@@ -83,21 +83,20 @@ logger = logging.getLogger(__name__)
 
 
 def apply_startup_fallback(inference: InferenceConfig, device: str) -> None:
-    """Swap a model that cannot start on this machine for a bundled one, for this session.
+    """Swap a model that cannot start for Parakeet, for this session.
 
-    A GPU model on CPU falls back to Whisper in-process. The custom-server slot without
-    a URL cannot build a client, so it falls back too instead of crashing before the
-    dashboard is up. The TOML is not rewritten here.
+    The custom-server slot without a URL cannot build a client, so it falls back instead of crashing
+    before the dashboard is up. The TOML is not rewritten here.
     """
     info = MODEL_REGISTRY.get(inference.model, {})
-    if device == "cpu" and info.get("requires_gpu"):
-        reason = "requires a GPU but device is CPU"
-    elif info.get("custom") and not inference.custom.url:
-        reason = "needs [inference.custom].url in config.toml"
-    else:
+    if not (info.get("custom") and not inference.custom.url):
         return
-    fallback = _CPU_FALLBACK_MODEL if device == "cpu" else InferenceConfig().model
-    logger.warning("Configured model %s %s. Falling back to %s for this session.", inference.model, reason, fallback)
+    fallback = DEFAULT_MODEL
+    logger.warning(
+        "Configured model %s needs [inference.custom].url in config.toml. Falling back to %s for this session.",
+        inference.model,
+        fallback,
+    )
     inference.model = fallback
     if model_needs_docker(fallback, device):
         inference.server_url = str(MODEL_REGISTRY[fallback]["default_url"])
@@ -115,9 +114,8 @@ class NexusVoxApp:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._running = False
 
-        # Resolve device once at startup. If the configured model requires a
-        # GPU but we're on CPU, fall back to Whisper (without rewriting the
-        # user's TOML — they can adjust in the dashboard later).
+        # Resolve device once at startup. A configured model that cannot start (a custom server
+        # without a URL) falls back to Parakeet without rewriting the user's TOML.
         self._device = resolve_device(config.inference.device)
         logger.info(
             "Resolved compute device: %s (requested: %s)",
@@ -140,8 +138,6 @@ class NexusVoxApp:
         self._transcriber = create_transcriber(
             config.inference,
             device=self._device,
-            language=config.language,
-            auto_detect_language=config.auto_language_detection,
             auto_fallback=config.inference.device == "auto",
         )
         self._db = Database(config.database)
@@ -179,8 +175,6 @@ class NexusVoxApp:
 
         self._tray = SystemTray(
             on_quit=self._on_quit,
-            on_toggle_language=self._toggle_language,
-            get_language=lambda: self._config.language,
             on_toggle_translate=self._toggle_translate,
             get_translate=lambda: self._config.translator.enabled,
             on_open_dashboard=self._open_dashboard,
@@ -338,7 +332,7 @@ class NexusVoxApp:
     async def switch_model(self, model_id: str) -> None:
         """Switch to a different transcription model.
 
-        In-process (Whisper-on-CPU) and custom-server switches skip Docker entirely;
+        In-process (Parakeet or Whisper on CPU) and custom-server switches skip Docker entirely;
         GPU-backed switches stop the old container, start the new one, and wait for health.
         """
         if model_id not in MODEL_REGISTRY:
@@ -383,8 +377,6 @@ class NexusVoxApp:
             self._transcriber = create_transcriber(
                 self._config.inference,
                 device=self._device,
-                language=self._config.language,
-                auto_detect_language=self._config.auto_language_detection,
                 auto_fallback=self._config.inference.device == "auto",
             )
             save_config(self._config)
@@ -416,8 +408,6 @@ class NexusVoxApp:
                 self._transcriber = create_transcriber(
                     self._config.inference,
                     device=self._device,
-                    language=self._config.language,
-                    auto_detect_language=self._config.auto_language_detection,
                     auto_fallback=self._config.inference.device == "auto",
                 )
             except Exception:
@@ -656,9 +646,11 @@ class NexusVoxApp:
                             processed.typed, self._config.learn_from_edits.window_s, processed.spoken
                         )
             latency_ms = int(((done_at or time.monotonic()) - stop_time) * 1000)
+            # lingua loads its models on first use: keep that off the event loop.
+            language = await loop.run_in_executor(None, stored_language, raw_text)
             record = self._db.save_transcription(
                 text=processed.saved,
-                language=self._language_of(raw_text),
+                language=language,
                 duration_ms=duration_ms,
                 confidence=result.confidence,
                 model=self._transcriber.model,
@@ -768,9 +760,6 @@ class NexusVoxApp:
             return text
         return registry.dictation(text, self._active_app())
 
-    def _language_of(self, spoken: str) -> str:
-        return detect_language(spoken) if self._config.auto_language_detection else self._config.language
-
     def _save_command(
         self,
         recording: _Recording | None,
@@ -786,7 +775,7 @@ class NexusVoxApp:
         """
         record = self._db.save_transcription(
             text=label,
-            language=self._language_of(spoken) if spoken else self._config.language,
+            language=stored_language(spoken),
             duration_ms=recording.duration_ms if recording else 0,
             confidence=recording.confidence if recording else None,
             model=self._transcriber.model if recording else None,
@@ -1030,11 +1019,10 @@ class NexusVoxApp:
         """Open the dashboard window."""
         open_dashboard(self._db, self._config, app=self)
 
-    def _toggle_language(self) -> None:
-        """Toggle between English and German."""
-        self._config.language = "de" if self._config.language == "en" else "en"
-        save_config(self._config)
-        logger.info("Language switched to: %s", self._config.language)
+    def open_dashboard_from_second_start(self) -> None:
+        """A second start of NexusVox rang the doorbell: show the dashboard of this instance."""
+        logger.info("A second NexusVox start was detected; opening the dashboard of this instance")
+        self._open_dashboard()
 
     def _toggle_translate(self) -> None:
         """Switch translate-before-inject on or off, and keep it across restarts."""

@@ -178,9 +178,12 @@ def test_a_busy_port_means_no_browser_and_no_started_flag(db, monkeypatch):
         raise OSError("address in use")
 
     opened: list[str] = []
-    monkeypatch.setattr(dashboard, "make_server", busy)
+    monkeypatch.setattr(dashboard, "_make_server", busy)
+    monkeypatch.setattr(dashboard, "show_message", lambda *a, **k: None)
     monkeypatch.setattr(dashboard.webbrowser, "open", opened.append)
     monkeypatch.setattr(dashboard, "_server_started", False)
+    monkeypatch.setattr(dashboard, "_start_failed", False)
+    monkeypatch.setattr(dashboard, "_api", None)
     monkeypatch.setattr(dashboard, "_guard", None)
     monkeypatch.setattr(dashboard.DashboardAPI, "sweep_meeting_leftovers", lambda self: None)
 
@@ -188,3 +191,124 @@ def test_a_busy_port_means_no_browser_and_no_started_flag(db, monkeypatch):
 
     assert opened == []
     assert dashboard._server_started is False
+
+
+def _fresh_dashboard(db, monkeypatch):
+    import nexusvox.dashboard as dashboard
+
+    shown: list[str] = []
+    opened: list[str] = []
+    monkeypatch.setattr(dashboard, "show_message", shown.append)
+    monkeypatch.setattr(dashboard.webbrowser, "open", opened.append)
+    monkeypatch.setattr(dashboard, "_server_started", False)
+    monkeypatch.setattr(dashboard, "_start_failed", False)
+    monkeypatch.setattr(dashboard, "_api", None)
+    monkeypatch.setattr(dashboard, "_guard", None)
+    monkeypatch.setattr(dashboard, "_port", dashboard._PORT)
+    monkeypatch.setattr(dashboard.DashboardAPI, "sweep_meeting_leftovers", lambda self: None)
+    return dashboard, shown, opened
+
+
+def test_a_held_port_falls_back_to_another_and_opens_that_one(db, monkeypatch):
+    import socket
+
+    dashboard, shown, opened = _fresh_dashboard(db, monkeypatch)
+    started: list[int] = []
+
+    class FakeServer:
+        def serve_forever(self):
+            pass
+
+    def fake_make_server(port, wsgi_app):
+        started.append(port)
+        return FakeServer()
+
+    with socket.socket() as probe:  # a port nobody holds, standing in for the usual one
+        probe.bind(("127.0.0.1", 0))
+        free = probe.getsockname()[1]
+    monkeypatch.setattr(dashboard, "_PORT", free)
+    monkeypatch.setattr(dashboard, "_FALLBACK_PORTS", (free + 1, free + 2))
+
+    def make(port, wsgi_app):
+        if port == free:
+            raise OSError("address in use")
+        return fake_make_server(port, wsgi_app)
+
+    monkeypatch.setattr(dashboard, "_make_server", make)
+    dashboard.open_dashboard(db, Config())
+
+    assert started == [free + 1]
+    assert len(opened) == 1 and opened[0].startswith(f"http://127.0.0.1:{free + 1}/?launch=")
+    assert shown == []
+
+
+def test_every_port_held_shows_one_message_and_is_not_retried(db, monkeypatch):
+    dashboard, shown, opened = _fresh_dashboard(db, monkeypatch)
+    attempts: list[int] = []
+
+    def busy(port, wsgi_app):
+        attempts.append(port)
+        raise OSError("address in use")
+
+    monkeypatch.setattr(dashboard, "_make_server", busy)
+
+    dashboard.open_dashboard(db, Config())
+    first_api = dashboard.running_dashboard_api()
+    tried = len(attempts)
+    dashboard.open_dashboard(db, Config())
+
+    assert opened == []
+    assert dashboard._server_started is False
+    assert len(shown) == 1 and "port" in shown[0]
+    assert len(attempts) == tried  # not probed again
+    assert dashboard.running_dashboard_api() is first_api  # one API, so one meeting session
+
+
+def _free_ports(count):
+    import socket
+
+    socks = [socket.socket() for _ in range(count)]
+    try:
+        for sock in socks:
+            sock.bind(("127.0.0.1", 0))
+        return [sock.getsockname()[1] for sock in socks]
+    finally:
+        for sock in socks:
+            sock.close()
+
+
+def test_real_held_port_falls_back_and_serves(db, monkeypatch):
+    import socket
+    import urllib.request
+
+    dashboard, shown, opened = _fresh_dashboard(db, monkeypatch)
+    first, second = _free_ports(2)
+    monkeypatch.setattr(dashboard, "_PORT", first)
+    monkeypatch.setattr(dashboard, "_FALLBACK_PORTS", (second,))
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", first))
+        holder.listen()
+        dashboard.open_dashboard(db, Config())  # must not raise SystemExit
+
+    assert shown == []
+    assert len(opened) == 1 and opened[0].startswith(f"http://127.0.0.1:{second}/?launch=")
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor())  # the launch URL sets the cookie
+    with opener.open(opened[0], timeout=5) as response:
+        assert response.status == 200
+
+
+def test_real_every_port_held_gives_one_message_and_no_exit(db, monkeypatch):
+    import socket
+
+    dashboard, shown, opened = _fresh_dashboard(db, monkeypatch)
+    first, second = _free_ports(2)
+    monkeypatch.setattr(dashboard, "_PORT", first)
+    monkeypatch.setattr(dashboard, "_FALLBACK_PORTS", (second,))
+    with socket.socket() as one, socket.socket() as two:
+        one.bind(("127.0.0.1", first))
+        two.bind(("127.0.0.1", second))
+        dashboard.open_dashboard(db, Config())
+        dashboard.open_dashboard(db, Config())
+
+    assert opened == []
+    assert len(shown) == 1 and "port" in shown[0]

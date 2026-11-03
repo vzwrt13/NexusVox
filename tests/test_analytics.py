@@ -1062,3 +1062,15 @@ def test_dictionary_usage_shows_the_latest_replacement_of_a_removed_entry(db, se
     (item,) = get_dictionary_usage(session_factory)["items"]
 
     assert (item["right"], item["hits"], item["removed"]) == ("NexusVox", 2, True)
+
+
+def test_language_distribution_skips_undetermined(session_factory):
+    _seed(
+        session_factory,
+        [
+            {"text": "hello", "language": "en", "duration_ms": 1000, "created_at": datetime(2026, 3, 15)},
+            {"text": "[polish] x", "language": "und", "duration_ms": 0, "created_at": datetime(2026, 3, 15)},
+        ],
+    )
+
+    assert get_language_distribution(session_factory)["labels"] == ["EN"]

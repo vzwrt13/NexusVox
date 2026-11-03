@@ -19,7 +19,7 @@ pip install -e .
 python -m nexusvox
 ```
 
-That runs the model in-process — Parakeet (ONNX, int8) by default, Whisper if you pick it. The model downloads from HuggingFace on first use (~670 MB for Parakeet, ~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Parakeet on CPU has no speaker detection for uploads — that needs the GPU container.
+That runs the model in-process — Parakeet (ONNX, int8) by default, Whisper if you pick it. The model downloads from HuggingFace on first use (~670 MB for Parakeet, ~1.6 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Parakeet on CPU has no speaker detection for uploads — that needs the GPU container.
 
 To stay on CPU even if you later add a GPU, open the dashboard from the tray icon → Settings → **Advanced** → **Compute Device** → set to `CPU`.
 
@@ -40,10 +40,10 @@ winget install Gyan.FFmpeg    # or: choco install ffmpeg
 ffmpeg -version               # verify — open a new terminal first so PATH is picked up
 ```
 
-**GPU path** (Voxtral / Cohere / Parakeet, plus faster Whisper):
+**GPU path** (Parakeet, plus faster Whisper):
 - **NVIDIA GPU** with CUDA runtime installed (VRAM depends on model — see table below)
 - **Docker Desktop** with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-- **Hugging Face account** with an access token ([create one here](https://huggingface.co/settings/tokens)) — only for Cohere Transcribe, the one gated model. Voxtral and Parakeet download without a token.
+- **Hugging Face token** (optional) — no model needs one; a token only raises the download rate limit ([create one here](https://huggingface.co/settings/tokens)).
 
 ---
 
@@ -51,34 +51,26 @@ ffmpeg -version               # verify — open a new terminal first so PATH is 
 
 | Model | Hugging Face ID | Model license | Runtime | Resources | Docker? |
 |---|---|---|---|---|---|
-| Whisper Small (CPU-optimized) | `Systran/faster-whisper-small` | MIT | in-process | CPU, ~500 MB RAM | **No** |
-| Whisper Base (CPU) | `Systran/faster-whisper-base` | MIT | in-process | CPU, ~300 MB RAM | **No** |
-| Whisper Medium (CPU) | `Systran/faster-whisper-medium` | MIT | in-process | CPU, ~1.5 GB RAM | **No** |
-| Distil-Whisper Medium.en (EN, CPU) | `Systran/faster-distil-whisper-medium.en` | MIT | in-process | CPU, ~800 MB RAM | **No** |
-| Distil-Whisper Large V3 (EN, CPU) | `Systran/faster-distil-whisper-large-v3` | MIT | in-process | CPU, ~1.5 GB RAM | **No** |
 | Whisper Large V3 Turbo | `deepdml/faster-whisper-large-v3-turbo-ct2` | MIT | in-process (CPU) / Docker (GPU) | CPU or ~4 GB VRAM | **No** on CPU |
-| Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ² | Docker (GPU) / in-process ONNX int8 (CPU) | ~2 GB VRAM, or CPU (~670 MB download) | Yes on GPU |
-| Cohere Transcribe | `CohereLabs/cohere-transcribe-03-2026` | Apache-2.0 ¹ | Docker | ~6 GB VRAM | Yes |
-| Voxtral Mini 4B | `mistralai/Voxtral-Mini-4B-Realtime-2602` | Apache-2.0 | Docker | ≥16 GB VRAM | Yes |
-| Custom server ³ | — | your server's | your own server | none on this PC | **No** |
+| Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ¹ | Docker (GPU) / in-process ONNX int8 (CPU) | ~2 GB VRAM, or CPU (~670 MB download) | Yes on GPU |
+| Custom server ² | — | your server's | your own server | none on this PC | **No** |
 
-¹ **Gated on Hugging Face** — requires accepting the terms on the model page plus an `HF_TOKEN` (see step 1.1). It is the only model that needs a token.
-² **Attribution required** — CC-BY-4.0 obliges you to credit NVIDIA if you redistribute the model.
-³ **Your own backend** — a server you run that speaks the OpenAI-compatible HTTP or vLLM realtime WebSocket protocol, set under `[inference.custom]`. Unlike every other entry, audio leaves this PC if that server is remote. Setup and protocol contract: [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md).
+¹ **Attribution required** — CC-BY-4.0 obliges you to credit NVIDIA if you redistribute the model.
+² **Your own backend** — a server you run that speaks the OpenAI-compatible HTTP or realtime WebSocket protocol, set under `[inference.custom]`. Unlike every other entry, audio leaves this PC if that server is remote. Setup and protocol contract: [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md).
 
 Model licenses are separate from NexusVox's own AGPL-3.0 license; no model weights ship with NexusVox. Check the terms of the model you pick, especially for commercial use.
 
-**Whisper Small** is the fastest CPU option — use it for push-to-talk on a laptop. **Whisper Base** is smaller and faster still, at lower accuracy. **Whisper Medium** is the best multilingual CPU option including German. The **Distil-Whisper** variants are English-only but noticeably faster than their full counterparts. **Whisper Large V3 Turbo** is higher-accuracy on CPU but several times slower; on GPU it's the best balance. **Voxtral** offers real-time WebSocket streaming with the highest quality if you have a 16 GB+ GPU.
+**Parakeet** is the default: the fastest and most accurate of the measured models, 25 European languages with automatic detection. **Whisper Large V3 Turbo** covers 99 languages — pick it for a language Parakeet does not know; on CPU it is several times slower than Parakeet, on a GPU it is fast. The dashboard marks each model as downloaded or not, with its size. A config that still names a removed model (Voxtral, Cohere, the smaller Whisper sizes, Distil-Whisper) starts on Parakeet.
 
 ---
 
 ## 1. Start the Inference Server (Docker — GPU users only)
 
-> **CPU / Whisper users: skip this section.** Whisper runs in-process — no Docker container needed.
+> **CPU users: skip this section.** Parakeet and Whisper run in-process — no Docker container needed.
 
 ### 1.1 Configure the Hugging Face Token
 
-> Required only for **Cohere Transcribe**, the one gated model. Voxtral and Parakeet download automatically without a token — skip this step if you are not using Cohere.
+> Optional. No model needs a token; skip this step unless you hit Hugging Face download rate limits.
 
 ```bash
 cd docker
@@ -91,8 +83,6 @@ Open `docker/.env` and replace the placeholder with your token:
 HF_TOKEN=hf_your_actual_token_here
 ```
 
-Before the first Cohere run, open the [Cohere Transcribe 03-2026](https://huggingface.co/CohereLabs/cohere-transcribe-03-2026) model page while logged in and accept the terms — the model is gated, and the download fails without it even with a valid token.
-
 ### 1.2 Build and Start the Container
 
 Use `--profile` to select your model:
@@ -100,8 +90,7 @@ Use `--profile` to select your model:
 ```bash
 cd docker
 docker compose --profile parakeet up --build  # Parakeet (HTTP, port 8002) -- default
-docker compose --profile voxtral up --build   # Voxtral (WebSocket, port 8000)
-docker compose --profile cohere up --build    # Cohere (HTTP, port 8001)
+docker compose --profile whisper up --build   # Whisper Large V3 Turbo (HTTP, port 8003)
 ```
 
 The first start will download the model and cache it in a Docker volume. Subsequent starts are fast.
@@ -147,12 +136,8 @@ cp src/nexusvox/config.example.toml config.toml
 
 ```toml
 [general]
-# Language for transcription: "en" or "de"
-language = "en"
 # Delay in ms between releasing modifier keys and sending Ctrl+V paste
 injection_delay_ms = 500
-# Enable automatic language detection per recording (experimental)
-auto_language_detection = false
 # How much the console log says: "DEBUG", "INFO", "WARNING" or "ERROR" (takes effect on the next start)
 log_level = "INFO"
 # The log is also written to %LOCALAPPDATA%\NexusVox\logs (one file per day, 7 days kept).
@@ -180,16 +165,13 @@ chunk_size = 4096
 
 [inference]
 # Server URL — used by Docker-backed models; ignored when Whisper runs in-process on CPU.
-server_url = "ws://localhost:8000/v1/realtime"
+server_url = "http://localhost:8002/v1/audio/transcriptions"
 # Transcription delay in ms (multiples of 80, range 80-2400)
 transcription_delay_ms = 480
-# Transcription model. In-process on CPU (no Docker): "parakeet-tdt-0.6b" (ONNX int8),
-# "whisper-small", "whisper-base", "whisper-medium", "whisper-large-v3-turbo",
-# "distil-whisper-large-v3" (EN), "distil-whisper-medium-en" (EN).
-# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe". Parakeet and
-# Whisper also run there, in a container.
+# Transcription model: "parakeet-tdt-0.6b" (default; in-process on CPU or a Docker container on a GPU)
+# or "whisper-large-v3-turbo" (99 languages; same two ways to run).
 # Your own server (see [inference.custom] below): "custom-server".
-model = "voxtral-mini-4b"
+model = "parakeet-tdt-0.6b"
 # Compute device: "auto" (detect CUDA, else CPU), "cuda", or "cpu".
 # Use "cpu" to force in-process Whisper — useful for benchmarking on a GPU machine.
 device = "auto"
@@ -227,7 +209,7 @@ bypass_symbols = false
 symbols = ["period", "comma", "question mark", "exclamation mark"]
 ```
 
-The defaults work out of the box — you only need to edit `config.toml` if you want to change the model, language, or tweak audio/inference settings.
+The defaults work out of the box — you only need to edit `config.toml` if you want to change the model or tweak audio/inference settings.
 
 ---
 
@@ -245,7 +227,7 @@ You should see:
 NexusVox started. Hold Ctrl+Shift+Alt to talk.
 ```
 
-A system tray icon also appears, where you can toggle the language or quit the app. Open the dashboard from the tray icon (left-click) for analytics, settings, and transcription history.
+A system tray icon also appears, where you can toggle translation or quit the app. Open the dashboard from the tray icon (left-click) for analytics, settings, and transcription history.
 
 ---
 
@@ -310,10 +292,11 @@ NexusVox writes its log to `%LOCALAPPDATA%\NexusVox\logs` (one file per day, the
 |---|---|
 | `Connection refused` on start | Make sure the Docker container is running and healthy. Check `docker compose logs`. |
 | No audio captured | Verify your default microphone is set correctly in Windows Sound settings. |
-| Model download fails | Only Cohere Transcribe is gated: check your `HF_TOKEN` in `docker/.env` and make sure you accepted the terms on its Hugging Face model page. Other models need no token — a failure there is usually network or disk space. |
-| High GPU memory usage | The default `--gpu-memory-utilization 0.70` reserves 70% of VRAM. Lower it in `docker-compose.yml` if needed. |
+| Model download fails | No model needs a token, so a failure is usually network or disk space. A Hugging Face token in `docker/.env` raises the rate limit. |
 | Text not appearing at cursor | Some applications block simulated Ctrl+V. Try a standard text editor first. |
 | `Audio conversion failed` on upload | ffmpeg is missing from your `PATH`. Install it (`winget install Gyan.FFmpeg`), then restart NexusVox. WAV files upload without ffmpeg. |
+| Starting NexusVox again while it runs | The second start opens the running instance's dashboard and exits; there is only ever one tray icon and one hotkey hook. |
+| The dashboard does not open | Port 47392 is held by another program. NexusVox then uses the next free port in 47400-47409 and logs a warning; if all are held it shows a message and logs the reason. Dictation keeps working. |
 
 ---
 
@@ -324,7 +307,6 @@ NexusVox/
 ├── pyproject.toml              # Project metadata & dependencies
 ├── config.toml                 # Your local configuration (git-ignored)
 ├── docker/
-│   ├── Dockerfile              # vLLM image (Voxtral/Cohere)
 │   ├── Dockerfile.parakeet     # NeMo-based Parakeet image
 │   ├── Dockerfile.whisper      # faster-whisper image
 │   ├── docker-compose.yml      # Container orchestration (4 profiles)

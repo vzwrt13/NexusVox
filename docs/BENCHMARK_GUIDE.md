@@ -28,7 +28,7 @@ FLEURS samples stream from HuggingFace Hub — no manual download, but the first
 
 ### 1. Server-backed (GPU)
 
-For models that run inside a Docker container — `voxtral-mini-4b`, `cohere-transcribe`, `parakeet-tdt-0.6b`, and the GPU Whisper build. The benchmark POSTs WAVs to the HTTP endpoint.
+For models that run inside a Docker container — `parakeet-tdt-0.6b` and the GPU Whisper build. The benchmark POSTs WAVs to the HTTP endpoint.
 
 ```bash
 # Start the container first (requires NVIDIA GPU)
@@ -45,7 +45,7 @@ The script runs a `/health` probe before starting and aborts with an actionable 
 For CPU-friendly models that run directly via `faster-whisper` — no Docker, no server. Add `--device cpu`:
 
 ```bash
-python scripts/benchmark.py --model distil-whisper-large-v3 --lang en_us --limit 200 --device cpu
+python scripts/benchmark.py --model whisper-large-v3-turbo --lang en_us --limit 200 --device cpu
 ```
 
 First run downloads the model (~200 MB–1.5 GB depending on size) to `~/.cache/huggingface/`. Subsequent runs reuse the cache.
@@ -61,30 +61,26 @@ python scripts/benchmark.py --list-models
 50-sample smoke test:
 
 ```bash
-python scripts/benchmark.py --model whisper-small --lang en_us --limit 50 --device cpu
+python scripts/benchmark.py --model whisper-large-v3-turbo --lang en_us --limit 50 --device cpu
 ```
 
-Full CPU sweep for the current plan (both languages, 200 samples each):
+Larger CPU run (200 samples):
 
 ```bash
-python scripts/benchmark.py --model distil-whisper-large-v3  --lang en_us --limit 200 --device cpu
-python scripts/benchmark.py --model distil-whisper-medium-en --lang en_us --limit 200 --device cpu
-python scripts/benchmark.py --model whisper-medium           --lang both  --limit 200 --device cpu
-python scripts/benchmark.py --model whisper-base             --lang both  --limit 200 --device cpu
+python scripts/benchmark.py --model whisper-large-v3-turbo  --lang en_us --limit 200 --device cpu
 ```
 
-CPU baselines for comparison:
+Both languages:
 
 ```bash
 python scripts/benchmark.py --model whisper-large-v3-turbo --lang both --limit 100 --device cpu
-python scripts/benchmark.py --model whisper-small          --lang both --limit 100 --device cpu
 ```
 
 ## CLI reference
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--model` | — (required) | Registry key, e.g. `whisper-medium` |
+| `--model` | — (required) | Registry key, e.g. `whisper-large-v3-turbo` |
 | `--lang` | `en_us` | `en_us`, `de_de`, or `both` |
 | `--limit` | none (full split) | Max samples per language |
 | `--device` | `gpu` | `gpu` (HTTP) or `cpu` (in-process) |
@@ -118,7 +114,7 @@ A model is "CPU-shippable" for NexusVox if it hits, on your target CPU:
 - **RTF ≤ 0.20** — 10 s of speech transcribes in ≤ 2 s, preserving the push-to-talk feel.
 - **WER ≤ 8 % EN and ≤ 12 % DE** — comparable to the GPU baseline on FLEURS.
 
-If one model clears both bars, it becomes the single default. If EN and DE have different winners, the registry can expose per-language defaults and the tray language toggle swaps automatically.
+If one model clears both bars, it becomes the single default. If EN and DE have different winners, the registry can expose per-language defaults.
 
 ## Viewing results in the dashboard
 
@@ -127,7 +123,7 @@ Open the dashboard from the tray icon, append `?dev` to the URL in the address b
 ## Troubleshooting
 
 - **"Cannot reach … server at http://…:800X/health"** — the Docker container for that model profile isn't running. Start it with `docker compose --profile <profile> up`.
-- **"Model is still loading"** — container came up but vLLM hasn't finished loading weights. Wait 20–60 s and retry.
+- **"Model is still loading"** — container came up but hasn't finished loading weights. Wait 20–60 s and retry.
 - **"faster-whisper is required for --device cpu"** — install the dev extras: `pip install -e ".[dev]"`.
 - **Very slow first CPU run** — model download (several hundred MB). Check `~/.cache/huggingface/` is growing. Subsequent runs reuse the cache.
 - **`ModuleNotFoundError: datasets`** — install with `pip install "datasets<3.0.0"`. Newer versions break the FLEURS `trust_remote_code` flag.

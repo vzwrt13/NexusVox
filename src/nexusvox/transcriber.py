@@ -207,7 +207,7 @@ class VoxtralRealtimeTranscriber(BaseTranscriber):
     def __init__(self, config: InferenceConfig) -> None:
         self._server_url = config.server_url
         self._ws: websockets.ClientConnection | None = None
-        self.model = "mistralai/Voxtral-Mini-4B-Realtime-2602"
+        self.model = "realtime"  # a custom server sets its own model_name
 
     async def connect(self) -> None:
         """Connect to the vLLM realtime endpoint and initialize session."""
@@ -338,7 +338,7 @@ class OpenAIHttpTranscriber(BaseTranscriber):
     """Buffers audio chunks, then POSTs complete WAV to an OpenAI-compatible endpoint.
 
     Used for models served via /v1/audio/transcriptions HTTP endpoint
-    (e.g. Cohere Transcribe, Parakeet TDT).
+    (Parakeet TDT, Whisper, a custom server).
 
     Usage per transcription cycle (same as VoxtralRealtimeTranscriber):
         await connect()
@@ -434,8 +434,6 @@ def create_transcriber(
     config: InferenceConfig,
     *,
     device: str | None = None,
-    language: str | None = None,
-    auto_detect_language: bool = False,
     auto_fallback: bool = False,
 ) -> BaseTranscriber:
     """Factory: create the right transcriber based on the configured model and device.
@@ -445,7 +443,6 @@ def create_transcriber(
     LocalParakeetTranscriber (ONNX int8); neither needs Docker.
     With `auto_fallback` (callers pass it when `[inference].device` is "auto") Parakeet on a GPU machine
     becomes `AutoParakeetTranscriber`: the Docker server while it answers, CPU Parakeet when it does not.
-    GPU-only models (voxtral/cohere) raise if selected with device=cpu.
     """
     registry = MODEL_REGISTRY.get(config.model)
     if registry is None:
@@ -479,15 +476,6 @@ def create_transcriber(
             config,
             device=resolved_device,
             compute_type=compute_type,
-            language=language,
-            auto_detect_language=auto_detect_language,
-        )
-
-    if registry.get("requires_gpu") and resolved_device == "cpu":
-        raise RuntimeError(
-            f"Model {config.model!r} requires a GPU, but the resolved device is CPU. "
-            "Switch to a CPU-capable model (e.g. whisper-large-v3-turbo or whisper-small) "
-            "or set [inference].device = 'cuda' in config.toml."
         )
 
     protocol = registry["protocol"]

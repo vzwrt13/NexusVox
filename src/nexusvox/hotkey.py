@@ -257,24 +257,35 @@ class HotkeyListener:
             if self._alt_pending == vk:  # our own re-injected key-up
                 self._alt_pending = None
                 self._cancel_alt_timer()
+                logger.debug("Alt release %#x: re-injected twin seen, passed through", vk)
                 return False
             self._alt_down.discard(vk)
             own_chord = self._chord_alt
             if not self._alt_down:
                 self._chord_alt = False
+            logger.debug(
+                "Alt release %#x pressed: own chord=%s, mark=%s, reinject=%s",
+                vk,
+                own_chord,
+                self._mark,
+                self._config.reinject_alt_release,
+            )
             if not own_chord or not self._config.reinject_alt_release or self._alt_release is None:
                 return False
             if self._alt_pending is not None:
+                logger.debug("Alt release %#x passed through: another one is still pending", vk)
                 return False  # one at a time; the second release goes through as it is
             self._alt_pending = vk
             self._alt_timer = threading.Timer(self._alt_timeout_s, self._alt_timed_out, args=(vk,))
             self._alt_timer.daemon = True
             self._alt_timer.start()
+        logger.debug("Alt release %#x masked: swallowed, re-injecting behind the mask key", vk)
         try:
             sent = self._alt_release(vk, True)
         except Exception:
             logger.exception("Could not re-inject the Alt release")
             sent = False
+        logger.debug("Alt release %#x re-injected: sent=%s", vk, sent)
         if not sent:
             with self._alt_lock:  # let the real key-up through instead
                 self._alt_pending = None
@@ -326,6 +337,7 @@ class HotkeyListener:
         """
         if not self._modifiers & _MENU_MODIFIERS or self._mask_sender is None:
             return
+        logger.debug("Menu mask key sent (combo %s, mark %s)", "pressed" if self._combo_down else "-", self._mark)
         try:
             self._mask_sender()
         except Exception:

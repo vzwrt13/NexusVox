@@ -122,9 +122,9 @@ sample_rate = 44100
 chunk_size = 2048
 
 [inference]
-server_url = "ws://gpu-server:8000/v1/realtime"
+server_url = "http://gpu-server:8003/v1/audio/transcriptions"
 transcription_delay_ms = 240
-model = "cohere-transcribe"
+model = "whisper-large-v3-turbo"
 
 [database]
 path = "test.db"
@@ -140,9 +140,9 @@ path = "test.db"
     assert cfg.hotkey.modifiers == ["ctrl", "alt"]
     assert cfg.audio.sample_rate == 44100
     assert cfg.audio.chunk_size == 2048
-    assert cfg.inference.server_url == "ws://gpu-server:8000/v1/realtime"
+    assert cfg.inference.server_url == "http://gpu-server:8003/v1/audio/transcriptions"
     assert cfg.inference.transcription_delay_ms == 240
-    assert cfg.inference.model == "cohere-transcribe"
+    assert cfg.inference.model == "whisper-large-v3-turbo"
     assert cfg.database.path == "test.db"
 
 
@@ -183,7 +183,9 @@ def test_save_config_roundtrip(tmp_path):
         hotkey=HotkeyConfig(modifiers=["ctrl", "alt"], mode="toggle"),
         audio=AudioConfig(sample_rate=44100, chunk_size=2048),
         inference=InferenceConfig(
-            server_url="ws://test:8000/v1/realtime", transcription_delay_ms=160, model="cohere-transcribe"
+            server_url="http://test:8003/v1/audio/transcriptions",
+            transcription_delay_ms=160,
+            model="whisper-large-v3-turbo",
         ),
         database=DatabaseConfig(path="roundtrip.db", audio_dir="recordings"),
     )
@@ -716,3 +718,57 @@ def test_save_config_writes_back_to_the_file_that_was_loaded(tmp_path, monkeypat
 
     assert not (elsewhere / "config.toml").exists()
     assert load_config(loaded).cleanup.level == "medium"
+
+
+@pytest.mark.parametrize(
+    "removed",
+    [
+        "voxtral-mini-4b",
+        "cohere-transcribe",
+        "distil-whisper-large-v3",
+        "distil-whisper-medium-en",
+        "whisper-small",
+        "whisper-medium",
+        "whisper-base",
+    ],
+)
+def test_a_removed_model_falls_back_to_parakeet_with_one_log_line(tmp_path, caplog, removed):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f"""[inference]
+server_url = "ws://localhost:8000/v1/realtime"
+model = "{removed}"
+""",
+        encoding="utf-8",
+    )
+
+    with caplog.at_level("WARNING", logger="nexusvox.config"):
+        cfg = load_config(config_path)
+
+    assert cfg.inference.model == "parakeet-tdt-0.6b"
+    assert cfg.inference.server_url == "http://localhost:8002/v1/audio/transcriptions"
+    assert [r.getMessage() for r in caplog.records if removed in r.getMessage()] == [
+        f"Model {removed!r} is no longer available; using parakeet-tdt-0.6b instead."
+    ]
+
+
+def test_the_registry_keeps_only_parakeet_whisper_turbo_and_the_custom_slot():
+    from nexusvox.config import MODEL_REGISTRY
+
+    assert list(MODEL_REGISTRY) == ["parakeet-tdt-0.6b", "whisper-large-v3-turbo", "custom-server"]
+
+
+def test_download_state_of_the_in_process_models(tmp_path):
+    from nexusvox.config import model_download_state
+
+    assert model_download_state("custom-server") == {"downloaded": None, "size": ""}
+    assert model_download_state("parakeet-tdt-0.6b", tmp_path) == {"downloaded": False, "size": "~670 MB"}
+    assert model_download_state("whisper-large-v3-turbo", tmp_path)["size"] == "~1.6 GB"
+
+    snapshot = tmp_path / "models--istupakov--parakeet-tdt-0.6b-v3-onnx"
+    (snapshot / "snapshots" / "abc").mkdir(parents=True)
+    (snapshot / "snapshots" / "abc" / "encoder-model.int8.onnx").write_bytes(b"x")
+    (snapshot / "refs").mkdir()
+    (snapshot / "refs" / "main").write_text("abc")
+
+    assert model_download_state("parakeet-tdt-0.6b", tmp_path)["downloaded"] is True

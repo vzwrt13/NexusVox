@@ -30,6 +30,7 @@ from ..config import (
     MeetingConfig,
     cuda_available,
     meeting_hotkey_clash,
+    model_download_state,
     normalize_hotkey_key,
     normalize_speaker_label,
     numbered_speaker_label,
@@ -75,6 +76,7 @@ from ..meeting_transcribe import (
     track_shifts,
 )
 from ..os_commands import NEXUS_ACTIONS
+from ..paths import models_dir
 from ..polish_presets import PolishPreset
 from ..snippets import Snippet, SnippetOption
 from ..transcriber import BaseTranscriber, create_transcriber
@@ -185,7 +187,6 @@ class DashboardAPI:
     # ---- Models -------------------------------------------------------------
 
     def get_available_models(self) -> list[dict]:
-        resolved = resolve_device(self._config.inference.device)
         custom = self._config.inference.custom
         return [
             {
@@ -204,11 +205,11 @@ class DashboardAPI:
                 else info.get("streaming", "false") == "true",
                 "vram_gb": info.get("vram_gb", "—"),
                 "hf_name": info["hf_name"],
-                "requires_gpu": bool(info.get("requires_gpu", True)),
                 "inprocess_supported": bool(info.get("inprocess_supported", False)),
+                # `downloaded` (None: not applicable or unknown) and `size` of the in-process copy.
+                **model_download_state(model_id, models_dir()),
             }
             for model_id, info in MODEL_REGISTRY.items()
-            if not (resolved == "cpu" and info.get("requires_gpu"))
         ]
 
     def get_current_model(self) -> dict:
@@ -231,12 +232,6 @@ class DashboardAPI:
         if model_id not in MODEL_REGISTRY:
             return {"ok": False, "error": f"Unknown model: {model_id}"}
         info = MODEL_REGISTRY[model_id]
-        resolved = resolve_device(self._config.inference.device)
-        if resolved == "cpu" and info.get("requires_gpu"):
-            return {
-                "ok": False,
-                "error": f"Model {model_id} requires a GPU and is not available on CPU.",
-            }
         if self._on_model_switch:
             self._on_model_switch(model_id)
             return {"ok": True, "status": "switching"}

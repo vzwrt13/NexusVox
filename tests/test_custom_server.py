@@ -196,13 +196,9 @@ def test_custom_server_without_url_starts_on_parakeet_with_its_url():
     assert inference.server_url == "http://localhost:8002/v1/audio/transcriptions"
 
 
-def test_custom_server_without_url_starts_on_whisper_on_cpu():
-    assert _fallback(_custom(url=""), "cpu").model == "whisper-large-v3-turbo"
+def test_custom_server_without_url_starts_on_parakeet_on_cpu():
+    assert _fallback(_custom(url=""), "cpu").model == "parakeet-tdt-0.6b"
 
 
 def test_custom_server_with_url_is_kept():
     assert _fallback(_custom(), "cuda").model == "custom-server"
-
-
-def test_gpu_model_on_cpu_still_falls_back():
-    assert _fallback(InferenceConfig(model="voxtral-mini-4b"), "cpu").model == "whisper-large-v3-turbo"

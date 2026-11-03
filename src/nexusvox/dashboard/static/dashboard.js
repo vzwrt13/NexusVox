@@ -1011,6 +1011,14 @@ async function saveSymbols() {
 // ── Model Switcher ──────────────────────────────────────────────────
 const modelSelect = document.getElementById("model-select");
 
+// " ✓ downloaded" or " · not downloaded (~670 MB)" for a model with a copy on this PC; nothing for the
+// custom server, or when the cache could not be read.
+function modelDownloadMark(m) {
+  if (m.downloaded === true) return " ✓ downloaded";
+  if (m.downloaded === false) return ` · not downloaded${m.size ? ` (${m.size})` : ""}`;
+  return "";
+}
+
 async function loadModelSwitcher() {
   const [models, current] = await Promise.all([
     fetch("/api/models").then((r) => r.json()),
@@ -1018,7 +1026,7 @@ async function loadModelSwitcher() {
   ]);
   modelSpecs = Object.fromEntries(models.map((m) => [m.id, m]));
   modelSelect.innerHTML = models.map((m) =>
-    `<option value="${m.id}"${m.id === current.model ? " selected" : ""}>${m.name}</option>`
+    `<option value="${m.id}"${m.id === current.model ? " selected" : ""}>${m.name}${modelDownloadMark(m)}</option>`
   ).join("");
   renderModelOverview(current.model);
   // An in-process model (Parakeet on CPU) may still be downloading or loading from the start.
@@ -1036,12 +1044,8 @@ function renderModelOverview(modelId) {
   let runtimeLabel;
   if (m.custom) {
     runtimeLabel = "External server (no Docker)";
-  } else if (m.inprocess_supported && !m.requires_gpu) {
-    runtimeLabel = "CPU in-process · GPU via Docker";
-  } else if (m.requires_gpu) {
-    runtimeLabel = "GPU only (Docker)";
   } else {
-    runtimeLabel = "CPU in-process";
+    runtimeLabel = "CPU in-process · GPU via Docker";
   }
   const rows = [
     ["Description", escapeHtml(m.description)],

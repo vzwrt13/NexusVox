@@ -41,7 +41,7 @@ def clear_cache():
     _reset_cache()
 
 
-def _make(device="cpu", compute_type="int8", model_id="whisper-small", **kwargs):
+def _make(device="cpu", compute_type="int8", model_id="whisper-large-v3-turbo", **kwargs):
     return LocalWhisperTranscriber(
         InferenceConfig(model=model_id),
         device=device,
@@ -55,11 +55,8 @@ def test_needs_docker_is_false():
 
 
 def test_model_attribute_matches_registry_hf_name():
-    t = _make(model_id="whisper-small")
-    assert t.model == "Systran/faster-whisper-small"
-
-    t2 = _make(model_id="whisper-large-v3-turbo")
-    assert t2.model == "deepdml/faster-whisper-large-v3-turbo-ct2"
+    t = _make(model_id="whisper-large-v3-turbo")
+    assert t.model == "deepdml/faster-whisper-large-v3-turbo-ct2"
 
 
 def test_auto_detect_language_nulls_language():
@@ -141,7 +138,7 @@ async def test_disconnect_clears_buffer_but_preserves_model_cache(monkeypatch):
 def test_model_cache_is_class_level_singleton():
     """Two instances with the same (hf_name, device, compute_type) share one model."""
     fake = _FakeModel()
-    key = ("Systran/faster-whisper-small", "cpu", "int8")
+    key = ("deepdml/faster-whisper-large-v3-turbo-ct2", "cpu", "int8")
     LocalWhisperTranscriber._model_cache[key] = fake
 
     t1 = _make()
@@ -171,7 +168,6 @@ def test_inprocess_registry_entries_are_loadable(model_key):
     a LocalWhisperTranscriber without importing faster-whisper."""
     entry = MODEL_REGISTRY[model_key]
     assert entry["hf_name"], f"{model_key} has empty hf_name"
-    assert entry["requires_gpu"] is False, f"{model_key} inprocess must have requires_gpu=False"
 
     t = _make(model_id=model_key)
     assert t.model == entry["hf_name"]

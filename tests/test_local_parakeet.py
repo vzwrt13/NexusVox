@@ -106,7 +106,9 @@ def test_factory_keeps_the_docker_client_on_gpu():
 def test_whisper_still_gets_the_whisper_engine_on_cpu():
     from nexusvox.transcribers.local_whisper import LocalWhisperTranscriber
 
-    assert isinstance(create_transcriber(InferenceConfig(model="whisper-small"), device="cpu"), LocalWhisperTranscriber)
+    assert isinstance(
+        create_transcriber(InferenceConfig(model="whisper-large-v3-turbo"), device="cpu"), LocalWhisperTranscriber
+    )
 
 
 @pytest.mark.parametrize(("device", "expected"), [("cpu", False), ("cuda", True)])
@@ -121,7 +123,7 @@ def test_the_model_is_the_int8_onnx_build_of_v3():
 
     assert t._onnx_model == "nemo-parakeet-tdt-0.6b-v3"
     assert t._quantization == "int8"
-    assert MODEL_REGISTRY["parakeet-tdt-0.6b"]["requires_gpu"] is False
+    assert "requires_gpu" not in MODEL_REGISTRY["parakeet-tdt-0.6b"]
 
 
 # ---- Words from tokens -------------------------------------------------------
@@ -750,7 +752,7 @@ async def test_a_job_that_timed_out_stops_and_does_not_hold_up_the_next_dictatio
 def test_other_engines_report_no_load_status():
     from nexusvox.transcriber import OpenAIHttpTranscriber
 
-    assert OpenAIHttpTranscriber(InferenceConfig(model="cohere-transcribe")).load_status() is None
+    assert OpenAIHttpTranscriber(InferenceConfig(model="whisper-large-v3-turbo")).load_status() is None
 
 
 # ---- App and dashboard integration ------------------------------------------
@@ -768,7 +770,7 @@ def _bare_app(transcriber):
     return app
 
 
-def test_parakeet_stays_the_model_on_cpu_but_the_gpu_only_models_fall_back():
+def test_parakeet_stays_the_model_on_cpu_and_an_unusable_custom_slot_falls_back():
     try:
         from nexusvox.app import apply_startup_fallback
     except Exception:
@@ -776,11 +778,11 @@ def test_parakeet_stays_the_model_on_cpu_but_the_gpu_only_models_fall_back():
 
     parakeet = InferenceConfig(model="parakeet-tdt-0.6b")
     apply_startup_fallback(parakeet, "cpu")
-    voxtral = InferenceConfig(model="voxtral-mini-4b")
-    apply_startup_fallback(voxtral, "cpu")
+    custom = InferenceConfig(model="custom-server")
+    apply_startup_fallback(custom, "cpu")
 
     assert parakeet.model == "parakeet-tdt-0.6b"
-    assert voxtral.model == "whisper-large-v3-turbo"
+    assert custom.model == "parakeet-tdt-0.6b"
 
 
 @pytest.mark.parametrize("state", ["downloading", "loading"])
@@ -824,7 +826,7 @@ def test_a_running_switch_wins_over_the_model_load():
 def test_engines_without_a_load_status_never_change_the_switch_status():
     from nexusvox.transcriber import OpenAIHttpTranscriber
 
-    app = _bare_app(OpenAIHttpTranscriber(InferenceConfig(model="cohere-transcribe")))
+    app = _bare_app(OpenAIHttpTranscriber(InferenceConfig(model="whisper-large-v3-turbo")))
 
     assert app.get_switch_status() == {"status": "idle", "error": None}
 
@@ -885,5 +887,4 @@ def test_parakeet_is_listed_and_switchable_on_cpu(db, session_factory, monkeypat
         models = {m["id"]: m for m in client.get("/api/models").get_json()}
 
     assert models["parakeet-tdt-0.6b"]["inprocess_supported"] is True
-    assert models["parakeet-tdt-0.6b"]["requires_gpu"] is False
     assert "voxtral-mini-4b" not in models

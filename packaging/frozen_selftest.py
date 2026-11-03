@@ -284,7 +284,7 @@ def run(work: Path, download: bool) -> NoReturn:
     def whisper() -> None:
         from nexusvox.transcribers.local_whisper import LocalWhisperTranscriber
 
-        config.inference.model = "whisper-base"
+        config.inference.model = "whisper-large-v3-turbo"
         pcm = pcm_of_speech()
 
         async def go():

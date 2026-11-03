@@ -575,6 +575,7 @@ def test_paste_key_roundtrip_and_default(tmp_path):
 
 def test_llm_and_polish_key_roundtrip_and_defaults(tmp_path, monkeypatch):
     monkeypatch.setattr(config_module, "cuda_available", lambda: True)
+    monkeypatch.setattr(config_module, "gpu_vram_gb", lambda: 16.0)
     path = tmp_path / "config.toml"
     llm = LlmConfig(url="http://127.0.0.1:1234/v1", protocol="openai", model="m", api_key='a"b', keep_alive="1m")
     save_config(Config(llm=llm, hotkey=HotkeyConfig(polish_key="P")), path)

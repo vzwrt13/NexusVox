@@ -171,6 +171,9 @@ def test_polish_sends_selection_and_instruction(monkeypatch):
 # --- reading the selection ---
 
 
+_ORDER: list = []
+
+
 def _focus(monkeypatch, focus, clipboard="from Ctrl+C"):
     import sys
     import types
@@ -179,12 +182,27 @@ def _focus(monkeypatch, focus, clipboard="from Ctrl+C"):
     from nexusvox.uia import Focus
 
     copies = []
+    order = _ORDER
+    order.clear()
     fake_injector = types.ModuleType("nexusvox.injector")
+    fake_injector.settle_after_chord = lambda delay: order.append(("settle", delay))
     fake_injector.copy_selection = lambda delay: copies.append(delay) or clipboard
     monkeypatch.setitem(sys.modules, "nexusvox.injector", fake_injector)
     monkeypatch.setattr(polish_module, "_ensure_com", lambda: None)
     monkeypatch.setattr(polish_module, "read_focus", lambda: Focus(**focus))
     return copies
+
+
+def test_read_selection_waits_for_the_chord_before_asking_the_control(monkeypatch):
+    import nexusvox.polish as polish_module
+    from nexusvox.uia import Focus
+
+    _focus(monkeypatch, {"terminal": False, "selection": "x"})
+    monkeypatch.setattr(
+        polish_module, "read_focus", lambda: _ORDER.append("read") or Focus(terminal=False, selection="x")
+    )
+    read_selection(250)
+    assert _ORDER == [("settle", 250), "read"]
 
 
 def test_read_selection_asks_the_control_first(monkeypatch):

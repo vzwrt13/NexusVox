@@ -155,24 +155,3 @@ def test_polish_key_sequence_never_lets_a_lone_alt_release_reach_the_target(monk
             elif down_seen and not up and vk not in (LCTRL, LSHIFT):
                 other_since_down = True
         assert hk._alt_pending is None
-
-
-def test_menu_mode_guard_sends_escape_only_when_a_menu_is_armed(monkeypatch):
-    from nexusvox import injector
-
-    sent = []
-    monkeypatch.setattr(injector, "_send_inputs", lambda inputs, name: sent.extend(inputs) or True)
-    monkeypatch.setattr(injector.time, "sleep", lambda s: None)
-    monkeypatch.setattr(injector, "_foreground_in_menu_mode", lambda: False)
-    injector._close_menu_mode("C")
-    assert sent == []
-    monkeypatch.setattr(injector, "_foreground_in_menu_mode", lambda: True)
-    injector._close_menu_mode("C")
-    assert [(i._input.ki.wVk, bool(i._input.ki.dwFlags & injector.KEYEVENTF_KEYUP)) for i in sent] == [
-        (injector.VK_ESCAPE, False),
-        (injector.VK_ESCAPE, True),
-    ]
-    sent.clear()
-    monkeypatch.setattr(injector, "menu_guard_enabled", lambda: False)  # [hotkey].reinject_alt_release = false
-    injector._close_menu_mode("C")
-    assert sent == []

@@ -103,8 +103,9 @@ def read_selection(injection_delay_ms: int, in_terminals: bool = False) -> str:
     terminal only with *in_terminals*, because there Ctrl+C without a selection
     interrupts the running program.
     """
-    from .injector import copy_selection  # Win32 at import; polish itself stays importable anywhere
+    from .injector import copy_selection, settle_after_chord  # Win32 at import; polish itself stays importable anywhere
 
+    settle_after_chord(injection_delay_ms)
     _ensure_com()
     focus = read_focus()
     if focus.terminal and not in_terminals:

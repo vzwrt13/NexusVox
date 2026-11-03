@@ -5,7 +5,6 @@ from __future__ import annotations
 import ctypes
 import logging
 import time
-from collections.abc import Callable
 from ctypes import wintypes
 
 import pyperclip
@@ -210,45 +209,6 @@ def _wait_for_physical_release(timeout_s: float = 1.5) -> bool:
     return False
 
 
-GUI_INMENUMODE = 0x00000004
-VK_ESCAPE = 0x1B
-SCAN_ESCAPE = 0x01
-
-# Whether the menu-mode guard may act; the hotkey listener points it at `[hotkey].reinject_alt_release`
-menu_guard_enabled: Callable[[], bool] = lambda: True  # noqa: E731
-
-
-def _foreground_in_menu_mode() -> bool:
-    """True when the foreground window's thread is in menu mode: Notepad's menu bar is armed (accelerator
-    underlines showing) and swallows the next Ctrl+C / Ctrl+V."""
-    hwnd = user32.GetForegroundWindow()
-    thread = user32.GetWindowThreadProcessId(hwnd, None) if hwnd else 0
-    info = GUITHREADINFO()
-    info.cbSize = ctypes.sizeof(GUITHREADINFO)
-    if not thread or not user32.GetGUIThreadInfo(thread, ctypes.byref(info)):
-        return False
-    return bool(info.flags & GUI_INMENUMODE)
-
-
-def _close_menu_mode(name: str) -> None:
-    """Safety net before our own Ctrl+<key>: with the app's menu bar armed the keystroke would be lost,
-    so Escape closes the menu first. Nothing happens when no menu is armed (the normal case)."""
-    try:
-        if not menu_guard_enabled() or not _foreground_in_menu_mode():
-            return
-    except Exception:
-        logger.debug("Menu mode check failed", exc_info=True)
-        return
-    logger.warning(
-        "The focused app is in menu mode before Ctrl+%s (a lone Alt release got through); sending Escape", name
-    )
-    _send_inputs(
-        [_make_key_input(VK_ESCAPE, SCAN_ESCAPE), _make_key_input(VK_ESCAPE, SCAN_ESCAPE, KEYEVENTF_KEYUP)],
-        "menu escape",
-    )
-    time.sleep(0.05)
-
-
 def _send_ctrl_chord(vk: int, scan: int, name: str) -> bool:
     """Simulate Ctrl+<key> via SendInput with hardware scan codes.
 
@@ -259,7 +219,6 @@ def _send_ctrl_chord(vk: int, scan: int, name: str) -> bool:
     sees a plain "v" instead of a paste.
     Returns True if all events were injected successfully.
     """
-    _close_menu_mode(name)
     inputs = [
         _make_key_input(VK_CONTROL, SCAN_CONTROL),  # Ctrl down
         _make_key_input(vk, scan),  # key down
@@ -339,6 +298,17 @@ def _prepare_keyboard(injection_delay_ms: int) -> None:
     """
     _wait_for_physical_release()
     _release_all_modifiers()
+    time.sleep(injection_delay_ms / 1000)
+
+
+def settle_after_chord(injection_delay_ms: int) -> None:
+    """Wait until the hotkey chord is physically released and the key-ups have reached the focused app.
+
+    Polish reads the selection through UI Automation right after the transcript arrives, which can be
+    ~0.3 s after the Alt release (and the re-injected one), before the app has handled it; Ctrl+C only
+    waited afterwards. Waiting here keeps every Polish step behind the chord, like a dictation's paste.
+    """
+    _wait_for_physical_release()
     time.sleep(injection_delay_ms / 1000)
 
 

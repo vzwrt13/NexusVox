@@ -19,7 +19,7 @@ produces English code, English commits, and English documentation. Do not mirror
 prompt language into the repository, and do not ask whether an exception applies —
 there is none.
 
-Rationale: this is a public open-source project. A mixed-language codebase excludes
+Rationale: this is a public source-available project. A mixed-language codebase excludes
 contributors and makes the project look unmaintained.
 
 The single deliberate exception is `.open-source-docs/`, a git-ignored, one-off

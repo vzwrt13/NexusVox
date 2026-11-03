@@ -267,7 +267,7 @@ for most code. Removing an offline check is a one-line patch. Realistic options:
 
 Realistic position: **no client-side check is unbreakable on a machine the attacker controls.** The
 goal is to stop casual sharing and make cracking inconvenient, not impossible. Pro will also have
-legal friction on top: the core is AGPL-3.0-or-later, so a proprietary add-on that links with it needs
+legal friction on top: the core is PolyForm Noncommercial 1.0.0, so a commercial add-on that builds on it needs
 a lawyer's reading before it ships. That is a licensing question, not a packaging one.
 
 ## Is Python still fine for a packaged desktop app?

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import subprocess
 import threading
 import tomllib
 from dataclasses import dataclass, field
@@ -348,6 +349,41 @@ def cuda_available() -> bool:
         return False
 
 
+_vram_probed = False
+_vram_gb: float | None = None
+
+
+def gpu_vram_gb() -> float | None:
+    """Total VRAM of the first NVIDIA GPU in GB, or None without one (read once through nvidia-smi)."""
+    global _vram_probed, _vram_gb
+    if not _vram_probed:
+        _vram_probed = True
+        try:
+            out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            ).stdout
+            _vram_gb = float(out.splitlines()[0].strip()) / 1024
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            _vram_gb = None
+    return _vram_gb
+
+
+# 12 GB and up hold the speech model and gemma4:e4b together (docs/llm-cpu-test.md).
+LLM_E4B_MIN_VRAM_GB = 12.0
+
+
+def llm_runs_fast() -> bool:
+    """True with a CUDA GPU that has room for gemma4:e4b next to the speech model."""
+    if not cuda_available():
+        return False
+    vram = gpu_vram_gb()
+    return vram is not None and vram >= LLM_E4B_MIN_VRAM_GB - 0.5  # nvidia-smi reports 12 GB cards as ~11.9
+
+
 def resolve_compute_type(device: str, override: str | None) -> str:
     if override:
         return override
@@ -486,8 +522,8 @@ CLEANUP_TIMEOUT_CPU_S = 10.0
 
 
 def auto_llm_model() -> str:
-    """The model for an unset `[llm].model`: gemma4:e2b without a CUDA GPU, gemma4:e4b with one."""
-    return LlmConfig.model if cuda_available() else LLM_MODEL_CPU
+    """The model for an unset `[llm].model`: gemma4:e4b with a CUDA GPU of 12 GB or more, else gemma4:e2b."""
+    return LlmConfig.model if llm_runs_fast() else LLM_MODEL_CPU
 
 
 def auto_cleanup_timeout() -> float:
@@ -941,7 +977,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
             *(
                 [f"model = {json.dumps(config.llm.model)}"]
                 if config.llm.model != auto_llm_model()
-                else ["# model = (unset: gemma4:e4b with a CUDA GPU, gemma4:e2b without)"]
+                else ["# model = (unset: gemma4:e4b with a CUDA GPU of 12 GB or more, else gemma4:e2b)"]
             ),
             # A free-form secret: escape it, a `"` or `\` would break the file.
             f"api_key = {json.dumps(config.llm.api_key)}",

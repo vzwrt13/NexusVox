@@ -14,14 +14,13 @@ import http.client
 import json
 import logging
 import re
-import subprocess
 import threading
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from .config import LlmConfig
+from .config import LLM_E4B_MIN_VRAM_GB, LlmConfig
 
 logger = logging.getLogger(__name__)
 
@@ -167,33 +166,9 @@ RECOMMENDED_MODELS: tuple[tuple[str, float], ...] = (
 _LIST_TIMEOUT_S = 3.0
 
 
-def gpu_vram_gb() -> float | None:
-    """Total VRAM of the first NVIDIA GPU in GB, or None without one (read once through nvidia-smi)."""
-    global _vram_probed, _vram_gb
-    if not _vram_probed:
-        _vram_probed = True
-        try:
-            out = subprocess.run(
-                ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=True,
-            ).stdout
-            _vram_gb = float(out.splitlines()[0].strip()) / 1024
-        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-            _vram_gb = None
-    return _vram_gb
-
-
-_vram_probed = False
-_vram_gb: float | None = None
-
-
 def recommended_model(cuda: bool, vram_gb: float | None) -> str:
-    """The recommended model for this PC (docs/llm-cpu-test.md): no CUDA GPU or 4-8 GB VRAM -> e2b,
-    12 GB and up -> e4b. Between 8 and 12 GB the speech model leaves too little room for e4b: e2b."""
-    if cuda and vram_gb is not None and vram_gb >= 12:
+    """The recommended model for this PC (docs/llm-cpu-test.md): 12 GB VRAM and up -> e4b, else e2b."""
+    if cuda and vram_gb is not None and vram_gb >= LLM_E4B_MIN_VRAM_GB - 0.5:
         return "gemma4:e4b"
     return "gemma4:e2b"
 

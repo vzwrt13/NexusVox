@@ -294,12 +294,28 @@ async function loadLlmStatus() {
 
 // ── Language model dropdown ──────────────────────────────────────────
 const llmModelHint = document.getElementById("llm-model-hint");
+const llmSlowHint = document.getElementById("llm-slow-hint");
 const llmPullBox = document.getElementById("llm-pull-status");
 const llmPullText = document.getElementById("llm-pull-text");
 const llmPullProgress = document.getElementById("llm-pull-progress");
 const llmPullCancel = document.getElementById("llm-pull-cancel");
 let llmSavedModel = "";
 let llmPullTimer = null;
+
+function renderLlmOverview(data, m) {
+  const installed = !m || m.installed === null ? "Unknown (server not reachable)" : m.installed ? "Yes" : "No";
+  const size = m && m.size_gb ? `${m.size_gb} GB` : "Unknown";
+  const rows = [
+    ["Model", escapeHtml(data.selected)],
+    ["Size on disk", size],
+    ["Installed", installed],
+    ["Runs on", data.device === "gpu" ? "GPU (CUDA)" : "CPU (no CUDA GPU found)"],
+    ["Used for", "Cleanup, Polish, upload cleanup"],
+  ];
+  document.getElementById("llm-overview-grid").innerHTML = rows
+    .map(([label, value]) => `<div class="overview-row"><span class="overview-label">${label}</span><span class="overview-value">${value}</span></div>`)
+    .join("");
+}
 
 function llmOptionLabel(m) {
   let label = m.name;
@@ -317,16 +333,22 @@ async function loadLlmModels() {
     return;
   }
   llmSavedModel = data.selected;
+  llmSlowHint.hidden = !data.slow_hint;
   llmModelSelect.replaceChildren();
   if (!data.reachable) {
     // Server down (or no model list): show the saved value only, nothing else can break.
     llmModelSelect.append(new Option(data.selected, data.selected));
     llmModelSelect.value = data.selected;
     llmModelHint.hidden = false;
-    llmModelHint.textContent =
+    // Red: the LLM features do not work while the server cannot be reached.
+    setStatus(
+      llmModelHint,
+      data.protocol === "ollama" ? "down" : "warn",
       data.protocol === "ollama"
         ? "Ollama is not reachable, so the installed models cannot be listed. The saved model is kept."
-        : "This server type has no model list. Set [llm].model in config.toml.";
+        : "This server type has no model list. Set [llm].model in config.toml.",
+    );
+    renderLlmOverview(data, null);
     return;
   }
   llmModelHint.hidden = true;
@@ -345,6 +367,7 @@ async function loadLlmModels() {
     llmModelSelect.append(other);
   }
   llmModelSelect.value = data.selected;
+  renderLlmOverview(data, [...data.recommended, ...data.other].find((m) => m.name === data.selected) || null);
   llmModelSelect.dataset.notInstalled = JSON.stringify(
     Object.fromEntries(data.recommended.filter((m) => !m.installed).map((m) => [m.name, m.size_gb])),
   );
@@ -666,7 +689,6 @@ cleanupLevelSelect.addEventListener("change", async () => {
   const s = await resp.json();
   if (s.error) alert(s.error);
   cleanupLevelSelect.value = s.cleanup_level;
-  document.getElementById("cleanup-cpu-hint").hidden = !(s.cleanup_cpu_hint && s.cleanup_level !== "off");
 });
 pasteKeySelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/paste-key", { key: pasteKeySelect.value });
@@ -699,7 +721,6 @@ async function loadSettings() {
   loadLlmModels();
   meetingOwnLabelInput.value = meetingOwnLabelSaved = s.meeting_own_voice_label;
   cleanupLevelSelect.value = s.cleanup_level;
-  document.getElementById("cleanup-cpu-hint").hidden = !(s.cleanup_cpu_hint && s.cleanup_level !== "off");
   feedbackModeSelect.value = s.feedback_mode;
   loadLlmStatus();
   micGuardToggle.checked = s.mic_guard_enabled;

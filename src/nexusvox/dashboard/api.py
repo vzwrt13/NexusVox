@@ -28,6 +28,8 @@ from ..config import (
     HotkeyConfig,
     MeetingConfig,
     cuda_available,
+    gpu_vram_gb,
+    llm_runs_fast,
     meeting_hotkey_clash,
     model_download_state,
     model_needs_docker,
@@ -57,7 +59,6 @@ from ..file_transcribe import (
 )
 from ..lang_detect import stored_language
 from ..llm import build_model_list as llm_build_model_list
-from ..llm import gpu_vram_gb
 from ..llm import model_pull as llm_pull
 from ..llm import model_status as llm_model_status
 from ..llm import warm_up as llm_warm_up
@@ -321,7 +322,7 @@ class DashboardAPI:
             "polish_in_terminals": self._config.polish.in_terminals,
             "cleanup_level": self._config.cleanup.level,
             "cleanup_levels": list(CLEANUP_LEVELS),
-            "cleanup_cpu_hint": not cuda_available(),
+            "llm_slow_hint": not llm_runs_fast(),
             "meeting_modifiers": list(self._config.meeting.modifiers),
             "meeting_key": self._config.meeting.key,
             "meeting_hotkey_default": {"modifiers": list(MeetingConfig().modifiers), "key": MeetingConfig().key},
@@ -421,6 +422,8 @@ class DashboardAPI:
         return {
             **llm_build_model_list(self._config.llm, cuda, gpu_vram_gb() if cuda else None),
             "selected": self._config.llm.model,
+            "device": "gpu" if cuda else "cpu",
+            "slow_hint": not llm_runs_fast(),
         }
 
     def start_llm_pull(self, model: str) -> dict:

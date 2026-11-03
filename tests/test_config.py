@@ -597,9 +597,18 @@ def test_llm_model_is_e2b_without_cuda_when_unset(tmp_path, monkeypatch):
 
 def test_llm_model_is_e4b_with_cuda_when_unset(tmp_path, monkeypatch):
     monkeypatch.setattr(config_module, "cuda_available", lambda: True)
+    monkeypatch.setattr(config_module, "gpu_vram_gb", lambda: 16.0)
     path = tmp_path / "config.toml"
     path.write_text("", encoding="utf-8")
     assert load_config(path).llm.model == "gemma4:e4b"
+
+
+def test_llm_model_is_e2b_with_cuda_but_little_vram_when_unset(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "cuda_available", lambda: True)
+    monkeypatch.setattr(config_module, "gpu_vram_gb", lambda: 8.0)
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    assert load_config(path).llm.model == "gemma4:e2b"
 
 
 @pytest.mark.parametrize("has_cuda", [False, True])
@@ -615,6 +624,7 @@ def test_llm_model_choice_is_kept(tmp_path, monkeypatch, has_cuda):
 @pytest.mark.parametrize("has_cuda", [False, True])
 def test_hardware_defaults_are_not_pinned_by_a_save(tmp_path, monkeypatch, has_cuda):
     monkeypatch.setattr(config_module, "cuda_available", lambda: has_cuda)
+    monkeypatch.setattr(config_module, "gpu_vram_gb", lambda: 16.0)
     path = tmp_path / "config.toml"
     path.write_text("", encoding="utf-8")
     save_config(load_config(path), path)

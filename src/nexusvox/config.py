@@ -147,7 +147,8 @@ class HotkeyConfig:
     polish_key: str = ""
     # Swallow the Alt key-up that ends the dictation chord and send it again right after a
     # neutral mask key, so the app never sees a lone Alt release (underlined menu accelerators).
-    # Only the Alt release of NexusVox's own chord is touched. Off by default: a live retest suggested it can arm Win 11 Notepad's menu bar.
+    # Only the Alt release of NexusVox's own chord is touched.
+    # Off by default: a live retest suggested it can arm Win 11 Notepad's menu bar.
     reinject_alt_release: bool = False
 
 

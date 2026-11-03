@@ -199,6 +199,19 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
         resp = api.set_llm_model(data.get("model", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
+    @app.route("/api/settings/llm-models")
+    def get_llm_models():
+        return jsonify(api.get_llm_models())
+
+    @app.route("/api/settings/llm-pull", methods=["GET", "POST", "DELETE"])
+    def llm_pull():
+        if request.method == "POST":
+            resp = api.start_llm_pull(request.get_json(force=True).get("model", ""))
+            return jsonify(resp), (400 if "error" in resp and resp.get("status") != "pulling" else 200)
+        if request.method == "DELETE":
+            return jsonify(api.cancel_llm_pull())
+        return jsonify(api.get_llm_pull())
+
     @app.route("/api/settings/llm-status")
     def get_llm_status():
         return jsonify(api.get_llm_status())

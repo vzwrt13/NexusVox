@@ -1177,9 +1177,17 @@ def test_polish_key_and_model_settings(flask_client, monkeypatch):
     assert post("/api/settings/llm-model", {"model": "gemma4:12b"}).get_json()["llm_model"] == "gemma4:12b"
     assert post("/api/settings/llm-model", {"model": " "}).status_code == 400
 
-    monkeypatch.setattr(api_module, "llm_reachable", lambda cfg: False)
+    monkeypatch.setattr(api_module, "llm_model_status", lambda cfg: {"state": "down"})
     status = flask_client.get("/api/settings/llm-status").get_json()
-    assert status == {"url": "http://127.0.0.1:11434", "model": "gemma4:12b", "reachable": False}
+    assert status == {
+        "url": "http://127.0.0.1:11434",
+        "model": "gemma4:12b",
+        "reachable": False,
+        "model_installed": None,
+    }
+    monkeypatch.setattr(api_module, "llm_model_status", lambda cfg: {"state": "missing"})
+    status = flask_client.get("/api/settings/llm-status").get_json()
+    assert (status["reachable"], status["model_installed"]) == (True, False)
 
 
 def test_upload_with_diarize_passes_the_flag_and_stores_speakers(flask_client, db, sample_wav_bytes, monkeypatch):

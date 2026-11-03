@@ -56,7 +56,10 @@ from ..file_transcribe import (
     transcribe_file,
 )
 from ..lang_detect import stored_language
-from ..llm import is_reachable as llm_reachable
+from ..llm import build_model_list as llm_build_model_list
+from ..llm import gpu_vram_gb
+from ..llm import model_pull as llm_pull
+from ..llm import model_status as llm_model_status
 from ..llm import warm_up as llm_warm_up
 from ..logsetup import log_dir
 from ..meeting_live import LIVE_OTHERS_LABEL, LiveTranscriber, WindowTranscriber
@@ -403,12 +406,40 @@ class DashboardAPI:
         return self.get_settings()
 
     def get_llm_status(self) -> dict:
-        """Whether the [llm] server answers - probed live, like the translator."""
+        """Whether the [llm] server answers and has the configured model - probed live, like the translator."""
+        status = llm_model_status(self._config.llm)
         return {
             "url": self._config.llm.url,
             "model": self._config.llm.model,
-            "reachable": llm_reachable(self._config.llm),
+            "reachable": status["state"] != "down",
+            "model_installed": {"ok": True, "missing": False}.get(status["state"]),
         }
+
+    def get_llm_models(self) -> dict:
+        """The dropdown's content: recommended models, other installed ones, and the saved value."""
+        cuda = cuda_available()
+        return {
+            **llm_build_model_list(self._config.llm, cuda, gpu_vram_gb() if cuda else None),
+            "selected": self._config.llm.model,
+        }
+
+    def start_llm_pull(self, model: str) -> dict:
+        """Download a model through Ollama. Only ever called after the user confirmed it in the dashboard."""
+        model = str(model or "").strip()
+        if not model:
+            return {"error": "A model name is required"}
+        if self._config.llm.protocol != "ollama":
+            return {"error": "Downloading models needs an Ollama server"}
+        if not llm_pull.start(self._config.llm, model):
+            return {"error": "A download is already running", **llm_pull.state()}
+        return llm_pull.state()
+
+    def get_llm_pull(self) -> dict:
+        return llm_pull.state()
+
+    def cancel_llm_pull(self) -> dict:
+        llm_pull.cancel()
+        return llm_pull.state()
 
     def set_mic_guard_enabled(self, enabled: bool) -> dict:
         """Checked by the app on every hold, so this is live."""

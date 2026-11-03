@@ -14,6 +14,7 @@ import http.client
 import json
 import logging
 import re
+import subprocess
 import threading
 import urllib.error
 import urllib.request
@@ -154,3 +155,197 @@ def is_reachable(config: LlmConfig) -> bool:
     except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError):
         return False
     return True
+
+
+# ── Model catalogue and Ollama's model list ───────────────────────────────────────────────────────
+# The models the dashboard offers first, with their download size in GB (docs/llm-cpu-test.md).
+RECOMMENDED_MODELS: tuple[tuple[str, float], ...] = (
+    ("gemma4:e2b", 4.6),
+    ("gemma4:e4b", 6.6),
+    ("gemma4:12b-it-qat", 7.2),
+)
+_LIST_TIMEOUT_S = 3.0
+
+
+def gpu_vram_gb() -> float | None:
+    """Total VRAM of the first NVIDIA GPU in GB, or None without one (read once through nvidia-smi)."""
+    global _vram_probed, _vram_gb
+    if not _vram_probed:
+        _vram_probed = True
+        try:
+            out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            ).stdout
+            _vram_gb = float(out.splitlines()[0].strip()) / 1024
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            _vram_gb = None
+    return _vram_gb
+
+
+_vram_probed = False
+_vram_gb: float | None = None
+
+
+def recommended_model(cuda: bool, vram_gb: float | None) -> str:
+    """The recommended model for this PC (docs/llm-cpu-test.md): no CUDA GPU or 4-8 GB VRAM -> e2b,
+    12 GB and up -> e4b. Between 8 and 12 GB the speech model leaves too little room for e4b: e2b."""
+    if cuda and vram_gb is not None and vram_gb >= 12:
+        return "gemma4:e4b"
+    return "gemma4:e2b"
+
+
+def installed_models(config: LlmConfig) -> list[dict] | None:
+    """Ollama's installed models as `{"name", "size_gb"}`, or None when they cannot be listed
+    (server down, or a protocol without Ollama's `/api/tags`)."""
+    if config.protocol != "ollama":
+        return None
+    try:
+        with urllib.request.urlopen(f"{config.url.rstrip('/')}/api/tags", timeout=_LIST_TIMEOUT_S) as response:
+            models = json.load(response)["models"]
+        return [
+            {"name": str(m["name"]), "size_gb": round(float(m.get("size", 0)) / 1e9, 1)}
+            for m in models
+            if isinstance(m, dict) and m.get("name")
+        ]
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def model_is_installed(name: str, installed: list[dict]) -> bool:
+    """Ollama treats `gemma4:e4b` and `gemma4:e4b:latest`-style tags as the same only for `:latest`."""
+    names = {m["name"] for m in installed}
+    return name in names or (":" not in name and f"{name}:latest" in names)
+
+
+def build_model_list(config: LlmConfig, cuda: bool, vram_gb: float | None) -> dict:
+    """What the dropdown shows: `recommended` (with installed flag, size, and the hardware mark),
+    `other` (installed models outside the recommended list; always includes the saved value) and `reachable`."""
+    installed = installed_models(config)
+    reachable = installed is not None
+    best = recommended_model(cuda, vram_gb)
+    have = installed or []
+    recommended = [
+        {
+            "name": name,
+            "size_gb": size,
+            "installed": model_is_installed(name, have),
+            "recommended_here": name == best,
+        }
+        for name, size in RECOMMENDED_MODELS
+    ]
+    known = {name for name, _ in RECOMMENDED_MODELS}
+    other = [{"name": m["name"], "size_gb": m["size_gb"], "installed": True} for m in have if m["name"] not in known]
+    if config.model not in known and config.model not in {m["name"] for m in other}:
+        # A saved model that is not in the lists: keep showing it, installed only if the server said so.
+        other.insert(0, {"name": config.model, "size_gb": 0.0, "installed": False if reachable else None})
+    return {"reachable": reachable, "recommended": recommended, "other": other, "protocol": config.protocol}
+
+
+def model_status(config: LlmConfig) -> dict:
+    """The status line's data: `state` is `down` (no server), `missing` (server up, model not installed),
+    `ok`, or `unknown` (a server without a model list - only reachability is known)."""
+    if not is_reachable(config):
+        return {"state": "down"}
+    installed = installed_models(config)
+    if installed is None:
+        return {"state": "unknown"}
+    return {"state": "ok" if model_is_installed(config.model, installed) else "missing"}
+
+
+# ── Pulling a model ───────────────────────────────────────────────────────────────────────────────
+class ModelPull:
+    """One `/api/pull` download at a time, run in a thread. `state()` is polled by the dashboard.
+
+    status: idle -> pulling -> done | error | cancelled."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._model = ""
+        self._status = "idle"
+        self._detail = ""
+        self._completed = 0
+        self._total = 0
+        self._error = ""
+        self._cancel = threading.Event()
+        self._response = None
+
+    def state(self) -> dict:
+        with self._lock:
+            return {
+                "status": self._status,
+                "model": self._model,
+                "detail": self._detail,
+                "completed": self._completed,
+                "total": self._total,
+                "error": self._error,
+            }
+
+    def start(self, config: LlmConfig, model: str) -> bool:
+        """False when a pull is already running."""
+        with self._lock:
+            if self._status == "pulling":
+                return False
+            self._model, self._status, self._detail, self._error = model, "pulling", "starting", ""
+            self._completed = self._total = 0
+            self._cancel = threading.Event()
+        threading.Thread(target=self._run, args=(config, model, self._cancel), daemon=True, name="llm-pull").start()
+        return True
+
+    def cancel(self) -> None:
+        with self._lock:
+            if self._status != "pulling":
+                return
+            self._cancel.set()
+            response = self._response
+        if response is not None:
+            try:
+                response.close()
+            except Exception:  # noqa: BLE001 - closing only unblocks the reader
+                pass
+
+    def _finish(self, status: str, error: str = "") -> None:
+        with self._lock:
+            self._status, self._error, self._response = status, error, None
+
+    def _run(self, config: LlmConfig, model: str, cancel: threading.Event) -> None:
+        url = f"{config.url.rstrip('/')}/api/pull"
+        request = urllib.request.Request(
+            url, json.dumps({"model": model, "stream": True}).encode("utf-8"), {"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                with self._lock:
+                    self._response = response
+                for line in response:
+                    if cancel.is_set():
+                        break
+                    if not line.strip():
+                        continue
+                    event = json.loads(line)
+                    if event.get("error"):
+                        self._finish("error", str(event["error"])[:200])
+                        return
+                    with self._lock:
+                        self._detail = str(event.get("status", ""))
+                        if event.get("total"):
+                            self._completed = int(event.get("completed", 0))
+                            self._total = int(event["total"])
+                if cancel.is_set():
+                    self._finish("cancelled")
+                    return
+                if self._detail == "success":
+                    self._finish("done")
+                else:
+                    self._finish("error", "the download ended early")
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError) as exc:
+            if cancel.is_set():
+                self._finish("cancelled")
+            else:
+                self._finish("error", f"{type(exc).__name__}: {exc}"[:200])
+
+
+model_pull = ModelPull()

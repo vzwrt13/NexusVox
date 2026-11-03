@@ -48,9 +48,7 @@ def test_example_config_ships_inside_the_package():
 
 def test_config_dataclass_defaults():
     cfg = Config()
-    assert cfg.language == "en"
     assert cfg.injection_delay_ms == 500
-    assert cfg.auto_language_detection is False
     assert cfg.voice_commands.enabled is True
     assert "slash" in cfg.voice_commands.symbols
     assert "plus" not in cfg.voice_commands.symbols
@@ -73,7 +71,6 @@ def test_load_config_defaults_when_no_file(tmp_path, monkeypatch):
 
     cfg = load_config(tmp_path / "config.toml")
 
-    assert cfg.language == "en"
     assert cfg.audio.sample_rate == 16_000
     assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
 
@@ -82,7 +79,7 @@ def test_load_config_copies_example(tmp_path, monkeypatch):
     """When config is missing but example exists, copy example and load it."""
     example = tmp_path / "config.example.toml"
     example.write_text(
-        '[general]\nlanguage = "de"\ninjection_delay_ms = 300\nauto_language_detection = true\n'
+        '[general]\ninjection_delay_ms = 300\n'
         "[hotkey]\n"
         'modifiers = ["ctrl", "alt"]\n'
         "[audio]\n"
@@ -101,7 +98,6 @@ def test_load_config_copies_example(tmp_path, monkeypatch):
     cfg = load_config(config_path)
 
     assert config_path.exists()
-    assert cfg.language == "de"
     assert cfg.injection_delay_ms == 300
     assert cfg.audio.sample_rate == 48000
 
@@ -110,9 +106,7 @@ def test_load_config_from_valid_toml(tmp_path):
     """Full TOML with non-default values is parsed correctly."""
     toml_content = """\
 [general]
-language = "de"
 injection_delay_ms = 200
-auto_language_detection = true
 
 [hotkey]
 modifiers = ["ctrl", "alt"]
@@ -134,9 +128,7 @@ path = "test.db"
 
     cfg = load_config(config_path)
 
-    assert cfg.language == "de"
     assert cfg.injection_delay_ms == 200
-    assert cfg.auto_language_detection is True
     assert cfg.hotkey.modifiers == ["ctrl", "alt"]
     assert cfg.audio.sample_rate == 44100
     assert cfg.audio.chunk_size == 2048
@@ -149,11 +141,11 @@ path = "test.db"
 def test_load_config_missing_sections_uses_defaults(tmp_path):
     """Partial TOML with only [general] — other sections get defaults."""
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[general]\nlanguage = "de"\n', encoding="utf-8")
+    config_path.write_text("[general]\ninjection_delay_ms = 300\n", encoding="utf-8")
 
     cfg = load_config(config_path)
 
-    assert cfg.language == "de"
+    assert cfg.injection_delay_ms == 300
     assert cfg.audio.sample_rate == 16_000
     assert cfg.audio.chunk_size == 4096
     assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
@@ -176,9 +168,7 @@ def test_save_config_roundtrip(tmp_path):
     from nexusvox.config import VoiceCommandsConfig
 
     original = Config(
-        language="de",
         injection_delay_ms=200,
-        auto_language_detection=True,
         voice_commands=VoiceCommandsConfig(enabled=False, symbols=["slash", "plus"]),
         hotkey=HotkeyConfig(modifiers=["ctrl", "alt"], mode="toggle"),
         audio=AudioConfig(sample_rate=44100, chunk_size=2048),
@@ -192,9 +182,7 @@ def test_save_config_roundtrip(tmp_path):
     save_config(original, config_path)
     loaded = load_config(config_path)
 
-    assert loaded.language == original.language
     assert loaded.injection_delay_ms == original.injection_delay_ms
-    assert loaded.auto_language_detection == original.auto_language_detection
     assert loaded.voice_commands.enabled == original.voice_commands.enabled
     assert loaded.voice_commands.symbols == original.voice_commands.symbols
     assert loaded.hotkey.modifiers == original.hotkey.modifiers
@@ -716,3 +704,18 @@ def test_save_config_writes_back_to_the_file_that_was_loaded(tmp_path, monkeypat
 
     assert not (elsewhere / "config.toml").exists()
     assert load_config(loaded).cleanup.level == "medium"
+
+
+def test_old_language_keys_are_ignored_and_not_written(tmp_path):
+    """A config.toml from before the language setting was removed still loads, and is saved without the keys."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[general]\nlanguage = "de"\nauto_language_detection = true\ninjection_delay_ms = 300\n', encoding="utf-8"
+    )
+
+    cfg = load_config(config_path)
+    save_config(cfg, config_path)
+
+    saved = config_path.read_text(encoding="utf-8")
+    assert cfg.injection_delay_ms == 300
+    assert "language" not in saved

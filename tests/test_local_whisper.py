@@ -62,14 +62,6 @@ def test_model_attribute_matches_registry_hf_name():
     assert t2.model == "deepdml/faster-whisper-large-v3-turbo-ct2"
 
 
-def test_auto_detect_language_nulls_language():
-    t = _make(language="en", auto_detect_language=True)
-    assert t._language is None
-
-    t2 = _make(language="de", auto_detect_language=False)
-    assert t2._language == "de"
-
-
 @pytest.mark.asyncio
 async def test_connect_resets_buffer_and_marks_connected(monkeypatch):
     monkeypatch.setattr(LocalWhisperTranscriber, "_get_model", classmethod(lambda cls, *a: _FakeModel()))
@@ -93,14 +85,14 @@ async def test_finish_runs_model_and_returns_text(monkeypatch):
     fake = _FakeModel(text="transcribed text")
     monkeypatch.setattr(LocalWhisperTranscriber, "_get_model", classmethod(lambda cls, *a: fake))
 
-    t = _make(language="en")
+    t = _make()
     await t.connect()
     await t.send_audio_chunk(b"\x00\x01" * 100)
     result = await t.finish(timeout=5.0)
 
     assert result.text == "transcribed text"
     assert result.done is True
-    assert fake.calls and fake.calls[0]["language"] == "en"
+    assert fake.calls and fake.calls[0]["language"] is None  # always auto-detected
     assert fake.calls[0]["beam_size"] == 1
 
 

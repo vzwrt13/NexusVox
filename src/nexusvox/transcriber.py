@@ -434,8 +434,6 @@ def create_transcriber(
     config: InferenceConfig,
     *,
     device: str | None = None,
-    language: str | None = None,
-    auto_detect_language: bool = False,
     auto_fallback: bool = False,
 ) -> BaseTranscriber:
     """Factory: create the right transcriber based on the configured model and device.
@@ -479,8 +477,6 @@ def create_transcriber(
             config,
             device=resolved_device,
             compute_type=compute_type,
-            language=language,
-            auto_detect_language=auto_detect_language,
         )
 
     if registry.get("requires_gpu") and resolved_device == "cpu":

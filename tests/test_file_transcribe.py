@@ -137,7 +137,6 @@ async def test_transcribe_file_dispatches_through_factory(monkeypatch, sample_wa
         chunks,
         InferenceConfig(model="whisper-small"),
         device="cpu",
-        language="en",
     )
 
     assert result.text == "hello from cpu"
@@ -148,16 +147,14 @@ async def test_transcribe_file_dispatches_through_factory(monkeypatch, sample_wa
 
 
 @pytest.mark.asyncio
-async def test_transcribe_file_passes_language_and_device_to_factory(monkeypatch, sample_wav_bytes):
+async def test_transcribe_file_passes_device_to_factory(monkeypatch, sample_wav_bytes):
     import nexusvox.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     captured: dict = {}
 
-    def fake_factory(config, *, device=None, language=None, auto_detect_language=False, auto_fallback=False):
+    def fake_factory(config, *, device=None, auto_fallback=False):
         captured["device"] = device
-        captured["language"] = language
-        captured["auto"] = auto_detect_language
         return _RecordingTranscriber()
 
     monkeypatch.setattr(ft, "create_transcriber", fake_factory)
@@ -167,11 +164,9 @@ async def test_transcribe_file_passes_language_and_device_to_factory(monkeypatch
         chunks,
         InferenceConfig(model="whisper-small"),
         device="cpu",
-        language="de",
-        auto_detect_language=True,
     )
 
-    assert captured == {"device": "cpu", "language": "de", "auto": True}
+    assert captured == {"device": "cpu"}
 
 
 class _ScriptedTranscriber(_RecordingTranscriber):

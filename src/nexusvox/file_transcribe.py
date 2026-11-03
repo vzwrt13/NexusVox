@@ -72,8 +72,6 @@ async def transcribe_file(
     config: InferenceConfig,
     *,
     device: str | None = None,
-    language: str | None = None,
-    auto_detect_language: bool = False,
     word_timestamps: bool = False,
     diarize: bool = False,
     on_progress: Callable[..., None] | None = None,
@@ -95,8 +93,6 @@ async def transcribe_file(
     transcriber = create_transcriber(
         config,
         device=device,
-        language=language,
-        auto_detect_language=auto_detect_language,
         auto_fallback=config.device == "auto",
     )
     # An engine that chooses between a server and the CPU settles on one before its flags are read.

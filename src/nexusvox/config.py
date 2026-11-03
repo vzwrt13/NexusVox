@@ -493,10 +493,6 @@ class OsControlConfig:
     timeout_s: float = 5.0
 
 
-# Languages the tray toggle and the dashboard's language selector cycle through.
-SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "de")
-
-
 @dataclass
 class TranslatorConfig:
     """Translate the text into English before injecting it, via a local HTTP
@@ -665,9 +661,7 @@ class VoiceCommandsConfig:
 
 @dataclass
 class Config:
-    language: str = "en"
     injection_delay_ms: int = 500
-    auto_language_detection: bool = False
     log_level: str = "INFO"
     # Dictated text goes into the log file in full; off shortens it there (the console always shows it).
     log_full_text: bool = False
@@ -796,9 +790,7 @@ def load_config(path: Path | None = None) -> Config:
         )
 
     config = Config(
-        language=general.get("language", "en"),
         injection_delay_ms=general.get("injection_delay_ms", 500),
-        auto_language_detection=general.get("auto_language_detection", False),
         log_level=_log_level(general.get("log_level", "INFO")),
         log_full_text=bool(general.get("log_full_text", False)),
         hotkey=HotkeyConfig(
@@ -914,9 +906,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
         structural_toml = "[{}]".format(", ".join(f'"{s}"' for s in config.voice_commands.structural))
         lines = [
             "[general]",
-            f'language = "{config.language}"',
             f"injection_delay_ms = {config.injection_delay_ms}",
-            f"auto_language_detection = {'true' if config.auto_language_detection else 'false'}",
             f'log_level = "{config.log_level}"',
             f"log_full_text = {'true' if config.log_full_text else 'false'}",
             "",

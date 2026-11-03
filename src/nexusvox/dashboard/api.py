@@ -24,7 +24,6 @@ from ..config import (
     HOTKEY_MODES,
     HOTKEY_MODIFIERS,
     MODEL_REGISTRY,
-    SUPPORTED_LANGUAGES,
     Config,
     HotkeyConfig,
     MeetingConfig,
@@ -54,6 +53,7 @@ from ..file_transcribe import (
     convert_to_wav,
     transcribe_file,
 )
+from ..lang_detect import detect_language
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
 from ..logsetup import log_dir
@@ -278,8 +278,6 @@ class DashboardAPI:
 
     def get_settings(self) -> dict:
         return {
-            "auto_language_detection": self._config.auto_language_detection,
-            "language": self._config.language,
             "translate_enabled": self._config.translator.enabled,
             "translator_url": self._config.translator.url,
             "hotkey_mode": self._config.hotkey.mode,
@@ -321,18 +319,6 @@ class DashboardAPI:
             "url": self._config.translator.url,
             "reachable": is_reachable(self._config.translator),
         }
-
-    def set_auto_language_detection(self, enabled: bool) -> dict:
-        self._config.auto_language_detection = enabled
-        save_config(self._config)
-        return self.get_settings()
-
-    def set_language(self, language: str) -> dict:
-        if language not in SUPPORTED_LANGUAGES:
-            return {"error": f"Unsupported language: {language}", **self.get_settings()}
-        self._config.language = language
-        save_config(self._config)
-        return self.get_settings()
 
     def set_hotkey_mode(self, mode: str) -> dict:
         """The listener reads the shared config on every key event, so this is live."""
@@ -862,13 +848,13 @@ class DashboardAPI:
     def _store_file_transcription(self, filename: str, notes: list[str], progress, **fields) -> dict:
         """Save a finished file transcription, run the extension hook and build the job result (blocking).
 
-        `fields` go to `Database.save_file_transcription`; the language and model are the current settings.
+        `fields` go to `Database.save_file_transcription`; the language is detected from the text.
         """
         if progress:
             progress("saving")
         try:
             record = self._db.save_file_transcription(
-                language=self._config.language,
+                language=detect_language(fields.get("text", "")),
                 original_filename=filename,
                 model=self._config.inference.model,
                 **fields,
@@ -1061,12 +1047,10 @@ class DashboardAPI:
         }
 
     def _make_live_transcriber(self) -> BaseTranscriber:
-        """The transcriber one live transcript uses for all its windows (current model and language)."""
+        """The transcriber one live transcript uses for all its windows (current model)."""
         return create_transcriber(
             self._config.inference,
             device=None,
-            language=self._config.language,
-            auto_detect_language=self._config.auto_language_detection,
             auto_fallback=self._config.inference.device == "auto",
         )
 
@@ -1368,13 +1352,11 @@ class DashboardAPI:
         diarize: bool = False,
         on_progress: Callable[..., None] | None = None,
     ):
-        """Transcribe WAV chunks with the current model and language settings (blocking)."""
+        """Transcribe WAV chunks with the current model (blocking)."""
         return asyncio.run(
             transcribe_file(
                 wav_chunks,
                 self._config.inference,
-                language=self._config.language,
-                auto_detect_language=self._config.auto_language_detection,
                 word_timestamps=word_timestamps,
                 diarize=diarize,
                 on_progress=on_progress,

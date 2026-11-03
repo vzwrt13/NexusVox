@@ -35,33 +35,10 @@ def test_get_settings(flask_client):
 
     assert resp.status_code == 200
     data = resp.get_json()
-    assert "auto_language_detection" in data
-    assert "language" in data
+    assert "language" not in data
+    assert "auto_language_detection" not in data
     assert "translate_enabled" in data
     assert data["translator_url"].startswith("http")
-
-
-def test_set_auto_language_detection(flask_client):
-    resp = flask_client.post(
-        "/api/settings/auto-language-detection",
-        data=json.dumps({"enabled": True}),
-        content_type="application/json",
-    )
-
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data["auto_language_detection"] is True
-
-
-def test_set_language(flask_client):
-    resp = flask_client.post(
-        "/api/settings/language",
-        data=json.dumps({"language": "de"}),
-        content_type="application/json",
-    )
-
-    assert resp.status_code == 200
-    assert resp.get_json()["language"] == "de"
 
 
 def test_set_hotkey_mode(flask_client):
@@ -99,15 +76,11 @@ def test_set_hotkey_mode_rejects_unknown(flask_client):
     assert "error" in resp.get_json()
 
 
-def test_set_language_rejects_unknown_code(flask_client):
-    resp = flask_client.post(
-        "/api/settings/language",
-        data=json.dumps({"language": "xx"}),
-        content_type="application/json",
-    )
+@pytest.mark.parametrize("path", ["/api/settings/language", "/api/settings/auto-language-detection"])
+def test_language_setting_endpoints_are_gone(flask_client, path):
+    resp = flask_client.post(path, data=json.dumps({"language": "de"}), content_type="application/json")
 
-    assert resp.status_code == 400
-    assert "error" in resp.get_json()
+    assert resp.status_code in (404, 405)  # no such route any more
 
 
 def test_set_translate_enabled(flask_client):

@@ -4,7 +4,7 @@ NexusVox can load optional extension packages. An extension is an ordinary Pytho
 installed next to NexusVox (`pip install ...`) and announces itself through an entry point. With none
 installed nothing changes: no tab, no export link, no extra step after an upload.
 
-The interface lives in `nexusvox.extensions` and is part of the NexusVox core (AGPL-3.0-or-later).
+The interface lives in `nexusvox.extensions` and is part of the NexusVox core (PolyForm Noncommercial 1.0.0).
 
 ## Registering an extension
 

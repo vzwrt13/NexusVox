@@ -3,7 +3,7 @@
 NexusVox
 Copyright (C) 2026 NightShift AI GmbH
 
-NexusVox itself is licensed under the GNU Affero General Public License v3.0 or later —
+NexusVox itself is source-available under the PolyForm Noncommercial License 1.0.0 —
 see [LICENSE](LICENSE). This file records the licenses of third-party material that is
 bundled with, or used by, NexusVox. Those licenses apply to that material only.
 
@@ -72,8 +72,8 @@ are recorded here so the compatibility picture is on file.
 | httpx, pyperclip, sounddevice, numpy, av | BSD |
 | lingua-language-detector, tokenizers, huggingface-hub, websockets | Apache-2.0 |
 
-All of these are compatible with AGPL-3.0. LGPL-3.0 is explicitly compatible with the GNU
-AGPL; MIT, BSD and Apache-2.0 are permissive and may be combined into an AGPL-licensed work.
+All of these allow use alongside NexusVox's own licence. MIT, BSD and Apache-2.0 are permissive.
+LGPL-3.0 applies to those two libraries only.
 `pynput` and `pystray` are used as unmodified libraries through ordinary Python imports.
 
 ---

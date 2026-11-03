@@ -38,7 +38,7 @@ docker/.env
 # Evaluation harness
 .jbeval/
 
-# Open-source release planning (internal)
+# Release planning (internal)
 .open-source-docs/
 
 # Personal CI/CD notes — written as a learning document, not project documentation

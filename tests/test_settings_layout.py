@@ -75,3 +75,13 @@ def test_feedback_tab_content():
     assert re.search(r'<button[^>]*id="send-feedback"', tab)
     assert re.search(r'<button[^>]*id="open-log-folder-feedback"', tab)
     assert 'id="feedback-log-dir"' in tab
+
+
+def test_sidebar_is_pinned_to_the_viewport_and_its_nav_scrolls():
+    css = (STATIC / "style.css").read_text(encoding="utf-8")
+    header = re.search(r"\nheader \{(.*?)\n\}", css, re.S).group(1)
+    assert "position: sticky" in header and "height: 100vh" in header
+    tabs = re.search(r"\n\.tabs \{(.*?)\n\}", css, re.S).group(1)
+    assert "overflow-y: auto" in tabs and "flex: 1" in tabs
+    footer = re.search(r"\n\.tabs-footer \{(.*?)\n\}", css, re.S).group(1)
+    assert "margin-top: auto" in footer

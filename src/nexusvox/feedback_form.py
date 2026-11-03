@@ -7,28 +7,43 @@ version and the hardware tier are added, never a transcript, audio or log conten
 
 from __future__ import annotations
 
+import functools
 import platform
+import sys
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from nexusvox import __version__
 from nexusvox.config import cuda_available
 
-
-def hardware_tier() -> str:
-    return "NVIDIA GPU" if cuda_available() else "CPU-only"
+_WINDOWS_11_BUILD = 22000
 
 
+@functools.cache
+def _gpu_present() -> bool:
+    return cuda_available()
+
+
+def hardware_tier(device: str = "auto") -> str:
+    """ "NVIDIA GPU" when a CUDA GPU is usable and `[inference].device` does not force the CPU."""
+    return "NVIDIA GPU" if device != "cpu" and _gpu_present() else "CPU-only"
+
+
+@functools.cache
 def windows_version() -> str:
-    """E.g. `Windows 11 (10.0.26200)`; falls back to the platform name off Windows."""
-    release, version, _csd, _ptype = platform.win32_ver()
-    if release:
-        return f"Windows {release} ({version})"
-    return platform.system() or "unknown"
+    """E.g. `Windows 11 (10.0.26200)`; the platform name off Windows. Python 3.11 reports
+    Windows 11 as release "10", so the build number decides."""
+    getter = getattr(sys, "getwindowsversion", None)
+    if getter is None:
+        return platform.system() or "unknown"
+    info = getter()
+    release = "11" if info.build >= _WINDOWS_11_BUILD else str(info.major)
+    return f"Windows {release} ({info.major}.{info.minor}.{info.build})"
 
 
 def build_feedback_url(
     form_url: str,
     *,
+    device: str = "auto",
     app_version: str | None = None,
     windows: str | None = None,
     hardware: str | None = None,
@@ -44,6 +59,6 @@ def build_feedback_url(
     query += [
         ("app_version", app_version if app_version is not None else __version__),
         ("windows_version", windows if windows is not None else windows_version()),
-        ("hardware", hardware if hardware is not None else hardware_tier()),
+        ("hardware", hardware if hardware is not None else hardware_tier(device)),
     ]
     return urlunsplit(parts._replace(query=urlencode(query)))

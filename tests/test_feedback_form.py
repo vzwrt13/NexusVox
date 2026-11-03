@@ -2,8 +2,8 @@
 
 from urllib.parse import parse_qs, urlsplit
 
-from nexusvox.config import Config, SupportConfig
-from nexusvox.feedback_form import build_feedback_url
+from nexusvox.config import Config, SupportConfig, load_config, save_config
+from nexusvox.feedback_form import build_feedback_url, hardware_tier, windows_version
 
 FACTS = {"app_version": "1.2.3", "windows": "Windows 11 (10.0.26200)", "hardware": "CPU-only"}
 
@@ -38,26 +38,62 @@ def test_only_http_urls_are_opened():
     assert build_feedback_url("javascript:alert(1)", **FACTS) == ""
 
 
-def test_defaults_come_from_the_running_app(monkeypatch):
-    monkeypatch.setattr("nexusvox.feedback_form.cuda_available", lambda: True)
+def test_defaults_come_from_the_running_app():
     query = _query(build_feedback_url("https://example.org/f"))
-    assert query["hardware"] == ["NVIDIA GPU"]
     assert query["app_version"][0]
+    assert query["windows_version"][0]
+    assert query["hardware"][0] in ("NVIDIA GPU", "CPU-only")
 
 
-def test_settings_expose_the_url_or_nothing(flask_client):
-    settings = flask_client.get("/api/settings").get_json()
-    assert settings["feedback_url"].startswith("https://")
-    assert "app_version=" in settings["feedback_url"]
+def test_hardware_tier_follows_the_device_in_use(monkeypatch):
+    monkeypatch.setattr("nexusvox.feedback_form._gpu_present", lambda: True)
+    assert hardware_tier("auto") == "NVIDIA GPU"
+    assert hardware_tier("cuda") == "NVIDIA GPU"
+    assert hardware_tier("cpu") == "CPU-only"
+    monkeypatch.setattr("nexusvox.feedback_form._gpu_present", lambda: False)
+    assert hardware_tier("auto") == "CPU-only"
 
 
-def test_settings_hide_the_button_when_unconfigured(db, session_factory):
+def test_windows_11_is_told_apart_by_build(monkeypatch):
+    class Info:
+        major, minor, build = 10, 0, 26200
+
+    windows_version.cache_clear()
+    monkeypatch.setattr("sys.getwindowsversion", lambda: Info, raising=False)
+    try:
+        assert windows_version() == "Windows 11 (10.0.26200)"
+        windows_version.cache_clear()
+        Info.build = 19045
+        assert windows_version() == "Windows 10 (10.0.19045)"
+    finally:
+        windows_version.cache_clear()
+
+
+def test_settings_expose_the_url(db, session_factory):
     from nexusvox.dashboard.api import DashboardAPI
 
-    config = Config(support=SupportConfig(feedback_form_url=""))
-    assert DashboardAPI(session_factory, config, db=db).get_settings()["feedback_url"] == ""
+    config = Config(support=SupportConfig(feedback_form_url="https://example.org/f"))
+    url = DashboardAPI(session_factory, config, db=db).get_settings()["feedback_url"]
+    assert url.startswith("https://example.org/f?") and "app_version=" in url
 
 
-def test_default_config_has_a_form_url():
-    assert Config().support.feedback_form_url.startswith("https://")
-    assert SupportConfig(feedback_form_url="").feedback_form_url == ""
+def test_settings_hide_the_button_by_default(flask_client):
+    assert flask_client.get("/api/settings").get_json()["feedback_url"] == ""
+
+
+def test_config_defaults_to_no_form_and_round_trips(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    assert load_config(path).support.feedback_form_url == ""
+    save_config(Config(support=SupportConfig(feedback_form_url="https://example.org/f?x=1")), path)
+    assert load_config(path).support.feedback_form_url == "https://example.org/f?x=1"
+    save_config(Config(), path)
+    assert load_config(path).support.feedback_form_url == ""
+
+
+def test_malformed_form_url_is_logged_and_unset(tmp_path, caplog):
+    path = tmp_path / "config.toml"
+    path.write_text('[support]\nfeedback_form_url = "nexusvox.example/feedback"\n', encoding="utf-8")
+    with caplog.at_level("WARNING"):
+        assert load_config(path).support.feedback_form_url == ""
+    assert "feedback_form_url" in caplog.text

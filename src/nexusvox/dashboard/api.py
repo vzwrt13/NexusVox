@@ -313,7 +313,9 @@ class DashboardAPI:
             "meeting_own_voice_label": self._config.meeting.own_voice_label,
             "meeting_live_transcript": self._config.meeting.live_transcript,
             "meeting_store_audio": self._config.meeting.store_audio,
-            "feedback_url": build_feedback_url(self._config.support.feedback_form_url),
+            "feedback_url": build_feedback_url(
+                self._config.support.feedback_form_url, device=self._config.inference.device
+            ),
         }
 
     def get_translator_status(self) -> dict:

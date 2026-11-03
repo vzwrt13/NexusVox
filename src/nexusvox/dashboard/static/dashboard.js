@@ -258,7 +258,8 @@ const openLogFolderButton = document.getElementById("open-log-folder");
 const logOpenError = document.getElementById("log-open-error");
 const logDirLabel = document.getElementById("log-dir");
 const feedbackCard = document.getElementById("feedback-card");
-const sendFeedbackLink = document.getElementById("send-feedback");
+const sendFeedbackButton = document.getElementById("send-feedback");
+let feedbackUrl = "";
 const learnFromEditsToggle = document.getElementById("learn-from-edits-toggle");
 const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
 const hotkeyMods = Array.from(document.querySelectorAll("#hotkey-mods input"));
@@ -438,6 +439,9 @@ languageSelect.addEventListener("change", () => postSetting("/api/settings/langu
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 storeAudioToggle.addEventListener("change", () => postSetting("/api/settings/store-audio", { enabled: storeAudioToggle.checked }));
 logFullTextToggle.addEventListener("change", () => postSetting("/api/settings/log-full-text", { enabled: logFullTextToggle.checked }));
+sendFeedbackButton.addEventListener("click", () => {
+  if (feedbackUrl) window.open(feedbackUrl, "_blank", "noopener,noreferrer");
+});
 openLogFolderButton.addEventListener("click", async () => {
   logOpenError.hidden = true;
   try {
@@ -580,7 +584,7 @@ async function loadSettings() {
   logFullTextToggle.checked = s.log_full_text;
   logDirLabel.textContent = s.log_dir;
   feedbackCard.hidden = !s.feedback_url;
-  if (s.feedback_url) sendFeedbackLink.href = s.feedback_url;
+  feedbackUrl = s.feedback_url || "";
   learnFromEditsToggle.checked = s.learn_from_edits;
   loadLearnStatus();
   polishTerminalsToggle.checked = s.polish_in_terminals;

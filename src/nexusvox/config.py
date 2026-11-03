@@ -630,16 +630,24 @@ class RemoteMicConfig:
     token: str = ""
 
 
-FEEDBACK_FORM_URL = "https://nexusvox.nightshift-ai.de/feedback"
-
-
 @dataclass
 class SupportConfig:
     """`feedback_form_url`: the page the dashboard's "Send feedback" button opens in the browser
-    (app version, Windows version and hardware tier are added as URL parameters). Empty hides
-    the button."""
+    (app version, Windows version and hardware tier are added as URL parameters). Empty (the
+    default, until the form exists) hides the button."""
 
-    feedback_form_url: str = FEEDBACK_FORM_URL
+    feedback_form_url: str = ""
+
+
+def _feedback_form_url(value: object) -> str:
+    """The configured form URL; a value that is not an http(s) URL is logged and treated as unset."""
+    url = value.strip() if isinstance(value, str) else ""
+    if value and not url.lower().startswith(("http://", "https://")):
+        logging.getLogger(__name__).warning(
+            "[support].feedback_form_url must be an http(s) URL; the Send feedback button stays hidden"
+        )
+        return ""
+    return url
 
 
 _DEFAULT_SYMBOLS: list[str] = [
@@ -913,7 +921,7 @@ def load_config(path: Path | None = None) -> Config:
             token=str(remote_mic_data.get("token", "")),
         ),
         support=SupportConfig(
-            feedback_form_url=str(support_data.get("feedback_form_url", FEEDBACK_FORM_URL)),
+            feedback_form_url=_feedback_form_url(support_data.get("feedback_form_url", "")),
         ),
     )
     config.source_path = path.resolve()

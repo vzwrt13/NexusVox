@@ -48,8 +48,8 @@ def test_settings_divs_are_balanced():
     assert len(re.findall(r"<div[\s>]", section)) == len(re.findall(r"</div>", section))
 
 
-def test_feedback_card_is_hidden_until_the_script_has_a_url():
+def test_feedback_card_starts_hidden_with_a_button():
     section = _settings_section()
-    assert re.search(r'<div class="settings-card" id="feedback-card" hidden>', section)
-    assert 'id="send-feedback"' in section
-    assert "feedbackCard.hidden = !s.feedback_url" in JS
+    opening = re.search(r'<div[^>]*id="feedback-card"[^>]*>', section)
+    assert opening and " hidden" in opening.group(0)
+    assert re.search(r'<button[^>]*id="send-feedback"', section[opening.end() :])

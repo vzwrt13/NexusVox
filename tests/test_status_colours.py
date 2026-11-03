@@ -30,7 +30,7 @@ def test_the_helper_accepts_exactly_the_three_states():
 def test_status_lines_are_not_styled_by_hand():
     # Only the helper may write a status-line class name; the one other writer is the rename error note.
     assert len(re.findall(r'className = "status-line', _JS)) <= 2
-    assert "className = \"status-line ok\"" not in _JS
+    assert 'className = "status-line ok"' not in _JS
 
 
 def test_caveat_hints_use_the_warn_state():

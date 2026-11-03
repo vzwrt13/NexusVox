@@ -118,7 +118,7 @@ A model is "CPU-shippable" for NexusVox if it hits, on your target CPU:
 - **RTF ≤ 0.20** — 10 s of speech transcribes in ≤ 2 s, preserving the push-to-talk feel.
 - **WER ≤ 8 % EN and ≤ 12 % DE** — comparable to the GPU baseline on FLEURS.
 
-If one model clears both bars, it becomes the single default. If EN and DE have different winners, the registry can expose per-language defaults and the tray language toggle swaps automatically.
+If one model clears both bars, it becomes the single default. If EN and DE have different winners, the registry can expose per-language defaults.
 
 ## Viewing results in the dashboard
 

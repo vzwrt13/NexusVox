@@ -250,8 +250,8 @@ def _load_inprocess_model(args: argparse.Namespace):
 
 
 def run_benchmark(lang: str, args: argparse.Namespace, inproc_model=None) -> tuple[list[dict], dict]:
-    # Map FLEURS lang code to Whisper's ISO-639-1 for the in-process language hint.
-    lang_hint = {"en_us": "en", "de_de": "de"}.get(lang)
+    # The app never gives Whisper a language (it always auto-detects), so the benchmark does not either.
+    lang_hint = None
 
     print(f"\nLoading google/fleurs ({lang}, split={args.split}, streaming) …")
     ds = load_dataset("google/fleurs", lang, split=args.split, streaming=True, trust_remote_code=True)

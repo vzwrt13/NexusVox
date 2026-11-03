@@ -30,7 +30,7 @@ the only place German may remain; no other file may follow its example.
 
 Anything that matches spoken words (voice commands, number words, OS/assistant triggers, dictionary
 helpers) must handle **English and German from the first version**, with tests for both. Both
-languages are always recognised; the matcher never depends on a language setting (there is none: the language of a stored row is detected from its text).
+languages are always recognised; the matcher never depends on a language setting (there is none: the language of a stored row is detected from its text by `lang_detect.stored_language`: `en`, `de`, or `und` when nothing can be told, which the language chart leaves out).
 
 ## Quick Reference
 

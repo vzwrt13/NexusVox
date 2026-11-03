@@ -152,7 +152,7 @@ Read from the code on this branch.
 
 | Step | Where | Bound to | What breaks in, say, Spanish |
 |---|---|---|---|
-| Language setting and tray toggle | `SUPPORTED_LANGUAGES = ("en", "de")`, `config.py:478`; tray toggle in `app.py:988` flips en/de | en, de | A user cannot select any other language. Whisper gets `language=` from this setting unless auto-detect is on, so Whisper in Spanish needs auto-detect. Parakeet is called without a language and auto-detects, so it works regardless |
+| Spoken-language setting (removed) | No language setting any more: Parakeet and CPU Whisper are called without a language and auto-detect | any | Nothing is bound to en/de here. The detected language only labels stored rows (see the next row) |
 | Language detection | `lang_detect.py`: lingua built from English and German only; used for the post-transcription language, analytics, and `edit_watch.py` confidence | en, de | Spanish text is labelled en or de (whichever is closer) or "unknown". Wrong language tags in stats; learn-from-edits may misjudge a correction |
 | Voice commands | `voice_commands.py`: structural and symbol lists, number words, `press_enter`; "Every vocabulary covers English and German" | en, de | "nueva línea" is typed as words; "veinticinco" is not converted to 25. Nothing crashes |
 | nexus OS commands | `os_commands.py`: `open`/`öffne` verbs, the `nexus` trigger | en, de | "abre Chrome" is typed instead of opening it |

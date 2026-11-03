@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from ..dictionary import suggest_entries, usage_key
 from ..edit_watch import OUTCOMES, WATCHED_KEYS
+from ..lang_detect import UNDETERMINED
 from ..models import (
     ACCEPTED_EVENT,
     COMMAND_APP,
@@ -284,6 +285,7 @@ def get_language_distribution(
             Transcription.language,
             func.count().label("count"),
         )
+        query = query.filter(Transcription.language != UNDETERMINED)  # nothing to tell: not a language
         rows = _apply_date_filter(query, start, end).group_by(Transcription.language).all()
 
     return {"labels": [r.language.upper() for r in rows], "values": [r.count for r in rows]}

@@ -31,3 +31,20 @@ def test_detect_unsupported_language_maps_to_closest():
     """French is not in the detector — lingua picks the closest configured language."""
     result = detect_language("Ceci est un test complet de la langue francaise qui est assez long.")
     assert result in ("en", "de")
+
+
+def test_stored_language_labels_and_undetermined():
+    from nexusvox.lang_detect import UNDETERMINED, stored_language
+
+    assert stored_language("This is a test of the English language.") == "en"
+    assert stored_language("Das ist ein Test der deutschen Sprache.") == "de"
+    assert stored_language("   ") == UNDETERMINED
+    assert stored_language("") == UNDETERMINED
+
+
+def test_stored_language_ignores_speaker_labels_and_long_text():
+    from nexusvox.lang_detect import stored_language
+
+    german = "Speaker 1: Das ist ein Test der deutschen Sprache, den wir heute machen.\n\n" * 3
+    assert stored_language(german, strip_labels=True) == "de"
+    assert stored_language("Das ist ein Test der deutschen Sprache. " * 5000, strip_labels=True) == "de"

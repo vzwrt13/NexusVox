@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from lingua import IsoCode639_1, Language, LanguageDetectorBuilder
 
 _detector = LanguageDetectorBuilder.from_languages(Language.ENGLISH, Language.GERMAN).build()
@@ -26,3 +28,25 @@ def detect_language(text: str) -> str:
     if lang is None:
         return "unknown"
     return _LANG_MAP.get(lang.iso_code_639_1, "unknown")
+
+
+# What is stored for text whose language cannot be told (empty, or neither English nor German).
+UNDETERMINED = "und"
+# Enough text for a sure verdict; a longer transcript (a meeting) would only cost CPU time.
+SAMPLE_CHARS = 2000
+_SPEAKER_LABEL = re.compile(r"(?m)^[^\n:]{1,40}:[ \t]+")
+
+
+def stored_language(text: str, *, strip_labels: bool = False) -> str:
+    """The language label saved with a row: ``"en"``, ``"de"`` or ``UNDETERMINED``.
+
+    `strip_labels` drops a leading ``Speaker N:`` style label from every line first (file transcripts
+    and meetings carry them in English, whatever was spoken); only the first `SAMPLE_CHARS` are inspected.
+    """
+    if strip_labels:
+        text = _SPEAKER_LABEL.sub("", text)
+    sample = text[:SAMPLE_CHARS].strip()
+    if not sample:
+        return UNDETERMINED
+    lang = detect_language(sample)
+    return UNDETERMINED if lang == "unknown" else lang

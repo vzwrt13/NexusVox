@@ -266,7 +266,7 @@ def _dictation_app(monkeypatch, inject):
     app._run_command = AsyncMock(return_value=None)
     app._db = MagicMock()
     app._store_audio = MagicMock()
-    monkeypatch.setattr(app_module, "detect_language", lambda _text: "de")
+    monkeypatch.setattr(app_module, "stored_language", lambda _text: "de")
     app._edit_watcher = MagicMock()
     processed = ProcessedText(
         "Hallo Welt",

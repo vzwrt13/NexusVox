@@ -36,7 +36,7 @@ from .extensions import ActiveApp, load_extensions, loaded_extensions
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, MeetingHotkey, describe_hotkey
 from .injector import foreground_window, inject_text
-from .lang_detect import detect_language
+from .lang_detect import stored_language
 from .llm import LlmError
 from .llm import warm_up as llm_warm_up
 from .logsetup import Text
@@ -648,9 +648,11 @@ class NexusVoxApp:
                             processed.typed, self._config.learn_from_edits.window_s, processed.spoken
                         )
             latency_ms = int(((done_at or time.monotonic()) - stop_time) * 1000)
+            # lingua loads its models on first use: keep that off the event loop.
+            language = await loop.run_in_executor(None, stored_language, raw_text)
             record = self._db.save_transcription(
                 text=processed.saved,
-                language=detect_language(raw_text),
+                language=language,
                 duration_ms=duration_ms,
                 confidence=result.confidence,
                 model=self._transcriber.model,
@@ -775,7 +777,7 @@ class NexusVoxApp:
         """
         record = self._db.save_transcription(
             text=label,
-            language=detect_language(spoken),
+            language=stored_language(spoken),
             duration_ms=recording.duration_ms if recording else 0,
             confidence=recording.confidence if recording else None,
             model=self._transcriber.model if recording else None,

@@ -53,7 +53,7 @@ from ..file_transcribe import (
     convert_to_wav,
     transcribe_file,
 )
-from ..lang_detect import detect_language
+from ..lang_detect import stored_language
 from ..llm import is_reachable as llm_reachable
 from ..llm import warm_up as llm_warm_up
 from ..logsetup import log_dir
@@ -854,7 +854,7 @@ class DashboardAPI:
             progress("saving")
         try:
             record = self._db.save_file_transcription(
-                language=detect_language(fields.get("text", "")),
+                language=stored_language(fields.get("text", ""), strip_labels=True),
                 original_filename=filename,
                 model=self._config.inference.model,
                 **fields,

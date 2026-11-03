@@ -405,6 +405,9 @@ def test_main_applies_the_configured_log_level(monkeypatch):
         def run(self):
             raise KeyboardInterrupt
 
+        def open_dashboard_from_second_start(self):
+            pass
+
     # The real app module binds PortAudio at import, which CI runners on Linux do not have.
     monkeypatch.setitem(sys.modules, "nexusvox.app", types.SimpleNamespace(NexusVoxApp=App))
     monkeypatch.delitem(sys.modules, "nexusvox.__main__", raising=False)
@@ -413,6 +416,12 @@ def test_main_applies_the_configured_log_level(monkeypatch):
     own = logging.getLogger("nexusvox")
     previous = own.level
     monkeypatch.setattr(entry, "load_config", lambda: Config(log_level="DEBUG"))
+    # A NexusVox that really runs on this machine must not turn this test into a second start.
+    monkeypatch.setattr(
+        entry,
+        "SingleInstance",
+        lambda: types.SimpleNamespace(acquire=lambda: True, watch=lambda cb: None, release=lambda: None),
+    )
     monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: seen.update(kwargs))
     try:
         with pytest.raises(SystemExit) as exit_:

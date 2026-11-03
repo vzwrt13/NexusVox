@@ -32,6 +32,17 @@ class MyExtension(Extension):
 name, targets another `api_version`, fails while registering its panels or targets, or raises inside a hook
 is logged and skipped (a hook failure only skips that call).
 
+## Starting without extensions (developers)
+
+To test the plain Free app while an extension package stays installed (for example an editable install in
+your development environment), set `NEXUSVOX_NO_EXTENSIONS=1` before starting NexusVox. No entry point of
+the `nexusvox.extensions` group is loaded and the log says so once at start. Only the exact value `1`
+counts; unset or any other value loads extensions as usual.
+
+```powershell
+$env:NEXUSVOX_NO_EXTENSIONS = "1"; python -m nexusvox
+```
+
 ## Versioning
 
 `nexusvox.extensions.API_VERSION` is an integer. It is bumped when a change breaks existing extensions

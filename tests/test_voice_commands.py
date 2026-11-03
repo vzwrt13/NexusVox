@@ -432,3 +432,70 @@ def test_split_press_enter_trailing_phrase(text, expected):
 )
 def test_split_press_enter_leaves_other_text(text):
     assert split_press_enter(text) == (text, False)
+
+
+# ---------------------------------------------------------------------------
+# Ordinals
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("zwölfter Test", "12. Test"),
+        ("der zwölfte Mai", "der 12. Mai"),
+        ("am zwanzigsten", "am 20."),
+        ("der hundertste Kunde", "der 100. Kunde"),
+        ("einundzwanzigste", "21."),
+        ("die erste, dritte, siebte", "die 1., 3., 7."),
+        ("am achten Mai", "am 8. Mai"),
+        ("Er wurde Zwölfter.", "Er wurde 12."),
+        ("die Neunte", "die 9."),
+        ("Ludwig der Vierzehnte", "Ludwig der 14."),
+    ],
+)
+def test_german_ordinals_become_digits(spoken, expected):
+    assert process_voice_commands(spoken, numbers_as_digits=True) == expected
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "ich achte darauf",
+        "wir achten darauf",
+        "zweitens und drittens",
+        "ein Drittel, ein Viertel, ein Achtel",
+        "die dreiste Lüge",
+        "er einte das Land",
+        "Eins ist klar",
+        "zwölfter Test",
+    ],
+)
+def test_german_non_ordinals_and_switch_off_stay_words(spoken):
+    if spoken == "zwölfter Test":
+        assert process_voice_commands(spoken, numbers_as_digits=False) == spoken
+    else:
+        assert process_voice_commands(spoken, numbers_as_digits=True) == spoken
+
+
+def test_eins_still_a_number_in_a_list():
+    assert process_voice_commands("Eins, zwei, drei", numbers_as_digits=True) == "1, 2, 3"
+    assert process_voice_commands("Eins zwei drei", numbers_as_digits=True) == "1 2 3"
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("twelfth", "12th"),
+        ("twenty first", "21st"),
+        ("twenty-second", "22nd"),
+        ("the third", "the 3rd"),
+        ("two hundredth", "200th"),
+        ("a second", "a second"),
+        ("first of all", "first of all"),
+        ("one second", "1 second"),
+    ],
+)
+def test_english_ordinals(spoken, expected):
+    assert process_voice_commands(spoken, numbers_as_digits=True) == expected
+    assert process_voice_commands(spoken) == spoken

@@ -317,8 +317,8 @@ def test_factory_wraps_only_for_auto_fallback_on_gpu():
     assert isinstance(create_transcriber(config, device="cuda", auto_fallback=True), AutoParakeetTranscriber)
     assert isinstance(create_transcriber(config, device="cuda"), OpenAIHttpTranscriber)
     assert not isinstance(create_transcriber(config, device="cpu", auto_fallback=True), AutoParakeetTranscriber)
-    voxtral = InferenceConfig(model="voxtral-mini-4b")
-    assert not isinstance(create_transcriber(voxtral, device="cuda", auto_fallback=True), AutoParakeetTranscriber)
+    whisper = InferenceConfig(model="whisper-large-v3-turbo")
+    assert not isinstance(create_transcriber(whisper, device="cuda", auto_fallback=True), AutoParakeetTranscriber)
 
 
 def test_health_probe_lines_are_dropped_from_the_httpx_log_but_posts_stay():

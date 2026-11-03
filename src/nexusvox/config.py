@@ -12,6 +12,8 @@ from pathlib import Path
 
 from .paths import default_config_path, resolve_data_path
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_CONFIG_PATH = Path("config.toml")
 # Resolved next to this module, not relative to the repository root. The template
 # ships inside the package (see [tool.setuptools.package-data]), so an installed
@@ -21,38 +23,6 @@ DEFAULT_CONFIG_PATH = Path("config.toml")
 EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parent / "config.example.toml"
 
 MODEL_REGISTRY: dict[str, dict[str, object]] = {
-    "voxtral-mini-4b": {
-        "hf_name": "mistralai/Voxtral-Mini-4B-Realtime-2602",
-        "default_url": "ws://localhost:8000/v1/realtime",
-        "protocol": "realtime_ws",
-        "display_name": "Voxtral Mini 4B",
-        "docker_profile": "voxtral",
-        "health_url": "http://localhost:8000/health",
-        "description": "Mistral real-time STT with causal audio encoder — <500 ms latency",
-        "parameters": "4B (3.4B LM + 970M encoder)",
-        "architecture": "Causal audio encoder + Mistral LM",
-        "languages": "13 languages (AR, DE, EN, ES, FR, HI, IT, NL, PT, ZH, JA, KO, RU)",
-        "streaming": "true",
-        "vram_gb": "≥16 GB",
-        "requires_gpu": True,
-        "inprocess_supported": False,
-    },
-    "cohere-transcribe": {
-        "hf_name": "CohereLabs/cohere-transcribe-03-2026",
-        "default_url": "http://localhost:8001/v1/audio/transcriptions",
-        "protocol": "openai_http",
-        "display_name": "Cohere Transcribe",
-        "docker_profile": "cohere",
-        "health_url": "http://localhost:8001/health",
-        "description": "2B Conformer-based STT — >3x real-time factor, 14 languages",
-        "parameters": "2B",
-        "architecture": "Conformer encoder + Transformer decoder",
-        "languages": "14 languages (EN, FR, DE, IT, ES, PT, EL, NL, PL, ZH, JA, KO, VI, AR)",
-        "streaming": "false",
-        "vram_gb": "~6 GB",
-        "requires_gpu": True,
-        "inprocess_supported": False,
-    },
     "parakeet-tdt-0.6b": {
         "hf_name": "nvidia/parakeet-tdt-0.6b-v3",
         "default_url": "http://localhost:8002/v1/audio/transcriptions",
@@ -70,11 +40,14 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "streaming": "false",
         "vram_gb": "GPU ~2 GB · CPU ~670 MB download",
         # GPU: the Docker NeMo container. CPU: in-process ONNX int8 through onnx-asr (no Docker).
-        "requires_gpu": False,
         "inprocess_supported": True,
         "inprocess_engine": "parakeet-onnx",
         "onnx_model": "nemo-parakeet-tdt-0.6b-v3",
         "onnx_quantization": "int8",
+        # The in-process copy the dashboard marks as downloaded (Hugging Face repo, a file that proves it, size).
+        "download_repo": "istupakov/parakeet-tdt-0.6b-v3-onnx",
+        "download_probe": "encoder-model.int8.onnx",
+        "download_size": "~670 MB",
     },
     "whisper-large-v3-turbo": {
         "hf_name": "deepdml/faster-whisper-large-v3-turbo-ct2",
@@ -89,88 +62,9 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "languages": "99 languages",
         "streaming": "false",
         "vram_gb": "~4 GB",
-        "requires_gpu": False,
         "inprocess_supported": True,
-    },
-    "whisper-small": {
-        "hf_name": "Systran/faster-whisper-small",
-        "default_url": "",
-        "protocol": "openai_http",
-        "display_name": "Whisper Small (CPU-optimized)",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "OpenAI Whisper Small via faster-whisper — ~150 MB, fast on CPU, English-strong",
-        "parameters": "244M",
-        "architecture": "Transformer encoder-decoder (CTranslate2)",
-        "languages": "99 languages",
-        "streaming": "false",
-        "vram_gb": "CPU (~500 MB RAM)",
-        "requires_gpu": False,
-        "inprocess_supported": True,
-    },
-    "distil-whisper-large-v3": {
-        "hf_name": "Systran/faster-distil-whisper-large-v3",
-        "default_url": "",
-        "protocol": "openai_http",
-        "display_name": "Distil-Whisper Large V3 (EN, CPU)",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "Distilled Whisper Large V3 — ~6x faster than large-v3 on CPU, English-only",
-        "parameters": "756M",
-        "architecture": "Transformer encoder-decoder (CTranslate2, distilled)",
-        "languages": "English only",
-        "streaming": "false",
-        "vram_gb": "CPU (~1.5 GB RAM)",
-        "requires_gpu": False,
-        "inprocess_supported": True,
-    },
-    "distil-whisper-medium-en": {
-        "hf_name": "Systran/faster-distil-whisper-medium.en",
-        "default_url": "",
-        "protocol": "openai_http",
-        "display_name": "Distil-Whisper Medium.en (EN, CPU)",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "Distilled Whisper Medium.en — ~4x faster than medium on CPU, English-only",
-        "parameters": "394M",
-        "architecture": "Transformer encoder-decoder (CTranslate2, distilled)",
-        "languages": "English only",
-        "streaming": "false",
-        "vram_gb": "CPU (~800 MB RAM)",
-        "requires_gpu": False,
-        "inprocess_supported": True,
-    },
-    "whisper-medium": {
-        "hf_name": "Systran/faster-whisper-medium",
-        "default_url": "",
-        "protocol": "openai_http",
-        "display_name": "Whisper Medium (CPU)",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "Whisper Medium via faster-whisper — multilingual incl. DE, ~3x faster than large-v3-turbo",
-        "parameters": "769M",
-        "architecture": "Transformer encoder-decoder (CTranslate2)",
-        "languages": "99 languages",
-        "streaming": "false",
-        "vram_gb": "CPU (~1.5 GB RAM)",
-        "requires_gpu": False,
-        "inprocess_supported": True,
-    },
-    "whisper-base": {
-        "hf_name": "Systran/faster-whisper-base",
-        "default_url": "",
-        "protocol": "openai_http",
-        "display_name": "Whisper Base (CPU)",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "Whisper Base via faster-whisper — multilingual, smallest multilingual option, fastest",
-        "parameters": "74M",
-        "architecture": "Transformer encoder-decoder (CTranslate2)",
-        "languages": "99 languages",
-        "streaming": "false",
-        "vram_gb": "CPU (~300 MB RAM)",
-        "requires_gpu": False,
-        "inprocess_supported": True,
+        "download_probe": "model.bin",
+        "download_size": "~1.6 GB",
     },
     "custom-server": {
         # Not a model but a slot: any server the user runs, at [inference.custom].url,
@@ -188,14 +82,43 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "languages": "Depends on the server",
         "streaming": "false",
         "vram_gb": "None locally",
-        "requires_gpu": False,
         "inprocess_supported": False,
         "custom": True,
     },
 }
 
+# The model every config falls back to: one that names a model no longer in the registry, and a
+# model that cannot start on this machine.
+DEFAULT_MODEL = "parakeet-tdt-0.6b"
+
+# Default URLs of the removed Voxtral and Cohere containers.
+_REMOVED_MODEL_URLS = {"ws://localhost:8000/v1/realtime", "http://localhost:8001/v1/audio/transcriptions"}
+_WARNED_REMOVED_MODELS: set[str] = set()
+
 # Wire protocols a custom server can speak, mapped to the registry protocol they reuse.
 CUSTOM_PROTOCOLS = {"http": "openai_http", "realtime": "realtime_ws"}
+
+
+def model_download_state(model_id: str, cache_dir: str | Path | None = None) -> dict[str, object]:
+    """Whether the in-process copy of `model_id` is already on disk, and how big the download is.
+
+    `downloaded` is None for a model without an in-process copy (the custom server) and when the cache
+    cannot be read; `size` is empty then. `cache_dir` is the installed app's models folder (None from
+    source: the Hugging Face cache).
+    """
+    info = MODEL_REGISTRY.get(model_id, {})
+    # The repo defaults to the model's own Hugging Face name; only the ONNX Parakeet build lives elsewhere.
+    repo, probe = info.get("download_repo") or info.get("hf_name"), info.get("download_probe")
+    if not repo or not probe:
+        return {"downloaded": None, "size": ""}
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        found = try_to_load_from_cache(str(repo), str(probe), cache_dir=cache_dir)
+        downloaded: bool | None = isinstance(found, str)
+    except Exception:
+        downloaded = None
+    return {"downloaded": downloaded, "size": str(info.get("download_size", ""))}
 
 
 def model_needs_docker(model_id: str, device: str) -> bool:
@@ -753,6 +676,20 @@ def load_config(path: Path | None = None) -> Config:
         meeting_modifiers, meeting_key = default_meeting_hotkey(hotkey_config)
     audio_data = data.get("audio", {})
     inference_data = data.get("inference", {})
+    model = inference_data.get("model", DEFAULT_MODEL)
+    server_url = inference_data.get("server_url", str(MODEL_REGISTRY[DEFAULT_MODEL]["default_url"]))
+    if model not in MODEL_REGISTRY:
+        # A model that was removed from the list (Voxtral, Cohere, the small Whisper sizes, Distil-Whisper):
+        # use Parakeet, and its server URL too, since the saved one belongs to the old model.
+        # The file is not rewritten, so say it once per process, not on every load.
+        if model not in _WARNED_REMOVED_MODELS:
+            _WARNED_REMOVED_MODELS.add(model)
+            logger.warning("Model %r is no longer available; using %s instead.", model, DEFAULT_MODEL)
+        model = DEFAULT_MODEL
+        # The saved URL is kept unless it is one of the removed servers' own defaults (Voxtral's WebSocket,
+        # Cohere's port), which Parakeet cannot answer; a deliberate address of another host stays.
+        if server_url in _REMOVED_MODEL_URLS or server_url.startswith(("ws:", "wss:")):
+            server_url = str(MODEL_REGISTRY[DEFAULT_MODEL]["default_url"])
     custom_data = inference_data.get("custom", {})
     custom_protocol = custom_data.get("protocol", "http")
     db_data = data.get("database", {})
@@ -816,9 +753,9 @@ def load_config(path: Path | None = None) -> Config:
             chunk_size=audio_data.get("chunk_size", 4096),
         ),
         inference=InferenceConfig(
-            server_url=inference_data.get("server_url", "http://localhost:8002/v1/audio/transcriptions"),
+            server_url=server_url,
             transcription_delay_ms=inference_data.get("transcription_delay_ms", 480),
-            model=inference_data.get("model", "parakeet-tdt-0.6b"),
+            model=model,
             device=inference_data.get("device", "auto"),
             compute_type=inference_data.get("compute_type", None),
             custom=CustomServerConfig(

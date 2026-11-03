@@ -1,8 +1,7 @@
 """In-process faster-whisper transcriber for CPU (and optional GPU) mode.
 
-Loads the model once and caches it at the class level — switching between
-Whisper entries (e.g. whisper-large-v3-turbo <-> whisper-small) reuses any
-already-loaded instance. Model downloads happen on first use via faster-whisper's
+Loads the model once and caches it at the class level — switching away from
+Whisper and back reuses the already-loaded instance. Model downloads happen on first use via faster-whisper's
 HuggingFace Hub integration (~/.cache/huggingface on Linux/macOS,
 %USERPROFILE%\\.cache\\huggingface on Windows).
 """

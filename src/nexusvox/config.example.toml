@@ -78,11 +78,10 @@ chunk_size = 4096
 server_url = "http://localhost:8002/v1/audio/transcriptions"
 # Transcription delay in ms (multiples of 80, range 80-2400)
 transcription_delay_ms = 480
-# Transcription model. In-process on CPU (no Docker): "parakeet-tdt-0.6b" (ONNX int8,
-# ~670 MB download), "whisper-small", "whisper-base", "whisper-medium",
-# "whisper-large-v3-turbo", "distil-whisper-large-v3" (EN), "distil-whisper-medium-en" (EN).
-# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe". Parakeet and the
-# Whisper models also run there, in a container.
+# Transcription model: "parakeet-tdt-0.6b" (default; 25 European languages; in-process on CPU
+# through ONNX int8, ~670 MB download, or in a Docker container on an NVIDIA GPU) or
+# "whisper-large-v3-turbo" (99 languages, for languages Parakeet does not cover; in-process on CPU
+# or in a container). A model name that no longer exists falls back to Parakeet.
 # Your own server (see [inference.custom] below): "custom-server".
 # See the model table in README.md for resources and model licenses.
 model = "parakeet-tdt-0.6b"

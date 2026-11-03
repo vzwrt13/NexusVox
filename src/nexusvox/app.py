@@ -21,6 +21,7 @@ from .assistant import parse_assistant_command, send_to_assistant, send_to_servi
 from .audio import AudioCapture
 from .clipboard import ClipboardError
 from .config import (
+    DEFAULT_MODEL,
     FEEDBACK_MODES,
     MODEL_REGISTRY,
     Config,
@@ -75,7 +76,6 @@ class _Recording:
     transcribe_ms: int
 
 
-_CPU_FALLBACK_MODEL = "whisper-large-v3-turbo"
 # A key press older than this before the recording started is not the start of this take.
 MAX_TAKE_LEAD_S = 10.0
 
@@ -83,21 +83,20 @@ logger = logging.getLogger(__name__)
 
 
 def apply_startup_fallback(inference: InferenceConfig, device: str) -> None:
-    """Swap a model that cannot start on this machine for a bundled one, for this session.
+    """Swap a model that cannot start for Parakeet, for this session.
 
-    A GPU model on CPU falls back to Whisper in-process. The custom-server slot without
-    a URL cannot build a client, so it falls back too instead of crashing before the
-    dashboard is up. The TOML is not rewritten here.
+    The custom-server slot without a URL cannot build a client, so it falls back instead of crashing
+    before the dashboard is up. The TOML is not rewritten here.
     """
     info = MODEL_REGISTRY.get(inference.model, {})
-    if device == "cpu" and info.get("requires_gpu"):
-        reason = "requires a GPU but device is CPU"
-    elif info.get("custom") and not inference.custom.url:
-        reason = "needs [inference.custom].url in config.toml"
-    else:
+    if not (info.get("custom") and not inference.custom.url):
         return
-    fallback = _CPU_FALLBACK_MODEL if device == "cpu" else InferenceConfig().model
-    logger.warning("Configured model %s %s. Falling back to %s for this session.", inference.model, reason, fallback)
+    fallback = DEFAULT_MODEL
+    logger.warning(
+        "Configured model %s needs [inference.custom].url in config.toml. Falling back to %s for this session.",
+        inference.model,
+        fallback,
+    )
     inference.model = fallback
     if model_needs_docker(fallback, device):
         inference.server_url = str(MODEL_REGISTRY[fallback]["default_url"])
@@ -115,9 +114,8 @@ class NexusVoxApp:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._running = False
 
-        # Resolve device once at startup. If the configured model requires a
-        # GPU but we're on CPU, fall back to Whisper (without rewriting the
-        # user's TOML — they can adjust in the dashboard later).
+        # Resolve device once at startup. A configured model that cannot start (a custom server
+        # without a URL) falls back to Parakeet without rewriting the user's TOML.
         self._device = resolve_device(config.inference.device)
         logger.info(
             "Resolved compute device: %s (requested: %s)",
@@ -334,7 +332,7 @@ class NexusVoxApp:
     async def switch_model(self, model_id: str) -> None:
         """Switch to a different transcription model.
 
-        In-process (Whisper-on-CPU) and custom-server switches skip Docker entirely;
+        In-process (Parakeet or Whisper on CPU) and custom-server switches skip Docker entirely;
         GPU-backed switches stop the old container, start the new one, and wait for health.
         """
         if model_id not in MODEL_REGISTRY:

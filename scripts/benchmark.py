@@ -15,8 +15,8 @@ Quick usage:
   # Parakeet, both languages, 200 samples each
   python scripts/benchmark.py --model parakeet-tdt-0.6b --lang both --limit 200
 
-  # Cohere, full test split, German only
-  python scripts/benchmark.py --model cohere-transcribe --lang de_de
+  # Parakeet, full test split, German only
+  python scripts/benchmark.py --model parakeet-tdt-0.6b --lang de_de
 
   # List available models
   python scripts/benchmark.py --list-models

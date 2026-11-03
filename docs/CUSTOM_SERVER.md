@@ -69,7 +69,7 @@ The same request NexusVox sends to the bundled HTTP models (OpenAI-compatible
 
 ## The `realtime` contract
 
-The vLLM `/v1/realtime` WebSocket protocol that the bundled Voxtral model uses. NexusVox
+The vLLM `/v1/realtime` WebSocket protocol that vLLM serves (Voxtral was the bundled model that used it). NexusVox
 opens one WebSocket per recording on `url` (`ws://` or `wss://`):
 
 1. **Server → client:** `{"type": "session.created", "id": "<any>"}` — must be the first

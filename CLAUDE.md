@@ -63,7 +63,6 @@ Hotkey listener (pynput low-level hook; default Ctrl+Shift+Alt, any modifiers op
 
 - **Windows-only** — uses Win32 SendInput + WM_PASTE for text injection and pynput win32 hooks
 - **NVIDIA GPU required only for server-backed models** (Parakeet/Whisper in their Docker builds). CPU-only mode runs faster-whisper or Parakeet (`onnx-asr`, ONNX int8, ~670 MB, no speaker detection) in-process — no Docker, no GPU. Set `[inference].device = "cpu"` in config.toml.
-- **HF_TOKEN** — optional in `docker/.env` (no model is gated; a token only raises the download rate limit)
 - **ffmpeg required** — must be on system PATH for pydub to convert non-WAV audio uploads (WAV works without it). Documented for users in README Requirements and GettingStarted Prerequisites.
 
 ## Configuration

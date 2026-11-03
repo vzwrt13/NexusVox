@@ -23,20 +23,13 @@ def test_factory_returns_openai_http_by_default():
     assert isinstance(transcriber, OpenAIHttpTranscriber)
 
 
-def test_factory_returns_voxtral_for_voxtral_model():
-    # Voxtral is no longer the default, so the realtime WebSocket path needs its own case.
-    config = InferenceConfig(server_url="ws://localhost:8000/v1/realtime", model="voxtral-mini-4b")
-    transcriber = create_transcriber(config, device="cuda")
-    assert isinstance(transcriber, VoxtralRealtimeTranscriber)
+def test_factory_returns_the_realtime_client_for_a_realtime_custom_server():
+    from nexusvox.config import CustomServerConfig
 
-
-def test_factory_returns_openai_http_for_cohere_model():
     config = InferenceConfig(
-        server_url="http://localhost:8001/v1/audio/transcriptions",
-        model="cohere-transcribe",
+        model="custom-server", custom=CustomServerConfig(url="ws://localhost:9000/v1/realtime", protocol="realtime")
     )
-    transcriber = create_transcriber(config, device="cuda")
-    assert isinstance(transcriber, OpenAIHttpTranscriber)
+    assert isinstance(create_transcriber(config, device="cuda"), VoxtralRealtimeTranscriber)
 
 
 def test_factory_returns_openai_http_for_parakeet():
@@ -68,16 +61,9 @@ def test_factory_returns_local_whisper_on_cpu():
 def test_factory_returns_local_whisper_on_cpu_for_small():
     from nexusvox.transcribers.local_whisper import LocalWhisperTranscriber
 
-    config = InferenceConfig(model="whisper-small")
+    config = InferenceConfig(model="whisper-large-v3-turbo")
     transcriber = create_transcriber(config, device="cpu")
     assert isinstance(transcriber, LocalWhisperTranscriber)
-
-
-@pytest.mark.parametrize("model", ["voxtral-mini-4b", "cohere-transcribe"])
-def test_factory_raises_for_gpu_models_on_cpu(model):
-    config = InferenceConfig(model=model)
-    with pytest.raises(RuntimeError, match="requires a GPU"):
-        create_transcriber(config, device="cpu")
 
 
 def test_factory_raises_for_unknown_model():
@@ -87,12 +73,8 @@ def test_factory_raises_for_unknown_model():
 
 
 def test_all_transcribers_are_base_transcriber():
-    voxtral = create_transcriber(InferenceConfig(model="voxtral-mini-4b"), device="cuda")
-    cohere = create_transcriber(InferenceConfig(model="cohere-transcribe"), device="cuda")
     parakeet = create_transcriber(InferenceConfig(model="parakeet-tdt-0.6b"), device="cuda")
     whisper = create_transcriber(InferenceConfig(model="whisper-large-v3-turbo"), device="cuda")
-    assert isinstance(voxtral, BaseTranscriber)
-    assert isinstance(cohere, BaseTranscriber)
     assert isinstance(parakeet, BaseTranscriber)
     assert isinstance(whisper, BaseTranscriber)
 
@@ -101,13 +83,13 @@ def test_base_transcriber_needs_docker_default():
     assert BaseTranscriber.needs_docker is True
 
 
-def test_voxtral_needs_docker():
-    config = InferenceConfig(model="voxtral-mini-4b")
+def test_parakeet_server_needs_docker():
+    config = InferenceConfig(model="parakeet-tdt-0.6b")
     assert create_transcriber(config, device="cuda").needs_docker is True
 
 
 def test_local_whisper_does_not_need_docker():
-    config = InferenceConfig(model="whisper-small")
+    config = InferenceConfig(model="whisper-large-v3-turbo")
     transcriber = create_transcriber(config, device="cpu")
     assert transcriber.needs_docker is False
 
@@ -116,7 +98,7 @@ def test_local_whisper_does_not_need_docker():
 async def test_openai_http_buffers_audio_chunks():
     config = InferenceConfig(
         server_url="http://localhost:8001/v1/audio/transcriptions",
-        model="cohere-transcribe",
+        model="parakeet-tdt-0.6b",
     )
     transcriber = OpenAIHttpTranscriber(config)
 
@@ -135,7 +117,7 @@ async def test_openai_http_buffers_audio_chunks():
 async def test_openai_http_connect_resets_buffer():
     config = InferenceConfig(
         server_url="http://localhost:8001/v1/audio/transcriptions",
-        model="cohere-transcribe",
+        model="parakeet-tdt-0.6b",
     )
     transcriber = OpenAIHttpTranscriber(config)
 
@@ -151,7 +133,7 @@ async def test_openai_http_connect_resets_buffer():
 async def test_openai_http_disconnect_clears_state():
     config = InferenceConfig(
         server_url="http://localhost:8001/v1/audio/transcriptions",
-        model="cohere-transcribe",
+        model="parakeet-tdt-0.6b",
     )
     transcriber = OpenAIHttpTranscriber(config)
 
@@ -167,18 +149,12 @@ async def test_openai_http_disconnect_clears_state():
 async def test_openai_http_send_raises_when_not_connected():
     config = InferenceConfig(
         server_url="http://localhost:8001/v1/audio/transcriptions",
-        model="cohere-transcribe",
+        model="parakeet-tdt-0.6b",
     )
     transcriber = OpenAIHttpTranscriber(config)
 
     with pytest.raises(RuntimeError, match="Not connected"):
         await transcriber.send_audio_chunk(b"\x00" * 100)
-
-
-def test_openai_http_model_name_cohere():
-    config = InferenceConfig(model="cohere-transcribe")
-    transcriber = OpenAIHttpTranscriber(config)
-    assert transcriber.model == "CohereLabs/cohere-transcribe-03-2026"
 
 
 def test_openai_http_model_name_parakeet():
@@ -193,10 +169,14 @@ def test_openai_http_model_name_whisper():
     assert transcriber.model == "deepdml/faster-whisper-large-v3-turbo-ct2"
 
 
-def test_voxtral_model_name():
-    config = InferenceConfig()
-    transcriber = VoxtralRealtimeTranscriber(config)
-    assert transcriber.model == "mistralai/Voxtral-Mini-4B-Realtime-2602"
+def test_realtime_client_model_name_is_set_by_the_custom_server():
+    from nexusvox.config import CustomServerConfig
+
+    config = InferenceConfig(
+        model="custom-server",
+        custom=CustomServerConfig(url="ws://h/v1/realtime", protocol="realtime", model_name="my-model"),
+    )
+    assert create_transcriber(config, device="cuda").model == "my-model"
 
 
 def test_wav_encoding_from_pcm16():
@@ -329,4 +309,4 @@ async def test_engines_without_speaker_detection_refuse_to_diarize():
     assert BaseTranscriber.supports_diarization is False
     assert OpenAIHttpTranscriber.supports_diarization is True
     with pytest.raises(NotImplementedError):
-        await VoxtralRealtimeTranscriber(InferenceConfig(model="voxtral-mini-4b")).diarize(b"", timeout=1.0)
+        await VoxtralRealtimeTranscriber(InferenceConfig()).diarize(b"", timeout=1.0)

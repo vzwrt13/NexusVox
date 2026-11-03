@@ -109,7 +109,7 @@ tests/
 | `test_db.py` | `db.py` | Save, retrieve, flag, correct transcriptions; empty database edge cases |
 | `test_analytics.py` | `dashboard/analytics.py` | Overview stats, word counting, time grouping, heatmap shape, date filtering |
 | `test_dashboard_api.py` | `dashboard/__init__.py` | All `/api/*` HTTP endpoints return correct status codes and JSON shape |
-| `test_transcriber.py` | `transcriber.py` | BaseTranscriber ABC, factory function, VoxtralRealtimeTranscriber, OpenAIHttpTranscriber |
+| `test_transcriber.py` | `transcriber.py` | BaseTranscriber ABC, factory function, VoxtralRealtimeTranscriber (the custom realtime client), OpenAIHttpTranscriber |
 | `test_docker_ctl.py` | `docker_ctl.py` | Docker profile start/stop, health-check waiting |
 | `test_file_transcribe.py` | `file_transcribe.py` | Extension detection, WAV passthrough, audio conversion, chunking |
 | `test_file_cleanup.py` | `file_cleanup.py` | Chunking at paragraphs and sentences (English and German), speaker labels kept, per-passage fallback, giving up on a dead model, progress |

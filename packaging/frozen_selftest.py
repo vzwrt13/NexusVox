@@ -282,8 +282,15 @@ def run(work: Path, download: bool) -> NoReturn:
     guarded("overlay", overlay)
 
     def whisper() -> None:
+        # The shipped Whisper is ~1.6 GB; the smoke test only needs the engine, so it borrows the registry
+        # entry for the 150 MB base model that used to ship.
+        from nexusvox.config import MODEL_REGISTRY
         from nexusvox.transcribers.local_whisper import LocalWhisperTranscriber
 
+        MODEL_REGISTRY["whisper-base"] = {
+            **MODEL_REGISTRY["whisper-large-v3-turbo"],
+            "hf_name": "Systran/faster-whisper-base",
+        }
         config.inference.model = "whisper-base"
         pcm = pcm_of_speech()
 

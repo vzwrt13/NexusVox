@@ -318,11 +318,8 @@ def test_get_models(flask_client):
     assert resp.status_code == 200
     data = resp.get_json()
     assert isinstance(data, list)
-    assert len(data) >= 3
     ids = [m["id"] for m in data]
-    assert "voxtral-mini-4b" in ids
-    assert "cohere-transcribe" in ids
-    assert "parakeet-tdt-0.6b" in ids
+    assert ids == ["parakeet-tdt-0.6b", "whisper-large-v3-turbo", "custom-server"]
     for m in data:
         assert "name" in m
         assert "protocol" in m
@@ -343,19 +340,19 @@ def test_get_current_model(flask_client):
 def test_switch_model(flask_client):
     resp = flask_client.post(
         "/api/models/switch",
-        data=json.dumps({"model": "cohere-transcribe"}),
+        data=json.dumps({"model": "whisper-large-v3-turbo"}),
         content_type="application/json",
     )
 
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["ok"] is True
-    assert data["model"] == "cohere-transcribe"
+    assert data["model"] == "whisper-large-v3-turbo"
 
     # Verify current model changed
     resp = flask_client.get("/api/models/current")
     assert resp.get_json() == {
-        "model": "cohere-transcribe",
+        "model": "whisper-large-v3-turbo",
         "diarization": False,
         "diarization_models": ["Parakeet TDT 0.6B"],
         "diarization_hint": "",
@@ -385,12 +382,67 @@ def test_switch_model_unknown(flask_client):
 def test_get_models_includes_device_metadata(flask_client):
     resp = flask_client.get("/api/models")
     data = resp.get_json()
-    assert all("requires_gpu" in m for m in data)
     assert all("inprocess_supported" in m for m in data)
+    assert all("requires_gpu" not in m for m in data)
 
 
-def test_get_models_filters_gpu_only_when_device_is_cpu(db, session_factory, monkeypatch):
-    """When resolved device is CPU, only inprocess-capable models are listed."""
+def test_get_models_marks_what_is_downloaded(flask_client, monkeypatch):
+    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cpu")
+    monkeypatch.setattr(
+        "nexusvox.dashboard.api.model_download_state",
+        lambda model_id, cache_dir=None: {"downloaded": model_id == "parakeet-tdt-0.6b", "size": "~1 GB"},
+    )
+
+    models = {m["id"]: m for m in flask_client.get("/api/models").get_json()}
+
+    assert models["parakeet-tdt-0.6b"]["downloaded"] is True
+    assert models["whisper-large-v3-turbo"]["downloaded"] is False
+    assert models["whisper-large-v3-turbo"]["size"] == "~1 GB"
+
+
+def test_get_models_gives_no_mark_for_models_that_run_in_a_container(flask_client, monkeypatch):
+    """On a GPU the model lives in the container's own volume, which the local cache says nothing about."""
+    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cuda")
+    monkeypatch.setattr(
+        "nexusvox.dashboard.api.model_download_state", lambda *a, **k: pytest.fail("the local cache was probed")
+    )
+
+    models = {m["id"]: m for m in flask_client.get("/api/models").get_json()}
+
+    assert models["parakeet-tdt-0.6b"]["downloaded"] is None
+    assert models["whisper-large-v3-turbo"]["downloaded"] is None
+
+
+def test_the_download_probe_is_reused_until_a_model_finishes_loading(db, session_factory, monkeypatch):
+    from nexusvox.config import Config
+    from nexusvox.dashboard.api import DashboardAPI
+
+    calls = []
+
+    def probe(model_id, cache_dir=None):
+        calls.append(model_id)
+        return {"downloaded": False, "size": ""}
+
+    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cpu")
+    monkeypatch.setattr("nexusvox.dashboard.api.model_download_state", probe)
+    status = {"status": "loading"}
+    api = DashboardAPI(session_factory, Config(), db=db, get_switch_status=lambda: status)
+
+    api.get_available_models()
+    api.get_available_models()
+    assert len(calls) == 2  # one per in-process model, not per request
+
+    api.get_model_status()
+    api.get_available_models()
+    assert len(calls) == 2  # still loading: the answer stands
+
+    status["status"] = "ready"
+    api.get_model_status()
+    api.get_available_models()
+    assert len(calls) == 4  # ready: probed again
+
+
+def test_get_models_lists_the_same_models_on_cpu(db, session_factory, monkeypatch):
     from nexusvox.config import Config
     from nexusvox.dashboard import _create_app
     from nexusvox.dashboard.api import DashboardAPI
@@ -399,53 +451,21 @@ def test_get_models_filters_gpu_only_when_device_is_cpu(db, session_factory, mon
     config.inference.device = "cpu"
     monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cpu")
 
-    api = DashboardAPI(session_factory, config, db=db)
-    app = _create_app(api)
+    app = _create_app(DashboardAPI(session_factory, config, db=db))
     app.config["TESTING"] = True
-    monkeypatch.setattr("nexusvox.dashboard.api.save_config", lambda cfg, path=None: None)
 
     with app.test_client() as client:
-        resp = client.get("/api/models")
-        data = resp.get_json()
+        ids = [m["id"] for m in client.get("/api/models").get_json()]
 
-    ids = {m["id"] for m in data}
-    assert "whisper-large-v3-turbo" in ids
-    assert "whisper-small" in ids
-    assert "distil-whisper-large-v3" in ids
-    assert "whisper-medium" in ids
-    assert "whisper-base" in ids
-    assert "voxtral-mini-4b" not in ids
-    assert "cohere-transcribe" not in ids
-    assert "parakeet-tdt-0.6b" in ids  # runs in-process on CPU (ONNX)
+    assert ids == ["parakeet-tdt-0.6b", "whisper-large-v3-turbo", "custom-server"]
 
 
-def test_switch_to_gpu_model_on_cpu_is_rejected(db, session_factory, monkeypatch):
-    from nexusvox.config import Config
-    from nexusvox.dashboard import _create_app
-    from nexusvox.dashboard.api import DashboardAPI
+def test_switch_to_a_removed_model_is_rejected(flask_client):
+    resp = flask_client.post(
+        "/api/models/switch", data=json.dumps({"model": "voxtral-mini-4b"}), content_type="application/json"
+    )
 
-    config = Config()
-    config.inference.device = "cpu"
-    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cpu")
-
-    api = DashboardAPI(session_factory, config, db=db)
-    app = _create_app(api)
-    app.config["TESTING"] = True
-    monkeypatch.setattr("nexusvox.dashboard.api.save_config", lambda cfg, path=None: None)
-
-    with app.test_client() as client:
-        resp = client.post(
-            "/api/models/switch",
-            data=json.dumps({"model": "voxtral-mini-4b"}),
-            content_type="application/json",
-        )
-
-    data = resp.get_json()
-    assert data["ok"] is False
-    assert "GPU" in data["error"]
-
-
-# ── Device endpoints ─────────────────────────────────────────────────
+    assert resp.get_json()["ok"] is False
 
 
 def test_get_device(flask_client, monkeypatch):

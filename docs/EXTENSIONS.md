@@ -98,6 +98,8 @@ The dashboard is local-only (127.0.0.1) and has no CDN: ship what the tab needs 
 Blueprint names must be unique across the app; a blueprint that cannot be mounted is logged and the tab
 stays without its backend.
 
+Every tab, an extension's included, opens at the top of the page. A panel that links to a stored transcript (for example from a summary) calls `NexusVoxExt.showTranscript(id)` with the upload id as listed by `GET /api/file-transcriptions`: the dashboard opens the Meetings tab for a meeting and the Upload tab for anything else, scrolls to the card and highlights it. The call returns a promise that resolves with `false` when no such transcript exists.
+
 ## Hook 3: export targets
 
 ```python

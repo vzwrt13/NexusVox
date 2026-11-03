@@ -46,22 +46,35 @@ def _attachment(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
-class _DashboardServer(ThreadedWSGIServer):
-    """Binds exclusively on Windows: with SO_REUSEADDR a second socket may share a port another program holds."""
+def _listen_socket(port: int) -> socket.socket:
+    """A listening socket on 127.0.0.1:`port`, bound by us: werkzeug exits the process when its own bind fails.
 
-    allow_reuse_address = sys.platform != "win32"
-
-    def server_bind(self) -> None:
+    Exclusive on Windows: with SO_REUSEADDR a second socket may share a port another program holds.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
         if sys.platform == "win32":
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-        super().server_bind()
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", port))
+        sock.listen(128)
+    except OSError:
+        sock.close()
+        raise
+    return sock
 
 
-def _make_server(port: int, wsgi_app) -> _DashboardServer:
-    return _DashboardServer("127.0.0.1", port, wsgi_app)
+def _make_server(port: int, wsgi_app) -> ThreadedWSGIServer:
+    sock = _listen_socket(port)
+    try:
+        # werkzeug duplicates the descriptor, so ours can be closed once it holds its own.
+        return ThreadedWSGIServer("127.0.0.1", port, wsgi_app, fd=sock.fileno())
+    finally:
+        sock.close()
 
 
-def _bind_server(wsgi_app) -> tuple[int, _DashboardServer] | None:
+def _bind_server(wsgi_app) -> tuple[int, ThreadedWSGIServer] | None:
     """Bind the first free dashboard port (the usual one, else a fallback) once; None when all are held."""
     for port in (_PORT, *_FALLBACK_PORTS):
         try:

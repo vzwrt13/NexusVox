@@ -1065,8 +1065,8 @@ canvas { width: 100% !important; max-height: 260px; }
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  background: rgba(255, 169, 77, 0.15);
-  color: var(--orange);
+  background: rgba(255, 212, 59, 0.15);
+  color: var(--yellow);
   padding: 2px 7px;
   border-radius: 4px;
   vertical-align: middle;
@@ -1250,7 +1250,7 @@ canvas { width: 100% !important; max-height: 260px; }
 .meeting-consent {
   margin-top: 16px;
   padding: 16px 20px;
-  border: 1px solid var(--orange);
+  border: 1px solid var(--yellow);
   border-radius: var(--radius-sm);
   background: var(--surface2);
 }

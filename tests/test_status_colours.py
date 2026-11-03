@@ -27,10 +27,26 @@ def test_the_helper_accepts_exactly_the_three_states():
     assert "function setStatus(el, state, text)" in _JS
 
 
+_HELPER = re.search(r"function setStatus\(el, state, text\) \{.*?\n\}", _JS, re.S).group(0)
+_JS_WITHOUT_HELPER = _JS.replace(_HELPER, "")
+
+
 def test_status_lines_are_not_styled_by_hand():
-    # Only the helper may write a status-line class name; the one other writer is the rename error note.
-    assert len(re.findall(r'className = "status-line', _JS)) <= 2
-    assert 'className = "status-line ok"' not in _JS
+    # The helper is the only writer of the state: no className writes, classList calls or HTML templates.
+    assert not re.search(r"className\s*=\s*[\"'`][^\"'`]*\b(status-line|ok|warn|down)\b", _JS_WITHOUT_HELPER)
+    assert not re.search(r"classList\.\w+\([^)]*[\"'](status-line|ok|warn|down)[\"']", _JS_WITHOUT_HELPER)
+    assert not re.search(r"class=[\"'][^\"']*\bstatus-line\b", _JS)
+
+
+def test_setting_a_state_keeps_the_other_classes():
+    assert "className" not in _HELPER
+    assert "classList.remove(...STATUS_STATES)" in _HELPER
+
+
+def test_orange_is_not_used_for_caveats():
+    for selector in (".symbol-ambiguous-label", ".meeting-consent", ".upload-note", ".settings-hint.model-caution"):
+        block = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", _CSS).group(1)
+        assert "--orange" not in block, selector
 
 
 def test_caveat_hints_use_the_warn_state():

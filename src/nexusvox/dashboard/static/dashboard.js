@@ -29,7 +29,9 @@
 // reachable. Anything else is neutral. Set the state through this helper, never by writing class names.
 const STATUS_STATES = ["ok", "warn", "down"];
 function setStatus(el, state, text) {
-  el.className = "status-line" + (STATUS_STATES.includes(state) ? " " + state : "");
+  el.classList.add("status-line");
+  el.classList.remove(...STATUS_STATES);
+  if (STATUS_STATES.includes(state)) el.classList.add(state);
   if (text !== undefined) el.textContent = text;
 }
 
@@ -837,7 +839,7 @@ async function loadDeviceSettings() {
     deviceSelect.value = d.requested;
     renderDeviceHint(d);
   } catch {
-    deviceResolved.textContent = "";
+    setStatus(deviceResolved, "", "");
   }
 }
 
@@ -846,9 +848,12 @@ function renderDeviceHint(d) {
   const resolvedLabel = d.resolved === "cuda" ? "GPU (CUDA)" : "CPU";
   const cudaNote = d.cuda_available ? "CUDA available on this system." : "No CUDA device detected.";
   deviceResolved.textContent = `Resolved: ${resolvedLabel} — ${cudaNote}`;
-  // "Auto" that ended up on the CPU is a fallback: it works, but slower than the GPU.
-  setStatus(deviceResolved, d.requested === "auto" && d.resolved !== "cuda" ? "warn" : "");
-  deviceResolved.classList.add("settings-hint");
+  // "Auto" that ended up on the CPU is a fallback (works, slower): yellow. A GPU asked for explicitly on a
+  // machine without CUDA will not work after the restart: red.
+  let state = "";
+  if (d.requested === "auto" && d.resolved !== "cuda") state = "warn";
+  else if (d.requested === "cuda" && !d.cuda_available) state = "down";
+  setStatus(deviceResolved, state);
 }
 
 if (deviceSelect) {
@@ -2433,8 +2438,7 @@ function editFileTitle(card) {
     row.querySelector(".upload-rename").addEventListener("click", () => editFileTitle(card));
     if (error) {
       const note = document.createElement("span");
-      note.className = "status-line down";
-      note.textContent = "✕ " + error;
+      setStatus(note, "down", "✕ " + error);
       row.append(note);
     }
   };
@@ -2533,7 +2537,7 @@ function askDeleteFileTranscription(row) {
     <span class="upload-delete-ask">Delete this ${kind}? This cannot be undone.</span>
     <button type="button" class="period-btn upload-delete-btn upload-delete-confirm">Delete</button>
     <button type="button" class="period-btn upload-delete-cancel">Cancel</button>
-    <span class="status-line down upload-delete-error" hidden></span>`;
+    <span class="upload-delete-error" hidden></span>`;
   row.querySelector(".upload-delete-cancel").addEventListener("click", () => {
     row.innerHTML = '<button type="button" class="period-btn upload-delete-btn">Delete</button>';
     row.querySelector(".upload-delete-btn").addEventListener("click", () => askDeleteFileTranscription(row));
@@ -2544,7 +2548,7 @@ function askDeleteFileTranscription(row) {
     const result = await resp.json();
     if (!resp.ok || !result.ok) {
       const err = row.querySelector(".upload-delete-error");
-      err.textContent = "✕ " + (result.error || "Delete failed");
+      setStatus(err, "down", "✕ " + (result.error || "Delete failed"));
       err.hidden = false;
       event.target.disabled = false;
       return;
@@ -2763,13 +2767,13 @@ async function loadPendingMeetings() {
         <button type="button" class="period-btn pending-transcribe">Transcribe</button>
         <button type="button" class="period-btn upload-delete-btn pending-delete">Delete</button>
       </div>
-      <p class="status-line down pending-error" hidden></p>
+      <p class="pending-error" hidden></p>
     </div>`).join("");
   list.querySelectorAll(".flagged-card").forEach((card) => {
     const name = card.dataset.name;
     const row = card.querySelector(".upload-delete-row");
     const error = card.querySelector(".pending-error");
-    const fail = (text) => { error.textContent = "✕ " + text; error.hidden = false; };
+    const fail = (text) => { setStatus(error, "down", "✕ " + text); error.hidden = false; };
     card.querySelector(".pending-transcribe").addEventListener("click", async () => {
       error.hidden = true;
       const resp = await fetch(`/api/meetings/pending/${encodeURIComponent(name)}/transcribe`, { method: "POST" });

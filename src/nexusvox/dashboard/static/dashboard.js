@@ -23,6 +23,16 @@
   };
 })();
 
+// ── Status colour rule ───────────────────────────────────────────────
+// One rule for every status line: "ok" (green) = works as expected, "warn" (yellow) = works, but with a caveat
+// the user should know (slower on the CPU, a fallback is active), "down" (red) = does not work or is not
+// reachable. Anything else is neutral. Set the state through this helper, never by writing class names.
+const STATUS_STATES = ["ok", "warn", "down"];
+function setStatus(el, state, text) {
+  el.className = "status-line" + (STATUS_STATES.includes(state) ? " " + state : "");
+  if (text !== undefined) el.textContent = text;
+}
+
 // ── Globals ──────────────────────────────────────────────────────────
 // Chart colors come from the :root variables in style.css, so the stylesheet is the single source
 // of the theme. The fallbacks only matter when the stylesheet failed to load.
@@ -271,10 +281,13 @@ const llmStatus = document.getElementById("llm-status");
 
 async function loadLlmStatus() {
   const s = await api("/api/settings/llm-status");
-  llmStatus.className = "status-line " + (s.reachable ? "ok" : "down");
-  llmStatus.textContent = s.reachable
-    ? `● Model server reachable at ${s.url} (model ${s.model})`
-    : `○ No model server at ${s.url} — polish plays the error beep`;
+  setStatus(
+    llmStatus,
+    s.reachable ? "ok" : "down",
+    s.reachable
+      ? `● Model server reachable at ${s.url} (model ${s.model})`
+      : `○ No model server at ${s.url} — polish plays the error beep`,
+  );
 }
 const hotkeyRecordBtn = document.getElementById("hotkey-record-btn");
 const hotkeyStatus = document.getElementById("hotkey-status");
@@ -330,8 +343,7 @@ function renderHotkey(s) {
 
 function showHotkeyStatus(text, cls) {
   hotkeyStatus.hidden = !text;
-  hotkeyStatus.className = "status-line " + (cls || "");
-  hotkeyStatus.textContent = text;
+  setStatus(hotkeyStatus, cls, text);
 }
 
 async function saveHotkey() {
@@ -410,23 +422,22 @@ const translatorStatus = document.getElementById("translator-status");
 
 // Probed live so the toggle never looks like it works while nothing is listening.
 async function loadTranslatorStatus() {
-  translatorStatus.className = "status-line";
-  translatorStatus.textContent = "Checking translator…";
+  setStatus(translatorStatus, "", "Checking translator…");
   let s;
   try {
     s = await api("/api/settings/translator-status");
   } catch (err) {
-    translatorStatus.className = "status-line down";
-    translatorStatus.textContent = "○ Could not check the translator (" + err.message + ")";
+    setStatus(translatorStatus, "down", "○ Could not check the translator (" + err.message + ")");
     return;
   }
   if (s.reachable) {
-    translatorStatus.className = "status-line ok";
-    translatorStatus.textContent = "● Translator reachable at " + s.url;
+    setStatus(translatorStatus, "ok", "● Translator reachable at " + s.url);
   } else {
-    translatorStatus.className = "status-line down";
-    translatorStatus.textContent =
-      "○ No translator at " + s.url + (translateToggle.checked ? " — text is typed untranslated" : "");
+    setStatus(
+      translatorStatus,
+      "down",
+      "○ No translator at " + s.url + (translateToggle.checked ? " — text is typed untranslated" : ""),
+    );
   }
 }
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
@@ -476,7 +487,7 @@ async function loadLearnStatus() {
     .filter(([k]) => !watchedKeys.has(k))
     .sort((a, b) => b[1] - a[1]);
   const skippedTotal = skipped.reduce((n, [, c]) => n + c, 0);
-  learnStatus.className = "status-line" + (s.last && s.last.outcome === "suggested" ? " ok" : "");
+  setStatus(learnStatus, s.last && s.last.outcome === "suggested" ? "ok" : "");
   if (!s.last) {
     learnStatus.textContent = learnFromEditsToggle.checked ? "No paste watched since NexusVox started." : "";
     return;
@@ -835,6 +846,9 @@ function renderDeviceHint(d) {
   const resolvedLabel = d.resolved === "cuda" ? "GPU (CUDA)" : "CPU";
   const cudaNote = d.cuda_available ? "CUDA available on this system." : "No CUDA device detected.";
   deviceResolved.textContent = `Resolved: ${resolvedLabel} — ${cudaNote}`;
+  // "Auto" that ended up on the CPU is a fallback: it works, but slower than the GPU.
+  setStatus(deviceResolved, d.requested === "auto" && d.resolved !== "cuda" ? "warn" : "");
+  deviceResolved.classList.add("settings-hint");
 }
 
 if (deviceSelect) {
@@ -2579,8 +2593,7 @@ function formatClock(seconds) {
 
 function showMeetingStatus(text, cls) {
   meetingStatus.hidden = !text;
-  meetingStatus.className = "status-line " + (cls || "");
-  meetingStatus.textContent = text;
+  setStatus(meetingStatus, cls, text);
 }
 
 // Live transcript: poll the new segments every 2 s while a meeting records. Text goes in with textContent only.
@@ -2690,7 +2703,7 @@ async function stopMeeting() {
     if (!result.ok && !result.busy) {
       showMeetingStatus("✕ " + result.error, "down");
     } else if (result.busy) {
-      showMeetingStatus("● " + result.error + ". Transcribe it below once that is done.", "");
+      showMeetingStatus("● " + result.error + ". Transcribe it below once that is done.", "warn");
       loadFileTranscriptions();
     } else {
       trackMeetingJob(result.job_id);
@@ -2837,10 +2850,10 @@ async function saveMeetingHotkey() {
   renderMeetingHotkey(s);
   meetingHotkeyStatus.hidden = false;
   if (s.error) {
-    meetingHotkeyStatus.className = "status-line down";
+    setStatus(meetingHotkeyStatus, "down");
     meetingHotkeyStatus.textContent = "✕ " + s.error;
   } else {
-    meetingHotkeyStatus.className = "status-line ok";
+    setStatus(meetingHotkeyStatus, "ok");
     meetingHotkeyStatus.textContent = "● Meeting hotkey is now " + describeHotkey(s.meeting_modifiers, s.meeting_key);
   }
 }

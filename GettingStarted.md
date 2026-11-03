@@ -19,9 +19,9 @@ pip install -e .
 python -m nexusvox
 ```
 
-That runs the model in-process — Parakeet (ONNX, int8) by default, Whisper if you pick it. The model downloads from HuggingFace on first use (~670 MB for Parakeet, ~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Parakeet on CPU has no speaker detection for uploads — that needs the GPU container.
+That runs the model in-process — Parakeet (ONNX, int8) by default, Whisper if you pick it. The model downloads from HuggingFace on first use (~670 MB for Parakeet, ~1.6 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Parakeet on CPU has no speaker detection for uploads — that needs the GPU container.
 
-To stay on CPU even if you later add a GPU, open the dashboard from the tray icon → Settings → **Compute Device** → set to `CPU`.
+To stay on CPU even if you later add a GPU, open the dashboard from the tray icon → Settings → **Advanced** → **Compute Device** → set to `CPU`.
 
 ---
 
@@ -40,10 +40,10 @@ winget install Gyan.FFmpeg    # or: choco install ffmpeg
 ffmpeg -version               # verify — open a new terminal first so PATH is picked up
 ```
 
-**GPU path** (Voxtral / Cohere / Parakeet, plus faster Whisper):
+**GPU path** (Parakeet, plus faster Whisper):
 - **NVIDIA GPU** with CUDA runtime installed (VRAM depends on model — see table below)
 - **Docker Desktop** with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-- **Hugging Face account** with an access token ([create one here](https://huggingface.co/settings/tokens)) — only for Cohere Transcribe, the one gated model. Voxtral and Parakeet download without a token.
+- **Hugging Face token** (optional) — no model needs one; a token only raises the download rate limit ([create one here](https://huggingface.co/settings/tokens)).
 
 ---
 
@@ -51,34 +51,26 @@ ffmpeg -version               # verify — open a new terminal first so PATH is 
 
 | Model | Hugging Face ID | Model license | Runtime | Resources | Docker? |
 |---|---|---|---|---|---|
-| Whisper Small (CPU-optimized) | `Systran/faster-whisper-small` | MIT | in-process | CPU, ~500 MB RAM | **No** |
-| Whisper Base (CPU) | `Systran/faster-whisper-base` | MIT | in-process | CPU, ~300 MB RAM | **No** |
-| Whisper Medium (CPU) | `Systran/faster-whisper-medium` | MIT | in-process | CPU, ~1.5 GB RAM | **No** |
-| Distil-Whisper Medium.en (EN, CPU) | `Systran/faster-distil-whisper-medium.en` | MIT | in-process | CPU, ~800 MB RAM | **No** |
-| Distil-Whisper Large V3 (EN, CPU) | `Systran/faster-distil-whisper-large-v3` | MIT | in-process | CPU, ~1.5 GB RAM | **No** |
 | Whisper Large V3 Turbo | `deepdml/faster-whisper-large-v3-turbo-ct2` | MIT | in-process (CPU) / Docker (GPU) | CPU or ~4 GB VRAM | **No** on CPU |
-| Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ² | Docker (GPU) / in-process ONNX int8 (CPU) | ~2 GB VRAM, or CPU (~670 MB download) | Yes on GPU |
-| Cohere Transcribe | `CohereLabs/cohere-transcribe-03-2026` | Apache-2.0 ¹ | Docker | ~6 GB VRAM | Yes |
-| Voxtral Mini 4B | `mistralai/Voxtral-Mini-4B-Realtime-2602` | Apache-2.0 | Docker | ≥16 GB VRAM | Yes |
-| Custom server ³ | — | your server's | your own server | none on this PC | **No** |
+| Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ¹ | Docker (GPU) / in-process ONNX int8 (CPU) | ~2 GB VRAM, or CPU (~670 MB download) | Yes on GPU |
+| Custom server ² | — | your server's | your own server | none on this PC | **No** |
 
-¹ **Gated on Hugging Face** — requires accepting the terms on the model page plus an `HF_TOKEN` (see step 1.1). It is the only model that needs a token.
-² **Attribution required** — CC-BY-4.0 obliges you to credit NVIDIA if you redistribute the model.
-³ **Your own backend** — a server you run that speaks the OpenAI-compatible HTTP or vLLM realtime WebSocket protocol, set under `[inference.custom]`. Unlike every other entry, audio leaves this PC if that server is remote. Setup and protocol contract: [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md).
+¹ **Attribution required** — CC-BY-4.0 obliges you to credit NVIDIA if you redistribute the model.
+² **Your own backend** — a server you run that speaks the OpenAI-compatible HTTP or realtime WebSocket protocol, set under `[inference.custom]`. Unlike every other entry, audio leaves this PC if that server is remote. Setup and protocol contract: [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md).
 
 Model licenses are separate from NexusVox's own AGPL-3.0 license; no model weights ship with NexusVox. Check the terms of the model you pick, especially for commercial use.
 
-**Whisper Small** is the fastest CPU option — use it for push-to-talk on a laptop. **Whisper Base** is smaller and faster still, at lower accuracy. **Whisper Medium** is the best multilingual CPU option including German. The **Distil-Whisper** variants are English-only but noticeably faster than their full counterparts. **Whisper Large V3 Turbo** is higher-accuracy on CPU but several times slower; on GPU it's the best balance. **Voxtral** offers real-time WebSocket streaming with the highest quality if you have a 16 GB+ GPU.
+**Parakeet** is the default: the fastest and most accurate of the measured models, 25 European languages with automatic detection. **Whisper Large V3 Turbo** covers 99 languages — pick it for a language Parakeet does not know; on CPU it is several times slower than Parakeet, on a GPU it is fast. The dashboard marks each model as downloaded or not, with its size. A config that still names a removed model (Voxtral, Cohere, the smaller Whisper sizes, Distil-Whisper) starts on Parakeet.
 
 ---
 
 ## 1. Start the Inference Server (Docker — GPU users only)
 
-> **CPU / Whisper users: skip this section.** Whisper runs in-process — no Docker container needed.
+> **CPU users: skip this section.** Parakeet and Whisper run in-process — no Docker container needed.
 
 ### 1.1 Configure the Hugging Face Token
 
-> Required only for **Cohere Transcribe**, the one gated model. Voxtral and Parakeet download automatically without a token — skip this step if you are not using Cohere.
+> Optional. No model needs a token; skip this step unless you hit Hugging Face download rate limits.
 
 ```bash
 cd docker
@@ -91,8 +83,6 @@ Open `docker/.env` and replace the placeholder with your token:
 HF_TOKEN=hf_your_actual_token_here
 ```
 
-Before the first Cohere run, open the [Cohere Transcribe 03-2026](https://huggingface.co/CohereLabs/cohere-transcribe-03-2026) model page while logged in and accept the terms — the model is gated, and the download fails without it even with a valid token.
-
 ### 1.2 Build and Start the Container
 
 Use `--profile` to select your model:
@@ -100,8 +90,7 @@ Use `--profile` to select your model:
 ```bash
 cd docker
 docker compose --profile parakeet up --build  # Parakeet (HTTP, port 8002) -- default
-docker compose --profile voxtral up --build   # Voxtral (WebSocket, port 8000)
-docker compose --profile cohere up --build    # Cohere (HTTP, port 8001)
+docker compose --profile whisper up --build   # Whisper Large V3 Turbo (HTTP, port 8003)
 ```
 
 The first start will download the model and cache it in a Docker volume. Subsequent starts are fast.
@@ -147,12 +136,8 @@ cp src/nexusvox/config.example.toml config.toml
 
 ```toml
 [general]
-# Language for transcription: "en" or "de"
-language = "en"
 # Delay in ms between releasing modifier keys and sending Ctrl+V paste
 injection_delay_ms = 500
-# Enable automatic language detection per recording (experimental)
-auto_language_detection = false
 # How much the console log says: "DEBUG", "INFO", "WARNING" or "ERROR" (takes effect on the next start)
 log_level = "INFO"
 # The log is also written to %LOCALAPPDATA%\NexusVox\logs (one file per day, 7 days kept).
@@ -180,16 +165,13 @@ chunk_size = 4096
 
 [inference]
 # Server URL — used by Docker-backed models; ignored when Whisper runs in-process on CPU.
-server_url = "ws://localhost:8000/v1/realtime"
+server_url = "http://localhost:8002/v1/audio/transcriptions"
 # Transcription delay in ms (multiples of 80, range 80-2400)
 transcription_delay_ms = 480
-# Transcription model. In-process on CPU (no Docker): "parakeet-tdt-0.6b" (ONNX int8),
-# "whisper-small", "whisper-base", "whisper-medium", "whisper-large-v3-turbo",
-# "distil-whisper-large-v3" (EN), "distil-whisper-medium-en" (EN).
-# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe". Parakeet and
-# Whisper also run there, in a container.
+# Transcription model: "parakeet-tdt-0.6b" (default; in-process on CPU or a Docker container on a GPU)
+# or "whisper-large-v3-turbo" (99 languages; same two ways to run).
 # Your own server (see [inference.custom] below): "custom-server".
-model = "voxtral-mini-4b"
+model = "parakeet-tdt-0.6b"
 # Compute device: "auto" (detect CUDA, else CPU), "cuda", or "cpu".
 # Use "cpu" to force in-process Whisper — useful for benchmarking on a GPU machine.
 device = "auto"
@@ -210,15 +192,6 @@ audio_dir = "audio"
 # Keep a WAV file of every recording (needed for playback in the Review tab)
 store_audio = true
 
-[os_commands]
-# Enable "nexus" voice commands for OS-level window management
-enabled = false
-
-[os_commands.apps]
-# Map app aliases to executable paths. Use the alias in voice commands.
-# chrome = "C:/Program Files/Google/Chrome/Application/chrome.exe"
-# discord = "C:/Users/YourUser/AppData/Local/Discord/Update.exe"
-
 [voice_commands]
 # Enable voice command text formatting substitutions
 enabled = true
@@ -236,7 +209,7 @@ bypass_symbols = false
 symbols = ["period", "comma", "question mark", "exclamation mark"]
 ```
 
-The defaults work out of the box — you only need to edit `config.toml` if you want to change the model, language, or tweak audio/inference settings.
+The defaults work out of the box — you only need to edit `config.toml` if you want to change the model or tweak audio/inference settings.
 
 ---
 
@@ -254,7 +227,7 @@ You should see:
 NexusVox started. Hold Ctrl+Shift+Alt to talk.
 ```
 
-A system tray icon also appears, where you can toggle the language or quit the app. Open the dashboard from the tray icon (left-click) for analytics, settings, and transcription history.
+A system tray icon also appears, where you can toggle translation or quit the app. Open the dashboard from the tray icon (left-click) for analytics, settings, and transcription history.
 
 ---
 
@@ -265,13 +238,13 @@ A system tray icon also appears, where you can toggle the language or quit the a
 3. **Release** any of the modifier keys — recording stops (second beep)
 4. The transcribed text is automatically pasted at your cursor position
 
-To paste the last text again, hold `Ctrl + Shift + Alt`, tap `V`, let go: the recording is dropped and the text NexusVox pasted last is pasted once more (key in Settings → Voice Input, `[hotkey].paste_key`; empty turns it off).
+To paste the last text again, hold `Ctrl + Shift + Alt`, tap `V`, let go: the recording is dropped and the text NexusVox pasted last is pasted once more (key in Settings → Text & Polish, `[hotkey].paste_key`; empty turns it off).
 
-To rewrite selected text by voice, pick a *Polish Selected Text Key* in Settings → Voice Input (e.g. `P`), install [Ollama](https://ollama.com) and run `ollama pull gemma4:e4b` (`gemma4:e2b` on a PC without an NVIDIA GPU: that is the model NexusVox asks for there unless you set `[llm].model`). Then select text in any app, hold `Ctrl + Shift + Alt`, tap `P`, say what to do ("make it shorter", "mach es formeller", "translate to English") or nothing, and let go: the selection is replaced by the rewritten text (Ctrl+Z undoes it). The model shares the GPU with the speech model - the dashboard shows whether the model server answers. Other servers (LM Studio, llama.cpp, vLLM, a cloud API) work through `[llm]` with `protocol = "openai"`. Terminals are skipped by default, because a terminal does not report its selection and polish would have to send Ctrl+C, which stops the running program when nothing is selected. Turn on *Polish In Terminals Too* (`[polish].in_terminals`) to polish there as well; the rewritten text is then pasted at the prompt.
+To rewrite selected text by voice, pick a *Polish Selected Text Key* in Settings → Text & Polish (e.g. `P`), install [Ollama](https://ollama.com) and run `ollama pull gemma4:e4b` (`gemma4:e2b` on a PC without an NVIDIA GPU: that is the model NexusVox asks for there unless you set `[llm].model`). Then select text in any app, hold `Ctrl + Shift + Alt`, tap `P`, say what to do ("make it shorter", "mach es formeller", "translate to English") or nothing, and let go: the selection is replaced by the rewritten text (Ctrl+Z undoes it). The model shares the GPU with the speech model - the dashboard shows whether the model server answers. Other servers (LM Studio, llama.cpp, vLLM, a cloud API) work through `[llm]` with `protocol = "openai"`. Terminals are skipped by default, because a terminal does not report its selection and polish would have to send Ctrl+C, which stops the running program when nothing is selected. Turn on *Polish In Terminals Too* (Settings → Advanced) (`[polish].in_terminals`) to polish there as well; the rewritten text is then pasted at the prompt.
 
-Instructions you use often go into Settings → *Polish Presets*: a name such as `prompt engineer` and the instruction, e.g. "Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." Then say just the name after tapping the polish key; words after it are added ("prompt engineer, in English"). Close spellings match, names can be in any language, and the preset marked *Default* is used when you say nothing.
+Instructions you use often go into Settings → Vocabulary → *Polish Presets*: a name such as `prompt engineer` and the instruction, e.g. "Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." Then say just the name after tapping the polish key; words after it are added ("prompt engineer, in English"). Close spellings match, names can be in any language, and the preset marked *Default* is used when you say nothing.
 
-To tidy every dictation, set *Auto Cleanup* in Settings → Voice Input (or `[cleanup].level`) to *Light* (fillers such as "um" and "äh", false starts and repeated words go, punctuation is fixed, your wording stays) or *Medium* (also grammar, slightly more concise). It uses the same model server as polish and adds about half a second per dictation. NexusVox loads the model at start; while it is still loading, or when the model's reply looks like an answer or a rewrite rather than your words cleaned up, the dictation is typed unchanged. Dictations under three words are not sent, and the transcript is saved as you said it.
+To tidy every dictation, set *Auto Cleanup* in Settings → Text & Polish (or `[cleanup].level`) to *Light* (fillers such as "um" and "äh", false starts and repeated words go, punctuation is fixed, your wording stays) or *Medium* (also grammar, slightly more concise). It uses the same model server as polish and adds about half a second per dictation. NexusVox loads the model at start; while it is still loading, or when the model's reply looks like an answer or a rewrite rather than your words cleaned up, the dictation is typed unchanged. Dictations under three words are not sent, and the transcript is saved as you said it.
 
 Prefer not to keep the keys down? Switch **Hotkey Mode** to *Toggle* in the dashboard's Settings tab (or `mode = "toggle"` in `config.toml`): press `Ctrl + Shift + Alt` once to start, press it again to stop. The change takes effect immediately.
 
@@ -291,11 +264,11 @@ With `[voice_commands].enabled = true`, certain spoken phrases are converted bef
 | "period", "comma", etc. | `.`, `,`, etc. (configurable via `symbols`) |
 | "[text], press enter" / "[Text], Enter drücken" (with `press_enter`) | pastes `text`, then presses Enter |
 
-The press enter command only fires at the very end of a dictation ("press enter to continue" stays text). Also accepted: "hit enter", "drück Enter", "drücke Enter". Turn it on in the dashboard under Settings → Voice Commands → Press Enter Command.
+The press enter command only fires at the very end of a dictation ("press enter to continue" stays text). Also accepted: "hit enter", "drück Enter", "drücke Enter". Turn it on in the dashboard under Settings → Text & Polish → Voice Commands → Press Enter Command.
 
 ### Snippets
 
-Your own spoken shortcuts, created in the dashboard under Settings → Snippets (none ship with NexusVox). Say the trigger anywhere in a dictation and the stored text is inserted exactly as saved, line breaks included:
+Your own spoken shortcuts, created in the dashboard under Settings → Vocabulary → Snippets (none ship with NexusVox). Say the trigger anywhere in a dictation and the stored text is inserted exactly as saved, line breaks included:
 
 | Trigger | Say | Result |
 |---|---|---|
@@ -303,26 +276,27 @@ Your own spoken shortcuts, created in the dashboard under Settings → Snippets 
 | `open remote repo` with options | "open remote repo nexus vox" | the URL of the best-matching option |
 | `open remote repo` with options | "nexus open remote repo nexus vox" / "nexus öffne …" | opens that URL in your browser (new tab) |
 
-Options are one `name = text` per line under a snippet; *Fill from GitHub* imports your repositories via the GitHub CLI (`gh`). The best-matching name wins - spaces, dashes and small mishearings do not matter. "nexus open" only opens URLs and existing paths, and does not need Nexus OS Commands turned on.
+Options are one `name = text` per line under a snippet. The best-matching name wins - spaces, dashes and small mishearings do not matter. "nexus open" only opens URLs and existing paths.
 
 ### Learn From Edits
 
-Turn on Settings → Correction Dictionary → Learn From Edits (or `[learn_from_edits].enabled`). After each paste NexusVox reads the text field for 20 seconds (`window_s`); fix a misheard word there and it shows up below the toggle as a suggestion to add or dismiss - nothing enters the dictionary on its own. Password fields and terminals are never read (terminals expose no readable text), and nothing is learned from a dictation that auto cleanup or translation changed. The line under the toggle says how the last paste ended, so you can tell "nothing corrected" from "this app cannot be read". The console log (`[general].log_level`, `INFO` by default) names the reason for every paste that taught nothing: the field could not be read, the edit was too small, there were too many changes, no word was replaced, and whether the watch ended because the time window ran out or the next dictation arrived. If a read fails (a browser rebuilds its address bar, for example) NexusVox fetches the focused field again before it gives up, and the last text it saw is still compared.
+Turn on Settings → Vocabulary → Correction Dictionary → Learn From Edits (or `[learn_from_edits].enabled`). After each paste NexusVox reads the text field for 20 seconds (`window_s`); fix a misheard word there and it shows up below the toggle as a suggestion to add or dismiss - nothing enters the dictionary on its own. Password fields and terminals are never read (terminals expose no readable text), and nothing is learned from a dictation that auto cleanup or translation changed. The line under the toggle says how the last paste ended, so you can tell "nothing corrected" from "this app cannot be read". The console log (`[general].log_level`, `INFO` by default) names the reason for every paste that taught nothing: the field could not be read, the edit was too small, there were too many changes, no word was replaced, and whether the watch ended because the time window ran out or the next dictation arrived. If a read fails (a browser rebuilds its address bar, for example) NexusVox fetches the focused field again before it gives up, and the last text it saw is still compared.
 
 ---
 
 ## Troubleshooting
 
-NexusVox writes its log to `%LOCALAPPDATA%\NexusVox\logs` (one file per day, the last 7 days are kept); Settings → Voice Input → *Open log folder* opens it. Send the newest file when you report a problem. Dictated text is shortened in the file to its first 20 characters and its length, unless `[general].log_full_text` is on.
+NexusVox writes its log to `%LOCALAPPDATA%\NexusVox\logs` (one file per day, the last 7 days are kept); Settings → Privacy → *Open log folder* opens it. Send the newest file when you report a problem. Dictated text is shortened in the file to its first 20 characters and its length, unless `[general].log_full_text` is on.
 
 | Problem | Solution |
 |---|---|
 | `Connection refused` on start | Make sure the Docker container is running and healthy. Check `docker compose logs`. |
 | No audio captured | Verify your default microphone is set correctly in Windows Sound settings. |
-| Model download fails | Only Cohere Transcribe is gated: check your `HF_TOKEN` in `docker/.env` and make sure you accepted the terms on its Hugging Face model page. Other models need no token — a failure there is usually network or disk space. |
-| High GPU memory usage | The default `--gpu-memory-utilization 0.70` reserves 70% of VRAM. Lower it in `docker-compose.yml` if needed. |
+| Model download fails | No model needs a token, so a failure is usually network or disk space. A Hugging Face token in `docker/.env` raises the rate limit. |
 | Text not appearing at cursor | Some applications block simulated Ctrl+V. Try a standard text editor first. |
 | `Audio conversion failed` on upload | ffmpeg is missing from your `PATH`. Install it (`winget install Gyan.FFmpeg`), then restart NexusVox. WAV files upload without ffmpeg. |
+| Starting NexusVox again while it runs | The second start opens the running instance's dashboard and exits; there is only ever one tray icon and one hotkey hook. |
+| The dashboard does not open | Port 47392 is held by another program. NexusVox then uses the next free port in 47400-47409 and logs a warning; if all are held it shows a message and logs the reason. Dictation keeps working. |
 
 ---
 
@@ -333,7 +307,6 @@ NexusVox/
 ├── pyproject.toml              # Project metadata & dependencies
 ├── config.toml                 # Your local configuration (git-ignored)
 ├── docker/
-│   ├── Dockerfile              # vLLM image (Voxtral/Cohere)
 │   ├── Dockerfile.parakeet     # NeMo-based Parakeet image
 │   ├── Dockerfile.whisper      # faster-whisper image
 │   ├── docker-compose.yml      # Container orchestration (4 profiles)

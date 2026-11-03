@@ -1,8 +1,7 @@
 """In-process faster-whisper transcriber for CPU (and optional GPU) mode.
 
-Loads the model once and caches it at the class level — switching between
-Whisper entries (e.g. whisper-large-v3-turbo <-> whisper-small) reuses any
-already-loaded instance. Model downloads happen on first use via faster-whisper's
+Loads the model once and caches it at the class level — switching away from
+Whisper and back reuses the already-loaded instance. Model downloads happen on first use via faster-whisper's
 HuggingFace Hub integration (~/.cache/huggingface on Linux/macOS,
 %USERPROFILE%\\.cache\\huggingface on Windows).
 """
@@ -41,14 +40,11 @@ class LocalWhisperTranscriber(BaseTranscriber):
         config: InferenceConfig,
         device: str,
         compute_type: str,
-        language: str | None = None,
-        auto_detect_language: bool = False,
     ) -> None:
         registry = MODEL_REGISTRY[config.model]
         self._hf_name = str(registry["hf_name"])
         self._device = device
         self._compute_type = compute_type
-        self._language: str | None = None if auto_detect_language else language
         self._audio_buffer = bytearray()
         self._sample_rate = 16_000
         self._connected = False
@@ -107,7 +103,6 @@ class LocalWhisperTranscriber(BaseTranscriber):
             segments, _info = model.transcribe(
                 io.BytesIO(wav_bytes),
                 beam_size=1,
-                language=self._language,
             )
             return " ".join(seg.text.strip() for seg in segments).strip()
 

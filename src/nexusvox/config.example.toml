@@ -1,11 +1,7 @@
 [general]
-# Language for transcription: "en" or "de"
-language = "en"
 # Delay in ms between releasing modifier keys and sending Ctrl+V paste.
 # Increase if text is not being injected at the cursor position.
 injection_delay_ms = 500
-# Enable automatic language detection per recording (experimental)
-auto_language_detection = false
 # How much the console log says: "DEBUG", "INFO", "WARNING" or "ERROR".
 # DEBUG applies to NexusVox's own messages; other libraries stay at INFO.
 # Takes effect on the next start.
@@ -89,15 +85,16 @@ chunk_size = 4096
 server_url = "http://localhost:8002/v1/audio/transcriptions"
 # Transcription delay in ms (multiples of 80, range 80-2400)
 transcription_delay_ms = 480
-# Transcription model. In-process on CPU (no Docker): "parakeet-tdt-0.6b" (ONNX int8,
-# ~670 MB download), "whisper-small", "whisper-base", "whisper-medium",
-# "whisper-large-v3-turbo", "distil-whisper-large-v3" (EN), "distil-whisper-medium-en" (EN).
-# Require NVIDIA GPU + Docker: "voxtral-mini-4b", "cohere-transcribe". Parakeet and the
-# Whisper models also run there, in a container.
+# Transcription model: "parakeet-tdt-0.6b" (default; 25 European languages; in-process on CPU
+# through ONNX int8, ~670 MB download, or in a Docker container on an NVIDIA GPU) or
+# "whisper-large-v3-turbo" (99 languages, for languages Parakeet does not cover; in-process on CPU
+# or in a container). A model name that no longer exists falls back to Parakeet.
 # Your own server (see [inference.custom] below): "custom-server".
 # See the model table in README.md for resources and model licenses.
 model = "parakeet-tdt-0.6b"
 # Compute device: "auto" (detect CUDA, fall back to CPU), "cuda", or "cpu".
+# With "auto" on a CUDA machine, Parakeet uses the Docker server while it answers and CPU Parakeet
+# (no speaker detection) while it does not; "cuda" and "cpu" never switch.
 # Use "cpu" to force in-process Whisper, including for benchmarking on a GPU machine.
 device = "auto"
 # Optional compute type override. Defaults: "int8" on CPU, "float16" on GPU.
@@ -124,7 +121,20 @@ audio_dir = "audio"
 # Also switchable in the dashboard Settings tab. Transcripts are saved either way.
 store_audio = true
 
+[experimental]
+# Features that are not part of v1. Each is hidden and cannot be triggered while it is false;
+# the dashboard endpoints behind it are not registered. Restart NexusVox after changing these.
+# Nexus OS commands ([os_commands] below) and their Settings card.
+os_commands = false
+# The "nexus flag" voice command and the dashboard Edit tab (Flagged Transcriptions).
+flag_command = false
+# The Snippets button "Fill from GitHub" (reads the repository list of the GitHub CLI account).
+github_snippets = false
+# The developer benchmark page of the dashboard.
+dev_tab = false
+
 [os_commands]
+# Needs [experimental] os_commands = true.
 # Enable "nexus" voice commands for OS-level window management.
 # Say "nexus open chrome" to launch, "nexus focus discord" to bring to front, etc.
 # Supported actions: open, close, focus, fullscreen, minimize, snap left, snap right

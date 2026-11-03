@@ -94,15 +94,18 @@ async function api(path) {
 // ── Tab Switching ────────────────────────────────────────────────────
 // The active tab is mirrored into the URL hash (e.g. "#analytics") so a page
 // refresh, bookmark, or back/forward navigation lands on the same tab.
-function activateTab(name) {
+// Every switch opens the tab at the top; only a deliberate jump (`keepScroll`, e.g. the "Meeting settings"
+// link) scrolls on its own afterwards.
+function activateTab(name, { keepScroll = false } = {}) {
   const btn = document.querySelector(`.tab[data-tab="${name}"]`);
   const panel = document.getElementById("tab-" + name);
-  if (!btn || !panel) return false;
+  if (!btn || !panel || btn.hidden) return false;
 
   document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
   document.querySelectorAll(".tab-content").forEach((s) => s.classList.remove("active"));
   btn.classList.add("active");
   panel.classList.add("active");
+  if (!keepScroll) window.scrollTo(0, 0);
 
   if (name === "analytics") loadAnalytics();
   if (name === "edit") loadFlaggedTranscriptions();
@@ -150,6 +153,11 @@ window.NexusVoxExt = {
   // A panel script registers what its upload action does: handler(upload, button).
   registerUploadAction(id, handler) {
     uploadActionHandlers[id] = handler;
+  },
+  // Opens the transcript card of a stored upload or meeting (a summary links to its transcript this way):
+  // meetings in the Meetings tab, everything else in the Upload tab. Resolves with false when there is no such card.
+  showTranscript(id) {
+    return showTranscriptCard(id);
   },
 };
 
@@ -213,8 +221,9 @@ function openExtensionPanel(id) {
 
 function restoreTabFromHash() {
   const name = window.location.hash.replace(/^#/, "");
-  if (!name || (name === "dev" && !DEV_MODE)) return;
-  activateTab(name);
+  if (!name) return;
+  // A hash for a tab that is off (an experimental one, or an extension that is gone) must not stay in the URL.
+  if (!activateTab(name)) history.replaceState(null, "", window.location.pathname + window.location.search);
 }
 
 window.addEventListener("hashchange", restoreTabFromHash);
@@ -238,9 +247,7 @@ document.getElementById("btn-clear-dates").addEventListener("click", () => {
 });
 
 // ── Settings ─────────────────────────────────────────────────────────
-const toggle = document.getElementById("auto-lang-toggle");
 const translateToggle = document.getElementById("translate-toggle");
-const languageSelect = document.getElementById("language-select");
 const hotkeyModeSelect = document.getElementById("hotkey-mode-select");
 const micGuardToggle = document.getElementById("mic-guard-toggle");
 const storeAudioToggle = document.getElementById("store-audio-toggle");
@@ -394,7 +401,6 @@ function postSetting(path, body) {
   });
 }
 
-toggle.addEventListener("change", () => postSetting("/api/settings/auto-language-detection", { enabled: toggle.checked }));
 translateToggle.addEventListener("change", async () => {
   await postSetting("/api/settings/translate", { enabled: translateToggle.checked });
   loadTranslatorStatus();
@@ -423,7 +429,6 @@ async function loadTranslatorStatus() {
       "○ No translator at " + s.url + (translateToggle.checked ? " — text is typed untranslated" : "");
   }
 }
-languageSelect.addEventListener("change", () => postSetting("/api/settings/language", { language: languageSelect.value }));
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 storeAudioToggle.addEventListener("change", () => postSetting("/api/settings/store-audio", { enabled: storeAudioToggle.checked }));
 logFullTextToggle.addEventListener("change", () => postSetting("/api/settings/log-full-text", { enabled: logFullTextToggle.checked }));
@@ -543,9 +548,7 @@ hotkeyResetBtn.addEventListener("click", () => {
 
 async function loadSettings() {
   const s = await api("/api/settings");
-  toggle.checked = s.auto_language_detection;
   translateToggle.checked = s.translate_enabled;
-  languageSelect.value = s.language;
   hotkeyModeSelect.value = s.hotkey_mode;
   renderHotkey(s);
   if (!pasteKeySelect.options.length) {
@@ -868,6 +871,8 @@ osCommandsToggle.addEventListener("change", async () => {
 });
 
 async function loadOsCommands() {
+  await featuresReady;
+  if (!FEATURES.os_commands) return; // experimental: the card is hidden and the endpoint is not registered
   const data = await fetch("/api/os-commands").then((r) => r.json());
   osCommandsToggle.checked = data.enabled;
 
@@ -1008,6 +1013,14 @@ async function saveSymbols() {
 // ── Model Switcher ──────────────────────────────────────────────────
 const modelSelect = document.getElementById("model-select");
 
+// " ✓ downloaded" or " · not downloaded (~670 MB)" for a model with a copy on this PC; nothing for the
+// custom server, or when the cache could not be read.
+function modelDownloadMark(m) {
+  if (m.downloaded === true) return " ✓ downloaded";
+  if (m.downloaded === false) return ` · not downloaded${m.size ? ` (${m.size})` : ""}`;
+  return "";
+}
+
 async function loadModelSwitcher() {
   const [models, current] = await Promise.all([
     fetch("/api/models").then((r) => r.json()),
@@ -1015,7 +1028,7 @@ async function loadModelSwitcher() {
   ]);
   modelSpecs = Object.fromEntries(models.map((m) => [m.id, m]));
   modelSelect.innerHTML = models.map((m) =>
-    `<option value="${m.id}"${m.id === current.model ? " selected" : ""}>${m.name}</option>`
+    `<option value="${m.id}"${m.id === current.model ? " selected" : ""}>${m.name}${modelDownloadMark(m)}</option>`
   ).join("");
   renderModelOverview(current.model);
   // An in-process model (Parakeet on CPU) may still be downloading or loading from the start.
@@ -1033,12 +1046,10 @@ function renderModelOverview(modelId) {
   let runtimeLabel;
   if (m.custom) {
     runtimeLabel = "External server (no Docker)";
-  } else if (m.inprocess_supported && !m.requires_gpu) {
+  } else if (m.inprocess_supported) {
     runtimeLabel = "CPU in-process · GPU via Docker";
-  } else if (m.requires_gpu) {
-    runtimeLabel = "GPU only (Docker)";
   } else {
-    runtimeLabel = "CPU in-process";
+    runtimeLabel = "GPU (Docker)";
   }
   const rows = [
     ["Description", escapeHtml(m.description)],
@@ -1116,6 +1127,8 @@ function pollModelStatus(prevModel) {
         clearInterval(interval);
         modelSelect.dataset.prev = modelSelect.value;
         modelSelect.disabled = false;
+        // The switch downloaded the model: redraw the list so its mark follows.
+        loadModelSwitcher();
         setTimeout(hideModelStatus, 2000);
       } else if (data.status === "error") {
         clearInterval(interval);
@@ -2292,6 +2305,24 @@ async function loadFileTranscriptions(poll = false) {
   if (generation === loadGeneration) pendingPoller.update(pendingLists.size > 0);
 }
 
+// Jump to one transcript card: load the lists, open the tab that holds the card, scroll it in and flash it.
+async function showTranscriptCard(id) {
+  await loadFileTranscriptions();
+  const selector = `> .flagged-card[data-id="${String(id).replace(/"/g, "")}"]`;
+  const inMeetings = document.querySelector("#meeting-list " + selector);
+  const card = inMeetings || document.querySelector("#upload-list " + selector);
+  if (!card) return false;
+  const tab = inMeetings ? "meetings" : "upload";
+  history.replaceState(null, "", "#" + tab);
+  activateTab(tab, { keepScroll: true });
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  card.classList.remove("flash-highlight");
+  void card.offsetWidth; // restart the animation when the link is used again
+  card.classList.add("flash-highlight");
+  setTimeout(() => card.classList.remove("flash-highlight"), 2000);
+  return true;
+}
+
 // One history list: `kind` "" shows every entry, "meeting" only meetings. Each card can be deleted, with the
 // confirmation inside the card (never a browser dialog). A `poll` keeps every card whose data did not change.
 function renderFileTranscriptions(container, data, emptyText, poll) {
@@ -2873,7 +2904,7 @@ function renderMeetingDevicesInfo() {
 document.getElementById("meeting-settings-link").addEventListener("click", (e) => {
   e.preventDefault();
   history.replaceState(null, "", "#settings");
-  activateTab("settings");
+  activateTab("settings", { keepScroll: true });
   const card = document.getElementById("meeting-settings-card");
   card.scrollIntoView({ behavior: "smooth", block: "start" });
   card.classList.remove("flash-highlight");
@@ -2893,17 +2924,34 @@ async function openMeetingsTab() {
   }, 3000);
 }
 
-// ── Dev Mode Detection ───────────────────────────────────────────────
-const DEV_MODE = new URLSearchParams(window.location.search).has("dev");
+// ── Experimental features ────────────────────────────────────────────
+// Features that are not part of v1 are hidden in index.html (`data-feature`) and have no endpoint unless
+// `[experimental]` in config.toml turns them on; the page shows what the server says is on.
+let FEATURES = {};
+
+// Resolves when the flags are known; started at page load next to the other loaders, awaited where one is needed.
+let featuresReady = Promise.resolve();
+
+async function loadFeatures() {
+  try {
+    const r = await fetch("/api/features");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    FEATURES = await r.json();
+  } catch (err) {
+    console.error("Could not load the experimental feature flags; experimental features stay hidden:", err);
+    FEATURES = {};
+  }
+  document.querySelectorAll("[data-feature]").forEach((el) => {
+    el.hidden = !FEATURES[el.dataset.feature];
+  });
+}
 
 // ── Init ─────────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
+  featuresReady = loadFeatures();
   loadSettings();
   loadMeetingSettings();
-  if (DEV_MODE) {
-    document.querySelectorAll("[data-dev-only]").forEach((el) => (el.style.display = ""));
-  }
-  loadExtensions().then(restoreTabFromHash);
+  Promise.all([featuresReady, loadExtensions()]).then(restoreTabFromHash);
 });
 
 // ── Benchmarks (Dev Tab) ─────────────────────────────────────────────
@@ -2912,7 +2960,8 @@ let benchmarkCache = null;
 let currentBenchmarkDetail = null;
 
 async function loadBenchmarks() {
-  if (!DEV_MODE) return;
+  await featuresReady;
+  if (!FEATURES.dev_tab) return;
   try {
     const comparison = await fetch("/api/benchmarks/compare").then((r) => r.json());
     benchmarkCache = comparison;

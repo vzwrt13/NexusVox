@@ -28,7 +28,7 @@ protocol = "http"             # "http" or "realtime"
 model_name = "custom-server"  # sent to the server, and stored with each transcript
 ```
 
-Or pick **Custom server** under Settings → **Model** in the dashboard; the `url`,
+Or pick **Custom server** under Settings → **Models** in the dashboard; the `url`,
 `protocol`, and `model_name` still come from `config.toml`. NexusVox reads that file at
 startup and writes it back when settings change, so quit NexusVox before editing
 `[inference.custom]` and start it again afterwards. The model overview shows the URL in
@@ -69,7 +69,7 @@ The same request NexusVox sends to the bundled HTTP models (OpenAI-compatible
 
 ## The `realtime` contract
 
-The vLLM `/v1/realtime` WebSocket protocol that the bundled Voxtral model uses. NexusVox
+The vLLM `/v1/realtime` WebSocket protocol that vLLM serves (Voxtral was the bundled model that used it). NexusVox
 opens one WebSocket per recording on `url` (`ws://` or `wss://`):
 
 1. **Server → client:** `{"type": "session.created", "id": "<any>"}` — must be the first

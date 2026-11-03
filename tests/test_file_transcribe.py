@@ -89,6 +89,9 @@ class _RecordingTranscriber:
 
     needs_docker = False
 
+    async def prepare(self):
+        pass
+
     def __init__(self, text="hello from cpu"):
         self._text = text
         self.connect_calls = 0
@@ -132,9 +135,8 @@ async def test_transcribe_file_dispatches_through_factory(monkeypatch, sample_wa
     chunks, _ = ft.convert_to_wav(sample_wav_bytes, "test.wav")
     result = await ft.transcribe_file(
         chunks,
-        InferenceConfig(model="whisper-small"),
+        InferenceConfig(model="whisper-large-v3-turbo"),
         device="cpu",
-        language="en",
     )
 
     assert result.text == "hello from cpu"
@@ -145,16 +147,14 @@ async def test_transcribe_file_dispatches_through_factory(monkeypatch, sample_wa
 
 
 @pytest.mark.asyncio
-async def test_transcribe_file_passes_language_and_device_to_factory(monkeypatch, sample_wav_bytes):
+async def test_transcribe_file_passes_device_to_factory(monkeypatch, sample_wav_bytes):
     import nexusvox.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     captured: dict = {}
 
-    def fake_factory(config, *, device=None, language=None, auto_detect_language=False):
+    def fake_factory(config, *, device=None, auto_fallback=False):
         captured["device"] = device
-        captured["language"] = language
-        captured["auto"] = auto_detect_language
         return _RecordingTranscriber()
 
     monkeypatch.setattr(ft, "create_transcriber", fake_factory)
@@ -162,13 +162,11 @@ async def test_transcribe_file_passes_language_and_device_to_factory(monkeypatch
     chunks, _ = ft.convert_to_wav(sample_wav_bytes, "test.wav")
     await ft.transcribe_file(
         chunks,
-        InferenceConfig(model="whisper-small"),
+        InferenceConfig(model="whisper-large-v3-turbo"),
         device="cpu",
-        language="de",
-        auto_detect_language=True,
     )
 
-    assert captured == {"device": "cpu", "language": "de", "auto": True}
+    assert captured == {"device": "cpu"}
 
 
 class _ScriptedTranscriber(_RecordingTranscriber):
@@ -240,7 +238,10 @@ async def test_engine_without_timestamps_leaves_words_empty(monkeypatch):
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
 
     result = await ft.transcribe_file(
-        [_silent_wav(), _silent_wav()], InferenceConfig(model="whisper-small"), device="cpu", word_timestamps=True
+        [_silent_wav(), _silent_wav()],
+        InferenceConfig(model="whisper-large-v3-turbo"),
+        device="cpu",
+        word_timestamps=True,
     )
 
     assert transcriber.word_timestamps is False
@@ -319,7 +320,7 @@ async def test_timeout_note_does_not_mention_words_for_engines_without_them(monk
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
 
     result = await ft.transcribe_file(
-        [_silent_wav()], InferenceConfig(model="whisper-small"), device="cpu", word_timestamps=True
+        [_silent_wav()], InferenceConfig(model="whisper-large-v3-turbo"), device="cpu", word_timestamps=True
     )
 
     assert len(result.notes) == 1
@@ -547,7 +548,7 @@ async def test_diarize_with_a_model_without_speaker_detection_says_so(monkeypatc
     transcriber = _DiarizingTranscriber([("hello", [], True)], [])
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
 
-    result = await ft.transcribe_file([_silent_wav()], InferenceConfig(model="cohere-transcribe"), diarize=True)
+    result = await ft.transcribe_file([_silent_wav()], InferenceConfig(model="whisper-large-v3-turbo"), diarize=True)
 
     assert transcriber.diarize_calls == []
     assert transcriber.word_timestamps is False
@@ -584,7 +585,7 @@ async def test_progress_is_reported_per_chunk(monkeypatch):
 
     await ft.transcribe_file(
         [_silent_wav(), _silent_wav(), _silent_wav()],
-        InferenceConfig(model="whisper-small"),
+        InferenceConfig(model="whisper-large-v3-turbo"),
         device="cpu",
         on_progress=lambda *args: seen.append(args),
     )

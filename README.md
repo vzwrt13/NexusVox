@@ -26,28 +26,27 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 ## Features
 
 - **Push-to-talk** — hold `Ctrl+Shift+Alt`, speak, release; text is injected at the cursor instantly. Or switch to *Toggle* mode in Settings: press once to start, press again to stop
-- **Your own hotkey** — any modifiers, optionally ending in a key (`Ctrl+Shift+A`, `F9`, ...), set in Settings → Voice Input with a *Record* button or in `config.toml`. A bound letter is swallowed while it is held as part of the combo, so it never lands in the app you are dictating into
-- **GPU-backed transcription** — Voxtral (WebSocket streaming), Cohere and Parakeet run on NVIDIA GPUs via Docker; Whisper runs there too and is far quicker than on CPU
-- **CPU fallback** — six Whisper variants and Parakeet (ONNX, int8) run in-process with no Docker and no GPU, for machines that have no other option
-- **Nine transcription models** — pick per recording in the dashboard
+- **Your own hotkey** — any modifiers, optionally ending in a key (`Ctrl+Shift+A`, `F9`, ...), set in Settings → Dictation with a *Record* button or in `config.toml`. A bound letter is swallowed while it is held as part of the combo, so it never lands in the app you are dictating into
+- **GPU-backed transcription** — Parakeet runs on an NVIDIA GPU via Docker; Whisper Large V3 Turbo runs there too and is far quicker than on CPU
+- **CPU fallback** — Parakeet (ONNX, int8) and Whisper Large V3 Turbo run in-process with no Docker and no GPU, for machines that have no other option
+- **Two transcription models and a custom slot** — Parakeet (default) and Whisper Large V3 Turbo for other languages; the dashboard marks which are already downloaded
 - **Voice commands** — spoken formatting shortcuts (new line, new paragraph, tab, all caps, punctuation symbols), and an opt-in "press enter" / "Enter drücken" at the end of a dictation that sends a chat message
-- **Paste the last text again** — hold the hotkey, tap `V` (`Ctrl+Shift+Alt+V`), let go: nothing is transcribed, the text NexusVox pasted last is pasted once more. The key is set in Settings → Voice Input (or `[hotkey].paste_key`)
-- **Rewrite selected text by voice** — select text, hold the hotkey, tap your polish key and say what to do ("make it shorter", "mach es formeller") or nothing for a general clean-up; a local language model rewrites the selection in place (Ctrl+Z undoes it). Needs a model server you run — [Ollama](https://ollama.com) by default, `ollama pull gemma4:e4b` (~4.6 GB VRAM; `gemma4:e2b` without an NVIDIA GPU, which is what an unset `[llm].model` picks there) — or any OpenAI-compatible one under `[llm]`. Off until you pick a key in Settings → Voice Input
-- **Polish presets** — keep instructions you use often under a short name (Settings → Polish Presets), e.g. "prompt engineer" or "formelle Mail": say the name instead of the whole instruction, add words after it to adjust it, and mark one as the default for a tap of the polish key without a word
-- **Auto cleanup** — off by default; *Light* removes fillers ("um", "äh"), false starts and repeated words and fixes punctuation, *Medium* also grammar. Every dictation goes through the same local model as polish (~0.6 s with `gemma4:e4b` on a GPU, about 2-6 s on the CPU); a reply that does not look like your words cleaned up - an answer, a translation, a lost line break - is ignored and the dictation is typed as spoken. Settings → Voice Input → *Auto Cleanup*
+- **Paste the last text again** — hold the hotkey, tap `V` (`Ctrl+Shift+Alt+V`), let go: nothing is transcribed, the text NexusVox pasted last is pasted once more. The key is set in Settings → Text & Polish (or `[hotkey].paste_key`)
+- **Rewrite selected text by voice** — select text, hold the hotkey, tap your polish key and say what to do ("make it shorter", "mach es formeller") or nothing for a general clean-up; a local language model rewrites the selection in place (Ctrl+Z undoes it). Needs a model server you run — [Ollama](https://ollama.com) by default, `ollama pull gemma4:e4b` (~4.6 GB VRAM; `gemma4:e2b` without an NVIDIA GPU, which is what an unset `[llm].model` picks there) — or any OpenAI-compatible one under `[llm]`. Off until you pick a key in Settings → Text & Polish
+- **Polish presets** — keep instructions you use often under a short name (Settings → Vocabulary → Polish Presets), e.g. "prompt engineer" or "formelle Mail": say the name instead of the whole instruction, add words after it to adjust it, and mark one as the default for a tap of the polish key without a word
+- **Auto cleanup** — off by default; *Light* removes fillers ("um", "äh"), false starts and repeated words and fixes punctuation, *Medium* also grammar. Every dictation goes through the same local model as polish (~0.6 s with `gemma4:e4b` on a GPU, about 2-6 s on the CPU); a reply that does not look like your words cleaned up - an answer, a translation, a lost line break - is ignored and the dictation is typed as spoken. Settings → Text & Polish → *Auto Cleanup*
 - **Retry a transcription** — in the Review tab, *Retry* transcribes a recording's stored audio again with the current model, e.g. after switching models. Needs *Store Audio Recordings* turned on
-- **Snippets** — your own spoken shortcuts: say a trigger phrase ("my address", "meine Signatur") anywhere in a dictation and your stored text is inserted exactly as saved, line breaks included. Create and edit them in Settings → Snippets; none ship with NexusVox. A snippet can hold a list of options, e.g. "open remote repo" with one line per repository (*Fill from GitHub* imports them): "open remote repo nexus vox" inserts the best-matching URL, and "nexus open remote repo nexus vox" / "nexus öffne …" opens it in your browser instead
-- **Learn from edits** — fix a misheard word right in the app you dictated into, and NexusVox suggests a correction-dictionary entry for it; you accept or dismiss it in Settings → Correction Dictionary. It reads the text field through UI Automation for 20 seconds after a paste (`window_s`), never password fields or terminals (they expose no readable text). Under the toggle the dashboard says how the last paste ended - suggestions, nothing corrected, or why it was skipped. Off by default, `[learn_from_edits]` in `config.toml`
-- **Nexus OS commands** — window management via voice ("nexus open chrome", "nexus minimize")
+- **Snippets** — your own spoken shortcuts: say a trigger phrase ("my address", "meine Signatur") anywhere in a dictation and your stored text is inserted exactly as saved, line breaks included. Create and edit them in Settings → Vocabulary → Snippets; none ship with NexusVox. A snippet can hold a list of options, e.g. "open remote repo" with one line per repository (*Fill from GitHub* imports them): "open remote repo nexus vox" inserts the best-matching URL, and "nexus open remote repo nexus vox" / "nexus öffne …" opens it in your browser instead
+- **Learn from edits** — fix a misheard word right in the app you dictated into, and NexusVox suggests a correction-dictionary entry for it; you accept or dismiss it in Settings → Vocabulary → Correction Dictionary. It reads the text field through UI Automation for 20 seconds after a paste (`window_s`), never password fields or terminals (they expose no readable text). Under the toggle the dashboard says how the last paste ended - suggestions, nothing corrected, or why it was skipped. Off by default, `[learn_from_edits]` in `config.toml`
 - **Assistant forward** — "nexus assistant <anything>" hands the sentence to a local voice assistant over a TCP port instead of typing it (off by default, `[assistant]` in `config.toml`); if nothing answers, the text is typed as usual. The assistant is a separate program you provide — see [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md)
 - **Command recordings** — add `Y` to the hotkey (`Ctrl+Shift+Alt+Y`) and that recording is not typed but sent as a command to a local program over a TCP port, for example a window switcher that understands "focus 3" (off by default, `[os_control]` in `config.toml`). Without the full chord `Y` types normally. The receiving program is not part of this project — see [docs/CONTROL_PORT.md](docs/CONTROL_PORT.md) for the contract
 - **Translate to English** — dictate in German, English or a mix and have the English version typed, while the recording and transcript are stored as spoken; a tray or dashboard toggle (off by default, `[translator]` in `config.toml`). NexusVox does not translate itself: it needs a separate local translator server that is not part of this project — see [docs/TRANSLATOR.md](docs/TRANSLATOR.md). If the server does not answer, the original text is typed
-- **Mute other apps' microphone while you dictate** — while the push-to-talk keys are held, every other app's WASAPI microphone session is muted so your dictation is not broadcast to a call; on release each app is put back exactly as it was, and an app you muted yourself stays muted. Per-app mute, never the microphone device; a crash mid-hold is repaired on the next start. Verified with browser calls (Chrome/WebRTC goes silent within 300 ms). Off by default; toggle in Settings → Voice Input or `[mic_guard]` in `config.toml`. **Discord's desktop app ignores per-session mute** (its voice engine reads the raw input): for Discord, bind its *Push to Mute* keybind to the same keys as the NexusVox hotkey — that is the reliable way and needs nothing from NexusVox
+- **Mute other apps' microphone while you dictate** — while the push-to-talk keys are held, every other app's WASAPI microphone session is muted so your dictation is not broadcast to a call; on release each app is put back exactly as it was, and an app you muted yourself stays muted. Per-app mute, never the microphone device; a crash mid-hold is repaired on the next start. Verified with browser calls (Chrome/WebRTC goes silent within 300 ms). Off by default; toggle in Settings → Dictation or `[mic_guard]` in `config.toml`. **Discord's desktop app ignores per-session mute** (its voice engine reads the raw input): for Discord, bind its *Push to Mute* keybind to the same keys as the NexusVox hotkey — that is the reliable way and needs nothing from NexusVox
 - **Meeting recording** — record a call without a bot in it: your microphone and the system audio are captured on your PC and turned into one transcript with numbered speakers (*Speaker 1* is you, the other participants follow). Start and stop it from the dashboard's Meetings tab or with its own hotkey (`Ctrl+Alt+M`, `[meeting]` in `config.toml`); dictation keeps working meanwhile. A reminder to inform all participants appears before each recording. Meetings play back in the dashboard and can be deleted with their audio. Read [docs/MEETINGS.md](docs/MEETINGS.md) first: consent (§ 201 StGB), headset, Bluetooth
 - **Flask dashboard** — analytics, settings, transcription history, audio review, and file upload, opened from the tray icon
-- **Dictation feedback** — audio chimes on recording start and stop, a small live waveform at the bottom centre of the screen instead, or both (Settings > Dictation feedback); the waveform never takes focus and ignores the mouse
+- **Dictation feedback** — audio chimes on recording start and stop, a small live waveform at the bottom centre of the screen instead, or both (Settings > Dictation); the waveform never takes focus and ignores the mouse
 - **SQLite history** — every transcription is saved with audio for review and flagging
-- **Auto language detection** — per-recording language switching (English/German)
+- **Automatic language detection** — no language setting: English and German are always recognised, and every stored row is labelled with the language detected from its text
 
 ---
 
@@ -56,7 +55,7 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 - **Windows 11** (Win32 SendInput + pynput hooks)
 - **Python 3.11+**
 
-**Recommended — NVIDIA GPU** (Voxtral / Cohere / Parakeet, and a much faster Whisper):
+**Recommended — NVIDIA GPU** (Parakeet, and a much faster Whisper):
 - **NVIDIA GPU** with CUDA runtime installed (VRAM depends on model — see table below)
 - **Docker Desktop** + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
 
@@ -87,7 +86,7 @@ pip install -e .
 python -m nexusvox
 ```
 
-Parakeet is the default because it is both the fastest and the most accurate model measured (see [Performance](#performance)) and needs only ~2 GB of VRAM. Voxtral offers WebSocket streaming but wants **≥16 GB** — switch to it in the dashboard Settings tab if your card has the headroom, and the server URL follows automatically.
+Parakeet is the default because it is both the fastest and the most accurate model measured (see [Performance](#performance)) and needs only ~2 GB of VRAM. Choose **Whisper Large V3 Turbo** in the dashboard Settings tab for languages Parakeet does not cover (it knows 25 European languages); the server URL follows automatically.
 
 ## Quick Start (CPU — fallback)
 
@@ -96,9 +95,9 @@ pip install -e .
 python -m nexusvox
 ```
 
-Without a usable GPU, Parakeet runs in-process on the CPU (ONNX, int8 — no Docker); Voxtral and Cohere need a GPU, and a config that names one of them starts on Whisper for that session instead. Open the dashboard from the tray icon → Settings → **Model** to pick another CPU-capable entry — `whisper-small` for speed, `whisper-medium` for accuracy — or set `[inference].model = "whisper-small"` in `config.toml` before the first run.
+Without a usable GPU, Parakeet runs in-process on the CPU (ONNX, int8 — no Docker). A config that names a model that no longer exists (Voxtral, Cohere, the smaller Whisper sizes, Distil-Whisper) falls back to Parakeet with one log line. Open the dashboard from the tray icon → Settings → **Models** to pick `whisper-large-v3-turbo` for languages Parakeet does not cover, or set `[inference].model = "whisper-large-v3-turbo"` in `config.toml` before the first run.
 
-Models download on first use (~670 MB for Parakeet on CPU, ~150 MB for `whisper-small`, ~1.5 GB for `whisper-large-v3-turbo`) and cache under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Speaker detection for uploads needs the Parakeet GPU container.
+Models download on first use (~670 MB for Parakeet on CPU, ~1.6 GB for `whisper-large-v3-turbo`) and cache under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Speaker detection for uploads needs the Parakeet GPU container.
 
 See [GettingStarted.md](GettingStarted.md) for the full setup guide including configuration, model selection, and troubleshooting.
 
@@ -108,24 +107,16 @@ See [GettingStarted.md](GettingStarted.md) for the full setup guide including co
 
 | Model | Hugging Face ID | Model license | Runtime | Resources | Docker? |
 |---|---|---|---|---|---|
-| Whisper Small (CPU-optimized) | `Systran/faster-whisper-small` | MIT | in-process | CPU (~500 MB RAM) | **No** |
-| Whisper Base (CPU) | `Systran/faster-whisper-base` | MIT | in-process | CPU (~300 MB RAM) | **No** |
-| Whisper Medium (CPU) | `Systran/faster-whisper-medium` | MIT | in-process | CPU (~1.5 GB RAM) | **No** |
-| Distil-Whisper Medium.en (EN, CPU) | `Systran/faster-distil-whisper-medium.en` | MIT | in-process | CPU (~800 MB RAM) | **No** |
-| Distil-Whisper Large V3 (EN, CPU) | `Systran/faster-distil-whisper-large-v3` | MIT | in-process | CPU (~1.5 GB RAM) | **No** |
 | Whisper Large V3 Turbo | `deepdml/faster-whisper-large-v3-turbo-ct2` | MIT | in-process (CPU) / Docker (GPU) | CPU or ~4 GB VRAM | **No** on CPU |
-| Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ² | Docker (GPU) / in-process ONNX int8 (CPU) | ~2 GB VRAM, or CPU (~670 MB download) | Yes on GPU |
-| Cohere Transcribe | `CohereLabs/cohere-transcribe-03-2026` | Apache-2.0 ¹ | Docker | ~6 GB VRAM | Yes |
-| Voxtral Mini 4B | `mistralai/Voxtral-Mini-4B-Realtime-2602` | Apache-2.0 | Docker | ≥16 GB VRAM | Yes |
-| Custom server ³ | — | your server's | your own server | none on this PC | **No** |
+| Parakeet TDT 0.6B | `nvidia/parakeet-tdt-0.6b-v3` | CC-BY-4.0 ¹ | Docker (GPU) / in-process ONNX int8 (CPU) | ~2 GB VRAM, or CPU (~670 MB download) | Yes on GPU |
+| Custom server ² | — | your server's | your own server | none on this PC | **No** |
 
-¹ **Gated on Hugging Face.** You must accept the terms on the model page and supply an `HF_TOKEN` before the container can download it. All other models download without a token.
-² **Attribution required.** CC-BY-4.0 obliges you to credit NVIDIA if you redistribute the model.
-³ **Your own backend.** Any server that speaks the OpenAI-compatible HTTP or vLLM realtime WebSocket protocol, set under `[inference.custom]`. Audio leaves this PC if the server is remote — see [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md).
+¹ **Attribution required.** CC-BY-4.0 obliges you to credit NVIDIA if you redistribute the model.
+² **Your own backend.** Any server that speaks the OpenAI-compatible HTTP or realtime WebSocket protocol, set under `[inference.custom]`. Audio leaves this PC if the server is remote — see [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md).
 
 Model licenses are **separate from NexusVox's own license** — NexusVox is AGPL-3.0, but no model weights ship with it; each model is downloaded from Hugging Face under its own terms. Check the license of the model you pick, especially for commercial use.
 
-Select your device in the dashboard Settings tab: `Auto` (detect CUDA, fall back to CPU), `GPU (CUDA)`, or `CPU`. On CPU, only the entries that run in-process are shown (Parakeet among them, without speaker detection).
+Select your device in the dashboard Settings tab: `Auto` (detect CUDA, fall back to CPU; with Parakeet on a CUDA machine each dictation, meeting and upload uses the Docker server while it answers and CPU Parakeet when it does not, without speaker detection, and the app warms the server up at start), `GPU (CUDA)`, or `CPU`. On CPU, only the entries that run in-process are shown (Parakeet among them, without speaker detection).
 
 ---
 
@@ -170,7 +161,9 @@ Open the dashboard from the NexusVox tray icon (left-click) while NexusVox is ru
 | Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg); optional speaker detection with Parakeet; optional text cleanup with the local language model; download as TXT, SRT or VTT (subtitles need Parakeet's word timing) |
 | Review | Flag and replay recordings |
 
-![The NexusVox settings tab: toggles for automatic language detection, a compute device selector resolved to GPU (CUDA), a transcription model selector set to Parakeet TDT 0.6B, and a model overview listing architecture, parameter count, protocol, runtime, supported languages and VRAM.](docs/images/settings.png)
+*(Screenshot from before the Settings tab was grouped: the compute device selector now sits in the collapsed **Advanced** card, and the language setting was removed.)*
+
+![The NexusVox settings tab: a compute device selector resolved to GPU (CUDA), a transcription model selector set to Parakeet TDT 0.6B, and a model overview listing architecture, parameter count, protocol, runtime, supported languages and VRAM.](docs/images/settings.png)
 
 **Speaker detection (Parakeet on GPU only).** In the Upload tab, choose a file, switch on *Detect speakers* and click *Transcribe*; the transcript comes back as `Speaker 1: …` paragraphs, one per turn. The Parakeet container runs NVIDIA's [Streaming Sortformer](https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2) (`nvidia/diar_streaming_sortformer_4spk-v2`, CC-BY-4.0, ~0.5 GB download, no token) once over the whole file; it is loaded on the first upload that asks for it and only occupies the GPU while it runs, so a dictation made during that run waits a few seconds. It tells **at most 4 speakers** apart — with more, voices get merged. If the container was built before this feature, rebuild it (`docker compose --profile parakeet up --build`).
 

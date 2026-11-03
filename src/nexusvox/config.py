@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import threading
 import tomllib
@@ -10,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .paths import default_config_path, resolve_data_path
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path("config.toml")
 # Resolved next to this module, not relative to the repository root. The template
@@ -20,38 +23,6 @@ DEFAULT_CONFIG_PATH = Path("config.toml")
 EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parent / "config.example.toml"
 
 MODEL_REGISTRY: dict[str, dict[str, object]] = {
-    "voxtral-mini-4b": {
-        "hf_name": "mistralai/Voxtral-Mini-4B-Realtime-2602",
-        "default_url": "ws://localhost:8000/v1/realtime",
-        "protocol": "realtime_ws",
-        "display_name": "Voxtral Mini 4B",
-        "docker_profile": "voxtral",
-        "health_url": "http://localhost:8000/health",
-        "description": "Mistral real-time STT with causal audio encoder — <500 ms latency",
-        "parameters": "4B (3.4B LM + 970M encoder)",
-        "architecture": "Causal audio encoder + Mistral LM",
-        "languages": "13 languages (AR, DE, EN, ES, FR, HI, IT, NL, PT, ZH, JA, KO, RU)",
-        "streaming": "true",
-        "vram_gb": "≥16 GB",
-        "requires_gpu": True,
-        "inprocess_supported": False,
-    },
-    "cohere-transcribe": {
-        "hf_name": "CohereLabs/cohere-transcribe-03-2026",
-        "default_url": "http://localhost:8001/v1/audio/transcriptions",
-        "protocol": "openai_http",
-        "display_name": "Cohere Transcribe",
-        "docker_profile": "cohere",
-        "health_url": "http://localhost:8001/health",
-        "description": "2B Conformer-based STT — >3x real-time factor, 14 languages",
-        "parameters": "2B",
-        "architecture": "Conformer encoder + Transformer decoder",
-        "languages": "14 languages (EN, FR, DE, IT, ES, PT, EL, NL, PL, ZH, JA, KO, VI, AR)",
-        "streaming": "false",
-        "vram_gb": "~6 GB",
-        "requires_gpu": True,
-        "inprocess_supported": False,
-    },
     "parakeet-tdt-0.6b": {
         "hf_name": "nvidia/parakeet-tdt-0.6b-v3",
         "default_url": "http://localhost:8002/v1/audio/transcriptions",
@@ -69,11 +40,14 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "streaming": "false",
         "vram_gb": "GPU ~2 GB · CPU ~670 MB download",
         # GPU: the Docker NeMo container. CPU: in-process ONNX int8 through onnx-asr (no Docker).
-        "requires_gpu": False,
         "inprocess_supported": True,
         "inprocess_engine": "parakeet-onnx",
         "onnx_model": "nemo-parakeet-tdt-0.6b-v3",
         "onnx_quantization": "int8",
+        # The in-process copy the dashboard marks as downloaded (Hugging Face repo, a file that proves it, size).
+        "download_repo": "istupakov/parakeet-tdt-0.6b-v3-onnx",
+        "download_probe": "encoder-model.int8.onnx",
+        "download_size": "~670 MB",
     },
     "whisper-large-v3-turbo": {
         "hf_name": "deepdml/faster-whisper-large-v3-turbo-ct2",
@@ -88,88 +62,9 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "languages": "99 languages",
         "streaming": "false",
         "vram_gb": "~4 GB",
-        "requires_gpu": False,
         "inprocess_supported": True,
-    },
-    "whisper-small": {
-        "hf_name": "Systran/faster-whisper-small",
-        "default_url": "",
-        "protocol": "openai_http",
-        "display_name": "Whisper Small (CPU-optimized)",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "OpenAI Whisper Small via faster-whisper — ~150 MB, fast on CPU, English-strong",
-        "parameters": "244M",
-        "architecture": "Transformer encoder-decoder (CTranslate2)",
-        "languages": "99 languages",
-        "streaming": "false",
-        "vram_gb": "CPU (~500 MB RAM)",
-        "requires_gpu": False,
-        "inprocess_supported": True,
-    },
-    "distil-whisper-large-v3": {
-        "hf_name": "Systran/faster-distil-whisper-large-v3",
-        "default_url": "",
-        "protocol": "openai_http",
-        "display_name": "Distil-Whisper Large V3 (EN, CPU)",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "Distilled Whisper Large V3 — ~6x faster than large-v3 on CPU, English-only",
-        "parameters": "756M",
-        "architecture": "Transformer encoder-decoder (CTranslate2, distilled)",
-        "languages": "English only",
-        "streaming": "false",
-        "vram_gb": "CPU (~1.5 GB RAM)",
-        "requires_gpu": False,
-        "inprocess_supported": True,
-    },
-    "distil-whisper-medium-en": {
-        "hf_name": "Systran/faster-distil-whisper-medium.en",
-        "default_url": "",
-        "protocol": "openai_http",
-        "display_name": "Distil-Whisper Medium.en (EN, CPU)",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "Distilled Whisper Medium.en — ~4x faster than medium on CPU, English-only",
-        "parameters": "394M",
-        "architecture": "Transformer encoder-decoder (CTranslate2, distilled)",
-        "languages": "English only",
-        "streaming": "false",
-        "vram_gb": "CPU (~800 MB RAM)",
-        "requires_gpu": False,
-        "inprocess_supported": True,
-    },
-    "whisper-medium": {
-        "hf_name": "Systran/faster-whisper-medium",
-        "default_url": "",
-        "protocol": "openai_http",
-        "display_name": "Whisper Medium (CPU)",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "Whisper Medium via faster-whisper — multilingual incl. DE, ~3x faster than large-v3-turbo",
-        "parameters": "769M",
-        "architecture": "Transformer encoder-decoder (CTranslate2)",
-        "languages": "99 languages",
-        "streaming": "false",
-        "vram_gb": "CPU (~1.5 GB RAM)",
-        "requires_gpu": False,
-        "inprocess_supported": True,
-    },
-    "whisper-base": {
-        "hf_name": "Systran/faster-whisper-base",
-        "default_url": "",
-        "protocol": "openai_http",
-        "display_name": "Whisper Base (CPU)",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "Whisper Base via faster-whisper — multilingual, smallest multilingual option, fastest",
-        "parameters": "74M",
-        "architecture": "Transformer encoder-decoder (CTranslate2)",
-        "languages": "99 languages",
-        "streaming": "false",
-        "vram_gb": "CPU (~300 MB RAM)",
-        "requires_gpu": False,
-        "inprocess_supported": True,
+        "download_probe": "model.bin",
+        "download_size": "~1.6 GB",
     },
     "custom-server": {
         # Not a model but a slot: any server the user runs, at [inference.custom].url,
@@ -187,14 +82,43 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "languages": "Depends on the server",
         "streaming": "false",
         "vram_gb": "None locally",
-        "requires_gpu": False,
         "inprocess_supported": False,
         "custom": True,
     },
 }
 
+# The model every config falls back to: one that names a model no longer in the registry, and a
+# model that cannot start on this machine.
+DEFAULT_MODEL = "parakeet-tdt-0.6b"
+
+# Default URLs of the removed Voxtral and Cohere containers.
+_REMOVED_MODEL_URLS = {"ws://localhost:8000/v1/realtime", "http://localhost:8001/v1/audio/transcriptions"}
+_WARNED_REMOVED_MODELS: set[str] = set()
+
 # Wire protocols a custom server can speak, mapped to the registry protocol they reuse.
 CUSTOM_PROTOCOLS = {"http": "openai_http", "realtime": "realtime_ws"}
+
+
+def model_download_state(model_id: str, cache_dir: str | Path | None = None) -> dict[str, object]:
+    """Whether the in-process copy of `model_id` is already on disk, and how big the download is.
+
+    `downloaded` is None for a model without an in-process copy (the custom server) and when the cache
+    cannot be read; `size` is empty then. `cache_dir` is the installed app's models folder (None from
+    source: the Hugging Face cache).
+    """
+    info = MODEL_REGISTRY.get(model_id, {})
+    # The repo defaults to the model's own Hugging Face name; only the ONNX Parakeet build lives elsewhere.
+    repo, probe = info.get("download_repo") or info.get("hf_name"), info.get("download_probe")
+    if not repo or not probe:
+        return {"downloaded": None, "size": ""}
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        found = try_to_load_from_cache(str(repo), str(probe), cache_dir=cache_dir)
+        downloaded: bool | None = isinstance(found, str)
+    except Exception:
+        downloaded = None
+    return {"downloaded": downloaded, "size": str(info.get("download_size", ""))}
 
 
 def model_needs_docker(model_id: str, device: str) -> bool:
@@ -449,6 +373,22 @@ class OSCommandsConfig:
 
 
 @dataclass
+class ExperimentalConfig:
+    """Features that are finished in code but not part of v1; each is off (hidden and unreachable) by default.
+
+    - ``os_commands``: Nexus OS commands (voice window management) and their Settings card.
+    - ``flag_command``: the "nexus flag" voice command and the Edit tab ("Flagged Transcriptions").
+    - ``github_snippets``: the Snippets button "Fill from GitHub" and its endpoint.
+    - ``dev_tab``: the developer benchmark page of the dashboard.
+    """
+
+    os_commands: bool = False
+    flag_command: bool = False
+    github_snippets: bool = False
+    dev_tab: bool = False
+
+
+@dataclass
 class AssistantConfig:
     """Where "nexus assistant <text>" is forwarded: a local TCP port that answers
     `send <service> <text>` (the personal-tooling Controller's control port)."""
@@ -478,10 +418,6 @@ class OsControlConfig:
     port: int = 49730
     service: str = "os-control"
     timeout_s: float = 5.0
-
-
-# Languages the tray toggle and the dashboard's language selector cycle through.
-SUPPORTED_LANGUAGES: tuple[str, ...] = ("en", "de")
 
 
 @dataclass
@@ -652,9 +588,7 @@ class VoiceCommandsConfig:
 
 @dataclass
 class Config:
-    language: str = "en"
     injection_delay_ms: int = 500
-    auto_language_detection: bool = False
     log_level: str = "INFO"
     # Dictated text goes into the log file in full; off shortens it there (the console always shows it).
     log_full_text: bool = False
@@ -664,6 +598,7 @@ class Config:
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     os_commands: OSCommandsConfig = field(default_factory=OSCommandsConfig)
+    experimental: ExperimentalConfig = field(default_factory=ExperimentalConfig)
     voice_commands: VoiceCommandsConfig = field(default_factory=VoiceCommandsConfig)
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
     os_control: OsControlConfig = field(default_factory=OsControlConfig)
@@ -678,6 +613,18 @@ class Config:
     # The file `load_config` read, as an absolute path; `save_config` writes back to it, whatever the working
     # directory is by then. None for a Config that was not loaded from a file.
     source_path: Path | None = field(default=None, repr=False, compare=False)
+
+
+def _experimental_flag(section: dict, key: str) -> bool:
+    """An `[experimental]` switch: only a real TOML `true` turns a feature on.
+
+    `"false"` or `1` must not count as on (a non-empty string is truthy), so anything but a bool means off.
+    """
+    value = section.get(key, False)
+    if isinstance(value, bool):
+        return value
+    logging.getLogger(__name__).warning("[experimental].%s must be true or false, got %r; keeping it off", key, value)
+    return False
 
 
 def _log_level(value: object) -> str:
@@ -733,10 +680,25 @@ def load_config(path: Path | None = None) -> Config:
         meeting_modifiers, meeting_key = default_meeting_hotkey(hotkey_config)
     audio_data = data.get("audio", {})
     inference_data = data.get("inference", {})
+    model = inference_data.get("model", DEFAULT_MODEL)
+    server_url = inference_data.get("server_url", str(MODEL_REGISTRY[DEFAULT_MODEL]["default_url"]))
+    if model not in MODEL_REGISTRY:
+        # A model that was removed from the list (Voxtral, Cohere, the small Whisper sizes, Distil-Whisper):
+        # use Parakeet, and its server URL too, since the saved one belongs to the old model.
+        # The file is not rewritten, so say it once per process, not on every load.
+        if model not in _WARNED_REMOVED_MODELS:
+            _WARNED_REMOVED_MODELS.add(model)
+            logger.warning("Model %r is no longer available; using %s instead.", model, DEFAULT_MODEL)
+        model = DEFAULT_MODEL
+        # The saved URL is kept unless it is one of the removed servers' own defaults (Voxtral's WebSocket,
+        # Cohere's port), which Parakeet cannot answer; a deliberate address of another host stays.
+        if server_url in _REMOVED_MODEL_URLS or server_url.startswith(("ws:", "wss:")):
+            server_url = str(MODEL_REGISTRY[DEFAULT_MODEL]["default_url"])
     custom_data = inference_data.get("custom", {})
     custom_protocol = custom_data.get("protocol", "http")
     db_data = data.get("database", {})
     os_cmd_data = data.get("os_commands", {})
+    experimental_data = data.get("experimental", {})
     vc_data = data.get("voice_commands", None)
     assistant_data = data.get("assistant", {})
     switcher_data = data.get("os_control", {})
@@ -769,9 +731,7 @@ def load_config(path: Path | None = None) -> Config:
         )
 
     config = Config(
-        language=general.get("language", "en"),
         injection_delay_ms=general.get("injection_delay_ms", 500),
-        auto_language_detection=general.get("auto_language_detection", False),
         log_level=_log_level(general.get("log_level", "INFO")),
         log_full_text=bool(general.get("log_full_text", False)),
         hotkey=HotkeyConfig(
@@ -798,9 +758,9 @@ def load_config(path: Path | None = None) -> Config:
             chunk_size=audio_data.get("chunk_size", 4096),
         ),
         inference=InferenceConfig(
-            server_url=inference_data.get("server_url", "http://localhost:8002/v1/audio/transcriptions"),
+            server_url=server_url,
             transcription_delay_ms=inference_data.get("transcription_delay_ms", 480),
-            model=inference_data.get("model", "parakeet-tdt-0.6b"),
+            model=model,
             device=inference_data.get("device", "auto"),
             compute_type=inference_data.get("compute_type", None),
             custom=CustomServerConfig(
@@ -817,6 +777,12 @@ def load_config(path: Path | None = None) -> Config:
         os_commands=OSCommandsConfig(
             enabled=os_cmd_data.get("enabled", False),
             apps=dict(os_cmd_data.get("apps", {})),
+        ),
+        experimental=ExperimentalConfig(
+            os_commands=_experimental_flag(experimental_data, "os_commands"),
+            flag_command=_experimental_flag(experimental_data, "flag_command"),
+            github_snippets=_experimental_flag(experimental_data, "github_snippets"),
+            dev_tab=_experimental_flag(experimental_data, "dev_tab"),
         ),
         voice_commands=vc_config,
         assistant=AssistantConfig(
@@ -882,9 +848,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
         structural_toml = "[{}]".format(", ".join(f'"{s}"' for s in config.voice_commands.structural))
         lines = [
             "[general]",
-            f'language = "{config.language}"',
             f"injection_delay_ms = {config.injection_delay_ms}",
-            f"auto_language_detection = {'true' if config.auto_language_detection else 'false'}",
             f'log_level = "{config.log_level}"',
             f"log_full_text = {'true' if config.log_full_text else 'false'}",
             "",
@@ -933,6 +897,12 @@ def save_config(config: Config, path: Path | None = None) -> None:
             "",
             "[os_commands.apps]",
             *[f'{name} = "{exe}"' for name, exe in config.os_commands.apps.items()],
+            "",
+            "[experimental]",
+            f"os_commands = {'true' if config.experimental.os_commands else 'false'}",
+            f"flag_command = {'true' if config.experimental.flag_command else 'false'}",
+            f"github_snippets = {'true' if config.experimental.github_snippets else 'false'}",
+            f"dev_tab = {'true' if config.experimental.dev_tab else 'false'}",
             "",
             "[voice_commands]",
             f"enabled = {'true' if config.voice_commands.enabled else 'false'}",

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import io
+import logging
 import wave
 
 import pytest
 
-from nexusvox.config import Config, DatabaseConfig
+from nexusvox.config import Config, DatabaseConfig, ExperimentalConfig
 from nexusvox.dashboard import _PORT, _create_app
 from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.dashboard.guard import COOKIE_NAME
@@ -20,6 +21,48 @@ def _isolated_cwd(tmp_path, monkeypatch):
     working directory, and a test that saved there left a config (with a throw-away database path) in the
     checkout that the app then loaded."""
     monkeypatch.chdir(tmp_path)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Tests marked ``desktop`` drive the real desktop (clipboard, windows); they run only with ``-m desktop``."""
+    if "desktop" in (config.getoption("-m") or ""):
+        return
+    skip = pytest.mark.skip(reason="needs a real desktop; run with -m desktop")
+    for item in items:
+        if "desktop" in item.keywords:
+            item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _tests_never_touch_the_real_log(tmp_path, monkeypatch):
+    """Point %LOCALAPPDATA% at a throw-away folder and drop any file handler a test leaves on the root logger.
+
+    ``nexusvox.__main__.main`` attaches a rotating file handler to the root logger. Left in place, every later
+    test that logs ("boom", "dummy-tab", ...) wrote into the user's real ``nexusvox.log``.
+    """
+    # Every place the app resolves a per-user folder from, including the fallbacks to the home folder.
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    root = logging.getLogger()
+    before = list(root.handlers)
+    yield
+    for handler in list(root.handlers):
+        if handler not in before and isinstance(handler, logging.FileHandler):
+            root.removeHandler(handler)
+            handler.close()
+
+
+@pytest.fixture(autouse=True)
+def _tests_never_play_sound(monkeypatch):
+    """No test makes the speakers chime: the app's start/stop/error beeps go through ``sounddevice.play``."""
+    try:
+        import sounddevice
+    except (ImportError, OSError):  # no PortAudio on this runner: nothing can play
+        return
+    monkeypatch.setattr(sounddevice, "play", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sounddevice, "wait", lambda *args, **kwargs: None)
 
 
 @pytest.fixture(autouse=True)
@@ -98,10 +141,7 @@ def sample_transcriptions(db):
     return records
 
 
-@pytest.fixture
-def flask_client(db, session_factory, monkeypatch):
-    """Flask test client backed by the in-memory database."""
-    config = Config()
+def _dashboard_client(db, session_factory, monkeypatch, config):
     api = DashboardAPI(session_factory, config, db=db)
     app = _create_app(api)
     app.config["TESTING"] = True
@@ -116,6 +156,19 @@ def flask_client(db, session_factory, monkeypatch):
 
     with app.test_client() as client:
         yield client
+
+
+@pytest.fixture
+def flask_client(db, session_factory, monkeypatch):
+    """Flask test client backed by the in-memory database, with the default config (experimental features off)."""
+    yield from _dashboard_client(db, session_factory, monkeypatch, Config())
+
+
+@pytest.fixture
+def experimental_client(db, session_factory, monkeypatch):
+    """Like ``flask_client``, with every `[experimental]` feature on (OS commands, Edit tab, GitHub, Dev)."""
+    flags = ExperimentalConfig(os_commands=True, flag_command=True, github_snippets=True, dev_tab=True)
+    yield from _dashboard_client(db, session_factory, monkeypatch, Config(experimental=flags))
 
 
 @pytest.fixture

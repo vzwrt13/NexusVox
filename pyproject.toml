@@ -48,7 +48,11 @@ dependencies = [
     "lingua-language-detector>=2.1",
     "pydub>=0.25",
     "audioop-lts>=0.2; python_version>='3.13'",
+    # Cap on faster-whisper's own dependency (nothing here imports av): faster-whisper <= 1.2.1 passes
+    # `metadata_errors` to av.open(), which av 19 rejects. Drop the cap when a faster-whisper release works with
+    # av 19 (clean venv, one Whisper transcription). Background: PR #187, docs/installer-research.md.
     "faster-whisper>=1.0.2",
+    "av<19",
     # Parakeet TDT on CPU (ONNX int8). Pinned to a minor series: onnx-asr's recognition and VAD
     # results are what transcribers/local_parakeet.py reads.
     "onnx-asr>=0.12,<0.13",
@@ -105,3 +109,4 @@ extend-immutable-calls = ["fastapi.File", "fastapi.Form"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["desktop: drives the real desktop (clipboard, windows); skipped unless run with -m desktop"]

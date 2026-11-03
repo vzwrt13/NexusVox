@@ -21,6 +21,7 @@ from .assistant import parse_assistant_command, send_to_assistant, send_to_servi
 from .audio import AudioCapture
 from .clipboard import ClipboardError
 from .config import (
+    DEFAULT_MODEL,
     FEEDBACK_MODES,
     MODEL_REGISTRY,
     Config,
@@ -36,13 +37,13 @@ from .extensions import ActiveApp, load_extensions, loaded_extensions
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, MeetingHotkey, describe_hotkey
 from .injector import foreground_window, inject_text
-from .lang_detect import detect_language
+from .lang_detect import stored_language
 from .llm import LlmError
 from .llm import warm_up as llm_warm_up
 from .logsetup import Text
 from .mic_guard import MicGuard, create_mic_guard
 from .models import COMMAND_APP
-from .os_commands import NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
+from .os_commands import WINDOW_ACTIONS, NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
 from .overlay import CONFIRMED, ERROR, PROCESSING, RECORDING, Overlay, level_from_rms
 from .paths import DOCKER_UNAVAILABLE_MSG, is_frozen
 from .pipeline import process_text
@@ -75,7 +76,6 @@ class _Recording:
     transcribe_ms: int
 
 
-_CPU_FALLBACK_MODEL = "whisper-large-v3-turbo"
 # A key press older than this before the recording started is not the start of this take.
 MAX_TAKE_LEAD_S = 10.0
 
@@ -83,21 +83,20 @@ logger = logging.getLogger(__name__)
 
 
 def apply_startup_fallback(inference: InferenceConfig, device: str) -> None:
-    """Swap a model that cannot start on this machine for a bundled one, for this session.
+    """Swap a model that cannot start for Parakeet, for this session.
 
-    A GPU model on CPU falls back to Whisper in-process. The custom-server slot without
-    a URL cannot build a client, so it falls back too instead of crashing before the
-    dashboard is up. The TOML is not rewritten here.
+    The custom-server slot without a URL cannot build a client, so it falls back instead of crashing
+    before the dashboard is up. The TOML is not rewritten here.
     """
     info = MODEL_REGISTRY.get(inference.model, {})
-    if device == "cpu" and info.get("requires_gpu"):
-        reason = "requires a GPU but device is CPU"
-    elif info.get("custom") and not inference.custom.url:
-        reason = "needs [inference.custom].url in config.toml"
-    else:
+    if not (info.get("custom") and not inference.custom.url):
         return
-    fallback = _CPU_FALLBACK_MODEL if device == "cpu" else InferenceConfig().model
-    logger.warning("Configured model %s %s. Falling back to %s for this session.", inference.model, reason, fallback)
+    fallback = DEFAULT_MODEL
+    logger.warning(
+        "Configured model %s needs [inference.custom].url in config.toml. Falling back to %s for this session.",
+        inference.model,
+        fallback,
+    )
     inference.model = fallback
     if model_needs_docker(fallback, device):
         inference.server_url = str(MODEL_REGISTRY[fallback]["default_url"])
@@ -115,9 +114,8 @@ class NexusVoxApp:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._running = False
 
-        # Resolve device once at startup. If the configured model requires a
-        # GPU but we're on CPU, fall back to Whisper (without rewriting the
-        # user's TOML — they can adjust in the dashboard later).
+        # Resolve device once at startup. A configured model that cannot start (a custom server
+        # without a URL) falls back to Parakeet without rewriting the user's TOML.
         self._device = resolve_device(config.inference.device)
         logger.info(
             "Resolved compute device: %s (requested: %s)",
@@ -140,8 +138,7 @@ class NexusVoxApp:
         self._transcriber = create_transcriber(
             config.inference,
             device=self._device,
-            language=config.language,
-            auto_detect_language=config.auto_language_detection,
+            auto_fallback=config.inference.device == "auto",
         )
         self._db = Database(config.database)
         # Statistics writes (dictionary hits, learn-from-edits outcomes) run here, one at a time and in order,
@@ -178,8 +175,6 @@ class NexusVoxApp:
 
         self._tray = SystemTray(
             on_quit=self._on_quit,
-            on_toggle_language=self._toggle_language,
-            get_language=lambda: self._config.language,
             on_toggle_translate=self._toggle_translate,
             get_translate=lambda: self._config.translator.enabled,
             on_open_dashboard=self._open_dashboard,
@@ -337,7 +332,7 @@ class NexusVoxApp:
     async def switch_model(self, model_id: str) -> None:
         """Switch to a different transcription model.
 
-        In-process (Whisper-on-CPU) and custom-server switches skip Docker entirely;
+        In-process (Parakeet or Whisper on CPU) and custom-server switches skip Docker entirely;
         GPU-backed switches stop the old container, start the new one, and wait for health.
         """
         if model_id not in MODEL_REGISTRY:
@@ -382,14 +377,13 @@ class NexusVoxApp:
             self._transcriber = create_transcriber(
                 self._config.inference,
                 device=self._device,
-                language=self._config.language,
-                auto_detect_language=self._config.auto_language_detection,
+                auto_fallback=self._config.inference.device == "auto",
             )
             save_config(self._config)
 
             self._switch_status = "ready"
             logger.info("Switched to model: %s", model_id)
-            if self._is_inprocess():
+            if self._warms_up():
                 asyncio.create_task(self._preload_transcriber())
 
             async def _reset_status():
@@ -414,8 +408,7 @@ class NexusVoxApp:
                 self._transcriber = create_transcriber(
                     self._config.inference,
                     device=self._device,
-                    language=self._config.language,
-                    auto_detect_language=self._config.auto_language_detection,
+                    auto_fallback=self._config.inference.device == "auto",
                 )
             except Exception:
                 logger.exception("Fallback restart also failed")
@@ -475,6 +468,8 @@ class NexusVoxApp:
         recording_stopped = False
         loop = asyncio.get_running_loop()
         take: tuple[int | None, float] | None = None  # (meeting token, start) while a take is open
+        audio: AudioCapture | RemoteAudioSource | None = None  # set once recording started
+        stream_task: asyncio.Task | None = None
 
         async def end_take(end: float) -> None:
             nonlocal take
@@ -601,7 +596,7 @@ class NexusVoxApp:
             # A phone recording only wants its text back, never a PC action.
             if not remote:
                 nexus_cmd = parse_nexus_command(raw_text)
-                if nexus_cmd is not None and nexus_cmd.action == "flag":
+                if nexus_cmd is not None and nexus_cmd.action == "flag" and self._config.experimental.flag_command:
                     self._flag_last_transcription()
                     await self._transcriber.disconnect()
                     return
@@ -651,9 +646,11 @@ class NexusVoxApp:
                             processed.typed, self._config.learn_from_edits.window_s, processed.spoken
                         )
             latency_ms = int(((done_at or time.monotonic()) - stop_time) * 1000)
+            # lingua loads its models on first use: keep that off the event loop.
+            language = await loop.run_in_executor(None, stored_language, raw_text)
             record = self._db.save_transcription(
                 text=processed.saved,
-                language=self._language_of(raw_text),
+                language=language,
                 duration_ms=duration_ms,
                 confidence=result.confidence,
                 model=self._transcriber.model,
@@ -675,6 +672,7 @@ class NexusVoxApp:
 
         except Exception:
             logger.exception("Transcription cycle failed")
+            await self._abort_recording(audio, stream_task, recording_stopped)
             self._tray.set_active(False)
             if not remote:
                 self._cue(None, ERROR)
@@ -762,9 +760,6 @@ class NexusVoxApp:
             return text
         return registry.dictation(text, self._active_app())
 
-    def _language_of(self, spoken: str) -> str:
-        return detect_language(spoken) if self._config.auto_language_detection else self._config.language
-
     def _save_command(
         self,
         recording: _Recording | None,
@@ -780,7 +775,7 @@ class NexusVoxApp:
         """
         record = self._db.save_transcription(
             text=label,
-            language=self._language_of(spoken) if spoken else self._config.language,
+            language=stored_language(spoken),
             duration_ms=recording.duration_ms if recording else 0,
             confidence=recording.confidence if recording else None,
             model=self._transcriber.model if recording else None,
@@ -917,7 +912,7 @@ class NexusVoxApp:
         await asyncio.get_running_loop().run_in_executor(None, save)
 
     def _flag_last_transcription(self) -> None:
-        """ "nexus flag" - always available, flags the most recent transcription for review."""
+        """ "nexus flag" (``[experimental].flag_command``): flags the most recent transcription for review."""
         last_tid = self._db.get_last_transcription_id()
         if last_tid is None:
             logger.info("Nexus flag: no transcription to flag")
@@ -961,35 +956,73 @@ class NexusVoxApp:
                     self._cue(beep_error, ERROR)
                 return f"[assistant] {assistant_text}"
 
-        if nexus_cmd is not None and self._config.os_commands.enabled:
+        if (
+            nexus_cmd is not None
+            and nexus_cmd.action in WINDOW_ACTIONS
+            and self._config.experimental.os_commands
+            and self._config.os_commands.enabled
+        ):
             await loop.run_in_executor(None, execute_nexus_command, nexus_cmd, self._config.os_commands)
             logger.info("Nexus command: %s %s", nexus_cmd.action, nexus_cmd.app_name)
             return f"[nexus] {nexus_cmd.action} {nexus_cmd.app_name}"
         return None
 
     async def _stream_audio(self, audio: AudioCapture | RemoteAudioSource) -> bytearray:
-        """Stream audio chunks from the mic or the phone to the transcription server, returning the full buffer."""
+        """Stream audio chunks from the mic or the phone to the transcription server, returning the full buffer.
+
+        When sending fails, the rest of the recording is still read up to its end marker (and kept), then the
+        error is raised. Stopping at the failure would leave the unread chunks and the marker in the audio queue,
+        and the next recording would start by reading them: every dictation after it would be the previous one.
+        """
         buffer = bytearray()
         count = 0
-        try:
-            async for chunk in audio.chunks():
+        failure: Exception | None = None
+        async for chunk in audio.chunks():
+            buffer.extend(chunk)
+            if failure is not None:
+                continue
+            try:
                 await self._transcriber.send_audio_chunk(chunk)
-                buffer.extend(chunk)
                 count += 1
-        except Exception:
-            logger.exception("Error streaming audio")
+            except Exception as exc:
+                logger.exception("Error streaming audio")
+                failure = exc
         logger.info("Streamed %d audio chunks to server", count)
+        if failure is not None:
+            raise failure
         return buffer
+
+    async def _abort_recording(
+        self,
+        audio: AudioCapture | RemoteAudioSource | None,
+        stream_task: asyncio.Task | None,
+        recording_stopped: bool,
+    ) -> None:
+        """After a failed cycle: end a stream that still runs and close the microphone it was reading.
+
+        A cycle that failed before the stop must not leave its stream task reading the audio queue (it would
+        take the next recording's chunks), nor the microphone open.
+        """
+        if audio is None:
+            return
+        try:
+            if not recording_stopped:
+                audio.stop()
+            if stream_task is not None and not stream_task.done():
+                stream_task.cancel()
+            if stream_task is not None:
+                await asyncio.gather(stream_task, return_exceptions=True)
+        except Exception:
+            logger.exception("Could not end the failed recording cleanly")
 
     def _open_dashboard(self) -> None:
         """Open the dashboard window."""
         open_dashboard(self._db, self._config, app=self)
 
-    def _toggle_language(self) -> None:
-        """Toggle between English and German."""
-        self._config.language = "de" if self._config.language == "en" else "en"
-        save_config(self._config)
-        logger.info("Language switched to: %s", self._config.language)
+    def open_dashboard_from_second_start(self) -> None:
+        """A second start of NexusVox rang the doorbell: show the dashboard of this instance."""
+        logger.info("A second NexusVox start was detected; opening the dashboard of this instance")
+        self._open_dashboard()
 
     def _toggle_translate(self) -> None:
         """Switch translate-before-inject on or off, and keep it across restarts."""
@@ -1036,7 +1069,8 @@ class NexusVoxApp:
         # For in-process transcribers (Whisper on CPU), eagerly load the model
         # so the first hotkey press doesn't pay the full load + download latency.
         # A custom server is remote and has nothing to preload.
-        if self._is_inprocess():
+        # Engine "auto" on a GPU machine warms up the Docker server (or the CPU model while it is down).
+        if self._warms_up():
             asyncio.create_task(self._preload_transcriber())
 
         if self._config.remote_mic.enabled:
@@ -1077,12 +1111,15 @@ class NexusVoxApp:
         """Whether the active model runs in this process; a custom server is remote and has nothing to load."""
         return not self._transcriber.needs_docker and not MODEL_REGISTRY[self._config.inference.model].get("custom")
 
+    def _warms_up(self) -> bool:
+        """Whether the active engine is warmed up in the background: in-process models load, "auto" warms the server."""
+        return self._is_inprocess() or self._transcriber.warms_up_at_start
+
     async def _preload_transcriber(self) -> None:
         """Warm up an in-process transcriber so the first hotkey press is snappy."""
         try:
             logger.info("Preloading in-process transcriber model (first run may download)")
-            await self._transcriber.connect()
-            await self._transcriber.disconnect()
+            await self._transcriber.warm_up()
             logger.info("Preload complete")
         except Exception:
             logger.exception("Preloading transcriber failed")

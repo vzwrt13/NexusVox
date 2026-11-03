@@ -5,18 +5,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import socket
+import sys
 import threading
 import webbrowser
+from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
-from werkzeug.serving import make_server
+from werkzeug.serving import ThreadedWSGIServer
 
 from ..config import Config
 from ..db import Database
 from ..extensions import load_extensions
+from ..single_instance import show_message
 from .api import DashboardAPI
 from .guard import LAUNCH_PARAM, DashboardGuard, install_guard
 
@@ -27,7 +31,10 @@ logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _PORT = 47392  # Uncommon port to avoid collisions.
+_FALLBACK_PORTS = tuple(range(47400, 47410))  # used when _PORT is held by another program; 47393 is the remote mic
+_port = _PORT  # the port this process serves on; differs from _PORT only after a fallback
 _server_started = False
+_start_failed = False  # every port was held: the API is built, there is no server, and it is not retried
 _api: DashboardAPI | None = None
 _guard: DashboardGuard | None = None
 _lock = threading.Lock()
@@ -39,9 +46,47 @@ def _attachment(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
-def _create_app(api: DashboardAPI) -> Flask:
+def _listen_socket(port: int) -> socket.socket:
+    """A listening socket on 127.0.0.1:`port`, bound by us: werkzeug exits the process when its own bind fails.
+
+    Exclusive on Windows: with SO_REUSEADDR a second socket may share a port another program holds.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if sys.platform == "win32":
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", port))
+        sock.listen(128)
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
+def _make_server(port: int, wsgi_app) -> ThreadedWSGIServer:
+    sock = _listen_socket(port)
+    try:
+        # werkzeug duplicates the descriptor, so ours can be closed once it holds its own.
+        return ThreadedWSGIServer("127.0.0.1", port, wsgi_app, fd=sock.fileno())
+    finally:
+        sock.close()
+
+
+def _bind_server(wsgi_app) -> tuple[int, ThreadedWSGIServer] | None:
+    """Bind the first free dashboard port (the usual one, else a fallback) once; None when all are held."""
+    for port in (_PORT, *_FALLBACK_PORTS):
+        try:
+            return port, _make_server(port, wsgi_app)
+        except OSError:
+            logger.debug("Dashboard port %d is held by another program", port)
+    return None
+
+
+def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     app = Flask(__name__, static_folder=str(_STATIC_DIR), static_url_path="")
-    install_guard(app, _PORT)  # before any route, so the extension blueprints below are covered too
+    install_guard(app, port)  # before any route, so the extension blueprints below are covered too
 
     # Suppress Flask request logging in production.
     wlog = logging.getLogger("werkzeug")
@@ -50,6 +95,14 @@ def _create_app(api: DashboardAPI) -> Flask:
     @app.route("/")
     def index():
         return app.send_static_file("index.html")
+
+    # Features that are not part of v1: their routes below are only registered when the flag is on, and the page
+    # asks which ones to show. Read once at start, so a change needs a restart.
+    experimental = api.experimental
+
+    @app.route("/api/features")
+    def get_features():
+        return jsonify(asdict(experimental))
 
     # ---- Model endpoints ---------------------------------------------------
 
@@ -86,17 +139,6 @@ def _create_app(api: DashboardAPI) -> Flask:
     @app.route("/api/settings")
     def get_settings():
         return jsonify(api.get_settings())
-
-    @app.route("/api/settings/auto-language-detection", methods=["POST"])
-    def set_auto_lang():
-        data = request.get_json(force=True)
-        return jsonify(api.set_auto_language_detection(data.get("enabled", False)))
-
-    @app.route("/api/settings/language", methods=["POST"])
-    def set_language():
-        data = request.get_json(force=True)
-        result = api.set_language(data.get("language", ""))
-        return jsonify(result), (400 if "error" in result else 200)
 
     @app.route("/api/settings/hotkey-mode", methods=["POST"])
     def set_hotkey_mode():
@@ -317,21 +359,23 @@ def _create_app(api: DashboardAPI) -> Flask:
         data = request.get_json(force=True)
         return jsonify(api.set_voice_commands_bypass_structural(data.get("enabled", False)))
 
-    # ---- OS Commands endpoints ---------------------------------------------
+    # ---- OS Commands endpoints (experimental) ------------------------------
 
-    @app.route("/api/os-commands")
-    def get_os_commands():
-        return jsonify(api.get_os_commands())
+    if experimental.os_commands:
 
-    @app.route("/api/os-commands/enabled", methods=["POST"])
-    def set_os_commands_enabled():
-        data = request.get_json(force=True)
-        return jsonify(api.set_os_commands_enabled(data.get("enabled", False)))
+        @app.route("/api/os-commands")
+        def get_os_commands():
+            return jsonify(api.get_os_commands())
 
-    @app.route("/api/os-commands/apps", methods=["POST"])
-    def set_os_commands_apps():
-        data = request.get_json(force=True)
-        return jsonify(api.set_os_commands_apps(data.get("apps", {})))
+        @app.route("/api/os-commands/enabled", methods=["POST"])
+        def set_os_commands_enabled():
+            data = request.get_json(force=True)
+            return jsonify(api.set_os_commands_enabled(data.get("enabled", False)))
+
+        @app.route("/api/os-commands/apps", methods=["POST"])
+        def set_os_commands_apps():
+            data = request.get_json(force=True)
+            return jsonify(api.set_os_commands_apps(data.get("apps", {})))
 
     # ---- Analytics endpoints -----------------------------------------------
 
@@ -373,14 +417,16 @@ def _create_app(api: DashboardAPI) -> Flask:
 
     # ---- Flagged / Corrections endpoints -----------------------------------
 
-    @app.route("/api/flagged")
-    def flagged_transcriptions():
-        return jsonify(api.get_flagged_transcriptions())
+    if experimental.flag_command:
 
-    @app.route("/api/flagged/<int:tid>/correct", methods=["POST"])
-    def correct_transcription(tid):
-        data = request.get_json(force=True)
-        return jsonify(api.update_correction(tid, data.get("corrected_text", "")))
+        @app.route("/api/flagged")
+        def flagged_transcriptions():
+            return jsonify(api.get_flagged_transcriptions())
+
+        @app.route("/api/flagged/<int:tid>/correct", methods=["POST"])
+        def correct_transcription(tid):
+            data = request.get_json(force=True)
+            return jsonify(api.update_correction(tid, data.get("corrected_text", "")))
 
     @app.route("/api/audio/<int:tid>")
     def serve_audio(tid):
@@ -433,9 +479,11 @@ def _create_app(api: DashboardAPI) -> Flask:
             )
         )
 
-    @app.route("/api/snippets/github-repos")
-    def get_github_repos():
-        return jsonify(api.get_github_repos())
+    if experimental.github_snippets:
+
+        @app.route("/api/snippets/github-repos")
+        def get_github_repos():
+            return jsonify(api.get_github_repos())
 
     @app.route("/api/snippets/<int:snippet_id>", methods=["DELETE"])
     def delete_snippet(snippet_id):
@@ -579,32 +627,34 @@ def _create_app(api: DashboardAPI) -> Flask:
         except Exception:  # a clashing blueprint name or a bad route must not take the dashboard down
             logger.exception("Could not mount the API of dashboard panel %r; the panel stays without it", panel.id)
 
-    # ---- Benchmark endpoints (Dev tab) -------------------------------------
+    # ---- Benchmark endpoints (Dev tab, experimental) -----------------------
 
-    @app.route("/api/benchmarks")
-    def benchmarks_list():
-        return jsonify(api.get_benchmarks())
+    if experimental.dev_tab:
 
-    @app.route("/api/benchmarks/compare")
-    def benchmarks_compare():
-        return jsonify(api.get_benchmark_comparison())
+        @app.route("/api/benchmarks")
+        def benchmarks_list():
+            return jsonify(api.get_benchmarks())
 
-    @app.route("/api/benchmarks/<filename>")
-    def benchmark_detail(filename):
-        data = api.get_benchmark(filename)
-        if data is None:
-            return jsonify({"error": "Benchmark not found"}), 404
-        return jsonify(data)
+        @app.route("/api/benchmarks/compare")
+        def benchmarks_compare():
+            return jsonify(api.get_benchmark_comparison())
+
+        @app.route("/api/benchmarks/<filename>")
+        def benchmark_detail(filename):
+            data = api.get_benchmark(filename)
+            if data is None:
+                return jsonify({"error": "Benchmark not found"}), 404
+            return jsonify(data)
 
     return app
 
 
 def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None = None) -> DashboardAPI:
     """Start the Flask server (once) without opening the browser, and return its API object."""
-    global _server_started, _api, _guard
+    global _server_started, _api, _guard, _port, _start_failed
 
     with _lock:
-        if not _server_started:
+        if _api is None:
             # Build the thread→async bridge for model switching
             on_model_switch = None
             get_switch_status = None
@@ -639,20 +689,35 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 benchmarks_dir=benchmarks_dir,
                 extensions=load_extensions(),
             )
-            flask_app = _create_app(_api)
-            _guard = flask_app.extensions["nexusvox_guard"]
-            threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
+        if not _server_started and not _start_failed:
+            # The Flask app needs the port (host check), the port needs the bind: bind first, hand the
+            # requests to the app once it exists.
+            flask_holder: list[Flask] = []
 
-            try:  # bind here rather than in the thread, so a port held by another process is noticed
-                server = make_server("127.0.0.1", _PORT, flask_app, threaded=True)
-            except OSError:
-                logger.exception("Dashboard port %d is in use (another NexusVox running?); no dashboard", _PORT)
-                _guard = None
+            def wsgi_app(environ, start_response):
+                return flask_holder[0](environ, start_response)
+
+            bound = _bind_server(wsgi_app)
+            if bound is None:
+                _start_failed = True
+                message = (
+                    f"The dashboard could not start: port {_PORT} and the fallback ports {_FALLBACK_PORTS[0]}-"
+                    f"{_FALLBACK_PORTS[-1]} are all held by other programs. Dictation still works."
+                )
+                logger.error(message)
+                show_message(message)
             else:
+                port, server = bound
+                flask_app = _create_app(_api, port)
+                flask_holder.append(flask_app)
+                _guard = flask_app.extensions["nexusvox_guard"]
+                threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
                 threading.Thread(target=server.serve_forever, daemon=True, name="dashboard-server").start()
                 _server_started = True
-                logger.info("Dashboard server started on http://127.0.0.1:%d", _PORT)
-        assert _api is not None
+                _port = port
+                if port != _PORT:
+                    logger.warning("Dashboard port %d is held by another program; using %d instead", _PORT, port)
+                logger.info("Dashboard server started on http://127.0.0.1:%d", port)
         return _api
 
 
@@ -668,4 +733,4 @@ def open_dashboard(db: Database, config: Config, app: NexusVoxApp | None = None,
         logger.error("The dashboard server is not running, so the dashboard was not opened")
         return
     query = f"?{LAUNCH_PARAM}={_guard.new_launch_secret()}" + (f"&tab={quote(tab)}" if tab else "")
-    webbrowser.open(f"http://127.0.0.1:{_PORT}/{query}")
+    webbrowser.open(f"http://127.0.0.1:{_port}/{query}")

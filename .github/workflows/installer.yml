@@ -59,23 +59,23 @@ jobs:
             @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") |
               Where-Object { Test-Path $_ } | Select-Object -First 1
           }
-          function Get-IsccVersion($iscc) {
-            if (-not $iscc) { return $null }
-            # The version resource of the compiler, "6.7.1.0" -> "6.7.1".
-            $info = (Get-Item $iscc).VersionInfo
-            Write-Host "ISCC.exe: FileVersion '$($info.FileVersion)', ProductVersion '$($info.ProductVersion)'"
-            if ("$($info.FileVersion) $($info.ProductVersion)" -match "(\d+\.\d+\.\d+)") { return $Matches[1] }
+          function Get-InnoVersion {
+            # ISCC.exe carries no version resource. The runner image installs Inno Setup with Chocolatey, which
+            # knows the version: "innosetup|6.7.1".
+            $line = choco list innosetup --exact --limit-output --local-only | Select-Object -First 1
+            if ($line -match "^innosetup\|(\d+\.\d+\.\d+)") { return $Matches[1] }
             return $null
           }
           $iscc = Find-Iscc
-          $have = Get-IsccVersion $iscc
+          $have = Get-InnoVersion
           Write-Host "Inno Setup on the runner: $have ($iscc)"
-          if ($have -ne $env:INNO_SETUP_VERSION) {
+          if ($have -ne $env:INNO_SETUP_VERSION -or -not $iscc) {
             choco install innosetup --version=$env:INNO_SETUP_VERSION --force --no-progress -y
             $iscc = Find-Iscc
-            $have = Get-IsccVersion $iscc
+            $have = Get-InnoVersion
           }
           if ($have -ne $env:INNO_SETUP_VERSION) { throw "Expected Inno Setup $env:INNO_SETUP_VERSION, found '$have'" }
+          if (-not $iscc) { throw "ISCC.exe not found after installing Inno Setup" }
           "ISCC=$iscc" >> $env:GITHUB_ENV
 
       - name: Build the installer

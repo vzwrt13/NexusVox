@@ -24,8 +24,18 @@ def test_advanced_is_collapsed_and_holds_rare_options():
     match = re.search(r'<details class="settings-card settings-advanced"([^>]*)>(.*?)</details>', section, re.S)
     assert match, "Advanced section missing"
     assert " open" not in match.group(1)
-    for element_id in ("device-select", "polish-terminals-toggle", "llm-model-input", "os-commands-toggle"):
+    for element_id in ("device-select", "polish-terminals-toggle", "os-commands-toggle"):
         assert f'id="{element_id}"' in match.group(2)
+
+
+def test_llm_dropdown_lives_in_the_models_card():
+    section = _settings_section()
+    start = section.index('<h4 class="nexus-section-title">Models</h4>')
+    card = section[start : section.index("meeting-settings-card", start)]
+    assert 'id="model-select"' in card and 'id="llm-model-select"' in card
+    assert card.index('id="model-select"') < card.index('id="llm-model-select"')
+    assert "Language model (LLM)" in card and "Used by Cleanup, Polish and upload cleanup" in card
+    assert 'id="llm-model-input"' not in HTML
 
 
 def test_every_script_lookup_has_an_element():

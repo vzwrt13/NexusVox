@@ -281,7 +281,7 @@ const hotkeyKeySelect = document.getElementById("hotkey-key-select");
 const pasteKeySelect = document.getElementById("paste-key-select");
 const polishKeySelect = document.getElementById("polish-key-select");
 const polishTerminalsToggle = document.getElementById("polish-terminals-toggle");
-const llmModelInput = document.getElementById("llm-model-input");
+const llmModelSelect = document.getElementById("llm-model-select");
 const meetingOwnLabelInput = document.getElementById("meeting-own-label-input");
 let meetingOwnLabelSaved = "";
 const feedbackModeSelect = document.getElementById("feedback-mode-select");
@@ -290,14 +290,277 @@ const llmStatus = document.getElementById("llm-status");
 
 async function loadLlmStatus() {
   const s = await api("/api/settings/llm-status");
-  setStatus(
-    llmStatus,
-    s.reachable ? "ok" : "down",
-    s.reachable
-      ? `● Model server reachable at ${s.url} (model ${s.model})`
-      : `○ No model server at ${s.url} — polish plays the error beep`,
+  if (!s.reachable) {
+    setStatus(llmStatus, "down", `○ No model server at ${s.url} — polish plays the error beep`);
+  } else if (s.model_installed === false) {
+    setStatus(llmStatus, "down", `○ Model ${s.model} is not installed — pick it above to download it`);
+  } else {
+    setStatus(llmStatus, "ok", `● Model ready at ${s.url} (model ${s.model})`);
+  }
+}
+
+// ── Language model dropdown ──────────────────────────────────────────
+const llmModelHint = document.getElementById("llm-model-hint");
+const llmSlowHint = document.getElementById("llm-slow-hint");
+const llmPullBox = document.getElementById("llm-pull-status");
+const llmPullText = document.getElementById("llm-pull-text");
+const llmPullProgress = document.getElementById("llm-pull-progress");
+const llmPullCancel = document.getElementById("llm-pull-cancel");
+let llmSavedModel = "";
+let llmPullTimer = null;
+
+// ── LLM card refresh (pure helpers, run under Node in tests) ─────────
+const LLM_REFRESH_MS = 5000;
+
+// Where the model runs, from what Ollama reports for a loaded model (`/api/ps`); otherwise from the hardware.
+// Figures Ollama under-reports (`plausible: false`) are never shown as real, and never claim "fully in VRAM".
+function llmRunsOn(data) {
+  const l = data.loaded;
+  if (!l) return { text: data.device === "gpu" ? "Not loaded (will use the GPU if it fits)" : "Not loaded (no CUDA GPU, will use the CPU)", warn: false };
+  if (!l.plausible) return { text: l.on_gpu ? "GPU" : "Loaded (placement unknown)", warn: false };
+  if (l.ram_gb === 0) return { text: "GPU (fully in VRAM)", warn: false };
+  if (l.vram_gb === 0) return { text: "CPU (in RAM)", warn: true };
+  return { text: `GPU + CPU (${Math.round((100 * l.vram_gb) / (l.vram_gb + l.ram_gb))}% on the GPU)`, warn: true };
+}
+
+// Memory the model needs: Ollama's real split when it is loaded and plausible, else an estimate from the size on disk.
+function llmMemory(data, m) {
+  if (!data.reachable || data.protocol !== "ollama") return "—";
+  const l = data.loaded;
+  if (l && l.plausible) {
+    const parts = [];
+    if (l.vram_gb > 0) parts.push(`${l.vram_gb} GB VRAM`);
+    if (l.ram_gb > 0) parts.push(`${l.ram_gb} GB RAM`);
+    return parts.join(" + ") || "—";
+  }
+  if (!m || !m.size_gb) return "—";
+  return `~${m.size_gb} GB ${data.device === "gpu" ? "VRAM" : "RAM"} (estimate)`;
+}
+
+// What the dropdown's options depend on: a change here (and only here) rebuilds the <select>.
+function llmOptionsKey(data) {
+  return JSON.stringify([data.reachable, data.protocol, data.selected, data.recommended, data.other]);
+}
+
+// Refreshes the card while it is on screen and the page is visible. `fetchData()` returns the models payload,
+// `render(data, rebuildOptions)` draws it. Nothing is drawn when the payload did not change, and the options are
+// rebuilt only when they changed (an open dropdown stays open); `force` (after a save or a pull) always draws.
+function createLlmRefresher({ fetchData, render, isActive, schedule, cancel }) {
+  let timer = null;
+  let started = false;
+  let lastData = null;
+  let lastOptions = null;
+  async function refresh(force = false) {
+    let data;
+    try {
+      data = await fetchData();
+    } catch {
+      return false;
+    }
+    const snapshot = JSON.stringify(data);
+    if (!force && snapshot === lastData) return false;
+    const options = llmOptionsKey(data);
+    render(data, force || options !== lastOptions);
+    lastData = snapshot;
+    lastOptions = options;
+    return true;
+  }
+  function tick() {
+    if (isActive()) refresh();
+  }
+  return {
+    refresh,
+    start() {
+      started = true;
+      if (timer === null) timer = schedule(tick, LLM_REFRESH_MS);
+    },
+    stop() {
+      if (timer !== null) cancel(timer);
+      timer = null;
+    },
+    get started() {
+      return started;
+    },
+    get running() {
+      return timer !== null;
+    },
+    // The page became visible again (or the card was opened): refresh once.
+    wake() {
+      tick();
+    },
+  };
+}
+// ── end of LLM card refresh ──────────────────────────────────────────
+
+function renderLlmOverview(data, m) {
+  const installed = !m || m.installed === null ? "Unknown (server not reachable)" : m.installed ? "Yes" : "No";
+  const size = m && m.size_gb ? `${m.size_gb} GB` : "Unknown";
+  const runs = llmRunsOn(data);
+  const rows = [
+    ["Model", escapeHtml(data.selected)],
+    ["Size on disk", size],
+    ["Installed", installed],
+    ["Runs on", `<span class="llm-runs-on"></span>`],
+    ["Memory", llmMemory(data, m)],
+    ["Used for", "Cleanup, Polish, upload cleanup"],
+  ];
+  document.getElementById("llm-overview-grid").innerHTML = rows
+    .map(([label, value]) => `<div class="overview-row"><span class="overview-label">${label}</span><span class="overview-value">${value}</span></div>`)
+    .join("");
+  setStatus(document.querySelector("#llm-overview-grid .llm-runs-on"), runs.warn ? "warn" : undefined, runs.text);
+}
+
+function llmOptionLabel(m) {
+  let label = m.name;
+  if (m.recommended_here) label += " — recommended for this PC";
+  if (m.installed === false && m.size_gb) label += ` — not installed, ${m.size_gb} GB`;
+  else if (m.installed === false) label += " — not installed";
+  return label;
+}
+
+function renderLlmModels(data, rebuildOptions) {
+  llmSavedModel = data.selected;
+  loadLlmStatus().catch(() => {}); // the status line follows the same data (reachable, installed)
+  llmSlowHint.hidden = !data.slow_hint;
+  if (!data.reachable) {
+    // Server down (or no model list): show the saved value only, nothing else can break.
+    if (rebuildOptions) {
+      llmModelSelect.replaceChildren(new Option(data.selected, data.selected));
+      llmModelSelect.value = data.selected;
+    }
+    llmModelHint.hidden = false;
+    // Red: the LLM features do not work while the server cannot be reached.
+    setStatus(
+      llmModelHint,
+      data.protocol === "ollama" ? "down" : "warn",
+      data.protocol === "ollama"
+        ? "Ollama is not reachable, so the installed models cannot be listed. The saved model is kept."
+        : "This server type has no model list. Set [llm].model in config.toml.",
+    );
+    renderLlmOverview(data, null);
+    return;
+  }
+  llmModelHint.hidden = true;
+  if (rebuildOptions) {
+    llmModelSelect.replaceChildren();
+    const rec = document.createElement("optgroup");
+    rec.label = "Recommended";
+    for (const m of data.recommended) {
+      const opt = new Option(llmOptionLabel(m), m.name);
+      if (!m.installed) opt.style.color = "var(--text-muted, gray)";
+      rec.append(opt);
+    }
+    llmModelSelect.append(rec);
+    if (data.other.length) {
+      const other = document.createElement("optgroup");
+      other.label = "Other installed models";
+      for (const m of data.other) other.append(new Option(m.installed === false ? `${m.name} — not installed` : m.name, m.name));
+      llmModelSelect.append(other);
+    }
+    llmModelSelect.value = data.selected;
+  }
+  renderLlmOverview(data, [...data.recommended, ...data.other].find((m) => m.name === data.selected) || null);
+  llmModelSelect.dataset.notInstalled = JSON.stringify(
+    Object.fromEntries(data.recommended.filter((m) => !m.installed).map((m) => [m.name, m.size_gb])),
   );
 }
+
+const llmRefresher = createLlmRefresher({
+  fetchData: () => api("/api/settings/llm-models"),
+  render: renderLlmModels,
+  // On screen: the Settings tab is open, the page is visible and the dropdown is laid out.
+  isActive: () =>
+    !document.hidden && document.getElementById("tab-settings").classList.contains("active") && llmModelSelect.offsetParent !== null,
+  schedule: (fn, ms) => setInterval(fn, ms),
+  cancel: (t) => clearInterval(t),
+});
+
+// Draws the card now, whatever changed (after a save, a pull, or when the tab opens).
+async function loadLlmModels() {
+  await llmRefresher.refresh(true);
+  llmRefresher.start();
+}
+
+document.addEventListener("visibilitychange", () => {
+  // No polling while the page is hidden; one refresh as soon as it is visible again.
+  if (document.hidden) {
+    llmRefresher.stop();
+  } else if (llmRefresher.started) {
+    llmRefresher.start();
+    llmRefresher.wake();
+  }
+});
+
+async function saveLlmModel(name) {
+  const resp = await postSetting("/api/settings/llm-model", { model: name });
+  const s = await resp.json();
+  if (s.error) alert(s.error);
+  llmSavedModel = s.llm_model;
+  await loadLlmModels();
+  loadLlmStatus();
+}
+
+function showLlmPull(text, pct, busy) {
+  llmPullBox.style.display = "flex";
+  llmPullText.textContent = text;
+  llmPullProgress.hidden = pct === null;
+  if (pct !== null) llmPullProgress.value = pct;
+  llmPullCancel.hidden = !busy;
+}
+
+function pollLlmPull() {
+  clearInterval(llmPullTimer);
+  llmPullTimer = setInterval(async () => {
+    let p;
+    try {
+      p = await api("/api/settings/llm-pull");
+    } catch {
+      return;
+    }
+    if (p.status === "pulling") {
+      const pct = p.total ? Math.round((p.completed / p.total) * 100) : null;
+      showLlmPull(`Downloading ${p.model}: ${p.detail}${pct === null ? "" : ` ${pct}%`}`, pct, true);
+      return;
+    }
+    clearInterval(llmPullTimer);
+    llmModelSelect.disabled = false;
+    if (p.status === "done") {
+      showLlmPull(`${p.model} downloaded.`, null, false);
+      await saveLlmModel(p.model); // selected only now that the pull succeeded
+    } else if (p.status === "cancelled") {
+      showLlmPull("Download cancelled.", null, false);
+      await loadLlmModels();
+    } else if (p.status === "error") {
+      showLlmPull(`Download failed: ${p.error || "unknown error"}`, null, false);
+      await loadLlmModels();
+    }
+    setTimeout(() => {
+      if (!llmPullTimer || p.status !== "pulling") llmPullBox.style.display = "none";
+    }, 5000);
+  }, 1000);
+}
+
+llmModelSelect.addEventListener("change", async () => {
+  const name = llmModelSelect.value;
+  const missing = JSON.parse(llmModelSelect.dataset.notInstalled || "{}");
+  if (!(name in missing)) {
+    await saveLlmModel(name);
+    return;
+  }
+  llmModelSelect.value = llmSavedModel; // the old model stays selected until the pull succeeded
+  if (!confirm(`${name} is not installed. Download it now (${missing[name]} GB) through Ollama?`)) return;
+  const resp = await postSetting("/api/settings/llm-pull", { model: name });
+  const p = await resp.json();
+  if (p.error && p.status !== "pulling") {
+    alert(p.error);
+    return;
+  }
+  llmModelSelect.disabled = true;
+  showLlmPull(`Downloading ${name}...`, null, true);
+  pollLlmPull();
+});
+llmPullCancel.addEventListener("click", () => fetch("/api/settings/llm-pull", { method: "DELETE" }));
+
 const hotkeyRecordBtn = document.getElementById("hotkey-record-btn");
 const hotkeyStatus = document.getElementById("hotkey-status");
 const hotkeyResetBtn = document.getElementById("hotkey-reset-btn");
@@ -527,13 +790,6 @@ polishKeySelect.addEventListener("change", async () => {
   if (s.error) alert(s.error);
   polishKeySelect.value = s.polish_key;
 });
-llmModelInput.addEventListener("change", async () => {
-  const resp = await postSetting("/api/settings/llm-model", { model: llmModelInput.value });
-  const s = await resp.json();
-  if (s.error) alert(s.error);
-  llmModelInput.value = s.llm_model;
-  loadLlmStatus();
-});
 meetingOwnLabelInput.addEventListener("change", async () => {
   try {
     const resp = await postSetting("/api/settings/meeting-own-voice-label", { label: meetingOwnLabelInput.value });
@@ -556,7 +812,6 @@ cleanupLevelSelect.addEventListener("change", async () => {
   const s = await resp.json();
   if (s.error) alert(s.error);
   cleanupLevelSelect.value = s.cleanup_level;
-  document.getElementById("cleanup-cpu-hint").hidden = !(s.cleanup_cpu_hint && s.cleanup_level !== "off");
 });
 pasteKeySelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/paste-key", { key: pasteKeySelect.value });
@@ -586,10 +841,9 @@ async function loadSettings() {
     for (const k of s.hotkey_key_options || []) polishKeySelect.append(new Option(k.replace("_", " "), k));
   }
   polishKeySelect.value = s.polish_key;
-  llmModelInput.value = s.llm_model;
+  loadLlmModels();
   meetingOwnLabelInput.value = meetingOwnLabelSaved = s.meeting_own_voice_label;
   cleanupLevelSelect.value = s.cleanup_level;
-  document.getElementById("cleanup-cpu-hint").hidden = !(s.cleanup_cpu_hint && s.cleanup_level !== "off");
   feedbackModeSelect.value = s.feedback_mode;
   loadLlmStatus();
   micGuardToggle.checked = s.mic_guard_enabled;

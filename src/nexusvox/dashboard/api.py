@@ -28,6 +28,8 @@ from ..config import (
     HotkeyConfig,
     MeetingConfig,
     cuda_available,
+    gpu_vram_gb,
+    llm_runs_fast,
     meeting_hotkey_clash,
     model_download_state,
     model_needs_docker,
@@ -57,7 +59,10 @@ from ..file_transcribe import (
     transcribe_file,
 )
 from ..lang_detect import stored_language
-from ..llm import is_reachable as llm_reachable
+from ..llm import build_model_list as llm_build_model_list
+from ..llm import loaded_model as llm_loaded_model
+from ..llm import model_pull as llm_pull
+from ..llm import model_status as llm_model_status
 from ..llm import warm_up as llm_warm_up
 from ..logsetup import log_dir
 from ..meeting_live import LIVE_OTHERS_LABEL, LiveTranscriber, WindowTranscriber
@@ -319,7 +324,7 @@ class DashboardAPI:
             "polish_in_terminals": self._config.polish.in_terminals,
             "cleanup_level": self._config.cleanup.level,
             "cleanup_levels": list(CLEANUP_LEVELS),
-            "cleanup_cpu_hint": not cuda_available(),
+            "llm_slow_hint": not llm_runs_fast(),
             "meeting_modifiers": list(self._config.meeting.modifiers),
             "meeting_key": self._config.meeting.key,
             "meeting_hotkey_default": {"modifiers": list(MeetingConfig().modifiers), "key": MeetingConfig().key},
@@ -407,12 +412,47 @@ class DashboardAPI:
         return self.get_settings()
 
     def get_llm_status(self) -> dict:
-        """Whether the [llm] server answers - probed live, like the translator."""
+        """Whether the [llm] server answers and has the configured model - probed live, like the translator."""
+        status = llm_model_status(self._config.llm)
         return {
             "url": self._config.llm.url,
             "model": self._config.llm.model,
-            "reachable": llm_reachable(self._config.llm),
+            "reachable": status["state"] != "down",
+            "model_installed": {"ok": True, "missing": False}.get(status["state"]),
         }
+
+    def get_llm_models(self) -> dict:
+        """The dropdown's content: recommended models, other installed ones, and the saved value."""
+        cuda = cuda_available()
+        models = llm_build_model_list(self._config.llm, cuda, gpu_vram_gb() if cuda else None)
+        selected = self._config.llm.model
+        known = [*models["recommended"], *models["other"]]
+        disk_gb = next((m["size_gb"] for m in known if m["name"] == selected), None)
+        return {
+            **models,
+            "selected": selected,
+            "device": "gpu" if cuda else "cpu",
+            "loaded": llm_loaded_model(self._config.llm, selected, disk_gb) if models["reachable"] else None,
+            "slow_hint": not llm_runs_fast(),
+        }
+
+    def start_llm_pull(self, model: str) -> dict:
+        """Download a model through Ollama. Only ever called after the user confirmed it in the dashboard."""
+        model = str(model or "").strip()
+        if not model:
+            return {"error": "A model name is required"}
+        if self._config.llm.protocol != "ollama":
+            return {"error": "Downloading models needs an Ollama server"}
+        if not llm_pull.start(self._config.llm, model):
+            return {"error": "A download is already running", **llm_pull.state()}
+        return llm_pull.state()
+
+    def get_llm_pull(self) -> dict:
+        return llm_pull.state()
+
+    def cancel_llm_pull(self) -> dict:
+        llm_pull.cancel()
+        return llm_pull.state()
 
     def set_mic_guard_enabled(self, enabled: bool) -> dict:
         """Checked by the app on every hold, so this is live."""

@@ -50,7 +50,7 @@ def test_orange_is_not_used_for_caveats():
 
 
 def test_caveat_hints_use_the_warn_state():
-    assert re.search(r'id="cleanup-cpu-hint"', _HTML)
-    assert re.search(r'class="[^"]*status-line warn[^"]*"\s+id="cleanup-cpu-hint"', _HTML)
+    assert re.search(r'id="llm-slow-hint"', _HTML)
+    assert re.search(r'id="llm-slow-hint"\s+class="[^"]*status-line warn', _HTML)
     assert re.search(r'class="[^"]*model-caution[^"]*status-line warn', _HTML)
     assert ".badge.warn" in _CSS

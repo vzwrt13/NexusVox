@@ -190,9 +190,17 @@ def installed_models(config: LlmConfig) -> list[dict] | None:
         return None
 
 
-def loaded_model(config: LlmConfig, name: str) -> dict | None:
-    """Where Ollama really holds `name` right now (`/api/ps`): `{"vram_gb", "ram_gb"}`, or None when the
-    model is not loaded or the server cannot say. `size_vram` of 0 means the whole model sits in RAM (CPU)."""
+# Ollama reports some models (gemma4:e2b: 0.22 GB for 4.6 GB on disk) far too small in /api/ps. A reported size
+# below this share of the size on disk is not believed.
+PLAUSIBLE_SIZE_RATIO = 0.5
+
+
+def loaded_model(config: LlmConfig, name: str, disk_gb: float | None = None) -> dict | None:
+    """Where Ollama holds `name` right now (`/api/ps`), or None when it is not loaded or the server cannot say.
+
+    Plausible figures: `{"plausible": True, "vram_gb", "ram_gb"}` (`size_vram` is the VRAM part, the rest is RAM).
+    When `size` is under `PLAUSIBLE_SIZE_RATIO` of the size on disk the figures are dropped:
+    `{"plausible": False, "on_gpu": bool}` - the caller shows an estimate and at most "GPU"."""
     if config.protocol != "ollama":
         return None
     try:
@@ -201,7 +209,13 @@ def loaded_model(config: LlmConfig, name: str) -> dict | None:
         for m in running:
             if isinstance(m, dict) and name in (m.get("name"), m.get("model")):
                 total, vram = float(m.get("size", 0)), float(m.get("size_vram", 0))
-                return {"vram_gb": round(vram / 1e9, 1), "ram_gb": round(max(total - vram, 0) / 1e9, 1)}
+                if disk_gb and total / 1e9 < disk_gb * PLAUSIBLE_SIZE_RATIO:
+                    return {"plausible": False, "on_gpu": vram > 0}
+                return {
+                    "plausible": True,
+                    "vram_gb": round(vram / 1e9, 1),
+                    "ram_gb": round(max(total - vram, 0) / 1e9, 1),
+                }
     except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError, KeyError, TypeError):
         return None
     return None

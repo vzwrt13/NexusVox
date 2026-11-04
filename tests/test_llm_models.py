@@ -138,7 +138,11 @@ def test_dashboard_endpoints(flask_client, monkeypatch):
 def test_loaded_model_reports_vram_and_ram(monkeypatch):
     ps = {"models": [{"name": "gemma4:e4b", "size": 8_000_000_000, "size_vram": 6_000_000_000}]}
     _serve(monkeypatch, ps)
-    assert llm.loaded_model(LlmConfig(model="gemma4:e4b"), "gemma4:e4b") == {"vram_gb": 6.0, "ram_gb": 2.0}
+    assert llm.loaded_model(LlmConfig(model="gemma4:e4b"), "gemma4:e4b") == {
+        "plausible": True,
+        "vram_gb": 6.0,
+        "ram_gb": 2.0,
+    }
     assert llm.loaded_model(LlmConfig(model="x"), "gemma4:e2b") is None
 
 
@@ -150,9 +154,30 @@ def test_loaded_model_none_when_server_down(monkeypatch):
 def test_fully_offloaded_model_has_no_gpu_share(monkeypatch):
     ps = {"models": [{"name": "gemma4:e4b", "size": 7_000_000_000, "size_vram": 0}]}
     _serve(monkeypatch, ps)
-    assert llm.loaded_model(LlmConfig(model="gemma4:e4b"), "gemma4:e4b") == {"vram_gb": 0.0, "ram_gb": 7.0}
+    assert llm.loaded_model(LlmConfig(model="gemma4:e4b"), "gemma4:e4b") == {
+        "plausible": True,
+        "vram_gb": 0.0,
+        "ram_gb": 7.0,
+    }
 
 
 def test_loaded_model_none_for_non_ollama_server(monkeypatch):
     _serve(monkeypatch, {"models": []})
     assert llm.loaded_model(LlmConfig(model="x", protocol="openai"), "x") is None
+
+
+def test_under_reported_size_is_flagged_implausible(monkeypatch):
+    # Ollama reports 0.22 GB for gemma4:e2b (4.6 GB on disk), all of it "in VRAM".
+    ps = {"models": [{"name": "gemma4:e2b", "size": 220_000_000, "size_vram": 220_000_000}]}
+    _serve(monkeypatch, ps)
+    assert llm.loaded_model(LlmConfig(model="gemma4:e2b"), "gemma4:e2b", disk_gb=4.6) == {
+        "plausible": False,
+        "on_gpu": True,
+    }
+
+
+def test_size_near_the_disk_size_is_believed(monkeypatch):
+    ps = {"models": [{"name": "gemma4:12b-it-qat", "size": 7_660_000_000, "size_vram": 7_660_000_000}]}
+    _serve(monkeypatch, ps)
+    loaded = llm.loaded_model(LlmConfig(model="gemma4:12b-it-qat"), "gemma4:12b-it-qat", disk_gb=7.2)
+    assert loaded == {"plausible": True, "vram_gb": 7.7, "ram_gb": 0.0}

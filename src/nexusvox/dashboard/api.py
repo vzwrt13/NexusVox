@@ -424,11 +424,15 @@ class DashboardAPI:
     def get_llm_models(self) -> dict:
         """The dropdown's content: recommended models, other installed ones, and the saved value."""
         cuda = cuda_available()
+        models = llm_build_model_list(self._config.llm, cuda, gpu_vram_gb() if cuda else None)
+        selected = self._config.llm.model
+        known = [*models["recommended"], *models["other"]]
+        disk_gb = next((m["size_gb"] for m in known if m["name"] == selected), None)
         return {
-            **llm_build_model_list(self._config.llm, cuda, gpu_vram_gb() if cuda else None),
-            "selected": self._config.llm.model,
+            **models,
+            "selected": selected,
             "device": "gpu" if cuda else "cpu",
-            "loaded": llm_loaded_model(self._config.llm, self._config.llm.model),
+            "loaded": llm_loaded_model(self._config.llm, selected, disk_gb) if models["reachable"] else None,
             "slow_hint": not llm_runs_fast(),
         }
 

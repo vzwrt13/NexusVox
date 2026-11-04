@@ -1,0 +1,209 @@
+name: Installer
+
+# Builds the frozen app, wraps it in the Inno Setup installer and test-installs it.
+# Called by the release workflow, and run on pull requests that touch what goes into the installer
+# (a Windows build with a 600 MB folder is too slow to run on every pull request). `src/**` is
+# in the list because a new lazy import or data file is what the frozen build misses.
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/installer.yml"
+      - ".github/workflows/release.yml"
+      - "packaging/**"
+      - "src/**"
+      - "LICENSE"
+      - "THIRD_PARTY_LICENSES.md"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+# A new push to the same pull request supersedes the running build (Windows minutes bill double). A release run is
+# never cancelled.
+concurrency:
+  group: installer-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The Inno Setup version the installer script is tested with. A different one is replaced by this one.
+  INNO_SETUP_VERSION: "6.7.1"
+
+jobs:
+  installer:
+    name: Build and test the installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install NexusVox and PyInstaller
+        # A regular install, not editable: the build must contain what a wheel contains. `packaging` is used by
+        # the notices script directly, so it is named here instead of relying on another package pulling it in.
+        run: pip install . "pyinstaller>=6,<7" packaging
+
+      - name: Build the app
+        run: python packaging/build.py
+
+      - name: Use the pinned Inno Setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          function Find-Iscc {
+            @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") |
+              Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          function Get-InnoVersion {
+            # ISCC.exe carries no version resource. The runner image installs Inno Setup with Chocolatey, which
+            # knows the version: "innosetup|6.7.1".
+            $line = choco list innosetup --exact --limit-output --local-only | Select-Object -First 1
+            if ($line -match "^innosetup\|(\d+\.\d+\.\d+)") { return $Matches[1] }
+            return $null
+          }
+          $iscc = Find-Iscc
+          $have = Get-InnoVersion
+          Write-Host "Inno Setup on the runner: $have ($iscc)"
+          if ($have -ne $env:INNO_SETUP_VERSION -or -not $iscc) {
+            choco install innosetup --version=$env:INNO_SETUP_VERSION --force --no-progress -y
+            $iscc = Find-Iscc
+            $have = Get-InnoVersion
+          }
+          if ($have -ne $env:INNO_SETUP_VERSION) { throw "Expected Inno Setup $env:INNO_SETUP_VERSION, found '$have'" }
+          if (-not $iscc) { throw "ISCC.exe not found after installing Inno Setup" }
+          "ISCC=$iscc" >> $env:GITHUB_ENV
+
+      - name: Build the installer
+        run: python packaging/build_installer.py
+
+      - name: Install, run, upgrade and uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = Join-Path $env:RUNNER_TEMP "NexusVox-installed"
+          $setup = "dist\installer\NexusVox-Setup.exe"
+          $run = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+          $config = Join-Path $env:APPDATA "NexusVox"
+          $local = Join-Path $env:LOCALAPPDATA "NexusVox"
+          $userFolders = @($config, "$local\data", "$local\logs", "$local\models", "$local\models-xet")
+          $logs = Join-Path $env:RUNNER_TEMP "installer-logs"
+          New-Item -ItemType Directory -Force $logs | Out-Null
+          $script:step = 0
+
+          function Install($name, $tasks) {
+            # Per-user: nothing here may need elevation. One log per run, so a failure shows its own.
+            $script:step++
+            $log = Join-Path $logs ("{0:D2}-install-{1}.log" -f $script:step, $name)
+            $arguments = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$target`"", "/LOG=`"$log`"") + $tasks
+            $process = Start-Process $setup -PassThru -ArgumentList $arguments
+            if (-not $process.WaitForExit(300000)) { $process.Kill(); throw "The installer ($name) did not finish" }
+            return [pscustomobject]@{ ExitCode = $process.ExitCode; Log = $log }
+          }
+
+          function Uninstall($name, $extra) {
+            $script:step++
+            $log = Join-Path $logs ("{0:D2}-uninstall-{1}.log" -f $script:step, $name)
+            Start-Process "$target\unins000.exe" -Wait -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$log`"") + $extra)
+            # The uninstaller hands over to a copy of itself, and the user's data is deleted at its very end. The
+            # copy writes "Log closed." as its last line, so wait for that, not for a guess about its process.
+            $deadline = (Get-Date).AddSeconds(120)
+            do {
+              Start-Sleep -Seconds 1
+              $closed = $false
+              try { $closed = (Get-Content $log -Raw -ErrorAction Stop) -match "Log closed\." } catch { }
+            } while (-not $closed -and (Get-Date) -lt $deadline)
+            if (-not $closed) { throw "The uninstaller ($name) did not finish" }
+          }
+
+          # --- Fresh install, with the autostart task.
+          if ((Install "fresh" @("/TASKS=autostart")).ExitCode -ne 0) { throw "The installer failed" }
+          foreach ($file in "NexusVox.exe", "unins000.exe", "LICENSE", "THIRD_PARTY_NOTICES.txt", "THIRD_PARTY_LICENSES.md") {
+            if (-not (Test-Path "$target\$file")) { throw "$file was not installed" }
+          }
+          $value = (Get-ItemProperty $run).NexusVox
+          if ($value -ne "`"$target\NexusVox.exe`"") { throw "Unexpected autostart value: $value" }
+
+          # --- The installed app starts and stays up (the frozen build is the part that breaks quietly).
+          $app = Start-Process "$target\NexusVox.exe" -PassThru
+          $started = $false
+          foreach ($i in 1..90) {
+            Start-Sleep -Seconds 1
+            if ($app.HasExited) { break }
+            if (Get-ChildItem "$local\logs" -ErrorAction SilentlyContinue | Select-String -Pattern "NexusVox started" -Quiet) { $started = $true; break }
+          }
+          if (-not $started) {
+            Get-ChildItem "$local\logs" -ErrorAction SilentlyContinue | Get-Content | Select-Object -Last 40
+            throw "The installed NexusVox did not start (exited: $($app.HasExited))"
+          }
+
+          # --- A running NexusVox must stop an install over it, and the old build must stay intact.
+          New-Item -ItemType File -Force "$target\_internal\stale-from-old-build.txt" | Out-Null
+          New-Item -ItemType File -Force "$target\extensions\addon\marker.txt" | Out-Null
+          $refused = Install "over-running-app" @()
+          if ($app.HasExited) { throw "Installing over a running NexusVox closed it" }
+          if ($refused.ExitCode -eq 0) { throw "Setup went ahead over a running NexusVox" }
+          if (-not ((Get-Content $refused.Log -Raw) -match "(?i)running")) {
+            Get-Content $refused.Log | Select-Object -Last 30
+            throw "Setup failed, but not because NexusVox was running (exit code $($refused.ExitCode))"
+          }
+          if (-not (Test-Path "$target\_internal\stale-from-old-build.txt")) { throw "Setup replaced files under a running NexusVox" }
+          $app.Kill()
+          $app.WaitForExit()
+
+          # --- Upgrade over the old build with the autostart task unticked: the add-ons stay, the old files go.
+          if ((Install "upgrade" @("/MERGETASKS=`"!autostart`"")).ExitCode -ne 0) { throw "The upgrade failed" }
+          if (Test-Path "$target\_internal\stale-from-old-build.txt") { throw "The upgrade left a file of the old build behind" }
+          if (Test-Path "$target\_internal.old") { throw "The upgrade left the moved-aside runtime behind" }
+          if (-not (Test-Path "$target\NexusVox.exe")) { throw "The upgrade lost NexusVox.exe" }
+          if (-not (Test-Path "$target\extensions\addon\marker.txt")) { throw "The upgrade deleted the add-ons" }
+          if ((Get-ItemProperty $run -ErrorAction SilentlyContinue).NexusVox) { throw "Unticking autostart on an upgrade left the Run value" }
+
+          # --- The user's files live outside the install folder. A plain silent uninstall must keep them.
+          foreach ($folder in $userFolders) {
+            New-Item -ItemType Directory -Force $folder | Out-Null
+            Set-Content "$folder\keep.txt" "x"
+          }
+          Uninstall "keep" @()
+          if (Test-Path $target) { throw "The uninstaller left $target behind (add-ons included)" }
+          foreach ($folder in $userFolders) {
+            if (-not (Test-Path "$folder\keep.txt")) { throw "A silent uninstall deleted $folder" }
+          }
+
+          # --- With the switches the data and the models go, too.
+          if ((Install "reinstall" @()).ExitCode -ne 0) { throw "The reinstall failed" }
+          Uninstall "delete" @("/DELETEDATA", "/DELETEMODELS")
+          foreach ($folder in $userFolders) {
+            if (Test-Path $folder) { throw "/DELETEDATA and /DELETEMODELS left $folder behind" }
+          }
+
+      - name: Collect the logs
+        if: failure()
+        shell: pwsh
+        run: |
+          $logs = Join-Path $env:RUNNER_TEMP "installer-logs"
+          New-Item -ItemType Directory -Force $logs | Out-Null
+          if (Test-Path "$env:LOCALAPPDATA\NexusVox\logs") { Copy-Item "$env:LOCALAPPDATA\NexusVox\logs" "$logs\app-logs" -Recurse }
+
+      - name: Upload the logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-logs
+          path: ${{ runner.temp }}/installer-logs
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # Only a release run needs the installer afterwards; a pull request run would store 220 MB for nothing.
+      - name: Upload the installer
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer
+          path: dist/installer/NexusVox-Setup.exe
+          retention-days: 3
+          if-no-files-found: error

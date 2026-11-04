@@ -362,6 +362,37 @@ What the build cannot do yet:
   `metadata_errors` to `av.open`, which `av` 19 no longer accepts, so Whisper failed on the first transcription in any
   fresh environment. `pyproject.toml` now has `av<19`; verified in a clean venv and in the frozen build.
 
+## Installer and release job (ticket 3, issue #163)
+
+`packaging/nexusvox.iss` is the Inno Setup script, `packaging/build_installer.py` compiles it after
+`packaging/build.py` (`dist/installer/NexusVox-Setup.exe`, version from `pyproject.toml`). It installs per user to
+`%LOCALAPPDATA%\Programs\NexusVox` without admin rights, adds a Start Menu entry, shows `LICENSE` (PolyForm
+Noncommercial 1.0.0) as the licence page and `THIRD_PARTY_NOTICES.txt` (generated at build time by
+`packaging/third_party_notices.py`: the licence texts of every package the frozen app bundles) as an information page,
+and offers an unchecked
+task "Start NexusVox when I sign in" (`HKCU\...\Run`, value `NexusVox`). The uninstaller asks two questions, both
+defaulting to keep: delete settings, history, audio and logs, and delete the downloaded models. A silent uninstall keeps
+everything unless `/DELETEDATA` and/or `/DELETEMODELS` are passed. `.github/workflows/installer.yml` builds and
+test-installs it in CI; the release workflow attaches `NexusVox-Setup.exe` (a stable name, the website links to it) to
+every release. Unsigned until the signing ticket; the first-run screen is a separate ticket.
+
+Behaviours worth knowing: `AppMutex` (the app's single-instance mutex, created with a DACL that lets any logged-on
+user open it with SYNCHRONIZE, so an elevated NexusVox is seen as well) makes Setup and the uninstaller refuse while
+NexusVox runs, because the tray app cannot be closed from outside. An upgrade moves the old `{app}\_internal` aside,
+deletes it once the new files are in and moves it back if Setup is cancelled or fails, so no file of the old build
+survives and a failed upgrade leaves a working app. Unticking the autostart task on an upgrade removes the Run value.
+The uninstaller also removes `{app}\extensions` (add-ons run inside the app); the delete-data question covers the
+default folders only, and "delete the models" also removes the Hugging Face xet cache, which the app keeps next to the
+models (`HF_XET_CACHE`). `MinVersion` is Windows 11. CI installs, starts the installed app, tries to install over
+it, upgrades, and uninstalls with and without the delete switches.
+
+**Open before the first public release: GPL libraries in the build.** The PyAV wheel's `av.libs` contains x264 and
+x265 (GPL-2.0-or-later) next to FFmpeg. NexusVox only needs PyAV because `faster-whisper` imports it at module level
+and uses it to decode audio; `LocalWhisperTranscriber` hands it a WAV (`io.BytesIO`), which it could pass as a
+float array instead, and the file transcription path converts with pydub and ffmpeg. The notices file now lists these libraries and where their
+source is, which is disclosure, not a licence answer. Options: ship a build without them (pass arrays to Whisper and put a stub `av` in
+the frozen app, or PyAV built against an LGPL-only FFmpeg), or have the licence combination reviewed.
+
 ## Open questions
 
 For the maintainer, with my default:

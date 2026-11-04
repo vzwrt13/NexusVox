@@ -57,6 +57,18 @@ def test_frozen_apply_models_dir_sets_hf_cache(frozen, monkeypatch):
     assert os.environ["HF_HUB_CACHE"] == str(paths.models_dir())
 
 
+def test_frozen_apply_models_dir_moves_the_xet_cache_next_to_the_models(frozen, monkeypatch):
+    monkeypatch.delenv("HF_XET_CACHE", raising=False)
+    paths.apply_models_dir()
+    assert os.environ["HF_XET_CACHE"] == str(paths.models_dir().parent / "models-xet")
+
+
+def test_from_source_apply_models_dir_leaves_the_xet_cache_alone(monkeypatch):
+    monkeypatch.delenv("HF_XET_CACHE", raising=False)
+    paths.apply_models_dir()
+    assert "HF_XET_CACHE" not in os.environ
+
+
 def test_frozen_load_config_creates_config_and_resolves_database(frozen):
     cfg = load_config()
     config_file = paths.config_dir() / "config.toml"

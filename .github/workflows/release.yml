@@ -99,9 +99,14 @@ jobs:
           name: dist
           path: dist/
 
+  installer:
+    name: Installer
+    needs: test
+    uses: ./.github/workflows/installer.yml
+
   release:
     name: GitHub Release
-    needs: build
+    needs: [build, installer]
     runs-on: ubuntu-latest
     steps:
       # Checked out before the artifacts, because actions/checkout cleans the
@@ -147,6 +152,14 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: dist
+          path: dist/
+
+      # The installer keeps one name for every version (NexusVox-Setup.exe): the website links to
+      # releases/latest/download/NexusVox-Setup.exe.
+      - name: Download the installer
+        uses: actions/download-artifact@v8
+        with:
+          name: installer
           path: dist/
 
       - name: Create GitHub Release

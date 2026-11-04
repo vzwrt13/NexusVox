@@ -149,7 +149,7 @@ class HotkeyConfig:
     # neutral mask key, so the app never sees a lone Alt release (underlined menu accelerators).
     # Only the Alt release of NexusVox's own chord is touched.
     # Off by default: a live retest suggested it can arm Win 11 Notepad's menu bar.
-    reinject_alt_release: bool = False
+    reinject_alt_release: bool = True
 
 
 HOTKEY_MODES = ("hold", "toggle")
@@ -741,7 +741,7 @@ def load_config(path: Path | None = None) -> Config:
             mode=hotkey_mode if hotkey_mode in HOTKEY_MODES else "hold",
             paste_key=normalize_hotkey_key(str(hotkey_data.get("paste_key", "V"))) or "",
             polish_key=_polish_key(hotkey_data),
-            reinject_alt_release=bool(hotkey_data.get("reinject_alt_release", False)),
+            reinject_alt_release=bool(hotkey_data.get("reinject_alt_release", True)),
         ),
         meeting=MeetingConfig(
             modifiers=meeting_modifiers,

@@ -38,9 +38,9 @@ polish_key = ""
 # without a key in between, which releasing Ctrl/Shift first leaves behind. With this on
 # (off by default: a live retest suggested it can arm Win 11 Notepad's menu bar), NexusVox swallows the Alt release that ends its own hotkey chord and sends it
 # again right behind a neutral mask key (a fallback sends it after 0.5 s at the latest, and
-# on quit). Other Alt use (Alt alone, Alt+Tab, app shortcuts) is never touched. Set false
+# on quit; a Polish chord keeps the plain release). Other Alt use (Alt alone, Alt+Tab, app shortcuts) is never touched. Set false
 # to let the plain release through.
-reinject_alt_release = false
+reinject_alt_release = true
 
 [meeting]
 # Meeting recording: your microphone and the system output (what the other participants say)

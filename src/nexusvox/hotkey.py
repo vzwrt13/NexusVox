@@ -224,6 +224,8 @@ class HotkeyListener:
         modifier = _VK_TO_MODIFIER.get(vk)
         if modifier is None or modifier not in self._modifiers:
             return False
+        # A held modifier repeats its key-down about every 31 ms; only the first one is a press.
+        repeat = pressed and (vk in self._alt_down if modifier == "alt" else modifier in self._pressed_modifiers)
         if modifier == "alt":
             if pressed:
                 self._alt_down.add(vk)
@@ -234,8 +236,8 @@ class HotkeyListener:
                 return True
         if pressed:
             self._pressed_modifiers.add(modifier)
-            if self._combo_down:
-                self._mask_menu_keys()  # a second Alt/Win pressed during the combo
+            if self._combo_down and not repeat:
+                self._mask_menu_keys()  # a second Alt/Win pressed during the combo (not an auto-repeat)
             # A modifier-only binding completes on its last modifier. With a key, the key
             # has to come last, otherwise "hold A, then press Ctrl" would start recording.
             if self._key_vk is None and not self._combo_down and self._modifiers <= self._pressed_modifiers:
@@ -271,6 +273,11 @@ class HotkeyListener:
                 self._config.reinject_alt_release,
             )
             if not own_chord or not self._config.reinject_alt_release or self._alt_release is None:
+                return False
+            if self._mark == POLISH:
+                # Live retest 2026-11-04: with the batch, Polish in Notepad found nothing selected 3 of 3 times
+                # (the same release is fine for dictation); the plain release got 8 of 10. Cause unproven.
+                logger.debug("Alt release %#x passed through: polish chord", vk)
                 return False
             if self._alt_pending is not None:
                 logger.debug("Alt release %#x passed through: another one is still pending", vk)

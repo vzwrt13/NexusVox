@@ -632,14 +632,14 @@ def test_config_switch_roundtrip(tmp_path):
 
     path = tmp_path / "config.toml"
     config = load_config(path)
-    assert config.hotkey.reinject_alt_release is False  # opt-in
-    config.hotkey.reinject_alt_release = True
+    assert config.hotkey.reinject_alt_release is True
+    config.hotkey.reinject_alt_release = False
     save_config(config, path)
-    assert load_config(path).hotkey.reinject_alt_release is True
+    assert load_config(path).hotkey.reinject_alt_release is False
 
 
 @pytest.mark.parametrize("marker_first_release", ["alt", "ctrl"])
-def test_polish_chord_alt_release_is_reinjected_too(marker_first_release):
+def test_polish_chord_alt_release_stays_plain(marker_first_release):
     hk, calls = _reinjecting()
     hk._config.polish_key = "P"
     _complete_chord(hk)
@@ -647,8 +647,31 @@ def test_polish_chord_alt_release_is_reinjected_too(marker_first_release):
     assert hk._handle(ord("P"), False) is True
     assert hk.mark == POLISH
     order = (LALT, LCTRL, LSHIFT) if marker_first_release == "alt" else (LCTRL, LSHIFT, LALT)
-    swallowed = [hk._handle(vk, False) for vk in order]
-    assert swallowed == [vk == LALT for vk in order]  # ... and the Alt release still goes through the batch
-    assert calls == [(LALT, True)]
-    hk._handle(LALT, False)  # twin
+    assert [hk._handle(vk, False) for vk in order] == [False] * 3  # ... the releases are not
+    assert calls == []
     assert hk._alt_pending is None
+
+
+def test_polish_chord_keeps_the_plain_alt_release():
+    hk, calls = _reinjecting()
+    hk._config.polish_key = "P"
+    _complete_chord(hk)
+    hk._handle(0x50, True)  # P: marks the recording as polish, swallowed
+    assert hk.mark == "polish"
+    assert hk._handle(LALT, False) is False  # the real release goes through
+    assert calls == []
+    assert hk._handle(0x50, False) is True  # P stays dead until released
+
+
+def test_alt_auto_repeat_sends_no_extra_mask():
+    hk, _, _ = _listener("hold", modifiers=("ctrl", "shift", "alt"))
+    masks: list[int] = []
+    hk._mask_sender = lambda: masks.append(1) or True
+    _complete_chord(hk)
+    assert len(masks) == 1
+    for _ in range(5):
+        hk._handle(LALT, True)  # auto-repeat of the held Alt
+    assert len(masks) == 1
+    hk._handle(LALT, False)
+    hk._handle(RALT, True)  # a second, different Alt key is a new press
+    assert len(masks) == 2

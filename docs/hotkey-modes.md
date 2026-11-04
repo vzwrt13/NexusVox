@@ -22,7 +22,7 @@ Code paths: `hotkey.py` (`HotkeyListener`, runs inside the keyboard hook), `app.
   again in one `SendInput` batch behind a neutral mask key (`_take_alt_release`, `injector.send_alt_release`), so
   menu-bar apps never see a lone Alt release. Only that release is touched. The re-injected key-up passes through
   when it comes back; a 0.5 s timer, `stop()` and `atexit` send a plain release if it does not.
-  `[hotkey].reinject_alt_release = true` turns it on (off by default: a live retest suggested the re-injected release can arm Win 11 Notepad's menu bar).
+  `[hotkey].reinject_alt_release` (on by default) switches it. A Polish chord keeps the plain release: in a live retest the batch made Polish in Notepad find nothing selected (0/3) while dictation went 20/20; the cause is unproven.
 
 ## What starts and stops a recording
 

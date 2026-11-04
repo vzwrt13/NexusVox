@@ -33,7 +33,7 @@ from .config import (
 from .dashboard import ensure_dashboard_api, open_dashboard, running_dashboard_api
 from .db import Database
 from .edit_watch import EditWatcher
-from .extensions import ActiveApp, load_extensions, loaded_extensions
+from .extensions import HOOK_TIMEOUT_S, ActiveApp, load_extensions, loaded_extensions
 from .feedback import beep_error, beep_flag, beep_start, beep_stop
 from .hotkey import COMMAND, PASTE_LAST, POLISH, HotkeyListener, MeetingHotkey, describe_hotkey
 from .injector import foreground_window, inject_text
@@ -598,6 +598,7 @@ class NexusVoxApp:
                     self._flag_last_transcription()
                     await self._transcriber.disconnect()
                     return
+                self._hook_budget_s = HOOK_TIMEOUT_S
                 label = await self._run_command(raw_text, nexus_cmd)
                 if label is not None:
                     self._save_command(recording, label, raw_text)
@@ -750,12 +751,16 @@ class NexusVoxApp:
         process = self._active_app().process.lower() if text else ""
         return inject_text(text, delay_ms, press_enter), process or None
 
+    # What is left of this dictation's `HOOK_TIMEOUT_S` for the extensions' hooks: `on_command` uses some of it
+    # before the pipeline runs, `on_dictation` gets the rest. Reset for every dictation (one cycle at a time).
+    _hook_budget_s: float = HOOK_TIMEOUT_S
+
     def _extend_dictation(self, text: str) -> str:
         """The extensions' say on a dictation about to be typed (runs in the executor with the pipeline)."""
         registry = loaded_extensions()  # None while the packages still load: type without them, never wait
         if registry is None or not registry.extensions:
             return text
-        return registry.dictation(text, self._active_app())
+        return registry.dictation(text, self._active_app(), budget_s=self._hook_budget_s)
 
     def _save_command(
         self,
@@ -921,9 +926,17 @@ class NexusVoxApp:
     def _extension_command(self, raw_text: str) -> tuple[str, bool] | None:
         """An extension's `on_command` answer for *raw_text* (runs in the executor), or None: nobody took it."""
         registry = loaded_extensions()  # None while the packages still load: no extension command, never wait
-        if registry is None or not registry.extensions:
+        if registry is None or not registry.has_command_hook():
+            return None  # no thread, no window lookup: an extension without the hook costs a dictation nothing
+        started = time.monotonic()
+        try:
+            return registry.command(raw_text, self._active_app(), budget_s=self._hook_budget_s)
+        except Exception:
+            # A broken extension step must never lose the dictation (process_text guards on_dictation the same way).
+            logger.exception("The extension command step failed; handling the dictation without it")
             return None
-        return registry.command(raw_text, self._active_app())
+        finally:
+            self._hook_budget_s = max(0.0, self._hook_budget_s - (time.monotonic() - started))
 
     async def _run_command(self, raw_text: str, nexus_cmd: NexusCommand | None) -> str | None:
         """Run the command *raw_text* is, if any. Returns the label to save it under, or None to type it.

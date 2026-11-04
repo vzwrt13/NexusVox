@@ -147,3 +147,46 @@ def test_nexus_open_is_typed_when_no_extension_takes_it(monkeypatch):
     monkeypatch.setattr(app_module, "loaded_extensions", lambda: None)  # extensions still loading
     assert asyncio.run(app._run_command("nexus öffne meine Webseite", None)) is None
     app._cue.assert_not_called()
+
+
+def test_a_registry_that_blows_up_never_loses_the_dictation(monkeypatch):
+    registry, _ = _registry_with(lambda text: ("[x] y", True))
+
+    def boom(*_a, **_k):
+        raise RuntimeError("cannot start new thread")
+
+    monkeypatch.setattr(registry, "command", boom)
+    app = _command_app(registry, monkeypatch)
+    assert asyncio.run(app._run_command("nexus open my site", None)) is None
+
+
+def test_no_command_hook_means_no_window_lookup_and_the_budget_stays_whole(monkeypatch):
+    from nexusvox.extensions import API_VERSION, Extension, ExtensionRegistry
+
+    class Plain(Extension):
+        name = "plain"
+        api_version = API_VERSION
+
+    registry = ExtensionRegistry()
+    assert registry.add(Plain())
+    app = _command_app(registry, monkeypatch)
+    looked = []
+    monkeypatch.setattr(
+        app_module.NexusVoxApp, "_active_app", classmethod(lambda cls: looked.append(1) or app_module.ActiveApp())
+    )
+    assert asyncio.run(app._run_command("hello there", None)) is None
+    assert looked == [] and app._hook_budget_s == app_module.HOOK_TIMEOUT_S
+
+
+def test_on_command_time_is_taken_from_the_on_dictation_budget(monkeypatch):
+    import time
+
+    def slow(text):
+        time.sleep(0.2)
+        return None
+
+    registry, _ = _registry_with(slow)
+    app = _command_app(registry, monkeypatch)
+    app._hook_budget_s = app_module.HOOK_TIMEOUT_S
+    asyncio.run(app._run_command("hello there", None))
+    assert app._hook_budget_s < app_module.HOOK_TIMEOUT_S - 0.15

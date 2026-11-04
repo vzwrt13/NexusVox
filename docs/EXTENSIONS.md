@@ -329,8 +329,9 @@ class SpeakerNames(Extension):
 def on_command(self, text: str, app: ActiveApp) -> tuple[str, bool] | None: ...
 ```
 
-Called for every dictation before anything else is done with it, as the first step of `App._run_command`: before the
-core's own commands ("nexus assistant ...", the OS/window commands) and before the text pipeline. *text* is the
+Called for every dictation before the text pipeline, as the first step of `App._run_command`: before the core's own
+commands ("nexus assistant ...", the OS/window commands). The one exception is "nexus flag" (only with
+`[experimental].flag_command`): the core handles it first and never offers it to the extensions. *text* is the
 transcript as spoken, trimmed; no dictionary, voice command, cleanup or translation has touched it. Return `None`
 when the phrase is not yours. Return `(label, opened)` to consume the dictation:
 
@@ -342,7 +343,8 @@ when the phrase is not yours. Return `(label, opened)` to consume the dictation:
 
 - **Order.** Extensions are asked in entry-point order; the first one that answers with a `(label, opened)` pair wins and the others are not called.
 - **Label.** A non-empty string; it is what the dashboard history shows for the dictation. The spoken text is not stored.
-- **Fallback.** An extension that raises, answers something that is not a `(non-empty str, bool)` pair, or is too slow is logged and skipped. All extensions share one budget of 3 seconds per dictation (`HOOK_TIMEOUT_S`), so keep the check cheap and hand long work to a thread of your own; the action itself (opening a link, say) runs inside the hook, within that budget.
+- **Fallback.** An extension that raises, answers something that is not a `(non-empty str, bool)` pair, or is too slow is logged and skipped, and the dictation goes on and is typed: a broken extension never loses a dictation. That also means a hook that times out may already have carried out its action, and the phrase is then typed as well. So the hook must be quick: check the phrase, do an action that returns at once (`os.startfile` does), or start a thread of your own and answer `(label, True)`.
+- **Budget.** `on_command` and `on_dictation` share the 3 seconds of one dictation (`HOOK_TIMEOUT_S`): what `on_command` takes is missing from `on_dictation`. An extension that does not override `on_command` is not called and costs nothing.
 - **Startup.** While the extensions are still loading right after NexusVox starts, a dictation is not offered to any.
 - **Not for the phone.** A remote-mic dictation is inserted by the phone and never runs a command; the hook is not called.
 - **Speech.** Spoken commands must work in English and German; matching them is the extension's job.
@@ -356,8 +358,8 @@ class OpenSite(Extension):
     def on_command(self, text, app):
         if text.strip().lower().rstrip(".") not in {"open my site", "öffne meine seite"}:
             return None
-        opened = webbrowser.open("https://example.com")
-        return ("[open-site] https://example.com", opened)
+        os.startfile("https://example.com")  # hands the link to the default browser and returns at once
+        return ("[open-site] https://example.com", True)
 ```
 
 ## Snippet matching helpers
@@ -367,5 +369,7 @@ matcher stays importable from `nexusvox.snippets` for extensions that offer the 
 `SnippetOption`, `mark_snippets(text, snippets) -> (text, expansions)`, `expand_snippets(text, expansions)`,
 `placeholders_intact(text, expansions)` and `best_option(spoken, options)`. They are plain functions over plain
 data (no database, no I/O). An extension calls `mark_snippets` in `on_dictation`, lets its own steps work on the
-placeholders, and expands them again before it returns the text. A database that still holds the `snippets` table of
+placeholders, and expands them again before it returns the text. Note that `on_dictation` runs after voice
+commands, cleanup and translation, which the core used to protect an expansion from, and that it is not called for a
+phone (remote-mic) dictation; an extension that needs either has to ask for a new hook. A database that still holds the `snippets` table of
 an earlier NexusVox keeps it untouched; the core never reads or writes it.

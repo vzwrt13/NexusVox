@@ -199,9 +199,12 @@ class Extension:
         *text* is the transcript as spoken (nothing of the text pipeline has run). Return None when it is not
         this extension's command. Otherwise return `(label, opened)`: the core saves the dictation under *label*
         (e.g. `[nexus] open <target>`), types nothing, and plays the error cue when *opened* is False (the command
-        was recognised but failed). Called before the core's own commands, so an extension can take over a phrase;
-        the first extension that answers wins. Several extensions run in entry-point order under one
-        `HOOK_TIMEOUT_S`. Never called for a phone (remote-mic) dictation.
+        was recognised but failed). Called before the core's own commands (but after "nexus flag", which the core
+        handles first when `[experimental].flag_command` is on), so an extension can take over a phrase; the first
+        extension that answers wins. Several extensions run in entry-point order and, together with `on_dictation`,
+        share one `HOOK_TIMEOUT_S` per dictation. A hook that is too slow or raises is skipped and the dictation is
+        typed, so do the action itself quickly (or on a thread of your own). Never called for a phone (remote-mic)
+        dictation.
         """
         return None
 
@@ -477,14 +480,23 @@ class ExtensionRegistry:
 
     # ---- Hooks: dictation and selection commands -----------------------------
 
-    def command(self, text: str, app: ActiveApp) -> tuple[str, bool] | None:
+    def has_command_hook(self) -> bool:
+        """True when any loaded extension overrides `on_command`; with none, asking costs nothing."""
+        return any(type(e).on_command is not Extension.on_command for e in self.extensions)
+
+    def command(self, text: str, app: ActiveApp, *, budget_s: float | None = None) -> tuple[str, bool] | None:
         """`(label, opened)` from the first extension whose `on_command` takes *text*, else None.
 
         An extension that raises, is too slow or answers something other than a `(non-empty str, bool)` pair
-        is logged and skipped; the next one is asked, and when none takes it the dictation goes on as usual.
+        is logged and skipped; the next one is asked, and when none takes it the dictation goes on as usual (so
+        a hook that timed out may already have acted: keep the action quick, see docs/EXTENSIONS.md). Extensions
+        that do not override `on_command` are not called. *budget_s* is the time all of them may take together;
+        the caller passes what is left of the dictation's `HOOK_TIMEOUT_S` on to `dictation`.
         """
-        deadline = time.monotonic() + HOOK_TIMEOUT_S
+        deadline = time.monotonic() + (HOOK_TIMEOUT_S if budget_s is None else budget_s)
         for extension in self.extensions:
+            if type(extension).on_command is Extension.on_command:
+                continue
             answer = self._guarded(
                 (extension.name, "on_command"),
                 f"Extension {extension.name}",
@@ -506,18 +518,20 @@ class ExtensionRegistry:
                 logger.info("Extension %s handled the command %r", extension.name, Text(text))
                 return answer[0], answer[1]
             logger.error(
-                "Extension %s answered on_command with %r, not a (label, opened) pair; ignored", extension.name, answer
+                "Extension %s answered on_command with %s, not a (label, opened) pair; ignored",
+                extension.name,
+                type(answer).__name__,
             )
         return None
 
-    def dictation(self, text: str, app: ActiveApp) -> str:
+    def dictation(self, text: str, app: ActiveApp, *, budget_s: float | None = None) -> str:
         """*text* as every extension's `on_dictation` leaves it, in load order.
 
         An extension that raises, returns something that is not a string, or does not answer in time is
-        skipped: the text stays as the previous step left it. The whole chain shares one `HOOK_TIMEOUT_S`. With
-        no extension this returns *text* itself.
+        skipped: the text stays as the previous step left it. The whole chain shares one `HOOK_TIMEOUT_S`, or the
+        *budget_s* the caller says is left of it after `command`. With no extension this returns *text* itself.
         """
-        deadline = time.monotonic() + HOOK_TIMEOUT_S
+        deadline = time.monotonic() + (HOOK_TIMEOUT_S if budget_s is None else budget_s)
         for extension in self.extensions:
             result = self._text_hook(extension, "on_dictation", deadline, text, app)
             if result is not None:

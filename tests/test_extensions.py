@@ -1141,3 +1141,38 @@ def test_an_extension_without_the_command_hook_loads_and_takes_nothing():
         name = "plain"
 
     assert _registry(Plain()).command("open a", APP) is None
+
+
+def test_has_command_hook_is_true_only_for_an_extension_that_overrides_it():
+    class Plain(V1Extension):
+        name = "plain"
+
+    assert _registry(Plain()).has_command_hook() is False
+    assert ExtensionRegistry().has_command_hook() is False
+    assert _registry(Plain(), Opens("opens", {})).has_command_hook() is True
+
+
+def test_command_skips_extensions_that_do_not_override_it(monkeypatch):
+    class Plain(V1Extension):
+        name = "plain"
+
+    real = ext._start_call
+    started = []
+    monkeypatch.setattr(ext, "_start_call", lambda fn, *args: started.append(fn) or real(fn, *args))
+    one = Opens("opens", {"open a": ("[opens] a", True)})
+    assert _registry(Plain(), one).command("open a", APP) == ("[opens] a", True)
+    assert len(started) == 1  # no helper thread for the extension without the hook
+
+
+def test_a_malformed_command_answer_never_logs_the_dictated_text(caplog):
+    secret = "my private address Hauptstrasse 1"
+    bad = Opens("bad", {"open a": (secret, "yes")})
+    assert _registry(bad).command("open a", APP) is None
+    assert secret not in caplog.text and "tuple" in caplog.text
+
+
+def test_command_and_dictation_share_the_budget_the_caller_passes(monkeypatch):
+    suffix = Suffix("b", "!")
+    registry = _registry(suffix)
+    assert registry.dictation("hi", APP, budget_s=0) == "hi" and suffix.seen == []  # nothing left after on_command
+    assert registry.dictation("hi", APP, budget_s=1.0) == "hi!"

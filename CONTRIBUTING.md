@@ -1,7 +1,7 @@
 # Contributing to NexusVox
 
 Thanks for your interest. NexusVox is a local speech-to-text tool for Windows. It is actively
-maintained and developed: the free app stays open source, and a NexusVox Pro edition with paid
+maintained and developed: the free app stays source-available, and a NexusVox Pro edition with paid
 add-ons is in development.
 
 The maintainer does not watch the repository daily. Issues and pull requests are read and
@@ -121,15 +121,15 @@ decide whether a finding is a bug or intended behaviour.
 
 ## Licensing
 
-NexusVox is licensed under the GNU Affero General Public License v3.0 or later. Your contribution is released under that licence, and the Contributor License Agreement below also lets the owner offer it under other terms.
+NexusVox is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE). Your contribution is released under that licence, and the Contributor License Agreement below also lets the owner offer it under other terms.
 
 ### Contributor License Agreement (CLA)
 
 By opening a pull request you agree that:
 
 1. **You wrote it, or have the right to submit it.** The contribution is your own work, or you are allowed to contribute it, and it does not knowingly infringe anyone else's rights. If your employer has rights in what you write, you have their permission.
-2. **You keep your copyright.** You grant NightShift AI GmbH (the "owner") a perpetual, worldwide, non-exclusive, royalty-free, irrevocable licence to use, modify, sublicense and distribute your contribution, **including the right to relicense it under any other terms, such as a commercial licence**, alongside the AGPL-3.0-or-later.
-3. **The open-source release stays.** Your contribution remains available to everyone under the AGPL-3.0-or-later as part of NexusVox.
+2. **You keep your copyright.** You grant NightShift AI GmbH (the "owner") a perpetual, worldwide, non-exclusive, royalty-free, irrevocable licence to use, modify, sublicense and distribute your contribution, **including the right to relicense it under any other terms, such as a commercial licence**, alongside the PolyForm Noncommercial License 1.0.0.
+3. **The source-available release stays.** Your contribution remains available to everyone for noncommercial use under the PolyForm Noncommercial License 1.0.0 as part of NexusVox.
 4. **Contributions are provided as is,** without warranty.
 
 **How to accept:** tick the CLA box in the pull request template. A pull request without it is not merged. You accept once per pull request, and the agreement covers every commit in it.

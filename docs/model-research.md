@@ -54,7 +54,7 @@ maintainer's own machine (the 36x figure is a 9800X3D). Where this matters it is
   8x vs 36x) or tied to a runtime that does not work here (Photon).
 - **Parakeet Ultra** has a real accuracy edge on the card (German 3.61 vs 4.13), but it only runs inside
   Moondream's Photon runtime, whose licence is not stated on its package page, and the runtime is
-  documented as GPU-oriented. Shipping it would make a proprietary binary a hard dependency of an AGPL
+  documented as GPU-oriented. Shipping it would make a proprietary binary a hard dependency of the
   product. Untested on the GPU here. Revisit if Moondream publishes the runtime licence and ONNX or NeMo
   weights load in a standard runtime.
 - **Parakeet Redux** is tempting for weak CPUs (178 MB, 113x on server cores) but costs about a point of
@@ -87,7 +87,7 @@ in the release notes.
 
 ## Licences
 
-NexusVox is AGPL-3.0-or-later with a commercial licence on request, and ships **no weights**: models are
+NexusVox is source-available under PolyForm Noncommercial 1.0.0 with a commercial licence on request, and ships **no weights**: models are
 downloaded by the user from Hugging Face. The question "may we download or offer it in a product with
 free private use and paid commercial use" reduces to: does the model licence allow commercial use and
 redistribution/download by the user, and what does it demand in return. Not legal advice.

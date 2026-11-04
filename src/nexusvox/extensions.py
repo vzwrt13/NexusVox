@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -38,6 +39,8 @@ logger = logging.getLogger(__name__)
 # Bumped on a change that breaks existing extensions; an additive change keeps it.
 API_VERSION = 1
 ENTRY_POINT_GROUP = "nexusvox.extensions"
+# Developer switch: exactly "1" starts the app without any entry-point extension (docs/EXTENSIONS.md).
+DISABLE_ENV_VAR = "NEXUSVOX_NO_EXTENSIONS"
 # How long a dictation or selection hook may take before its result is dropped and the text stays as it was.
 HOOK_TIMEOUT_S = 3.0
 # A selection command may wait for a local language model; nobody types meanwhile and the core polish allows longer.
@@ -341,8 +344,12 @@ class ExtensionRegistry:
     def load(self, entry_point_list: list | None = None) -> None:
         """Load every extension of the entry-point group; skip, and log, any that fails.
 
-        `entry_point_list` replaces the discovery (tests pass fakes).
+        `entry_point_list` replaces the discovery (tests pass fakes). With `NEXUSVOX_NO_EXTENSIONS=1`
+        nothing is loaded.
         """
+        if os.environ.get(DISABLE_ENV_VAR) == "1":
+            logger.info("Extensions are disabled by %s=1; none loaded", DISABLE_ENV_VAR)
+            return
         try:
             found = (
                 list(entry_point_list) if entry_point_list is not None else list(entry_points(group=ENTRY_POINT_GROUP))

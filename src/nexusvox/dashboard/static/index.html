@@ -22,6 +22,9 @@
       <button class="tab" data-tab="review">Review</button>
       <button class="tab tab-dev" data-tab="dev" data-feature="dev_tab" hidden>Dev</button>
     </nav>
+    <nav class="tabs tabs-footer">
+      <button class="tab" id="feedback-tab-button" data-tab="feedback" hidden>Feedback</button>
+    </nav>
   </header>
 
   <main>
@@ -114,7 +117,7 @@
           <div class="setting-info">
             <h3>Auto Cleanup</h3>
             <p>Tidies every dictation through the same model before it is typed. Light: removes fillers ("um", "äh"), false starts and repeated words, fixes punctuation, keeps your wording. Medium: also grammar, slightly more concise. Adds about half a second with a GPU; while the model is still loading, or when its reply does not look like your text cleaned up, the dictation is typed unchanged. Saved as spoken.</p>
-            <p class="settings-hint" id="cleanup-cpu-hint" hidden>No CUDA GPU found: Cleanup runs on the CPU and adds about 2-6 s per dictation.</p>
+            <p class="settings-hint status-line warn" id="cleanup-cpu-hint" hidden>No CUDA GPU found: Cleanup runs on the CPU and adds about 2-6 s per dictation.</p>
           </div>
           <select id="cleanup-level-select" class="select-input">
             <option value="off">Off</option>
@@ -288,7 +291,7 @@
           <span class="model-status-spinner"></span>
           <span id="model-status-text"></span>
         </div>
-        <p class="settings-hint model-caution">Switching GPU-backed models restarts Docker containers and reloads weights. CPU (in-process Whisper) switches reload the model directly — may take 5–20s on first load.</p>
+        <p class="settings-hint model-caution status-line warn">Switching GPU-backed models restarts Docker containers and reloads weights. CPU (in-process Whisper) switches reload the model directly — may take 5–20s on first load.</p>
         <div class="settings-sub" id="model-overview-card">
           <h3 class="overview-title">Model Overview</h3>
           <div id="model-overview-grid" class="overview-grid"></div>
@@ -455,6 +458,38 @@
         </div>
       </details>
 
+    </section>
+
+    <!-- Feedback Tab (shown only when [support].feedback_form_url is set) -->
+    <section id="tab-feedback" class="tab-content" hidden>
+      <div class="settings-card">
+        <h4 class="nexus-section-title">Feedback &amp; bug reports</h4>
+        <p class="settings-hint" style="margin-top: 6px;">Tell us what works, what you wish for, or what broke.</p>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Send feedback or report a bug</h3>
+            <p>Opens the feedback form in your browser. Only the NexusVox version, the Windows version and whether this PC runs CPU-only or with an NVIDIA GPU are filled in. Your dictated text, audio and logs are never sent.</p>
+          </div>
+          <button type="button" class="btn" id="send-feedback">Send feedback or report a bug</button>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Reporting a bug?</h3>
+            <p>Attach the log file: it is in <code id="feedback-log-dir">%LOCALAPPDATA%\NexusVox\logs</code> (one file per day). Dictated text is shortened there to its first 20 characters unless you turned on full-text logging.</p>
+            <p id="feedback-log-error" class="settings-hint" hidden></p>
+          </div>
+          <button type="button" class="btn" id="open-log-folder-feedback">Open log folder</button>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Questions or support</h3>
+            <p>Write to <a href="mailto:nexusvox@nightshift-ai.de">nexusvox@nightshift-ai.de</a>.</p>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Analytics Tab -->

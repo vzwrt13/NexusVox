@@ -3,7 +3,7 @@
 # NexusVox
 
 [![CI](https://github.com/vzwrt13/NexusVox/actions/workflows/ci.yml/badge.svg)](https://github.com/vzwrt13/NexusVox/actions/workflows/ci.yml)
-[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![Platform](https://img.shields.io/badge/platform-Windows%2011-blue.svg)](#platform)
 
@@ -13,8 +13,8 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 
 **An NVIDIA GPU is strongly recommended.** A CPU-only path exists and needs no Docker, but it is slow enough that dictation stops feeling immediate — see [Performance](#performance) for measured numbers before you choose it.
 
-> **Project status.** NexusVox is actively maintained and developed. The free app stays open source
-> under the AGPL. A NexusVox Pro edition with paid add-ons is in development; there is no release date
+> **Project status.** NexusVox is actively maintained and developed. The free app is source-available
+> under the PolyForm Noncommercial License 1.0.0. A NexusVox Pro edition with paid add-ons is in development; there is no release date
 > yet. Issues and pull requests are welcome.
 
 ![The NexusVox analytics dashboard: a dark interface with tiles for transcription count, average, minimum and maximum words per minute, average duration and minutes saved, above a line chart of transcriptions over time with a date-range filter.](docs/images/dashboard.png)
@@ -114,7 +114,7 @@ See [GettingStarted.md](GettingStarted.md) for the full setup guide including co
 ¹ **Attribution required.** CC-BY-4.0 obliges you to credit NVIDIA if you redistribute the model.
 ² **Your own backend.** Any server that speaks the OpenAI-compatible HTTP or realtime WebSocket protocol, set under `[inference.custom]`. Audio leaves this PC if the server is remote — see [docs/CUSTOM_SERVER.md](docs/CUSTOM_SERVER.md).
 
-Model licenses are **separate from NexusVox's own license** — NexusVox is AGPL-3.0, but no model weights ship with it; each model is downloaded from Hugging Face under its own terms. Check the license of the model you pick, especially for commercial use.
+Model licenses are **separate from NexusVox's own license** — NexusVox is PolyForm Noncommercial 1.0.0, but no model weights ship with it; each model is downloaded from Hugging Face under its own terms. Check the license of the model you pick, especially for commercial use.
 
 Select your device in the dashboard Settings tab: `Auto` (detect CUDA, fall back to CPU; with Parakeet on a CUDA machine each dictation, meeting and upload uses the Docker server while it answers and CPU Parakeet when it does not, without speaker detection, and the app warms the server up at start), `GPU (CUDA)`, or `CPU`. On CPU, only the entries that run in-process are shown (Parakeet among them, without speaker detection).
 
@@ -194,13 +194,13 @@ Windows 11 only. NexusVox uses Win32 APIs (`SendInput`, `WM_PASTE`) for text inj
 
 ## Free and Pro (coming soon)
 
-The **core of NexusVox stays free and open source under the AGPL-3.0-or-later**. That includes dictation, polish, auto cleanup, file upload transcription and speaker detection. Basic export (TXT, SRT, VTT) is free. Nothing listed here is going to become paid.
+The **core of NexusVox stays free and source-available under the PolyForm Noncommercial License 1.0.0**. That includes dictation, polish, auto cleanup, file upload transcription and speaker detection. Basic export (TXT, SRT, VTT) is free. Nothing listed here is going to become paid.
 
 **Pro** is a separate, commercial extension that sits next to the core. It adds on top of NexusVox and does not take anything away from it.
 
 Pro is being built and is not on sale yet. The first planned Pro features are local summaries and minutes templates; there are no dates yet.
 
-A commercial licence for the core itself (for example to use it without the AGPL's source-sharing terms) is available on request: info@nightshift-ai.de. Contributions are accepted under the [CLA](CONTRIBUTING.md#contributor-license-agreement-cla), which is what makes this possible.
+Commercial use of the core needs NexusVox Pro or a commercial licence, available on request: info@nightshift-ai.de. Contributions are accepted under the [CLA](CONTRIBUTING.md#contributor-license-agreement-cla), which is what makes this possible.
 
 ---
 
@@ -212,11 +212,14 @@ Bug reports and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING
 
 ## License
 
-NexusVox is licensed under the **GNU Affero General Public License v3.0 or later** — see [LICENSE](LICENSE).
+NexusVox is **source-available** under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**. The licence does not allow commercial use.
 
-In practice: use it, study it, change it, run it — privately or inside your company — as much as you like. If you distribute a modified version, or offer one to others over a network, you must make your source available under the same license. That is the whole deal: improvements to NexusVox stay available to everyone.
+In plain words:
 
-If those terms don't fit your case, a separate commercial license can be arranged with the copyright holder (NightShift AI GmbH, info@nightshift-ai.de).
+- **Free** for private use, and for schools, public bodies, research institutions and charitable organisations. You can read, change and run the code for those purposes.
+- **Commercial use** (for example inside a company) needs NexusVox Pro or a commercial licence. Write to the copyright holder, NightShift AI GmbH, info@nightshift-ai.de.
+
+The licence text in [LICENSE](LICENSE) is the only binding wording; this summary is not legal advice.
 
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) covers the bundled Chart.js (MIT), the licenses of the runtime dependencies and the speaker detection model.
 

@@ -23,6 +23,18 @@
   };
 })();
 
+// ── Status colour rule ───────────────────────────────────────────────
+// One rule for every status line: "ok" (green) = works as expected, "warn" (yellow) = works, but with a caveat
+// the user should know (slower on the CPU, a fallback is active), "down" (red) = does not work or is not
+// reachable. Anything else is neutral. Set the state through this helper, never by writing class names.
+const STATUS_STATES = ["ok", "warn", "down"];
+function setStatus(el, state, text) {
+  el.classList.add("status-line");
+  el.classList.remove(...STATUS_STATES);
+  if (STATUS_STATES.includes(state)) el.classList.add(state);
+  if (text !== undefined) el.textContent = text;
+}
+
 // ── Globals ──────────────────────────────────────────────────────────
 // Chart colors come from the :root variables in style.css, so the stylesheet is the single source
 // of the theme. The fallbacks only matter when the stylesheet failed to load.
@@ -255,6 +267,13 @@ const logFullTextToggle = document.getElementById("log-full-text-toggle");
 const openLogFolderButton = document.getElementById("open-log-folder");
 const logOpenError = document.getElementById("log-open-error");
 const logDirLabel = document.getElementById("log-dir");
+const feedbackTabButton = document.getElementById("feedback-tab-button");
+const feedbackPanel = document.getElementById("tab-feedback");
+const feedbackLogDirLabel = document.getElementById("feedback-log-dir");
+const feedbackLogError = document.getElementById("feedback-log-error");
+const openLogFolderFeedbackButton = document.getElementById("open-log-folder-feedback");
+const sendFeedbackButton = document.getElementById("send-feedback");
+let feedbackUrl = "";
 const learnFromEditsToggle = document.getElementById("learn-from-edits-toggle");
 const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
 const hotkeyMods = Array.from(document.querySelectorAll("#hotkey-mods input"));
@@ -271,10 +290,13 @@ const llmStatus = document.getElementById("llm-status");
 
 async function loadLlmStatus() {
   const s = await api("/api/settings/llm-status");
-  llmStatus.className = "status-line " + (s.reachable ? "ok" : "down");
-  llmStatus.textContent = s.reachable
-    ? `● Model server reachable at ${s.url} (model ${s.model})`
-    : `○ No model server at ${s.url} — polish plays the error beep`;
+  setStatus(
+    llmStatus,
+    s.reachable ? "ok" : "down",
+    s.reachable
+      ? `● Model server reachable at ${s.url} (model ${s.model})`
+      : `○ No model server at ${s.url} — polish plays the error beep`,
+  );
 }
 const hotkeyRecordBtn = document.getElementById("hotkey-record-btn");
 const hotkeyStatus = document.getElementById("hotkey-status");
@@ -330,8 +352,7 @@ function renderHotkey(s) {
 
 function showHotkeyStatus(text, cls) {
   hotkeyStatus.hidden = !text;
-  hotkeyStatus.className = "status-line " + (cls || "");
-  hotkeyStatus.textContent = text;
+  setStatus(hotkeyStatus, cls, text);
 }
 
 async function saveHotkey() {
@@ -410,38 +431,42 @@ const translatorStatus = document.getElementById("translator-status");
 
 // Probed live so the toggle never looks like it works while nothing is listening.
 async function loadTranslatorStatus() {
-  translatorStatus.className = "status-line";
-  translatorStatus.textContent = "Checking translator…";
+  setStatus(translatorStatus, "", "Checking translator…");
   let s;
   try {
     s = await api("/api/settings/translator-status");
   } catch (err) {
-    translatorStatus.className = "status-line down";
-    translatorStatus.textContent = "○ Could not check the translator (" + err.message + ")";
+    setStatus(translatorStatus, "down", "○ Could not check the translator (" + err.message + ")");
     return;
   }
   if (s.reachable) {
-    translatorStatus.className = "status-line ok";
-    translatorStatus.textContent = "● Translator reachable at " + s.url;
+    setStatus(translatorStatus, "ok", "● Translator reachable at " + s.url);
   } else {
-    translatorStatus.className = "status-line down";
-    translatorStatus.textContent =
-      "○ No translator at " + s.url + (translateToggle.checked ? " — text is typed untranslated" : "");
+    setStatus(
+      translatorStatus,
+      "down",
+      "○ No translator at " + s.url + (translateToggle.checked ? " — text is typed untranslated" : ""),
+    );
   }
 }
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 storeAudioToggle.addEventListener("change", () => postSetting("/api/settings/store-audio", { enabled: storeAudioToggle.checked }));
 logFullTextToggle.addEventListener("change", () => postSetting("/api/settings/log-full-text", { enabled: logFullTextToggle.checked }));
-openLogFolderButton.addEventListener("click", async () => {
-  logOpenError.hidden = true;
+sendFeedbackButton.addEventListener("click", () => {
+  if (feedbackUrl) window.open(feedbackUrl, "_blank", "noopener,noreferrer");
+});
+async function openLogFolder(errorLine) {
+  errorLine.hidden = true;
   try {
     const r = await fetch("/api/log-folder/open", { method: "POST" });
     if (!r.ok) throw new Error((await r.json()).error || "The log folder could not be opened.");
   } catch (e) {
-    logOpenError.textContent = e.message;
-    logOpenError.hidden = false;
+    errorLine.textContent = e.message;
+    errorLine.hidden = false;
   }
-});
+}
+openLogFolderButton.addEventListener("click", () => openLogFolder(logOpenError));
+openLogFolderFeedbackButton.addEventListener("click", () => openLogFolder(feedbackLogError));
 learnFromEditsToggle.addEventListener("change", async () => {
   await postSetting("/api/settings/learn-from-edits", { enabled: learnFromEditsToggle.checked });
   loadLearnStatus();
@@ -476,7 +501,7 @@ async function loadLearnStatus() {
     .filter(([k]) => !watchedKeys.has(k))
     .sort((a, b) => b[1] - a[1]);
   const skippedTotal = skipped.reduce((n, [, c]) => n + c, 0);
-  learnStatus.className = "status-line" + (s.last && s.last.outcome === "suggested" ? " ok" : "");
+  setStatus(learnStatus, s.last && s.last.outcome === "suggested" ? "ok" : "");
   if (!s.last) {
     learnStatus.textContent = learnFromEditsToggle.checked ? "No paste watched since NexusVox started." : "";
     return;
@@ -571,6 +596,10 @@ async function loadSettings() {
   storeAudioToggle.checked = s.store_audio;
   logFullTextToggle.checked = s.log_full_text;
   logDirLabel.textContent = s.log_dir;
+  feedbackLogDirLabel.textContent = s.log_dir;
+  feedbackUrl = s.feedback_url || "";
+  feedbackTabButton.hidden = !feedbackUrl;
+  feedbackPanel.hidden = !feedbackUrl;
   learnFromEditsToggle.checked = s.learn_from_edits;
   loadLearnStatus();
   polishTerminalsToggle.checked = s.polish_in_terminals;
@@ -826,7 +855,7 @@ async function loadDeviceSettings() {
     deviceSelect.value = d.requested;
     renderDeviceHint(d);
   } catch {
-    deviceResolved.textContent = "";
+    setStatus(deviceResolved, "", "");
   }
 }
 
@@ -835,6 +864,12 @@ function renderDeviceHint(d) {
   const resolvedLabel = d.resolved === "cuda" ? "GPU (CUDA)" : "CPU";
   const cudaNote = d.cuda_available ? "CUDA available on this system." : "No CUDA device detected.";
   deviceResolved.textContent = `Resolved: ${resolvedLabel} — ${cudaNote}`;
+  // "Auto" that ended up on the CPU is a fallback (works, slower): yellow. A GPU asked for explicitly on a
+  // machine without CUDA will not work after the restart: red.
+  let state = "";
+  if (d.requested === "auto" && d.resolved !== "cuda") state = "warn";
+  else if (d.requested === "cuda" && !d.cuda_available) state = "down";
+  setStatus(deviceResolved, state);
 }
 
 if (deviceSelect) {
@@ -2419,8 +2454,7 @@ function editFileTitle(card) {
     row.querySelector(".upload-rename").addEventListener("click", () => editFileTitle(card));
     if (error) {
       const note = document.createElement("span");
-      note.className = "status-line down";
-      note.textContent = "✕ " + error;
+      setStatus(note, "down", "✕ " + error);
       row.append(note);
     }
   };
@@ -2519,7 +2553,7 @@ function askDeleteFileTranscription(row) {
     <span class="upload-delete-ask">Delete this ${kind}? This cannot be undone.</span>
     <button type="button" class="period-btn upload-delete-btn upload-delete-confirm">Delete</button>
     <button type="button" class="period-btn upload-delete-cancel">Cancel</button>
-    <span class="status-line down upload-delete-error" hidden></span>`;
+    <span class="upload-delete-error" hidden></span>`;
   row.querySelector(".upload-delete-cancel").addEventListener("click", () => {
     row.innerHTML = '<button type="button" class="period-btn upload-delete-btn">Delete</button>';
     row.querySelector(".upload-delete-btn").addEventListener("click", () => askDeleteFileTranscription(row));
@@ -2530,7 +2564,7 @@ function askDeleteFileTranscription(row) {
     const result = await resp.json();
     if (!resp.ok || !result.ok) {
       const err = row.querySelector(".upload-delete-error");
-      err.textContent = "✕ " + (result.error || "Delete failed");
+      setStatus(err, "down", "✕ " + (result.error || "Delete failed"));
       err.hidden = false;
       event.target.disabled = false;
       return;
@@ -2579,8 +2613,7 @@ function formatClock(seconds) {
 
 function showMeetingStatus(text, cls) {
   meetingStatus.hidden = !text;
-  meetingStatus.className = "status-line " + (cls || "");
-  meetingStatus.textContent = text;
+  setStatus(meetingStatus, cls, text);
 }
 
 // Live transcript: poll the new segments every 2 s while a meeting records. Text goes in with textContent only.
@@ -2690,7 +2723,7 @@ async function stopMeeting() {
     if (!result.ok && !result.busy) {
       showMeetingStatus("✕ " + result.error, "down");
     } else if (result.busy) {
-      showMeetingStatus("● " + result.error + ". Transcribe it below once that is done.", "");
+      showMeetingStatus("● " + result.error + ". Transcribe it below once that is done.", "warn");
       loadFileTranscriptions();
     } else {
       trackMeetingJob(result.job_id);
@@ -2750,13 +2783,13 @@ async function loadPendingMeetings() {
         <button type="button" class="period-btn pending-transcribe">Transcribe</button>
         <button type="button" class="period-btn upload-delete-btn pending-delete">Delete</button>
       </div>
-      <p class="status-line down pending-error" hidden></p>
+      <p class="pending-error" hidden></p>
     </div>`).join("");
   list.querySelectorAll(".flagged-card").forEach((card) => {
     const name = card.dataset.name;
     const row = card.querySelector(".upload-delete-row");
     const error = card.querySelector(".pending-error");
-    const fail = (text) => { error.textContent = "✕ " + text; error.hidden = false; };
+    const fail = (text) => { setStatus(error, "down", "✕ " + text); error.hidden = false; };
     card.querySelector(".pending-transcribe").addEventListener("click", async () => {
       error.hidden = true;
       const resp = await fetch(`/api/meetings/pending/${encodeURIComponent(name)}/transcribe`, { method: "POST" });
@@ -2837,10 +2870,10 @@ async function saveMeetingHotkey() {
   renderMeetingHotkey(s);
   meetingHotkeyStatus.hidden = false;
   if (s.error) {
-    meetingHotkeyStatus.className = "status-line down";
+    setStatus(meetingHotkeyStatus, "down");
     meetingHotkeyStatus.textContent = "✕ " + s.error;
   } else {
-    meetingHotkeyStatus.className = "status-line ok";
+    setStatus(meetingHotkeyStatus, "ok");
     meetingHotkeyStatus.textContent = "● Meeting hotkey is now " + describeHotkey(s.meeting_modifiers, s.meeting_key);
   }
 }

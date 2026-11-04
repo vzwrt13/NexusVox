@@ -36,6 +36,7 @@
   --green: #00d2a0;
   --green-soft: rgba(0, 210, 160, 0.1);
   --red: #ff6b6b;
+  --yellow: #ffd43b;
   --orange: #ffa94d;
   --radius: 18px;
   --radius-sm: 12px;
@@ -65,7 +66,11 @@ button, input, select, textarea { font-family: inherit; }
 header {
   flex: 0 0 232px;
   width: 232px;
-  align-self: stretch;
+  /* Fixed to the viewport: only <main> scrolls, so the footer entry is always in view */
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  align-self: flex-start;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -88,12 +93,24 @@ header h1 {
 .brand-vox { color: var(--green); }
 
 .tabs {
-  position: sticky;
-  top: 24px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
+
+/* Feedback sits alone at the bottom of the sidebar, apart from the working tabs */
+.tabs-footer {
+  flex: 0 0 auto;
+  overflow-y: visible;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.tabs-footer .tab[hidden] { display: none; }
+.tabs-footer:not(:has(.tab:not([hidden]))) { display: none; }
 
 .tab {
   display: flex;
@@ -154,6 +171,7 @@ body::before {
 [data-feature][hidden] { display: none !important; } /* experimental features, see [experimental] */
 .tab-content { display: none; }
 .tab-content.active { display: block; }
+.tab-content[hidden] { display: none; }
 
 
 /* Settings */
@@ -202,8 +220,11 @@ body::before {
 .setting-info h3 { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
 .setting-info p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
 .setting-info code { font-family: var(--mono); font-size: 12px; background: var(--surface3); padding: 1px 5px; border-radius: 4px; }
+/* Status colour rule (setStatus in dashboard.js): green .ok = works as expected; yellow .warn = works, with a
+   caveat the user should know; red .down = does not work or is not reachable. No class = neutral. */
 .status-line { margin-top: 6px; }
 .status-line.ok { color: var(--green); }
+.status-line.warn { color: var(--yellow); }
 .status-line.down { color: var(--red); }
 
 .badge {
@@ -218,6 +239,7 @@ body::before {
   border-radius: 999px;
   vertical-align: middle;
 }
+.badge.warn { background: rgba(255, 212, 59, 0.15); color: var(--yellow); }
 
 /* Toggle switch */
 .toggle { position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0; }
@@ -314,11 +336,7 @@ body::before {
   border-radius: 4px;
   font-size: 11px;
 }
-.settings-hint.model-caution {
-  margin-top: 12px;
-  color: var(--orange);
-  opacity: 0.85;
-}
+.settings-hint.model-caution { margin-top: 12px; }
 
 /* Stats row */
 .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; margin-bottom: 20px; }
@@ -621,7 +639,7 @@ canvas { width: 100% !important; max-height: 260px; }
 .upload-note {
   padding: 10px 14px;
   font-size: 13px;
-  color: var(--orange);
+  color: var(--yellow);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   margin-bottom: 12px;
@@ -1064,8 +1082,8 @@ canvas { width: 100% !important; max-height: 260px; }
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  background: rgba(255, 169, 77, 0.15);
-  color: var(--orange);
+  background: rgba(255, 212, 59, 0.15);
+  color: var(--yellow);
   padding: 2px 7px;
   border-radius: 4px;
   vertical-align: middle;
@@ -1217,13 +1235,15 @@ canvas { width: 100% !important; max-height: 260px; }
     z-index: 10;
     flex: none;
     width: auto;
+    height: auto;
     align-self: auto;
     gap: 16px;
     padding: 16px;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
-  .tabs { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .tabs { flex: none; overflow-y: visible; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .tabs-footer { margin-top: 0; padding-top: 0; border-top: none; }
   .tab { width: auto; padding: 9px 12px; }
   main { padding: 24px 16px 40px; }
   .charts-grid { grid-template-columns: minmax(0, 1fr); }
@@ -1249,7 +1269,7 @@ canvas { width: 100% !important; max-height: 260px; }
 .meeting-consent {
   margin-top: 16px;
   padding: 16px 20px;
-  border: 1px solid var(--orange);
+  border: 1px solid var(--yellow);
   border-radius: var(--radius-sm);
   background: var(--surface2);
 }

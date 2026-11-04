@@ -8,7 +8,7 @@ version = "0.7.0"
 description = "Local speech-to-text with push-to-talk and auto-insert — NVIDIA GPU recommended, CPU fallback available"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "AGPL-3.0-or-later"
+license = "PolyForm-Noncommercial-1.0.0"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 authors = [{ name = "NightShift AI GmbH", email = "info@nightshift-ai.de" }]
 keywords = [

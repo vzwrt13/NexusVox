@@ -15,6 +15,15 @@
     </div>
     <nav class="tabs">
       <button class="tab active" data-tab="settings">Settings</button>
+      <div class="subtabs" id="settings-submenu" aria-label="Settings sections">
+        <a class="subtab" href="#settings" data-card="settings-card-dictation">Dictation</a>
+        <a class="subtab" href="#settings" data-card="settings-card-vocabulary">Vocabulary</a>
+        <a class="subtab" href="#settings" data-card="settings-card-text-polish">Text &amp; Polish</a>
+        <a class="subtab" href="#settings" data-card="settings-card-models">Models</a>
+        <a class="subtab" href="#settings" data-card="meeting-settings-card">Meetings</a>
+        <a class="subtab" href="#settings" data-card="settings-card-privacy">Privacy</a>
+        <a class="subtab" href="#settings" data-card="settings-advanced">Advanced</a>
+      </div>
       <button class="tab" data-tab="analytics">Analytics</button>
       <button class="tab" data-tab="edit" data-feature="flag_command" hidden>Edit</button>
       <button class="tab" data-tab="meetings">Meetings</button>
@@ -30,7 +39,12 @@
   <main>
     <!-- Settings Tab -->
     <section id="tab-settings" class="tab-content active">
-      <div class="settings-card">
+      <div class="settings-search">
+        <input type="search" id="settings-search" placeholder="Search settings" aria-label="Search settings" autocomplete="off">
+      </div>
+      <p id="settings-no-match" class="settings-hint" hidden>No setting found</p>
+
+      <div class="settings-card" id="settings-card-dictation">
         <h4 class="nexus-section-title">Dictation</h4>
         <p class="settings-hint" style="margin-top: 6px;">The everyday basics: how you start a recording, what you speak and what you see while it runs.</p>
 
@@ -92,7 +106,72 @@
         </div>
       </div>
 
-      <div class="settings-card">
+      <div class="settings-card" id="settings-card-vocabulary">
+        <h4 class="nexus-section-title">Vocabulary</h4>
+        <p class="settings-hint" style="margin-top: 6px;">Words and phrases NexusVox should know: corrections, text shortcuts and rewrite instructions.</p>
+
+        <div class="settings-sub">
+          <div class="setting-info">
+            <h3>Correction Dictionary</h3>
+            <p>Words the model keeps getting wrong. Every match (whole word, any case) is replaced before the text is typed.</p>
+          </div>
+          <form id="dict-form" class="dict-form">
+            <input type="text" id="dict-wrong" class="dict-input" placeholder="As transcribed, e.g. nexus fox" required>
+            <span class="dict-arrow">&rarr;</span>
+            <input type="text" id="dict-right" class="dict-input" placeholder="Should be, e.g. NexusVox" required>
+            <button type="submit" class="flagged-play-btn dict-add-btn">Add</button>
+          </form>
+          <div id="dict-list" class="dict-list"></div>
+          <p class="settings-hint">Tip: correcting a recording in the Review tab suggests entries automatically.</p>
+
+          <div class="setting-row" style="margin-top: 16px;">
+            <div class="setting-info">
+              <h3>Learn From Edits</h3>
+              <p>After a paste, NexusVox reads the text field for a while (20 seconds by default, <code>[learn_from_edits].window_s</code>). Words you correct there show up below as suggestions; nothing is added without your OK. Password fields and terminals are never read, and nothing is learned from a dictation that auto cleanup or translation changed.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="learn-from-edits-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <p class="status-line" id="learn-status"></p>
+          <div id="dict-suggestions" class="dict-list"></div>
+        </div>
+        <div class="settings-sub">
+          <div class="setting-info">
+            <h3>Snippets</h3>
+            <p>Say a trigger phrase anywhere in a dictation and it is replaced by your stored text - an address, a signature, a link, a template. The text is inserted exactly as stored, line breaks included. Pick triggers you would not say by accident, in any language.</p>
+            <p>Options turn one trigger into a choice: with <code>open remote repo</code> and options like <code>NexusVox = https://github.com/...</code>, saying "open remote repo nexus vox" inserts that URL - the best-matching name wins, spaces and small mishearings do not matter. Say <code>nexus open ...</code> / <code>nexus öffne ...</code> in front to open the URL in your browser instead of typing it.</p>
+          </div>
+          <form id="snippet-form" class="dict-form snippet-form">
+            <input type="hidden" id="snippet-id">
+            <input type="text" id="snippet-trigger" class="dict-input" placeholder="Trigger, e.g. my address / meine Adresse" required>
+            <textarea id="snippet-expansion" class="dict-input snippet-expansion" rows="3" placeholder="Text to insert (optional with options: used when no option matches)"></textarea>
+            <textarea id="snippet-options" class="dict-input snippet-expansion" rows="3" placeholder="Options, one per line: name = text"></textarea>
+            <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-github" data-feature="github_snippets" hidden>Fill from GitHub</button>
+            <button type="submit" class="flagged-play-btn dict-add-btn" id="snippet-save">Add</button>
+            <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-cancel" hidden>Cancel</button>
+          </form>
+          <div id="snippet-list" class="dict-list"></div>
+        </div>
+        <div class="settings-sub">
+          <div class="setting-info">
+            <h3>Polish Presets</h3>
+            <p>Instructions you use often, under a short name. Select text, hold the hotkey, tap your polish key and say the name - "prompt engineer", "formal email" - and the stored instruction is used; words after the name are added to it ("formal email, and keep it short"). The default preset applies when you tap the polish key without saying anything. Names in any language; close spellings match.</p>
+          </div>
+          <form id="preset-form" class="dict-form snippet-form">
+            <input type="hidden" id="preset-id">
+            <input type="text" id="preset-name" class="dict-input" placeholder="Name, e.g. prompt engineer" required>
+            <textarea id="preset-instruction" class="dict-input snippet-expansion" rows="3" placeholder="Instruction, e.g. Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." required></textarea>
+            <label class="settings-hint"><input type="checkbox" id="preset-default"> Default when nothing is said</label>
+            <button type="submit" class="flagged-play-btn dict-add-btn" id="preset-save">Add</button>
+            <button type="button" class="flagged-play-btn dict-add-btn" id="preset-cancel" hidden>Cancel</button>
+          </form>
+          <div id="preset-list" class="dict-list"></div>
+        </div>
+      </div>
+
+      <div class="settings-card" id="settings-card-text-polish">
         <h4 class="nexus-section-title">Text &amp; Polish</h4>
         <p class="settings-hint" style="margin-top: 6px;">What happens to the words after you speak them: tidying, rewriting, translating and spoken formatting.</p>
 
@@ -209,72 +288,7 @@
         </div>
       </div>
 
-      <div class="settings-card">
-        <h4 class="nexus-section-title">Vocabulary</h4>
-        <p class="settings-hint" style="margin-top: 6px;">Words and phrases NexusVox should know: corrections, text shortcuts and rewrite instructions.</p>
-
-        <div class="settings-sub">
-          <div class="setting-info">
-            <h3>Correction Dictionary</h3>
-            <p>Words the model keeps getting wrong. Every match (whole word, any case) is replaced before the text is typed.</p>
-          </div>
-          <form id="dict-form" class="dict-form">
-            <input type="text" id="dict-wrong" class="dict-input" placeholder="As transcribed, e.g. nexus fox" required>
-            <span class="dict-arrow">&rarr;</span>
-            <input type="text" id="dict-right" class="dict-input" placeholder="Should be, e.g. NexusVox" required>
-            <button type="submit" class="flagged-play-btn dict-add-btn">Add</button>
-          </form>
-          <div id="dict-list" class="dict-list"></div>
-          <p class="settings-hint">Tip: correcting a recording in the Review tab suggests entries automatically.</p>
-
-          <div class="setting-row" style="margin-top: 16px;">
-            <div class="setting-info">
-              <h3>Learn From Edits</h3>
-              <p>After a paste, NexusVox reads the text field for a while (20 seconds by default, <code>[learn_from_edits].window_s</code>). Words you correct there show up below as suggestions; nothing is added without your OK. Password fields and terminals are never read, and nothing is learned from a dictation that auto cleanup or translation changed.</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="learn-from-edits-toggle">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <p class="status-line" id="learn-status"></p>
-          <div id="dict-suggestions" class="dict-list"></div>
-        </div>
-        <div class="settings-sub">
-          <div class="setting-info">
-            <h3>Snippets</h3>
-            <p>Say a trigger phrase anywhere in a dictation and it is replaced by your stored text - an address, a signature, a link, a template. The text is inserted exactly as stored, line breaks included. Pick triggers you would not say by accident, in any language.</p>
-            <p>Options turn one trigger into a choice: with <code>open remote repo</code> and options like <code>NexusVox = https://github.com/...</code>, saying "open remote repo nexus vox" inserts that URL - the best-matching name wins, spaces and small mishearings do not matter. Say <code>nexus open ...</code> / <code>nexus öffne ...</code> in front to open the URL in your browser instead of typing it.</p>
-          </div>
-          <form id="snippet-form" class="dict-form snippet-form">
-            <input type="hidden" id="snippet-id">
-            <input type="text" id="snippet-trigger" class="dict-input" placeholder="Trigger, e.g. my address / meine Adresse" required>
-            <textarea id="snippet-expansion" class="dict-input snippet-expansion" rows="3" placeholder="Text to insert (optional with options: used when no option matches)"></textarea>
-            <textarea id="snippet-options" class="dict-input snippet-expansion" rows="3" placeholder="Options, one per line: name = text"></textarea>
-            <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-github" data-feature="github_snippets" hidden>Fill from GitHub</button>
-            <button type="submit" class="flagged-play-btn dict-add-btn" id="snippet-save">Add</button>
-            <button type="button" class="flagged-play-btn dict-add-btn" id="snippet-cancel" hidden>Cancel</button>
-          </form>
-          <div id="snippet-list" class="dict-list"></div>
-        </div>
-        <div class="settings-sub">
-          <div class="setting-info">
-            <h3>Polish Presets</h3>
-            <p>Instructions you use often, under a short name. Select text, hold the hotkey, tap your polish key and say the name - "prompt engineer", "formal email" - and the stored instruction is used; words after the name are added to it ("formal email, and keep it short"). The default preset applies when you tap the polish key without saying anything. Names in any language; close spellings match.</p>
-          </div>
-          <form id="preset-form" class="dict-form snippet-form">
-            <input type="hidden" id="preset-id">
-            <input type="text" id="preset-name" class="dict-input" placeholder="Name, e.g. prompt engineer" required>
-            <textarea id="preset-instruction" class="dict-input snippet-expansion" rows="3" placeholder="Instruction, e.g. Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." required></textarea>
-            <label class="settings-hint"><input type="checkbox" id="preset-default"> Default when nothing is said</label>
-            <button type="submit" class="flagged-play-btn dict-add-btn" id="preset-save">Add</button>
-            <button type="button" class="flagged-play-btn dict-add-btn" id="preset-cancel" hidden>Cancel</button>
-          </form>
-          <div id="preset-list" class="dict-list"></div>
-        </div>
-      </div>
-
-      <div class="settings-card">
+      <div class="settings-card" id="settings-card-models">
         <h4 class="nexus-section-title">Models</h4>
         <p class="settings-hint" style="margin-top: 6px;">Which speech model turns your voice into text.</p>
 
@@ -380,7 +394,7 @@
         </div>
       </div>
 
-      <div class="settings-card">
+      <div class="settings-card" id="settings-card-privacy">
         <h4 class="nexus-section-title">Privacy</h4>
         <p class="settings-hint" style="margin-top: 6px;">What NexusVox keeps on this computer.</p>
 
@@ -468,7 +482,7 @@
         </div>
       </details>
 
-    </section>
+        </section>
 
     <!-- Feedback Tab (shown only when [support].feedback_form_url is set) -->
     <section id="tab-feedback" class="tab-content" hidden>

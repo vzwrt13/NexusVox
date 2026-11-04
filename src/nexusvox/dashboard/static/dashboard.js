@@ -3629,3 +3629,89 @@ function wordDiff(ref, hyp) {
 
   return parts.reverse().join(" ");
 }
+
+// ── Settings submenu and search ──────────────────────────────────────
+// The sidebar lists one entry per Settings card; the search field hides settings that do not match.
+function settingsCards() {
+  return Array.from(document.querySelectorAll("#tab-settings > .settings-card"));
+}
+
+function markActiveSubtab() {
+  const links = Array.from(document.querySelectorAll("#settings-submenu .subtab"));
+  let current = null;
+  for (const link of links) {
+    const card = document.getElementById(link.dataset.card);
+    if (card && !card.classList.contains("search-hidden") && card.getBoundingClientRect().top <= 120) current = link;
+  }
+  links.forEach((l) => l.classList.toggle("active", l === current));
+}
+
+document.querySelectorAll("#settings-submenu .subtab").forEach((link) => {
+  link.addEventListener("click", (e) => {
+    e.preventDefault();
+    const card = document.getElementById(link.dataset.card);
+    if (!card) return;
+    if (card.classList.contains("search-hidden")) clearSettingsSearch();
+    if (card.tagName === "DETAILS") card.open = true;
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+});
+window.addEventListener("scroll", markActiveSubtab, { passive: true });
+
+// A unit is a top-level setting row or sub-block of a card.
+function settingsUnits(card) {
+  return Array.from(card.querySelectorAll(".setting-row, .settings-sub")).filter(
+    (u) => !u.parentElement.closest(".setting-row, .settings-sub") && !u.closest("[hidden]"),
+  );
+}
+
+let advancedWasOpen = null;
+
+function applySettingsSearch() {
+  const input = document.getElementById("settings-search");
+  const query = input.value.trim().toLowerCase();
+  const advanced = document.getElementById("settings-advanced");
+  let shown = 0;
+  for (const card of settingsCards()) {
+    const units = settingsUnits(card);
+    card.classList.remove("search-hidden");
+    units.forEach((u) => u.classList.remove("search-hidden"));
+    if (!query) continue;
+    const titleText = (card.querySelector(".nexus-section-title, summary") || {}).textContent || "";
+    if (titleText.toLowerCase().includes(query)) {
+      shown++;
+      continue;
+    }
+    let any = false;
+    for (const u of units) {
+      if (u.textContent.toLowerCase().includes(query)) any = true;
+      else u.classList.add("search-hidden");
+    }
+    if (any) shown++;
+    else card.classList.add("search-hidden");
+  }
+  if (query) {
+    if (advancedWasOpen === null) advancedWasOpen = advanced.open;
+    if (!advanced.classList.contains("search-hidden")) advanced.open = true;
+  } else if (advancedWasOpen !== null) {
+    advanced.open = advancedWasOpen;
+    advancedWasOpen = null;
+  }
+  document.getElementById("settings-no-match").hidden = !query || shown > 0;
+  markActiveSubtab();
+}
+
+function clearSettingsSearch() {
+  const input = document.getElementById("settings-search");
+  input.value = "";
+  applySettingsSearch();
+}
+
+document.getElementById("settings-search").addEventListener("input", applySettingsSearch);
+document.getElementById("settings-search").addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && e.target.value) {
+    e.preventDefault();
+    clearSettingsSearch();
+  }
+});
+markActiveSubtab();

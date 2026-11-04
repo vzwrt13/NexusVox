@@ -106,6 +106,9 @@ For development (includes pytest):
 pip install -e ".[dev]"
 ```
 
+To run the plain app while an extension package is installed, set `NEXUSVOX_NO_EXTENSIONS=1` before
+starting it (details in [docs/EXTENSIONS.md](docs/EXTENSIONS.md)).
+
 ---
 
 ## 3. Configure

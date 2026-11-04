@@ -146,6 +146,37 @@ def test_load_accepts_a_class_an_instance_and_a_factory(tmp_path):
     assert [e.name for e in reg.extensions] == ["a", "b", "c"]
 
 
+@pytest.fixture(autouse=True)
+def _extensions_enabled(monkeypatch):
+    monkeypatch.delenv(ext.DISABLE_ENV_VAR, raising=False)
+
+
+def test_the_disable_variable_skips_all_extensions(monkeypatch, caplog):
+    class A(V1Extension):
+        name = "a"
+
+    monkeypatch.setenv("NEXUSVOX_NO_EXTENSIONS", "1")
+    reg = ExtensionRegistry()
+    with caplog.at_level("INFO", logger=ext.logger.name):
+        reg.load([fake_entry_point("a", A)])
+
+    assert reg.extensions == []
+    assert sum("disabled by NEXUSVOX_NO_EXTENSIONS=1" in r.message for r in caplog.records) == 1
+
+
+@pytest.mark.parametrize("value", [None, "", "0", "true", "yes", "2"])
+def test_other_values_of_the_disable_variable_change_nothing(monkeypatch, value):
+    class A(V1Extension):
+        name = "a"
+
+    if value is not None:
+        monkeypatch.setenv("NEXUSVOX_NO_EXTENSIONS", value)
+    reg = ExtensionRegistry()
+    reg.load([fake_entry_point("a", A)])
+
+    assert [e.name for e in reg.extensions] == ["a"]
+
+
 def test_load_asks_the_installed_entry_points_of_the_group(monkeypatch):
     class A(V1Extension):
         name = "a"

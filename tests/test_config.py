@@ -18,6 +18,7 @@ from nexusvox.config import (
     InferenceConfig,
     LearnFromEditsConfig,
     LlmConfig,
+    MeetingConfig,
     OSCommandsConfig,
     PolishConfig,
     VoiceCommandsConfig,
@@ -866,3 +867,12 @@ def test_numbers_as_digits_false_survives_save_roundtrip(tmp_path):
     save_config(Config(voice_commands=VoiceCommandsConfig(numbers_as_digits=False)), path)
 
     assert load_config(path).voice_commands.numbers_as_digits is False
+
+
+def test_meeting_fallback_list_starts_with_the_default_and_stays_alt_free_first():
+    from nexusvox import config as config_module
+
+    first = config_module._MEETING_HOTKEY_FALLBACKS[0]
+    assert first == (list(MeetingConfig().modifiers), MeetingConfig().key) and first[1] == "F9"
+    clash = HotkeyConfig(modifiers=["ctrl", "shift"], key="F9")
+    assert config_module.default_meeting_hotkey(clash) == (["ctrl", "shift"], "F10")

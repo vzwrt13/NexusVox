@@ -136,6 +136,8 @@ DEFAULT_HOTKEY_MODIFIERS = ("ctrl", "win")
 LEGACY_HOTKEY_MODIFIERS = ("ctrl", "shift", "alt")
 DEFAULT_MEETING_MODIFIERS = ("ctrl", "shift")
 LEGACY_MEETING_MODIFIERS = ("ctrl", "alt")
+DEFAULT_MEETING_KEY = "F9"
+LEGACY_MEETING_KEY = "M"
 
 
 @dataclass
@@ -235,12 +237,12 @@ class MeetingConfig:
     """Meeting recording (microphone + system audio) started from the dashboard or its own hotkey.
 
     The hotkey is a toggle and always needs a key, so it never collides with the dictation hotkey; the
-    default Ctrl+Shift+M leaves the default dictation chord (Ctrl+Win) untouched and, having no Alt, opens no
-    app menu. Empty device names mean the system default devices.
+    default Ctrl+Shift+F9 leaves the default dictation chord (Ctrl+Win) untouched, has no Alt (no app menu) and
+    avoids Ctrl+Shift+M, the Teams mute shortcut. Empty device names mean the system default devices.
     """
 
     modifiers: list[str] = field(default_factory=lambda: list(DEFAULT_MEETING_MODIFIERS))
-    key: str = "M"
+    key: str = DEFAULT_MEETING_KEY
     mic_device: str = ""
     output_device: str = ""
     # Show "Inform all participants before you record" before each recording; off after "don't show again".
@@ -289,10 +291,10 @@ def validate_meeting_hotkey(modifiers: list[str], key: str, dictation: HotkeyCon
 
 # Tried in order when a hand-edited file leaves no usable meeting hotkey.
 _MEETING_HOTKEY_FALLBACKS = (
-    (list(DEFAULT_MEETING_MODIFIERS), "M"),
-    (list(DEFAULT_MEETING_MODIFIERS), "F9"),
-    (list(LEGACY_MEETING_MODIFIERS), "M"),
-    (list(LEGACY_MEETING_MODIFIERS), "F9"),
+    (list(DEFAULT_MEETING_MODIFIERS), DEFAULT_MEETING_KEY),
+    (list(DEFAULT_MEETING_MODIFIERS), "F10"),
+    (list(LEGACY_MEETING_MODIFIERS), DEFAULT_MEETING_KEY),
+    (list(LEGACY_MEETING_MODIFIERS), LEGACY_MEETING_KEY),
     (["ctrl", "alt", "win"], "M"),
 )
 
@@ -740,7 +742,7 @@ def load_config(path: Path | None = None) -> Config:
         str(m).lower()
         for m in meeting_data.get("modifiers", LEGACY_MEETING_MODIFIERS if meeting_data else DEFAULT_MEETING_MODIFIERS)
     ]
-    meeting_key = str(meeting_data.get("key", "M"))
+    meeting_key = str(meeting_data.get("key", LEGACY_MEETING_KEY if meeting_data else DEFAULT_MEETING_KEY))
     hotkey_config = HotkeyConfig(modifiers=hotkey_modifiers, key=normalize_hotkey_key(hotkey_key) or "")
     if validate_meeting_hotkey(meeting_modifiers, meeting_key, hotkey_config) is not None:
         # An unusable binding in the file falls back to the default, like the dictation hotkey.
@@ -819,7 +821,7 @@ def load_config(path: Path | None = None) -> Config:
         ),
         meeting=MeetingConfig(
             modifiers=meeting_modifiers,
-            key=normalize_hotkey_key(meeting_key) or "M",
+            key=normalize_hotkey_key(meeting_key) or DEFAULT_MEETING_KEY,
             mic_device=str(meeting_data.get("mic_device", "")),
             output_device=str(meeting_data.get("output_device", "")),
             consent_hint=bool(meeting_data.get("consent_hint", True)),

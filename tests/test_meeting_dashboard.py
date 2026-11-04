@@ -25,7 +25,7 @@ from nexusvox.meeting_session import MeetingSession
 
 def test_meeting_hotkey_default_does_not_start_dictation():
     cfg = Config()
-    assert cfg.meeting.modifiers == ["ctrl", "shift"] and cfg.meeting.key == "M"
+    assert cfg.meeting.modifiers == ["ctrl", "shift"] and cfg.meeting.key == "F9"
     assert validate_meeting_hotkey(cfg.meeting.modifiers, cfg.meeting.key, cfg.hotkey) is None
 
 
@@ -95,6 +95,7 @@ def test_a_file_whose_dictation_hotkey_clashes_with_the_default_meeting_hotkey_g
 
 LCTRL, LALT, LSHIFT = 0xA2, 0xA4, 0xA0
 VK_M = ord("M")
+VK_F9, VK_F8 = 0x78, 0x77
 
 
 def _hotkey():
@@ -114,39 +115,39 @@ def test_meeting_hotkey_toggles_once_per_press_and_swallows_its_key():
     hk, toggles, _ = _hotkey()
     hk._handle(LCTRL, True)
     hk._handle(LSHIFT, True)
-    assert hk._handle(VK_M, True) is True and toggles == [1]
-    assert hk._handle(VK_M, True) is True  # auto-repeat
+    assert hk._handle(VK_F9, True) is True and toggles == [1]
+    assert hk._handle(VK_F9, True) is True  # auto-repeat
     assert toggles == [1]
-    assert hk._handle(VK_M, False) is True  # key-up of a swallowed key
-    hk._handle(VK_M, True)
+    assert hk._handle(VK_F9, False) is True  # key-up of a swallowed key
+    hk._handle(VK_F9, True)
     assert toggles == [1, 1]
 
 
 def test_meeting_hotkey_ignores_plain_typing_and_a_partial_chord():
     hk, toggles, _ = _hotkey()
-    assert hk._handle(VK_M, True) is False and hk._handle(VK_M, False) is False
+    assert hk._handle(VK_F9, True) is False and hk._handle(VK_F9, False) is False
     hk._handle(LCTRL, True)
-    assert hk._handle(VK_M, True) is False  # Shift is not down
-    hk._handle(VK_M, False)
+    assert hk._handle(VK_F9, True) is False  # Shift is not down
+    hk._handle(VK_F9, False)
     hk._handle(LCTRL, False)
     assert toggles == []
 
 
 def test_meeting_hotkey_follows_the_live_config():
     hk, toggles, config = _hotkey()
-    config.modifiers, config.key = ["ctrl", "shift"], "F9"
+    config.modifiers, config.key = ["ctrl", "shift"], "F8"
     hk._handle(LCTRL, True)
     hk._handle(LSHIFT, True)
-    assert hk._handle(VK_M, True) is False  # the old key is plain typing now
-    assert hk._handle(0x78, True) is True  # VK_F9
+    assert hk._handle(VK_F9, True) is False  # the old key is plain typing now
+    assert hk._handle(VK_F8, True) is True
     assert toggles == [1]
 
 
 def test_meeting_hotkey_needs_exactly_its_modifiers():
     hk, toggles, _ = _hotkey()
-    for vk in (LCTRL, LSHIFT, LALT):  # Ctrl+Shift+Alt+M is not the meeting hotkey
+    for vk in (LCTRL, LSHIFT, LALT):  # Ctrl+Shift+Alt+F9 is not the meeting hotkey
         hk._handle(vk, True)
-    assert hk._handle(VK_M, True) is False
+    assert hk._handle(VK_F9, True) is False
     assert toggles == []
 
 
@@ -168,7 +169,7 @@ def test_modifiers_whose_key_up_was_lost_do_not_stay_held():
     hk._handle(LCTRL, True)
     hk._handle(LSHIFT, True)
     hk._physical_modifiers = lambda: set()  # but nothing is down any more
-    assert hk._handle(VK_M, True) is False  # a plain "m" is typed, not swallowed
+    assert hk._handle(VK_F9, True) is False  # a plain F9 is passed on, not swallowed
     assert toggles == [] and hk._pressed_modifiers == set()
 
 
@@ -323,7 +324,7 @@ def test_quitting_closes_a_running_meeting(env):
 def test_meeting_settings_endpoints(env):
     client, *_ = env
     settings = client.get("/api/settings").get_json()
-    assert settings["meeting_modifiers"] == ["ctrl", "shift"] and settings["meeting_key"] == "M"
+    assert settings["meeting_modifiers"] == ["ctrl", "shift"] and settings["meeting_key"] == "F9"
     assert settings["meeting_consent_hint"] is True
     assert settings["meeting_leave_dictation_out"] is True
     resp = client.post("/api/settings/meeting-leave-dictation-out", json={"enabled": False})

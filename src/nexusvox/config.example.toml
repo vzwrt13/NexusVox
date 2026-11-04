@@ -42,7 +42,7 @@ polish_key = ""
 # a meeting. Only record when every participant knows (see docs/MEETINGS.md).
 # The hotkey needs at least one modifier and a key, and must not also be the dictation hotkey.
 modifiers = ["ctrl", "shift"]
-key = "M"
+key = "F9"
 # Devices by name (see the dashboard Meetings tab). Empty: the system default devices.
 mic_device = ""
 output_device = ""

@@ -66,7 +66,11 @@ button, input, select, textarea { font-family: inherit; }
 header {
   flex: 0 0 232px;
   width: 232px;
-  align-self: stretch;
+  /* Fixed to the viewport: only <main> scrolls, so the footer entry is always in view */
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  align-self: flex-start;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -89,12 +93,24 @@ header h1 {
 .brand-vox { color: var(--green); }
 
 .tabs {
-  position: sticky;
-  top: 24px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
+
+/* Feedback sits alone at the bottom of the sidebar, apart from the working tabs */
+.tabs-footer {
+  flex: 0 0 auto;
+  overflow-y: visible;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.tabs-footer .tab[hidden] { display: none; }
+.tabs-footer:not(:has(.tab:not([hidden]))) { display: none; }
 
 .tab {
   display: flex;
@@ -155,6 +171,7 @@ body::before {
 [data-feature][hidden] { display: none !important; } /* experimental features, see [experimental] */
 .tab-content { display: none; }
 .tab-content.active { display: block; }
+.tab-content[hidden] { display: none; }
 
 
 /* Settings */
@@ -1218,13 +1235,15 @@ canvas { width: 100% !important; max-height: 260px; }
     z-index: 10;
     flex: none;
     width: auto;
+    height: auto;
     align-self: auto;
     gap: 16px;
     padding: 16px;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
-  .tabs { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .tabs { flex: none; overflow-y: visible; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .tabs-footer { margin-top: 0; padding-top: 0; border-top: none; }
   .tab { width: auto; padding: 9px 12px; }
   main { padding: 24px 16px 40px; }
   .charts-grid { grid-template-columns: minmax(0, 1fr); }

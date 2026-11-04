@@ -22,6 +22,9 @@
       <button class="tab" data-tab="review">Review</button>
       <button class="tab tab-dev" data-tab="dev" data-feature="dev_tab" hidden>Dev</button>
     </nav>
+    <nav class="tabs tabs-footer">
+      <button class="tab" id="feedback-tab-button" data-tab="feedback" hidden>Feedback</button>
+    </nav>
   </header>
 
   <main>
@@ -465,6 +468,38 @@
         </div>
       </details>
 
+    </section>
+
+    <!-- Feedback Tab (shown only when [support].feedback_form_url is set) -->
+    <section id="tab-feedback" class="tab-content" hidden>
+      <div class="settings-card">
+        <h4 class="nexus-section-title">Feedback &amp; bug reports</h4>
+        <p class="settings-hint" style="margin-top: 6px;">Tell us what works, what you wish for, or what broke.</p>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Send feedback or report a bug</h3>
+            <p>Opens the feedback form in your browser. Only the NexusVox version, the Windows version and whether this PC runs CPU-only or with an NVIDIA GPU are filled in. Your dictated text, audio and logs are never sent.</p>
+          </div>
+          <button type="button" class="btn" id="send-feedback">Send feedback or report a bug</button>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Reporting a bug?</h3>
+            <p>Attach the log file: it is in <code id="feedback-log-dir">%LOCALAPPDATA%\NexusVox\logs</code> (one file per day). Dictated text is shortened there to its first 20 characters unless you turned on full-text logging.</p>
+            <p id="feedback-log-error" class="settings-hint" hidden></p>
+          </div>
+          <button type="button" class="btn" id="open-log-folder-feedback">Open log folder</button>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Questions or support</h3>
+            <p>Write to <a href="mailto:nexusvox@nightshift-ai.de">nexusvox@nightshift-ai.de</a>.</p>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Analytics Tab -->

@@ -189,9 +189,28 @@ _SCALE: dict[str, int] = {
 _ALL_NUM_WORDS: set[str] = set(_ONES) | set(_TENS) | set(_SCALE)
 _SORTED_NUM_WORDS = sorted(_ALL_NUM_WORDS, key=len, reverse=True)
 _NUM_WORD_PAT = "(?:" + "|".join(re.escape(w) for w in _SORTED_NUM_WORDS) + ")"
-# Match a maximal run of number words separated by spaces or hyphens
+
+# English ordinal word -> its cardinal ("twelfth" -> "twelve").
+_IRREGULAR_ORD_EN: dict[str, str] = {
+    "one": "first",
+    "two": "second",
+    "three": "third",
+    "five": "fifth",
+    "eight": "eighth",
+    "nine": "ninth",
+    "twelve": "twelfth",
+}
+_ORD_EN: dict[str, str] = {}
+for _card in (*_ONES, *_TENS, *_SCALE):
+    if _card == "zero":
+        continue
+    _ord = _IRREGULAR_ORD_EN.get(_card) or (_card[:-1] + "ieth" if _card.endswith("y") else _card + "th")
+    _ORD_EN[_ord] = _card
+_ORD_WORD_PAT = "(?:" + "|".join(re.escape(w) for w in sorted(_ORD_EN, key=len, reverse=True)) + ")"
+# Match a maximal run of number words separated by spaces or hyphens, optionally ending in an ordinal
+_NUM_SEQ = _NUM_WORD_PAT + r"(?:[\s-]+" + _NUM_WORD_PAT + r")*"
 _NUM_SEQ_PATTERN: re.Pattern[str] = re.compile(
-    r"\b" + _NUM_WORD_PAT + r"(?:[\s-]+" + _NUM_WORD_PAT + r")*\b",
+    r"\b(?:(?:" + _NUM_SEQ + r"[\s-]+)?" + _ORD_WORD_PAT + r"|" + _NUM_SEQ + r")\b",
     re.IGNORECASE,
 )
 
@@ -331,6 +350,56 @@ def _de_classify(word: str) -> tuple[str, int] | None:
     return ("num", value) if value is not None else None
 
 
+_DE_ORDINAL_RE: re.Pattern[str] = re.compile(r"(.+t)(?:e|en|em|er|es)")
+# Ordinal stems that are not the cardinal plus "t"/"st"; the tail is swapped for the cardinal's.
+_DE_IRREGULAR_STEMS: tuple[tuple[str, str], ...] = (
+    ("erst", "eins"),
+    ("dritt", "drei"),
+    ("siebt", "sieben"),
+    ("acht", "acht"),
+)
+# "achte"/"achten" are also forms of the verb "achten" ("ich achte darauf"); they only count as an
+# ordinal right after one of these words ("der achte Mai", "am achten").
+_DE_ORDINAL_DETERMINERS: frozenset[str] = frozenset(
+    {"der", "die", "das", "dem", "den", "des", "am", "im", "zum", "zur", "vom", "beim", "ein", "eine", "einen", "einem"}
+)
+
+
+def _de_ordinal_value(word: str, previous: str) -> int | None:
+    """Value of a lower-case German ordinal ("zwölfter" -> 12, "zwanzigsten" -> 20), or None."""
+    m = _DE_ORDINAL_RE.fullmatch(word)
+    if not m:
+        return None
+    if word in ("achte", "achten") and previous not in _DE_ORDINAL_DETERMINERS:
+        return None
+    stem = m.group(1)
+    candidates: list[tuple[str, str]] = [("t", stem[:-1]), ("st", stem[:-2])]
+    for tail, cardinal in _DE_IRREGULAR_STEMS:
+        if stem.endswith(tail):
+            candidates.append(("irregular", stem[: -len(tail)] + cardinal))
+    for kind, cardinal in candidates:
+        value = _parse_de_compound(cardinal) if cardinal else None
+        if value is None or value < 1:
+            continue
+        # "dreiste" (cheeky) and "einte" (united) are not ordinals: "-te" is for 2..19, "-ste" for 20 and up.
+        if kind == "irregular" or (kind == "t" and 1 < value % 100 < 20) or (kind == "st" and value >= 20):
+            return value
+    return None
+
+
+def _de_is_plain_eins(text: str, matches: list[re.Match[str]], i: int) -> bool:
+    """True for a capitalised "Eins" opening a sentence that goes on with an ordinary word."""
+    word = matches[i].group()
+    if word != "Eins":
+        return False
+    before = text[: matches[i].start()].rstrip(" \t")
+    if before and before[-1] not in ".!?\n":
+        return False
+    if i + 1 >= len(matches) or not _SEP_RE.fullmatch(text[matches[i].end() : matches[i + 1].start()]):
+        return False
+    return _de_classify(matches[i + 1].group().lower()) is None
+
+
 def _de_run_value(run: list[tuple[str, str, int]]) -> int:
     """Combine a run of (word, kind, value) German tokens into one integer."""
     result = 0
@@ -357,6 +426,17 @@ def _convert_numbers_de(text: str) -> str:
     pos = 0
     i = 0
     while i < len(matches):
+        previous = matches[i - 1].group().lower() if i else ""
+        ordinal = _de_ordinal_value(matches[i].group().lower(), previous)
+        if ordinal is not None:
+            out.append(text[pos : matches[i].start()])
+            out.append(str(ordinal))
+            pos = matches[i].end()
+            # "Er wurde Zwölfter." keeps its single full stop; otherwise the ordinal brings one.
+            if text[pos : pos + 1] != ".":
+                out.append(".")
+            i += 1
+            continue
         run: list[tuple[str, str, int]] = []
         j = i
         while j < len(matches):
@@ -388,7 +468,7 @@ def _convert_numbers_de(text: str) -> str:
             run.append((word, info[0], info[1]))
             j += 1
         # A big scale needs a multiplier in front of it ("Million" alone is not a number).
-        if not run or run[0][1] == "big":
+        if not run or run[0][1] == "big" or (len(run) == 1 and _de_is_plain_eins(text, matches, i)):
             i += 1
             continue
         out.append(text[pos : matches[i].start()])
@@ -399,12 +479,42 @@ def _convert_numbers_de(text: str) -> str:
     return "".join(out)
 
 
+def _en_ordinal_suffix(n: int) -> str:
+    if n % 100 in (11, 12, 13):
+        return "th"
+    return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+
+def _ordinal_fits(prefix_value: int, card: str) -> bool:
+    """Whether a prefix such as "twenty" can stand in front of the ordinal of *card* ("first")."""
+    if card in _SCALE:
+        return prefix_value > 0
+    unit = 10 if _ONES.get(card, 100) < 10 else 100
+    return prefix_value > 0 and prefix_value % unit == 0
+
+
 def _convert_numbers_en(text: str) -> str:
-    """Replace runs of English number words with their digit representation."""
+    """Replace runs of English number words with digits ("twenty five" -> "25", "twelfth" -> "12th")."""
 
     def replace_match(m: re.Match[str]) -> str:
-        words = re.split(r"[\s-]+", m.group())
-        return str(_words_to_int(words))
+        group = m.group()
+        words = re.split(r"[\s-]+", group)
+        last = words[-1].lower()
+        if last not in _ORD_EN:
+            return str(_words_to_int(words))
+        card = _ORD_EN[last]
+        if len(words) == 1:
+            # A lone "first" or "second" is usually an adverb or a time unit ("a second"), not a position.
+            if last in ("first", "second"):
+                return group
+            n = _words_to_int([card])
+            return f"{n}{_en_ordinal_suffix(n)}"
+        prefix_value = _words_to_int(words[:-1])
+        if _ordinal_fits(prefix_value, card):
+            n = _words_to_int([*words[:-1], card])
+            return f"{n}{_en_ordinal_suffix(n)}"
+        # "one second": the number and the word stay apart.
+        return f"{prefix_value} {words[-1]}"
 
     return _NUM_SEQ_PATTERN.sub(replace_match, text)
 

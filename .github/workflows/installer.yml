@@ -61,8 +61,10 @@ jobs:
           }
           function Get-IsccVersion($iscc) {
             if (-not $iscc) { return $null }
-            $banner = (& $iscc 2>&1 | Out-String)
-            if ($banner -match "Compiler engine version: Inno Setup (\d+\.\d+\.\d+)") { return $Matches[1] }
+            # The version resource of the compiler, "6.7.1.0" -> "6.7.1".
+            $info = (Get-Item $iscc).VersionInfo
+            Write-Host "ISCC.exe: FileVersion '$($info.FileVersion)', ProductVersion '$($info.ProductVersion)'"
+            if ("$($info.FileVersion) $($info.ProductVersion)" -match "(\d+\.\d+\.\d+)") { return $Matches[1] }
             return $null
           }
           $iscc = Find-Iscc

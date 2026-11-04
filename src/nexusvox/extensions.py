@@ -208,6 +208,22 @@ class Extension:
         """
         return None
 
+    def protect(self, text: str, app: ActiveApp) -> tuple[str, Callable[[str], str | None]] | None:
+        """Shield parts of a dictation from the text pipeline, and put them back at its end.
+
+        Called with the transcript after the correction dictionary and before voice commands, cleanup and
+        translation, for a dictation typed on this PC and for a phone (remote-mic) one; for the phone *app* is an
+        empty `ActiveApp`. Return None to leave the text alone. Otherwise return `(protected, restore)`: the
+        pipeline works on *protected* (e.g. a trigger phrase swapped for a placeholder that cleanup and the
+        translator leave alone), and at the end calls `restore(text)` on the text to type and on the text to save.
+        `restore` returns the final text, or None when it cannot (e.g. the translator dropped a placeholder); the
+        core then runs the dictation again without any `protect`. A hook that raises, is too slow or answers
+        anything else is skipped and the dictation goes through unprotected. Several extensions run in entry-point
+        order, each seeing the previous one's *protected* text; their `restore` calls run in reverse order. The
+        `protect` and `restore` calls share the dictation's `HOOK_TIMEOUT_S` with `on_command` and `on_dictation`.
+        """
+        return None
+
     def on_dictation(self, text: str, app: ActiveApp) -> str | None:
         """Change a dictation just before it is typed into *app*.
 
@@ -483,6 +499,82 @@ class ExtensionRegistry:
     def has_command_hook(self) -> bool:
         """True when any loaded extension overrides `on_command`; with none, asking costs nothing."""
         return any(type(e).on_command is not Extension.on_command for e in self.extensions)
+
+    def has_protect_hook(self) -> bool:
+        """True when any loaded extension overrides `protect`; with none, asking costs nothing."""
+        return any(type(e).protect is not Extension.protect for e in self.extensions)
+
+    def protect(
+        self, text: str, app: ActiveApp, *, budget_s: float | None = None
+    ) -> tuple[str, Callable[..., str | None]] | None:
+        """`(protected, restore)` from every extension's `protect` in load order, or None when none changed *text*.
+
+        An extension that raises, is too slow or answers something other than a `(non-empty str, callable)` pair is
+        logged and skipped; the text stays as the previous extension left it. Extensions that do not override
+        `protect` are not called. *budget_s* is the time all of them may take together.
+
+        `restore(text, budget_s=None)` runs the extensions' restores in reverse order, sharing one deadline
+        (`HOOK_TIMEOUT_S` by default), and returns the restored text, or None when any of them raised, was too
+        slow or did not return a string: a half-restored text must never be typed, the caller starts over without
+        `protect`.
+        """
+        deadline = time.monotonic() + (HOOK_TIMEOUT_S if budget_s is None else budget_s)
+        restores: list[tuple[Extension, Callable[[str], str | None]]] = []
+        for extension in self.extensions:
+            if type(extension).protect is Extension.protect:
+                continue
+            answer = self._guarded(
+                (extension.name, "protect"),
+                f"Extension {extension.name}",
+                "protect",
+                deadline,
+                extension.protect,
+                text,
+                app,
+            )
+            if answer is None:
+                continue
+            if (
+                isinstance(answer, tuple)
+                and len(answer) == 2
+                and isinstance(answer[0], str)
+                and (answer[0] or not text)
+                and callable(answer[1])
+            ):
+                text = answer[0]
+                restores.append((extension, answer[1]))
+                continue
+            logger.error(
+                "Extension %s answered protect with %s, not a (text, restore) pair; ignored",
+                extension.name,
+                type(answer).__name__,
+            )
+        if not restores:
+            return None
+
+        def restore(restored: str, budget_s: float | None = None) -> str | None:
+            restore_deadline = time.monotonic() + (HOOK_TIMEOUT_S if budget_s is None else budget_s)
+            for extension, fn in reversed(restores):
+                answer = self._guarded(
+                    (extension.name, "protect.restore"),
+                    f"Extension {extension.name}",
+                    "its restore",
+                    restore_deadline,
+                    fn,
+                    restored,
+                )
+                if not isinstance(answer, str) or (not answer and restored):
+                    if answer is not None:
+                        logger.error(
+                            "Extension %s answered its restore with %s, not text; the dictation starts over",
+                            extension.name,
+                            type(answer).__name__,
+                        )
+                    return None
+                restored = answer
+            return restored
+
+        return text, restore
 
     def command(self, text: str, app: ActiveApp, *, budget_s: float | None = None) -> tuple[str, bool] | None:
         """`(label, opened)` from the first extension whose `on_command` takes *text*, else None.

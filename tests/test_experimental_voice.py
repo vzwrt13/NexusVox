@@ -190,3 +190,84 @@ def test_on_command_time_is_taken_from_the_on_dictation_budget(monkeypatch):
     app._hook_budget_s = app_module.HOOK_TIMEOUT_S
     asyncio.run(app._run_command("hello there", None))
     assert app._hook_budget_s < app_module.HOOK_TIMEOUT_S - 0.15
+
+
+# -- the protect hook on the app side ------------------------------------------------------------------------
+
+
+def _protect_registry():
+    from nexusvox.extensions import API_VERSION, Extension, ExtensionRegistry
+
+    class Shield(Extension):
+        name = "shield"
+        api_version = API_VERSION
+
+        def __init__(self):
+            self.apps = []
+
+        def protect(self, text, app):
+            self.apps.append(app)
+            return text.replace("my address", "⟦1⟧"), lambda out: out.replace("⟦1⟧", "Hauptstrasse 1")
+
+    registry = ExtensionRegistry()
+    extension = Shield()
+    assert registry.add(extension)
+    return registry, extension
+
+
+def test_protect_gets_the_active_app_for_a_pc_dictation_and_an_empty_one_for_the_phone(monkeypatch):
+    registry, extension = _protect_registry()
+    app = _command_app(registry, monkeypatch)
+    protected, restore = app._protect_dictation("send my address")
+    assert protected == "send ⟦1⟧" and restore("send ⟦1⟧") == "send Hauptstrasse 1"
+    protected, restore = app._protect_dictation("send my address", remote=True)
+    assert restore("send ⟦1⟧") == "send Hauptstrasse 1"
+    assert extension.apps == [app_module.ActiveApp("Code.exe", "title"), app_module.ActiveApp()]
+
+
+def test_without_a_protect_hook_there_is_no_window_lookup_and_the_budget_stays_whole(monkeypatch):
+    registry, _ = _registry_with(lambda text: None)  # only on_command
+    app = _command_app(registry, monkeypatch)
+    looked = []
+    monkeypatch.setattr(
+        app_module.NexusVoxApp, "_active_app", classmethod(lambda cls: looked.append(1) or app_module.ActiveApp())
+    )
+    assert app._protect_dictation("hello there") is None
+    assert app._protect_dictation("hello there", remote=True) is None
+    assert looked == [] and app._hook_budget_s == app_module.HOOK_TIMEOUT_S
+
+
+def test_no_registry_yet_means_no_protection(monkeypatch):
+    app = _app(ExperimentalConfig())
+    monkeypatch.setattr(app_module, "loaded_extensions", lambda: None)
+    assert app._protect_dictation("send my address") is None
+
+
+def test_protect_and_restore_time_come_out_of_the_shared_budget_but_not_the_pipeline_in_between(monkeypatch):
+    import time
+
+    from nexusvox.extensions import API_VERSION, Extension, ExtensionRegistry
+
+    class Pause(Extension):
+        name = "pause"
+        api_version = API_VERSION
+
+        def protect(self, text, app):
+            time.sleep(0.2)
+            return text, self.restore
+
+        def restore(self, text):
+            time.sleep(0.2)
+            return text
+
+    registry = ExtensionRegistry()
+    assert registry.add(Pause())
+    app = _command_app(registry, monkeypatch)
+    app._hook_budget_s = app_module.HOOK_TIMEOUT_S
+    _, restore = app._protect_dictation("hello there")
+    after_protect = app._hook_budget_s
+    assert after_protect < app_module.HOOK_TIMEOUT_S - 0.15
+    time.sleep(0.3)  # cleanup and translation: not charged
+    assert app._hook_budget_s == after_protect
+    assert restore("hello there") == "hello there"
+    assert app._hook_budget_s < after_protect - 0.15

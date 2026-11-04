@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import logging
 import os
 import threading
 import time
 import wave
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -591,6 +592,7 @@ class NexusVoxApp:
                 return
             loop = asyncio.get_running_loop()
 
+            self._hook_budget_s = HOOK_TIMEOUT_S
             # A phone recording only wants its text back, never a PC action.
             if not remote:
                 nexus_cmd = parse_nexus_command(raw_text)
@@ -598,7 +600,6 @@ class NexusVoxApp:
                     self._flag_last_transcription()
                     await self._transcriber.disconnect()
                     return
-                self._hook_budget_s = HOOK_TIMEOUT_S
                 label = await self._run_command(raw_text, nexus_cmd)
                 if label is not None:
                     self._save_command(recording, label, raw_text)
@@ -614,6 +615,7 @@ class NexusVoxApp:
                     self._db.get_dictionary_entries(),
                     remote=remote,
                     extend_fn=None if remote else self._extend_dictation,
+                    protect_fn=functools.partial(self._protect_dictation, remote=remote),
                 ),
             )
             done_at = None  # when the text was in place; the clipboard restore after it is not latency
@@ -754,6 +756,36 @@ class NexusVoxApp:
     # What is left of this dictation's `HOOK_TIMEOUT_S` for the extensions' hooks: `on_command` uses some of it
     # before the pipeline runs, `on_dictation` gets the rest. Reset for every dictation (one cycle at a time).
     _hook_budget_s: float = HOOK_TIMEOUT_S
+
+    @contextlib.contextmanager
+    def _charged(self) -> Iterator[None]:
+        """Charge the time of the block to this dictation's hook budget."""
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            self._hook_budget_s = max(0.0, self._hook_budget_s - (time.monotonic() - started))
+
+    def _protect_dictation(self, text: str, *, remote: bool = False) -> tuple[str, Callable[[str], str | None]] | None:
+        """The extensions' `protect` on a dictation, phone ones included (runs in the executor with the pipeline).
+
+        Returns `(protected text, restore)` or None. `restore` draws on what is left of the hook budget when the
+        pipeline calls it, not on the time cleanup and translation took in between.
+        """
+        registry = loaded_extensions()  # None while the packages still load: no protection, never wait
+        if registry is None or not registry.has_protect_hook():
+            return None  # no thread, no window lookup: an extension without the hook costs a dictation nothing
+        with self._charged():
+            answer = registry.protect(text, ActiveApp() if remote else self._active_app(), budget_s=self._hook_budget_s)
+        if answer is None:
+            return None
+        protected, restore = answer
+
+        def charged_restore(restoring: str) -> str | None:
+            with self._charged():
+                return restore(restoring, budget_s=self._hook_budget_s)
+
+        return protected, charged_restore
 
     def _extend_dictation(self, text: str) -> str:
         """The extensions' say on a dictation about to be typed (runs in the executor with the pipeline)."""
@@ -928,15 +960,13 @@ class NexusVoxApp:
         registry = loaded_extensions()  # None while the packages still load: no extension command, never wait
         if registry is None or not registry.has_command_hook():
             return None  # no thread, no window lookup: an extension without the hook costs a dictation nothing
-        started = time.monotonic()
         try:
-            return registry.command(raw_text, self._active_app(), budget_s=self._hook_budget_s)
+            with self._charged():
+                return registry.command(raw_text, self._active_app(), budget_s=self._hook_budget_s)
         except Exception:
             # A broken extension step must never lose the dictation (process_text guards on_dictation the same way).
             logger.exception("The extension command step failed; handling the dictation without it")
             return None
-        finally:
-            self._hook_budget_s = max(0.0, self._hook_budget_s - (time.monotonic() - started))
 
     async def _run_command(self, raw_text: str, nexus_cmd: NexusCommand | None) -> str | None:
         """Run the command *raw_text* is, if any. Returns the label to save it under, or None to type it.

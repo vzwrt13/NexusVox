@@ -362,14 +362,68 @@ class OpenSite(Extension):
         return ("[open-site] https://example.com", True)
 ```
 
+## Hook 9: protect parts of a dictation from the pipeline
+
+```python
+def protect(self, text: str, app: ActiveApp) -> tuple[str, Callable[[str], str | None]] | None: ...
+```
+
+For an extension that recognises something in the spoken words and must get it through voice commands, cleanup and
+translation unharmed (a trigger phrase that stands for a longer text, say). Return `None` to leave the dictation alone.
+Otherwise return `(protected, restore)`:
+
+1. The core runs the pipeline on *protected* instead of *text*: swap what you want shielded for a placeholder the
+   language model and the translator will not touch (a token without spaces, such as `⟦1⟧`, is safest).
+2. At the end of the pipeline the core calls `restore(text)` twice: on the text to type and on the text to save.
+   `restore` puts the real content back and returns the final text.
+
+```
+dictionary -> press enter -> protect -> voice commands -> cleanup -> translation -> restore -> on_dictation
+```
+
+- **When.** *text* is the transcript after the correction dictionary and a trailing "press enter" was split off; no
+  voice command, cleanup or translation has touched it. `on_command` has already declined it.
+- **Phone too.** The hook is also called for a phone (remote-mic) dictation, with an empty `ActiveApp` (`process` and
+  `title` are `""`), and `restore` runs there as well. `on_dictation` is not called for the phone.
+- **Restore.** `restore(text) -> str | None` must return the whole text. Return `None` (or raise) when it cannot, for
+  example because the translator dropped a placeholder: the core then processes the dictation again without any
+  `protect`, so a half-restored text is never typed or saved. That runs cleanup and translation a second time.
+- **Fallback.** An extension whose `protect` raises, is too slow or answers something that is not a
+  `(str, callable)` pair is logged and skipped; the dictation goes through unprotected. The core never loses a
+  dictation to this hook.
+- **Order.** Several extensions run in entry-point order and each sees the previous one's *protected* text; their
+  `restore` calls run in reverse order. An extension that does not override `protect` is not called and costs nothing.
+- **Budget.** `on_command`, `protect`, `restore` and `on_dictation` share the 3 seconds of one dictation
+  (`HOOK_TIMEOUT_S`). Time spent in cleanup and translation between `protect` and `restore` is not charged. Keep all
+  of them quick.
+- **Learning.** A dictation whose text `restore` changed is not offered to "learn from edits".
+- **Speech.** Matching spoken phrases must work in English and German; that is the extension's job.
+- Added without an `API_VERSION` change: an extension without the hook loads and behaves as before.
+
+```python
+from nexusvox.snippets import Snippet, expand_snippets, mark_snippets, placeholders_intact
+
+
+class Snippets(Extension):
+    name = "snippets"
+    api_version = 1
+
+    def protect(self, text, app):
+        marked, expansions = mark_snippets(text, self._snippets)
+        if not expansions:
+            return None
+        return marked, lambda out: (
+            expand_snippets(out, expansions) if placeholders_intact(out, expansions) else None
+        )
+```
+
 ## Snippet matching helpers
 
 The core no longer stores or expands snippets; that is an extension's job (the Pro extension does it). The pure
 matcher stays importable from `nexusvox.snippets` for extensions that offer the same feature: `Snippet`,
 `SnippetOption`, `mark_snippets(text, snippets) -> (text, expansions)`, `expand_snippets(text, expansions)`,
 `placeholders_intact(text, expansions)` and `best_option(spoken, options)`. They are plain functions over plain
-data (no database, no I/O). An extension calls `mark_snippets` in `on_dictation`, lets its own steps work on the
-placeholders, and expands them again before it returns the text. Note that `on_dictation` runs after voice
-commands, cleanup and translation, which the core used to protect an expansion from, and that it is not called for a
-phone (remote-mic) dictation; an extension that needs either has to ask for a new hook. A database that still holds the `snippets` table of
-an earlier NexusVox keeps it untouched; the core never reads or writes it.
+data (no database, no I/O). Call `mark_snippets` in `protect` and `expand_snippets` in the `restore` it returns
+(Hook 9), so the placeholders pass through voice commands, cleanup and translation, also for a phone dictation. A
+database that still holds the `snippets` table of an earlier NexusVox keeps it untouched; the core never reads or
+writes it.

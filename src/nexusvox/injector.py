@@ -124,25 +124,49 @@ def send_menu_mask() -> bool:
     return _send_inputs(menu_mask_inputs(), "menu mask")
 
 
-def _release_inputs(menu_key_down: bool) -> list[INPUT]:
-    """Key-ups for every modifier; with Alt or Win still down, the menu mask goes in before the Alt key-up."""
+# Generic modifier -> every virtual key that counts as it being held
+_MODIFIER_GROUPS = (
+    (VK_CONTROL, SCAN_CONTROL, (VK_CONTROL, 0xA2, 0xA3)),
+    (VK_SHIFT, SCAN_SHIFT, (VK_SHIFT, 0xA0, 0xA1)),
+    (VK_MENU, SCAN_ALT, (VK_MENU, 0xA4, 0xA5)),
+    (VK_LWIN, SCAN_LWIN, (VK_LWIN, VK_RWIN)),
+)
+
+
+def _held_modifiers() -> set[int]:
+    """The generic modifier keys (VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN) that are down right now."""
+    return {
+        generic for generic, _scan, vks in _MODIFIER_GROUPS if any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in vks)
+    }
+
+
+def _release_inputs(held: set[int]) -> list[INPUT]:
+    """Key-ups for the modifiers in `held` only; with Alt or Win among them, the menu mask goes in before
+    the first such key-up.
+
+    A key-up for a key that is not down is never sent: for Alt it is a lone Alt release, which menu-bar
+    apps (Notepad, Word) answer by toggling their menu on or off, and for Win it opens the Start menu.
+    """
     inputs: list[INPUT] = []
-    for vk, sc in (
-        (VK_CONTROL, SCAN_CONTROL),
-        (VK_SHIFT, SCAN_SHIFT),
-        (VK_MENU, SCAN_ALT),
-        (VK_LWIN, SCAN_LWIN),
-    ):
-        if vk == VK_MENU and menu_key_down:
+    masked = False
+    for vk, sc, _vks in _MODIFIER_GROUPS:
+        if vk not in held:
+            continue
+        if vk in (VK_MENU, VK_LWIN) and not masked:
             inputs.extend(menu_mask_inputs())
+            masked = True
         inputs.append(_make_key_input(vk, sc, KEYEVENTF_KEYUP))
     return inputs
 
 
 def _release_all_modifiers() -> None:
-    """Release all modifier keys to clear stale state from the push-to-talk hotkey."""
-    inputs = _release_inputs(any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in (VK_MENU, VK_LWIN, VK_RWIN)))
-    _send_inputs(inputs, "modifier release")
+    """Release the modifier keys that are still down, to clear stale state from the push-to-talk hotkey.
+
+    Does nothing when none is down, which is the normal case after `_wait_for_physical_release`.
+    """
+    held = _held_modifiers()
+    if held:
+        _send_inputs(_release_inputs(held), "modifier release")
 
 
 def _wait_for_physical_release(timeout_s: float = 1.5) -> bool:

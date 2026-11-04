@@ -85,6 +85,7 @@ class HotkeyListener:
         self._pressed_modifiers: set[str] = set()
         self._combo_down = False  # complete combo currently pressed (edge detection)
         self._key_swallowed = False  # trigger key is held since a swallowed key-down
+        self._modifier_vks_down: set[int] = set()  # modifier keys down, to tell an auto-repeat from a press
         self._mask_sender: Callable[[], None] | None = None  # set by start(); tests leave it unset
         self._sync_binding()
 
@@ -124,6 +125,7 @@ class HotkeyListener:
         self._pressed_modifiers = set()
         self._combo_down = False
         self._key_swallowed = False
+        self._modifier_vks_down = set()
 
     # -- core -----------------------------------------------------------------
 
@@ -208,9 +210,14 @@ class HotkeyListener:
         modifier = _VK_TO_MODIFIER.get(vk)
         if modifier is None or modifier not in self._modifiers:
             return False
+        repeat = pressed and vk in self._modifier_vks_down  # a held key repeats its key-down every ~31 ms
+        if pressed:
+            self._modifier_vks_down.add(vk)
+        else:
+            self._modifier_vks_down.discard(vk)
         if pressed:
             self._pressed_modifiers.add(modifier)
-            if self._combo_down:
+            if self._combo_down and not repeat:
                 self._mask_menu_keys()  # a second Alt/Win pressed during the combo
             # A modifier-only binding completes on its last modifier. With a key, the key
             # has to come last, otherwise "hold A, then press Ctrl" would start recording.

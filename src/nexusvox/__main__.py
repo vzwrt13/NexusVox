@@ -1,6 +1,7 @@
 """Entry point for `python -m nexusvox`."""
 
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -9,6 +10,28 @@ from .config import load_config
 from .logsetup import setup_file_logging
 from .paths import apply_models_dir, default_config_path, ensure_dirs
 from .single_instance import SingleInstance, show_message
+
+
+def _git_revision() -> str:
+    """`branch@commit` of the checkout this code runs from, "(not a git checkout)" for an installed copy."""
+    folder = Path(__file__).resolve().parent
+
+    def git(*args: str) -> str:
+        done = subprocess.run(
+            ["git", *args],
+            cwd=folder,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return done.stdout.strip()
+
+    try:
+        return f"{git('rev-parse', '--abbrev-ref', 'HEAD')}@{git('rev-parse', '--short', 'HEAD')}"
+    except (OSError, subprocess.SubprocessError):
+        return "(not a git checkout)"
 
 
 def main() -> None:
@@ -43,6 +66,9 @@ def main() -> None:
             config.cleanup.level,
             log_file or "(none, the log folder is not writable)",
         )
+
+        # Which code runs: a retest against the wrong checkout is otherwise only noticed as a fix that does nothing.
+        logging.getLogger(__name__).info("Code: %s, %s", Path(__file__).resolve().parent, _git_revision())
 
         app = NexusVoxApp(config)
         instance.watch(app.open_dashboard_from_second_start)

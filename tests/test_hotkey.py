@@ -484,3 +484,18 @@ def test_no_sender_means_no_injection_in_unit_tests():
     assert hk._mask_sender is None
     _press_combo(hk)
     assert events == ["start"]
+
+
+def test_auto_repeat_of_a_held_modifier_sends_no_extra_mask():
+    hk, _, _ = _listener("hold", modifiers=("ctrl", "shift", "alt"))
+    log: list[str] = []
+    hk._mask_sender = lambda: log.append("mask")
+    for vk in (LCTRL, LSHIFT, LALT):
+        hk._handle(vk, True)
+    assert log == ["mask"]  # the combo completing
+    for _ in range(5):
+        hk._handle(LALT, True)  # Windows repeats the key-down of a held key
+    assert log == ["mask"]
+    hk._handle(LALT, False)
+    hk._handle(LALT, True)  # a real second press does get one
+    assert log == ["mask", "mask"]

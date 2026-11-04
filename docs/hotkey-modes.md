@@ -18,6 +18,10 @@ Code paths: `hotkey.py` (`HotkeyListener`, runs inside the keyboard hook), `app.
   turns the recording into something else (`_handle_marker_key`, `hotkey.py:160`): command
   key (`[os_control]`), paste key (`[hotkey].paste_key`, default `V`), polish key
   (`[hotkey].polish_key`, default off). The first marker wins; the key is swallowed.
+- **Menu keys**: with Alt or Win in the binding, a neutral mask key is typed when the chord completes (and for a
+  genuinely new Alt/Win press, not for an auto-repeat of a held one), so releasing Ctrl/Shift first leaves no lone
+  Alt/Win release. The injector's own modifier release (`_release_all_modifiers`) sends key-ups only for modifiers that
+  are still down; a key-up for an Alt that is already up would toggle Notepad's menu bar.
 
 ## What starts and stops a recording
 

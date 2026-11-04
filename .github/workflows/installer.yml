@@ -81,6 +81,22 @@ jobs:
       - name: Build the installer
         run: python packaging/build_installer.py
 
+      - name: Check that the exe and the setup file carry the NexusVox icon
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Add-Type -AssemblyName System.Drawing
+          # The centre of the logo is its green dot (#00d2a0); a generic icon has no such pixel there.
+          foreach ($file in "dist\NexusVox\NexusVox.exe", "dist\installer\NexusVox-Setup.exe") {
+            $icon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path $file).Path)
+            $bitmap = $icon.ToBitmap()
+            $pixel = $bitmap.GetPixel([int]($bitmap.Width / 2), [int]($bitmap.Height / 2))
+            Write-Host "$file centre pixel: $pixel"
+            if ($pixel.R -gt 12 -or [math]::Abs($pixel.G - 210) -gt 12 -or [math]::Abs($pixel.B - 160) -gt 12) {
+              throw "$file does not carry the NexusVox icon"
+            }
+          }
+
       - name: Install, run, upgrade and uninstall
         shell: pwsh
         run: |

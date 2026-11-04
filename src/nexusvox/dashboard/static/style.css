@@ -1289,3 +1289,26 @@ canvas { width: 100% !important; max-height: 260px; }
   100% { box-shadow: 0 0 0 2px transparent; }
 }
 .overview-value .status-line { margin-top: 0; }
+
+/* Settings submenu in the sidebar and the settings search */
+.subtabs { display: none; flex-direction: column; gap: 1px; margin: 2px 0 6px 18px; padding-left: 10px; border-left: 1px solid var(--border); }
+.tab.active[data-tab="settings"] + .subtabs { display: flex; }
+.subtab {
+  display: block;
+  padding: 6px 10px;
+  border-radius: var(--radius-ctl);
+  color: var(--text-dim);
+  font-size: 13px;
+  text-decoration: none;
+  transition: color 0.15s, background 0.15s;
+}
+.subtab:hover { color: var(--text); background: var(--surface2); }
+.subtab.active { color: var(--text); background: var(--accent-glow); }
+.subtab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.settings-search { margin-bottom: 12px; }
+.settings-search input { width: 100%; max-width: 100%; box-sizing: border-box; padding: 9px 12px; }
+.search-hidden { display: none !important; }
+#tab-settings .settings-card { scroll-margin-top: 16px; }
+@media (max-width: 800px) {
+  .subtabs { display: none !important; }
+}

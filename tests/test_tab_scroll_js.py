@@ -29,7 +29,7 @@ def run_js(body: str):
     const window = { scrollTo: (x, y) => calls.push(["scrollTo", x, y]) };
     for (const f of ["loadAnalytics", "loadFlaggedTranscriptions", "openMeetingsTab", "loadMeetingSettings",
       "loadFileTranscriptions", "refreshDiarizeToggle", "resumeUploadJob", "loadReviewTranscriptions",
-      "loadBenchmarks", "openExtensionPanel"]) globalThis[f] = () => {};
+      "loadBenchmarks", "openExtensionPanel", "markActiveSubtab"]) globalThis[f] = () => {};
     """
     script = f"{stubs}\n{match.group(0)}\n{body}"
     out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True, timeout=30).stdout

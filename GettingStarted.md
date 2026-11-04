@@ -136,9 +136,9 @@ voice_commands_enabled = true
 [hotkey]
 # Press all listed modifiers simultaneously to record
 # Options: ctrl, shift, alt, win (may be empty when a key is set)
-modifiers = ["ctrl", "shift", "alt"]
+modifiers = ["ctrl", "win"]
 # Optional key that completes the combo (letter, digit, F1-F24, SPACE, ...), e.g. "a"
-# for Ctrl+Shift+Alt+A. Swallowed while held as part of the combo, so it never types.
+# for Ctrl+Win+A. Swallowed while held as part of the combo, so it never types.
 key = ""
 # "hold": record while the keys are held (push-to-talk)
 # "toggle": press once to start, press again to stop
@@ -211,7 +211,7 @@ python -m nexusvox
 You should see:
 
 ```
-NexusVox started. Hold Ctrl+Shift+Alt to talk.
+NexusVox started. Hold Ctrl+Win to talk.
 ```
 
 A system tray icon also appears, where you can toggle translation or quit the app. Open the dashboard from the tray icon (left-click) for analytics, settings, and transcription history.
@@ -220,20 +220,20 @@ A system tray icon also appears, where you can toggle translation or quit the ap
 
 ## 5. Usage
 
-1. **Hold** `Ctrl + Shift + Alt` — recording starts (you'll hear a beep, or see a small waveform at the bottom of the screen if you chose visual feedback)
+1. **Hold** `Ctrl + Win` — recording starts (you'll hear a beep, or see a small waveform at the bottom of the screen if you chose visual feedback)
 2. **Speak** into your microphone
 3. **Release** any of the modifier keys — recording stops (second beep)
 4. The transcribed text is automatically pasted at your cursor position
 
-To paste the last text again, hold `Ctrl + Shift + Alt`, tap `V`, let go: the recording is dropped and the text NexusVox pasted last is pasted once more (key in Settings → Text & Polish, `[hotkey].paste_key`; empty turns it off).
+To paste the last text again, hold `Ctrl + Win`, tap `V`, let go: the recording is dropped and the text NexusVox pasted last is pasted once more (key in Settings → Text & Polish, `[hotkey].paste_key`; empty turns it off).
 
-To rewrite selected text by voice, pick a *Polish Selected Text Key* in Settings → Text & Polish (e.g. `P`), install [Ollama](https://ollama.com) and run `ollama pull gemma4:e4b` (`gemma4:e2b` on a PC without an NVIDIA GPU: that is the model NexusVox asks for there unless you set `[llm].model`). Then select text in any app, hold `Ctrl + Shift + Alt`, tap `P`, say what to do ("make it shorter", "mach es formeller", "translate to English") or nothing, and let go: the selection is replaced by the rewritten text (Ctrl+Z undoes it). The model shares the GPU with the speech model - the dashboard shows whether the model server answers. Other servers (LM Studio, llama.cpp, vLLM, a cloud API) work through `[llm]` with `protocol = "openai"`. Terminals are skipped by default, because a terminal does not report its selection and polish would have to send Ctrl+C, which stops the running program when nothing is selected. Turn on *Polish In Terminals Too* (Settings → Advanced) (`[polish].in_terminals`) to polish there as well; the rewritten text is then pasted at the prompt.
+To rewrite selected text by voice, pick a *Polish Selected Text Key* in Settings → Text & Polish (e.g. `P`), install [Ollama](https://ollama.com) and run `ollama pull gemma4:e4b` (`gemma4:e2b` on a PC without an NVIDIA GPU: that is the model NexusVox asks for there unless you set `[llm].model`). Then select text in any app, hold `Ctrl + Win`, tap `P`, say what to do ("make it shorter", "mach es formeller", "translate to English") or nothing, and let go: the selection is replaced by the rewritten text (Ctrl+Z undoes it). The model shares the GPU with the speech model - the dashboard shows whether the model server answers. Other servers (LM Studio, llama.cpp, vLLM, a cloud API) work through `[llm]` with `protocol = "openai"`. Terminals are skipped by default, because a terminal does not report its selection and polish would have to send Ctrl+C, which stops the running program when nothing is selected. Turn on *Polish In Terminals Too* (Settings → Advanced) (`[polish].in_terminals`) to polish there as well; the rewritten text is then pasted at the prompt.
 
 Instructions you use often go into Settings → Vocabulary → *Polish Presets*: a name such as `prompt engineer` and the instruction, e.g. "Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." Then say just the name after tapping the polish key; words after it are added ("prompt engineer, in English"). Close spellings match, names can be in any language, and the preset marked *Default* is used when you say nothing.
 
 To tidy every dictation, set *Auto Cleanup* in Settings → Text & Polish (or `[cleanup].level`) to *Light* (fillers such as "um" and "äh", false starts and repeated words go, punctuation is fixed, your wording stays) or *Medium* (also grammar, slightly more concise). It uses the same model server as polish and adds about half a second per dictation. NexusVox loads the model at start; while it is still loading, or when the model's reply looks like an answer or a rewrite rather than your words cleaned up, the dictation is typed unchanged. Dictations under three words are not sent, and the transcript is saved as you said it.
 
-Prefer not to keep the keys down? Switch **Hotkey Mode** to *Toggle* in the dashboard's Settings tab (or `mode = "toggle"` in `config.toml`): press `Ctrl + Shift + Alt` once to start, press it again to stop. The change takes effect immediately.
+Prefer not to keep the keys down? Switch **Hotkey Mode** to *Toggle* in the dashboard's Settings tab (or `mode = "toggle"` in `config.toml`): press `Ctrl + Win` once to start, press it again to stop. The change takes effect immediately.
 
 > NexusVox uses the clipboard to inject text (Ctrl+V). Your previous clipboard content is saved and restored after each injection.
 

@@ -132,7 +132,7 @@ def model_needs_docker(model_id: str, device: str) -> bool:
 
 @dataclass
 class HotkeyConfig:
-    modifiers: list[str] = field(default_factory=lambda: ["ctrl", "shift", "alt"])
+    modifiers: list[str] = field(default_factory=lambda: ["ctrl", "win"])
     # Optional non-modifier key that completes the combo (e.g. "a", "f9", "space").
     # Empty: the modifiers alone are the hotkey. Its keystrokes are swallowed while
     # it is held as part of the combo, so the target app never sees the letter.
@@ -141,10 +141,10 @@ class HotkeyConfig:
     # "toggle": press once to start recording, press again to stop.
     mode: str = "hold"
     # Pressed during a recording with every modifier down: the recording is dropped and
-    # the last pasted text is pasted again (Ctrl+Shift+Alt+V). Empty turns it off.
+    # the last pasted text is pasted again (Ctrl+Win+V). Empty turns it off.
     paste_key: str = "V"
     # Pressed during a recording with every modifier down: the selected text is rewritten by
-    # the spoken instruction through the [llm] model (Ctrl+Shift+Alt+P). Empty: off.
+    # the spoken instruction through the [llm] model (Ctrl+Win+P). Empty: off.
     polish_key: str = ""
 
 
@@ -227,11 +227,11 @@ class MeetingConfig:
     """Meeting recording (microphone + system audio) started from the dashboard or its own hotkey.
 
     The hotkey is a toggle and always needs a key, so it never collides with the dictation hotkey; the
-    default Ctrl+Alt+M leaves the default dictation chord (Ctrl+Shift+Alt) untouched. Empty device names
-    mean the system default devices.
+    default Ctrl+Shift+M leaves the default dictation chord (Ctrl+Win) untouched and, having no Alt, opens no
+    app menu. Empty device names mean the system default devices.
     """
 
-    modifiers: list[str] = field(default_factory=lambda: ["ctrl", "alt"])
+    modifiers: list[str] = field(default_factory=lambda: ["ctrl", "shift"])
     key: str = "M"
     mic_device: str = ""
     output_device: str = ""
@@ -281,10 +281,10 @@ def validate_meeting_hotkey(modifiers: list[str], key: str, dictation: HotkeyCon
 
 # Tried in order when a hand-edited file leaves no usable meeting hotkey.
 _MEETING_HOTKEY_FALLBACKS = (
-    (["ctrl", "alt"], "M"),
     (["ctrl", "shift"], "M"),
-    (["ctrl", "alt"], "F9"),
     (["ctrl", "shift"], "F9"),
+    (["ctrl", "alt"], "M"),
+    (["ctrl", "alt"], "F9"),
     (["ctrl", "alt", "win"], "M"),
 )
 
@@ -433,7 +433,7 @@ class AssistantConfig:
 
 
 # Keys that can mark a recording as an os-control command, pressed as the last key of the
-# hotkey chord (Ctrl+Shift+Alt+Y by default). OEM_102 is the "<" key left of Y/Z on a
+# hotkey chord (Ctrl+Win+Y by default). OEM_102 is the "<" key left of Y/Z on a
 # German (ISO) keyboard.
 COMMAND_KEY_VKS: dict[str, int] = {"Y": 0x59, "OEM_102": 0xE2}
 
@@ -719,13 +719,13 @@ def load_config(path: Path | None = None) -> Config:
     general = data.get("general", {})
     hotkey_data = data.get("hotkey", {})
     hotkey_mode = hotkey_data.get("mode", "hold")
-    hotkey_modifiers = list(hotkey_data.get("modifiers", ["ctrl", "shift", "alt"]))
+    hotkey_modifiers = list(hotkey_data.get("modifiers", ["ctrl", "win"]))
     hotkey_key = str(hotkey_data.get("key", ""))
     if validate_hotkey(hotkey_modifiers, hotkey_key) is not None:
         # An unusable binding would make the app unreachable; fall back to the default.
-        hotkey_modifiers, hotkey_key = ["ctrl", "shift", "alt"], ""
+        hotkey_modifiers, hotkey_key = ["ctrl", "win"], ""
     meeting_data = data.get("meeting", {})
-    meeting_modifiers = [str(m).lower() for m in meeting_data.get("modifiers", ["ctrl", "alt"])]
+    meeting_modifiers = [str(m).lower() for m in meeting_data.get("modifiers", ["ctrl", "shift"])]
     meeting_key = str(meeting_data.get("key", "M"))
     hotkey_config = HotkeyConfig(modifiers=hotkey_modifiers, key=normalize_hotkey_key(hotkey_key) or "")
     if validate_meeting_hotkey(meeting_modifiers, meeting_key, hotkey_config) is not None:

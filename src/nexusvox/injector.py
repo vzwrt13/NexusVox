@@ -271,7 +271,7 @@ def _prepare_keyboard(injection_delay_ms: int) -> None:
 
     The hotkey fires on the first modifier going up; without this a synthetic
     keystroke would be combined with the still-held modifiers (Ctrl+V turning
-    into Ctrl+Shift+Alt+V, Enter into Ctrl+Enter).
+    into Ctrl+Win+V, Enter into Ctrl+Enter).
     """
     _wait_for_physical_release()
     _release_all_modifiers()

@@ -52,7 +52,7 @@ def test_config_dataclass_defaults():
     assert cfg.voice_commands.enabled is True
     assert "slash" in cfg.voice_commands.symbols
     assert "plus" not in cfg.voice_commands.symbols
-    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert cfg.hotkey.modifiers == ["ctrl", "win"]
     assert cfg.hotkey.mode == "hold"
     assert cfg.audio.sample_rate == 16_000
     assert cfg.audio.chunk_size == 4096
@@ -72,7 +72,7 @@ def test_load_config_defaults_when_no_file(tmp_path, monkeypatch):
     cfg = load_config(tmp_path / "config.toml")
 
     assert cfg.audio.sample_rate == 16_000
-    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert cfg.hotkey.modifiers == ["ctrl", "win"]
 
 
 def test_load_config_copies_example(tmp_path, monkeypatch):
@@ -148,7 +148,7 @@ def test_load_config_missing_sections_uses_defaults(tmp_path):
     assert cfg.injection_delay_ms == 300
     assert cfg.audio.sample_rate == 16_000
     assert cfg.audio.chunk_size == 4096
-    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert cfg.hotkey.modifiers == ["ctrl", "win"]
     assert cfg.inference.server_url == "http://localhost:8002/v1/audio/transcriptions"
 
 
@@ -448,15 +448,25 @@ def test_hotkey_key_defaults_to_none(tmp_path):
     assert load_config(path).hotkey.key == ""
 
 
+def test_saved_hotkeys_survive_the_new_defaults(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hotkey]\nmodifiers = ["ctrl", "shift", "alt"]\n[meeting]\nmodifiers = ["ctrl", "alt"]\nkey = "M"\n'
+    )
+    cfg = load_config(path)
+    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert cfg.meeting.modifiers == ["ctrl", "alt"] and cfg.meeting.key == "M"
+
+
 def test_unusable_hotkey_falls_back_to_default(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[hotkey]\nmodifiers = []\nkey = ""\n')
-    assert load_config(path).hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert load_config(path).hotkey.modifiers == ["ctrl", "win"]
     path.write_text('[hotkey]\nmodifiers = ["ctrl"]\nkey = "enter"\n')
     cfg = load_config(path)
-    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"] and cfg.hotkey.key == ""
+    assert cfg.hotkey.modifiers == ["ctrl", "win"] and cfg.hotkey.key == ""
     path.write_text('[hotkey]\nmodifiers = ["hyper"]\n')
-    assert load_config(path).hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert load_config(path).hotkey.modifiers == ["ctrl", "win"]
 
 
 def test_validate_hotkey():

@@ -3,14 +3,14 @@
 Two optional features hand a sentence to another program instead of typing it:
 
 - **Command recordings** (`[os_control]`) — press `Y` as the last key of the voice
-  hotkey chord (`Ctrl+Shift+Alt+Y` by default) and that recording is sent as a command,
+  hotkey chord (`Ctrl+Win+Y` by default) and that recording is sent as a command,
   for example to a window switcher that understands "focus 3" or "bring up the terminal".
 - **Assistant forward** (`[assistant]`) — "nexus assistant &lt;anything&gt;" is sent to a
   voice assistant, for example "nexus assistant remember to buy milk".
 
 NexusVox only routes the text. The program on the other end is **not part of NexusVox**:
 you run it yourself, and any program that speaks the contract below works. Both features
-are off by default; with them off, `Ctrl+Shift+Alt+Y` types a plain `y` and "nexus
+are off by default; with them off, `Ctrl+Win+Y` types a plain `y` and "nexus
 assistant ..." is typed like any other sentence.
 
 ## Configuration

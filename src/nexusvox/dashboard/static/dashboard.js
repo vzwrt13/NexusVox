@@ -567,7 +567,7 @@ const hotkeyResetBtn = document.getElementById("hotkey-reset-btn");
 const hotkeyKeycaps = document.getElementById("hotkey-keycaps");
 const hotkeyBadge = document.getElementById("hotkey-badge");
 const hotkeyDefaultName = document.getElementById("hotkey-default-name");
-let hotkeyDefault = { modifiers: ["ctrl", "shift", "alt"], key: "" };
+let hotkeyDefault = { modifiers: ["ctrl", "win"], key: "" };
 
 function describeHotkey(modifiers, key) {
   const parts = modifiers.map((m) => m.charAt(0).toUpperCase() + m.slice(1));

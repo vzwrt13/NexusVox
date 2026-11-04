@@ -87,7 +87,26 @@ def test_access_denied_on_the_mutex_counts_as_already_running(monkeypatch):
             return None
 
         CloseHandle = staticmethod(lambda handle: True)  # noqa: N815
+        LocalFree = staticmethod(lambda handle: None)  # noqa: N815
 
     monkeypatch.setattr(single_instance, "_kernel32", lambda: Denied())
     monkeypatch.setattr(single_instance.ctypes, "get_last_error", lambda: 5)
     assert SingleInstance().acquire() is False
+
+
+def test_the_mutex_can_be_opened_to_wait_on_it():
+    """The installer's AppMutex check opens the mutex with SYNCHRONIZE only; that must work for any logged-on user."""
+    import ctypes
+
+    synchronize = 0x00100000
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenMutexW.argtypes = [ctypes.c_uint32, ctypes.c_int32, ctypes.c_wchar_p]
+    k32.OpenMutexW.restype = ctypes.c_void_p
+    k32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+    first = SingleInstance()
+    assert first.acquire()
+    handle = k32.OpenMutexW(synchronize, False, single_instance.MUTEX_NAME)
+    assert handle
+    k32.CloseHandle(handle)
+    first.release()

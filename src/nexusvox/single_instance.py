@@ -25,6 +25,13 @@ _ERROR_ALREADY_EXISTS = 183
 _EVENT_MODIFY_STATE = 0x0002
 _WAIT_OBJECT_0 = 0
 _POLL_MS = 500
+_SDDL_REVISION_1 = 1
+
+# Who may open the mutex. The installer checks it (Inno Setup's AppMutex, SYNCHRONIZE access) to refuse an install
+# or uninstall over a running NexusVox. An elevated NexusVox would otherwise own a mutex that a normal-rights Setup
+# cannot open, and Setup would read "access denied" as "not running". Full control stays with the owner, SYSTEM and
+# the Administrators; everybody else who is logged on may only wait on it (0x00100000 = SYNCHRONIZE).
+_MUTEX_SDDL = "D:(A;;GA;;;OW)(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x00100000;;;AU)"
 
 
 @functools.cache
@@ -35,6 +42,8 @@ def _kernel32():
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
     k32.CreateMutexW.restype = ctypes.c_void_p
+    k32.LocalFree.argtypes = [ctypes.c_void_p]
+    k32.LocalFree.restype = ctypes.c_void_p
     k32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
     k32.CreateEventW.restype = ctypes.c_void_p
     k32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
@@ -46,6 +55,32 @@ def _kernel32():
     k32.WaitForSingleObject.argtypes = [ctypes.c_void_p, wintypes.DWORD]
     k32.WaitForSingleObject.restype = wintypes.DWORD
     return k32
+
+
+class _SecurityAttributes(ctypes.Structure):
+    _fields_ = (
+        ("nLength", ctypes.c_uint32),
+        ("lpSecurityDescriptor", ctypes.c_void_p),
+        ("bInheritHandle", ctypes.c_int32),
+    )
+
+
+def _create_mutex(k32):
+    """CreateMutexW with `_MUTEX_SDDL` as its security; the default security if the descriptor cannot be built."""
+    descriptor = ctypes.c_void_p()
+    convert = ctypes.WinDLL("advapi32", use_last_error=True).ConvertStringSecurityDescriptorToSecurityDescriptorW
+    convert.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+    convert.restype = ctypes.c_int32
+    if not convert(_MUTEX_SDDL, _SDDL_REVISION_1, ctypes.byref(descriptor), None):
+        logger.warning("Could not build the mutex security descriptor (error %d)", ctypes.get_last_error())
+        return k32.CreateMutexW(None, False, MUTEX_NAME)
+    try:
+        attributes = _SecurityAttributes(ctypes.sizeof(_SecurityAttributes), descriptor, 0)
+        return k32.CreateMutexW(ctypes.byref(attributes), False, MUTEX_NAME)
+    finally:
+        # CreateMutexW copies the descriptor, and the caller reads GetLastError after this returns. LocalFree
+        # leaves the last error alone on success.
+        k32.LocalFree(descriptor)
 
 
 class SingleInstance:
@@ -66,7 +101,7 @@ class SingleInstance:
         event = k32.CreateEventW(None, False, False, EVENT_NAME)  # auto-reset
         if not event:
             logger.warning("Could not create the dashboard doorbell (error %d)", ctypes.get_last_error())
-        mutex = k32.CreateMutexW(None, False, MUTEX_NAME)
+        mutex = _create_mutex(k32)
         error = ctypes.get_last_error()
         if not mutex:
             if event:

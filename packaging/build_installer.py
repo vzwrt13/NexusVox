@@ -19,8 +19,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from third_party_notices import write_notices  # noqa: E402
+from third_party_notices import MissingLicenceError, write_notices
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "packaging" / "nexusvox.iss"
@@ -73,7 +72,11 @@ def main() -> int:
         return 1
     version = app_version()
     # The licence notices for everything the frozen app contains; the script shows and installs them.
-    write_notices(ROOT / "dist" / "installer" / "THIRD_PARTY_NOTICES.txt")
+    try:
+        write_notices(ROOT / "dist" / "installer" / "THIRD_PARTY_NOTICES.txt")
+    except MissingLicenceError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     command = [iscc, f"/DAppVersion={version}", f"/DAppVersionInfo={numeric_version(version)}", str(SCRIPT)]
     result = subprocess.run(command, cwd=ROOT)
     if result.returncode != 0:

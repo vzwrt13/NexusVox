@@ -73,12 +73,17 @@ below records the main licences so the compatibility picture is on file.
 |---|---|
 | pynput, pystray | LGPL-3.0 |
 | sqlalchemy, alembic, flask, pydub, faster-whisper, ctranslate2, onnxruntime, onnx-asr, Pillow | MIT |
-| httpx, pyperclip, sounddevice, numpy, av | BSD |
+| httpx, pyperclip, sounddevice, numpy | BSD |
+| av (PyAV) | BSD for PyAV itself; its wheel bundles FFmpeg and codec libraries under LGPL and GPL, see below |
 | lingua-language-detector, tokenizers, huggingface-hub, websockets | Apache-2.0 |
 
-All of these allow use alongside NexusVox's own licence. MIT, BSD and Apache-2.0 are permissive.
-LGPL-3.0 applies to those two libraries only.
-`pynput` and `pystray` are used as unmodified libraries through ordinary Python imports.
+MIT, BSD and Apache-2.0 are permissive. LGPL-3.0 applies to `pynput` and `pystray` only, which are used as
+unmodified libraries through ordinary Python imports.
+
+**PyAV's FFmpeg libraries are the exception.** The PyAV wheels carry FFmpeg and a set of codec libraries
+(`av.libs`), among them x264 and x265, which are licensed under the GPL (version 2 or later). NexusVox does not
+use the encoders: `faster-whisper` uses PyAV only to decode audio (the WAV it is given). In the Windows installer they are bundled
+anyway, and `THIRD_PARTY_NOTICES.txt` lists them with where their source is.
 
 ---
 

@@ -34,6 +34,9 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+; Windows 11, the one supported system (README, pyproject classifiers): refuse earlier ones up front instead of
+; installing an app that cannot start.
+MinVersion=10.0.22000
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 LicenseFile=..\LICENSE
@@ -65,12 +68,6 @@ Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\installer\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\THIRD_PARTY_LICENSES.md"; DestDir: "{app}"; Flags: ignoreversion
 
-[InstallDelete]
-; An upgrade copies the new build over the old one. Files only the old build had (renamed DLLs, old .dist-info
-; folders that importlib.metadata would still find, removed packages) must not stay behind.
-; {app}\extensions is not touched.
-Type: filesandordirs; Name: "{app}\_internal"
-
 [UninstallDelete]
 ; Files Setup did not install. The add-ons in extensions run inside the app (microphone, keyboard hook), so they go
 ; with it; a reinstall must not silently load an old one.
@@ -90,11 +87,56 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Filename: "{app}\{#AppExe}"; Description: "Start {#AppName}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+{ An upgrade copies the new build over the old one. Files only the old build had (renamed DLLs, old .dist-info
+  folders that importlib.metadata would still find, removed packages) must not stay behind, but deleting the old
+  _internal before the copy would leave an app that cannot start if the upgrade is cancelled or fails half way. So
+  the old folder is moved aside first, deleted once the new files are in, and moved back if Setup does not get that
+  far. The extensions folder next to it is never touched. }
+
+var
+  InternalMovedAside: Boolean;
+  InstallFinished: Boolean;
+
+function InternalDir: String;
+begin
+  Result := ExpandConstant('{app}\_internal');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+  begin
+    { Left over from an upgrade that was killed half way. }
+    if DirExists(InternalDir + '.old') then
+      DelTree(InternalDir + '.old', True, True, True);
+    if DirExists(InternalDir) then
+      InternalMovedAside := RenameFile(InternalDir, InternalDir + '.old');
+  end
+  else if CurStep = ssPostInstall then
+  begin
+    InstallFinished := True;
+    if InternalMovedAside then
+      DelTree(InternalDir + '.old', True, True, True);
+  end;
+end;
+
+procedure DeinitializeSetup;
+begin
+  { Cancelled or failed: Setup has rolled back the files it added; put the old runtime back. }
+  if InternalMovedAside and not InstallFinished then
+  begin
+    if DirExists(InternalDir) then
+      DelTree(InternalDir, True, True, True);
+    RenameFile(InternalDir + '.old', InternalDir);
+  end;
+end;
+
 { The uninstaller removes the program and its add-ons. The user's own files live outside the install folder:
     config:  %APPDATA%\NexusVox
     data:    %LOCALAPPDATA%\NexusVox\data (history database, stored audio)
     logs:    %LOCALAPPDATA%\NexusVox\logs
-    models:  %LOCALAPPDATA%\NexusVox\models (downloaded speech models, several hundred MB)
+    models:  %LOCALAPPDATA%\NexusVox\models (downloaded speech models, several hundred MB) and
+             %LOCALAPPDATA%\NexusVox\models-xet (the Hugging Face chunk cache, which holds model data too)
   The default locations only: a database or audio folder moved elsewhere in Settings is not touched, and the question
   says so. Two questions, both defaulting to keep. A silent uninstall keeps everything unless it is told otherwise
   with /DELETEDATA and /DELETEMODELS. }
@@ -107,6 +149,12 @@ begin
   for I := 1 to ParamCount do
     if CompareText(ParamStr(I), Name) = 0 then
       Result := True;
+end;
+
+{ DelTree reports a folder that does not exist as a failure. Nothing to delete is not a failure. }
+function RemoveFolder(const Path: String): Boolean;
+begin
+  Result := (not DirExists(Path)) or DelTree(Path, True, True, True);
 end;
 
 function WantsDelete(const Switch, Question: String): Boolean;
@@ -137,16 +185,19 @@ begin
       'It cannot be undone.' + #13#10#13#10 +
       'Choose No to keep them for a later reinstall.') then
   begin
-    Failed := not DelTree(ExpandConstant('{userappdata}\NexusVox'), True, True, True);
-    Failed := not DelTree(LocalRoot + '\data', True, True, True) or Failed;
-    Failed := not DelTree(LocalRoot + '\logs', True, True, True) or Failed;
+    Failed := not RemoveFolder(ExpandConstant('{userappdata}\NexusVox'));
+    Failed := not RemoveFolder(LocalRoot + '\data') or Failed;
+    Failed := not RemoveFolder(LocalRoot + '\logs') or Failed;
   end;
 
   if WantsDelete('/DELETEMODELS',
       'Also delete the downloaded speech models?' + #13#10#13#10 +
       'They take several hundred MB and are downloaded again when you reinstall and dictate.' + #13#10#13#10 +
       'Choose No to keep them.') then
-    Failed := not DelTree(LocalRoot + '\models', True, True, True) or Failed;
+  begin
+    Failed := not RemoveFolder(LocalRoot + '\models') or Failed;
+    Failed := not RemoveFolder(LocalRoot + '\models-xet') or Failed;
+  end;
 
   if Failed then
   begin

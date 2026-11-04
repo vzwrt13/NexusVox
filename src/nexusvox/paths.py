@@ -5,7 +5,7 @@ app) there is no meaningful working directory, so everything lives in fixed per-
 
 - config: ``%APPDATA%\NexusVox``
 - database and audio: the data folder, ``%LOCALAPPDATA%\NexusVox\data``
-- speech models: ``%LOCALAPPDATA%\NexusVox\models``
+- speech models: ``%LOCALAPPDATA%\NexusVox\models`` (and ``...\models-xet``, the Hugging Face chunk cache)
 
 The models folder is defined only here; a later setting that lets the user pick another folder
 changes ``models_dir`` and nothing else.
@@ -56,6 +56,12 @@ def models_dir() -> Path | None:
     return _local_dir() / "models" if is_frozen() else None
 
 
+def xet_cache_dir() -> Path | None:
+    """The Hugging Face xet chunk cache when frozen. It holds model data too, so it lives next to the models folder
+    and the uninstaller deletes both with "delete the models"; by default it would sit in the user profile."""
+    return _local_dir() / "models-xet" if is_frozen() else None
+
+
 def default_config_path() -> Path:
     """The config.toml to load: relative ``config.toml`` from source, the config folder when frozen."""
     return Path("config.toml") if not is_frozen() else config_dir() / "config.toml"
@@ -82,3 +88,6 @@ def apply_models_dir() -> None:
     folder = models_dir()
     if folder is not None:
         os.environ["HF_HUB_CACHE"] = str(folder)
+    xet = xet_cache_dir()
+    if xet is not None:
+        os.environ["HF_XET_CACHE"] = str(xet)

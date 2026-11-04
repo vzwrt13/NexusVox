@@ -376,11 +376,22 @@ everything unless `/DELETEDATA` and/or `/DELETEMODELS` are passed. `.github/work
 test-installs it in CI; the release workflow attaches `NexusVox-Setup.exe` (a stable name, the website links to it) to
 every release. Unsigned until the signing ticket; the first-run screen is a separate ticket.
 
-Behaviours worth knowing: `AppMutex` (the app's single-instance mutex) makes Setup and the uninstaller refuse while
-NexusVox runs, because the tray app cannot be closed from outside; an upgrade first deletes `{app}\_internal` so no
-file of the old build survives; unticking the autostart task on an upgrade removes the Run value; the uninstaller
-also removes `{app}\extensions`; the delete-data question covers the default folders only. CI installs, starts the
-installed app, tries to install over it, upgrades, and uninstalls with and without the delete switches.
+Behaviours worth knowing: `AppMutex` (the app's single-instance mutex, created with a DACL that lets any logged-on
+user open it with SYNCHRONIZE, so an elevated NexusVox is seen as well) makes Setup and the uninstaller refuse while
+NexusVox runs, because the tray app cannot be closed from outside. An upgrade moves the old `{app}\_internal` aside,
+deletes it once the new files are in and moves it back if Setup is cancelled or fails, so no file of the old build
+survives and a failed upgrade leaves a working app. Unticking the autostart task on an upgrade removes the Run value.
+The uninstaller also removes `{app}\extensions` (add-ons run inside the app); the delete-data question covers the
+default folders only, and "delete the models" also removes the Hugging Face xet cache, which the app keeps next to the
+models (`HF_XET_CACHE`). `MinVersion` is Windows 11. CI installs, starts the installed app, tries to install over
+it, upgrades, and uninstalls with and without the delete switches.
+
+**Open before the first public release: GPL libraries in the build.** The PyAV wheel's `av.libs` contains x264 and
+x265 (GPL-2.0-or-later) next to FFmpeg. NexusVox only needs PyAV because `faster-whisper` imports it at module level
+and uses it to decode audio; `LocalWhisperTranscriber` hands it a WAV (`io.BytesIO`), which it could pass as a
+float array instead, and the file transcription path converts with pydub and ffmpeg. The notices file now lists these libraries and where their
+source is, which is disclosure, not a licence answer. Options: ship a build without them (pass arrays to Whisper and put a stub `av` in
+the frozen app, or PyAV built against an LGPL-only FFmpeg), or have the licence combination reviewed.
 
 ## Open questions
 

@@ -85,3 +85,12 @@ def test_polish_sequence_masks_a_forced_alt_release(monkeypatch):
     events = _capture_inputs(monkeypatch, held={injector.VK_MENU})
     assert (injector.VK_MENU, True) in events
     assert events.index((injector.VK_MENU_MASK, True)) < events.index((injector.VK_MENU, True))
+
+
+def test_only_right_win_down_gets_a_right_win_key_up(monkeypatch):
+    from nexusvox import injector
+
+    down = {injector.VK_RWIN}
+    monkeypatch.setattr(injector.user32, "GetAsyncKeyState", lambda vk: 0x8000 if vk in down else 0, raising=False)
+    seq = _sequence({injector.VK_LWIN})
+    assert (injector.VK_RWIN, True) in seq and (injector.VK_LWIN, True) not in seq

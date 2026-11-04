@@ -13,7 +13,7 @@ log_full_text = false
 [hotkey]
 # Press all listed modifiers simultaneously to record
 # Modifier options: ctrl, shift, alt, win (may be empty when a key is set)
-modifiers = ["ctrl", "shift", "alt"]
+modifiers = ["ctrl", "win"]
 # Optional key that completes the combo: a letter, digit, F1-F24, SPACE, CAPS_LOCK,
 # SCROLL_LOCK, PAUSE, INSERT, HOME, END, PAGE_UP or PAGE_DOWN. Empty: modifiers only.
 # The key is swallowed while it is held as part of the combo, so it never types.
@@ -24,12 +24,12 @@ key = ""
 # Also switchable in the dashboard Settings tab.
 mode = "hold"
 # Paste the last text again: start a recording with the hotkey, tap this key while every
-# modifier is still down (Ctrl+Shift+Alt+V), let go. Nothing is transcribed; the text
+# modifier is still down (Ctrl+Win+V), let go. Nothing is transcribed; the text
 # NexusVox pasted last is pasted once more. Same key names as `key`; empty turns it off.
 # Also editable in the dashboard Settings tab.
 paste_key = "V"
 # Polish the selected text: select text, start a recording with the hotkey, tap this key
-# while every modifier is down (e.g. "P" -> Ctrl+Shift+Alt+P) and say what to do ("make it
+# while every modifier is down (e.g. "P" -> Ctrl+Win+P) and say what to do ("make it
 # shorter", "mach es formeller") - or nothing for a general polish. The selection is
 # rewritten by the [llm] model and pasted over itself (Ctrl+Z in the app undoes it).
 # Empty (default) turns it off. Also editable in the dashboard Settings tab.
@@ -41,8 +41,8 @@ polish_key = ""
 # it from the dashboard's Meetings tab or with this toggle hotkey; dictation keeps working during
 # a meeting. Only record when every participant knows (see docs/MEETINGS.md).
 # The hotkey needs at least one modifier and a key, and must not also be the dictation hotkey.
-modifiers = ["ctrl", "alt"]
-key = "M"
+modifiers = ["ctrl", "shift"]
+key = "F9"
 # Devices by name (see the dashboard Meetings tab). Empty: the system default devices.
 mic_device = ""
 output_device = ""
@@ -188,7 +188,7 @@ timeout_s = 5.0
 
 [os_control]
 # Command recordings: press command_key as the last key of the voice hotkey chord ("Y" by
-# default, so Ctrl+Shift+Alt+Y; "OEM_102" is the "<" key on a German keyboard) and that
+# default, so Ctrl+Win+Y; "OEM_102" is the "<" key on a German keyboard) and that
 # recording is not typed - its transcript goes to a local TCP port as
 # `send <service> <text>`, for example to a window switcher that understands "focus 3".
 # Without the full chord the key types normally. NexusVox also sends `::show` when the

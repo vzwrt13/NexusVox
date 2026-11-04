@@ -335,6 +335,11 @@ def minimize_app(app_name: str, exe_path: str | None = None) -> None:
 
 def snap_app(app_name: str, direction: str, exe_path: str | None = None) -> None:
     """Snap an app's window left or right (Win+Arrow)."""
+    # A Win key-down while the dictation chord's Ctrl or Win is still held would restart a recording and send
+    # Ctrl+Win+Arrow (virtual desktop switch) instead of snapping.
+    from .injector import _wait_for_physical_release  # imported here: injector binds Win32 at import
+
+    _wait_for_physical_release()
     if not focus_app(app_name, exe_path):
         return
     time.sleep(0.1)

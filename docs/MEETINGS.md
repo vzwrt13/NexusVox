@@ -13,7 +13,7 @@ meeting would show it under your own voice; by default NexusVox leaves it out (s
 - **Dashboard:** open the **Meetings** tab and press **Start recording**. A timer and a red indicator
   show that it runs. **Stop recording** ends it and starts the transcription; the progress shows in
   the same tab and the finished meeting appears under *Previous Meetings*.
-- **Hotkey:** the meeting hotkey (default `Ctrl+Alt+M`, `[meeting]` in `config.toml`, also editable
+- **Hotkey:** the meeting hotkey (default `Ctrl+Shift+F9`, `[meeting]` in `config.toml`, also editable
   in the Settings tab's Meetings card) starts and stops a meeting from anywhere. It is separate from the dictation
   hotkey and needs a key plus at least one modifier; a binding that would also start dictation is
   refused, and so is a dictation hotkey that the meeting hotkey would also start. While the consent hint is on, the hotkey opens the Meetings tab to start a meeting, so the

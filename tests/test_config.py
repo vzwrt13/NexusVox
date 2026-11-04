@@ -18,6 +18,7 @@ from nexusvox.config import (
     InferenceConfig,
     LearnFromEditsConfig,
     LlmConfig,
+    MeetingConfig,
     OSCommandsConfig,
     PolishConfig,
     VoiceCommandsConfig,
@@ -52,7 +53,7 @@ def test_config_dataclass_defaults():
     assert cfg.voice_commands.enabled is True
     assert "slash" in cfg.voice_commands.symbols
     assert "plus" not in cfg.voice_commands.symbols
-    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert cfg.hotkey.modifiers == ["ctrl", "win"]
     assert cfg.hotkey.mode == "hold"
     assert cfg.audio.sample_rate == 16_000
     assert cfg.audio.chunk_size == 4096
@@ -72,7 +73,7 @@ def test_load_config_defaults_when_no_file(tmp_path, monkeypatch):
     cfg = load_config(tmp_path / "config.toml")
 
     assert cfg.audio.sample_rate == 16_000
-    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert cfg.hotkey.modifiers == ["ctrl", "win"]
 
 
 def test_load_config_copies_example(tmp_path, monkeypatch):
@@ -148,7 +149,7 @@ def test_load_config_missing_sections_uses_defaults(tmp_path):
     assert cfg.injection_delay_ms == 300
     assert cfg.audio.sample_rate == 16_000
     assert cfg.audio.chunk_size == 4096
-    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert cfg.hotkey.modifiers == ["ctrl", "win"]
     assert cfg.inference.server_url == "http://localhost:8002/v1/audio/transcriptions"
 
 
@@ -448,15 +449,33 @@ def test_hotkey_key_defaults_to_none(tmp_path):
     assert load_config(path).hotkey.key == ""
 
 
+def test_saved_hotkeys_survive_the_new_defaults(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[hotkey]\nmodifiers = ["ctrl", "shift", "alt"]\n[meeting]\nmodifiers = ["ctrl", "alt"]\nkey = "M"\n'
+    )
+    cfg = load_config(path)
+    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert cfg.meeting.modifiers == ["ctrl", "alt"] and cfg.meeting.key == "M"
+
+
+def test_partial_hotkey_sections_keep_their_old_meaning(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[hotkey]\nkey = "A"\n[meeting]\nkey = "F8"\n')
+    cfg = load_config(path)
+    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"] and cfg.hotkey.key == "A"
+    assert cfg.meeting.modifiers == ["ctrl", "alt"] and cfg.meeting.key == "F8"
+
+
 def test_unusable_hotkey_falls_back_to_default(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[hotkey]\nmodifiers = []\nkey = ""\n')
-    assert load_config(path).hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert load_config(path).hotkey.modifiers == ["ctrl", "win"]
     path.write_text('[hotkey]\nmodifiers = ["ctrl"]\nkey = "enter"\n')
     cfg = load_config(path)
-    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"] and cfg.hotkey.key == ""
+    assert cfg.hotkey.modifiers == ["ctrl", "win"] and cfg.hotkey.key == ""
     path.write_text('[hotkey]\nmodifiers = ["hyper"]\n')
-    assert load_config(path).hotkey.modifiers == ["ctrl", "shift", "alt"]
+    assert load_config(path).hotkey.modifiers == ["ctrl", "win"]
 
 
 def test_validate_hotkey():
@@ -848,3 +867,12 @@ def test_numbers_as_digits_false_survives_save_roundtrip(tmp_path):
     save_config(Config(voice_commands=VoiceCommandsConfig(numbers_as_digits=False)), path)
 
     assert load_config(path).voice_commands.numbers_as_digits is False
+
+
+def test_meeting_fallback_list_starts_with_the_default_and_stays_alt_free_first():
+    from nexusvox import config as config_module
+
+    first = config_module._MEETING_HOTKEY_FALLBACKS[0]
+    assert first == (list(MeetingConfig().modifiers), MeetingConfig().key) and first[1] == "F9"
+    clash = HotkeyConfig(modifiers=["ctrl", "shift"], key="F9")
+    assert config_module.default_meeting_hotkey(clash) == (["ctrl", "shift"], "F10")

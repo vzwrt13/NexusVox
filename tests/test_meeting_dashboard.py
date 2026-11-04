@@ -25,7 +25,7 @@ from nexusvox.meeting_session import MeetingSession
 
 def test_meeting_hotkey_default_does_not_start_dictation():
     cfg = Config()
-    assert cfg.meeting.modifiers == ["ctrl", "alt"] and cfg.meeting.key == "M"
+    assert cfg.meeting.modifiers == ["ctrl", "shift"] and cfg.meeting.key == "F9"
     assert validate_meeting_hotkey(cfg.meeting.modifiers, cfg.meeting.key, cfg.hotkey) is None
 
 
@@ -34,7 +34,7 @@ def test_meeting_hotkey_default_does_not_start_dictation():
     [
         (["ctrl", "alt"], "", "needs a key"),
         ([], "M", "at least one modifier"),
-        (["ctrl", "shift", "alt"], "M", "also start dictation"),  # contains the modifier-only dictation chord
+        (["ctrl", "shift", "win"], "M", "also start dictation"),  # contains the modifier-only dictation chord
         (["ctrl", "alt"], "enter", "Unknown key"),
     ],
 )
@@ -66,7 +66,7 @@ def test_meeting_section_round_trips_and_an_unusable_file_falls_back(tmp_path):
     path = tmp_path / "config.toml"
     cfg = Config()
     cfg.meeting = MeetingConfig(
-        modifiers=["ctrl", "win"],
+        modifiers=["ctrl", "alt"],
         key="F8",
         mic_device='Mic "A"',
         output_device="Speakers",
@@ -77,14 +77,15 @@ def test_meeting_section_round_trips_and_an_unusable_file_falls_back(tmp_path):
     loaded = load_config(path).meeting
     assert loaded == cfg.meeting
 
-    path.write_text('[meeting]\nmodifiers = ["ctrl", "shift", "alt"]\nkey = "M"\n', encoding="utf-8")
-    assert load_config(path).meeting.modifiers == ["ctrl", "alt"]  # would also start dictation
+    path.write_text('[meeting]\nmodifiers = ["ctrl", "shift", "win"]\nkey = "M"\n', encoding="utf-8")
+    assert load_config(path).meeting.modifiers == ["ctrl", "shift"]  # would also start dictation
 
 
 def test_a_file_whose_dictation_hotkey_clashes_with_the_default_meeting_hotkey_gets_another_one(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text(
-        '[hotkey]\nmodifiers = ["ctrl", "alt"]\nkey = ""\n[meeting]\nmodifiers = ["ctrl", "alt"]\n', encoding="utf-8"
+        '[hotkey]\nmodifiers = ["ctrl", "shift"]\nkey = ""\n[meeting]\nmodifiers = ["ctrl", "shift"]\n',
+        encoding="utf-8",
     )
     cfg = load_config(path)
     assert validate_meeting_hotkey(cfg.meeting.modifiers, cfg.meeting.key, cfg.hotkey) is None
@@ -94,6 +95,7 @@ def test_a_file_whose_dictation_hotkey_clashes_with_the_default_meeting_hotkey_g
 
 LCTRL, LALT, LSHIFT = 0xA2, 0xA4, 0xA0
 VK_M = ord("M")
+VK_F9, VK_F8 = 0x78, 0x77
 
 
 def _hotkey():
@@ -112,52 +114,52 @@ def _hotkey():
 def test_meeting_hotkey_toggles_once_per_press_and_swallows_its_key():
     hk, toggles, _ = _hotkey()
     hk._handle(LCTRL, True)
-    hk._handle(LALT, True)
-    assert hk._handle(VK_M, True) is True and toggles == [1]
-    assert hk._handle(VK_M, True) is True  # auto-repeat
+    hk._handle(LSHIFT, True)
+    assert hk._handle(VK_F9, True) is True and toggles == [1]
+    assert hk._handle(VK_F9, True) is True  # auto-repeat
     assert toggles == [1]
-    assert hk._handle(VK_M, False) is True  # key-up of a swallowed key
-    hk._handle(VK_M, True)
+    assert hk._handle(VK_F9, False) is True  # key-up of a swallowed key
+    hk._handle(VK_F9, True)
     assert toggles == [1, 1]
 
 
 def test_meeting_hotkey_ignores_plain_typing_and_a_partial_chord():
     hk, toggles, _ = _hotkey()
-    assert hk._handle(VK_M, True) is False and hk._handle(VK_M, False) is False
+    assert hk._handle(VK_F9, True) is False and hk._handle(VK_F9, False) is False
     hk._handle(LCTRL, True)
-    assert hk._handle(VK_M, True) is False  # Alt is not down
-    hk._handle(VK_M, False)
+    assert hk._handle(VK_F9, True) is False  # Shift is not down
+    hk._handle(VK_F9, False)
     hk._handle(LCTRL, False)
     assert toggles == []
 
 
 def test_meeting_hotkey_follows_the_live_config():
     hk, toggles, config = _hotkey()
-    config.modifiers, config.key = ["ctrl", "shift"], "F9"
+    config.modifiers, config.key = ["ctrl", "shift"], "F8"
     hk._handle(LCTRL, True)
     hk._handle(LSHIFT, True)
-    assert hk._handle(VK_M, True) is False  # the old key is plain typing now
-    assert hk._handle(0x78, True) is True  # VK_F9
+    assert hk._handle(VK_F9, True) is False  # the old key is plain typing now
+    assert hk._handle(VK_F8, True) is True
     assert toggles == [1]
 
 
 def test_meeting_hotkey_needs_exactly_its_modifiers():
     hk, toggles, _ = _hotkey()
-    for vk in (LCTRL, LSHIFT, LALT):  # Ctrl+Shift+Alt+M is dictation's paste-last, not a meeting
+    for vk in (LCTRL, LSHIFT, LALT):  # Ctrl+Shift+Alt+F9 is not the meeting hotkey
         hk._handle(vk, True)
-    assert hk._handle(VK_M, True) is False
+    assert hk._handle(VK_F9, True) is False
     assert toggles == []
 
 
 def test_a_meeting_hotkey_inside_the_dictation_chord_does_not_steal_it():
-    # dictation Ctrl+Alt+M, meeting Ctrl+M: pressing the dictation chord must not toggle a meeting or eat the M
+    # dictation Ctrl+Shift+M, meeting Ctrl+M: pressing the dictation chord must not toggle a meeting or eat the M
     hk, toggles, config = _hotkey()
     config.modifiers, config.key = ["ctrl"], "M"
     hk._handle(LCTRL, True)
-    hk._handle(LALT, True)
+    hk._handle(LSHIFT, True)
     assert hk._handle(VK_M, True) is False and toggles == []
     hk._handle(VK_M, False)
-    hk._handle(LALT, False)
+    hk._handle(LSHIFT, False)
     assert hk._handle(VK_M, True) is True and toggles == [1]  # Ctrl+M alone is the meeting hotkey
 
 
@@ -165,9 +167,9 @@ def test_modifiers_whose_key_up_was_lost_do_not_stay_held():
     # Ctrl+Alt+Del: the secure desktop eats the key-ups, the hook still counts both as held
     hk, toggles, _ = _hotkey()
     hk._handle(LCTRL, True)
-    hk._handle(LALT, True)
+    hk._handle(LSHIFT, True)
     hk._physical_modifiers = lambda: set()  # but nothing is down any more
-    assert hk._handle(VK_M, True) is False  # a plain "m" is typed, not swallowed
+    assert hk._handle(VK_F9, True) is False  # a plain F9 is passed on, not swallowed
     assert toggles == [] and hk._pressed_modifiers == set()
 
 
@@ -322,7 +324,7 @@ def test_quitting_closes_a_running_meeting(env):
 def test_meeting_settings_endpoints(env):
     client, *_ = env
     settings = client.get("/api/settings").get_json()
-    assert settings["meeting_modifiers"] == ["ctrl", "alt"] and settings["meeting_key"] == "M"
+    assert settings["meeting_modifiers"] == ["ctrl", "shift"] and settings["meeting_key"] == "F9"
     assert settings["meeting_consent_hint"] is True
     assert settings["meeting_leave_dictation_out"] is True
     resp = client.post("/api/settings/meeting-leave-dictation-out", json={"enabled": False})
@@ -332,7 +334,7 @@ def test_meeting_settings_endpoints(env):
     assert resp.status_code == 200
     assert resp.get_json()["meeting_modifiers"] == ["ctrl", "shift"] and resp.get_json()["meeting_key"] == "F8"
 
-    resp = client.post("/api/settings/meeting-hotkey", json={"modifiers": ["ctrl", "shift", "alt"], "key": "M"})
+    resp = client.post("/api/settings/meeting-hotkey", json={"modifiers": ["ctrl", "win"], "key": "M"})
     assert resp.status_code == 400 and "dictation" in resp.get_json()["error"]
     assert client.post("/api/settings/meeting-hotkey", json={"modifiers": "ctrl"}).status_code == 400
 
@@ -491,10 +493,10 @@ def test_the_upload_tab_shows_the_selected_file_and_lets_it_be_removed():
 
 def test_dictation_hotkey_cannot_be_set_to_something_the_meeting_hotkey_would_start(env):
     client, *_ = env
-    resp = client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "alt"], "key": ""})  # meeting: Ctrl+Alt+M
+    resp = client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "shift"], "key": ""})  # = meeting hotkey
     assert resp.status_code == 400 and "meeting hotkey" in resp.get_json()["error"]
-    assert client.get("/api/settings").get_json()["hotkey_modifiers"] == ["ctrl", "shift", "alt"]
-    resp = client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "shift"], "key": ""})
+    assert client.get("/api/settings").get_json()["hotkey_modifiers"] == ["ctrl", "win"]
+    resp = client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "alt"], "key": ""})
     assert resp.status_code == 200
 
 
@@ -819,3 +821,15 @@ def test_portaudio_is_only_refreshed_while_no_stream_is_open():
         audio_state.stream_closed()
     assert calls == []
     assert audio_state.streams_open() == 0
+
+
+def test_reset_to_default_is_refused_while_the_meeting_hotkey_contains_the_default_chord(env):
+    client, *_ = env
+    assert (
+        client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "shift", "alt"], "key": ""}).status_code == 200
+    )
+    assert (
+        client.post("/api/settings/meeting-hotkey", json={"modifiers": ["ctrl", "win"], "key": "F8"}).status_code == 200
+    )
+    resp = client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "win"], "key": ""})
+    assert resp.status_code == 400 and "change the meeting hotkey first" in resp.get_json()["error"]

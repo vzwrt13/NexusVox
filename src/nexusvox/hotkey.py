@@ -269,10 +269,10 @@ class HotkeyListener:
         was lost (used by the mic guard watchdog to tell a long dictation from a stuck hold).
         """
         user32 = ctypes.windll.user32
-        vks = [_MODIFIER_VKS[m][0] for m in self._modifiers]
+        groups: list[tuple[int, ...]] = [_MODIFIER_VKS[m] for m in self._modifiers]
         if self._key_vk is not None:
-            vks.append(self._key_vk)
-        return all(user32.GetAsyncKeyState(vk) & 0x8000 for vk in vks)
+            groups.append((self._key_vk,))
+        return all(any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in vks) for vks in groups)
 
     def still_recording(self) -> bool:
         """Whether the user still means to record: physical keys in hold mode, the
@@ -306,7 +306,7 @@ class HotkeyListener:
 def _physical_modifiers() -> set[str]:
     """The modifiers held right now, asked straight from Win32."""
     user32 = ctypes.windll.user32
-    return {name for name, vks in _MODIFIER_VKS.items() if user32.GetAsyncKeyState(vks[0]) & 0x8000}
+    return {name for name, vks in _MODIFIER_VKS.items() if any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in vks)}
 
 
 class MeetingHotkey:
@@ -341,7 +341,7 @@ class MeetingHotkey:
                     return True  # auto-repeat while held as part of the chord
                 # The tracked set is only a hint: a key-up the hook never saw (Ctrl+Alt+Del, a lock screen) would
                 # leave a modifier counted as held, so the physical state decides and heals the set. The chord
-                # must match exactly: with more modifiers down it is another shortcut (dictation's paste-last).
+                # must match exactly: with more modifiers down it is another shortcut.
                 self._pressed_modifiers &= self._physical_modifiers()
                 if self._pressed_modifiers != set(self._config.modifiers):
                     return False  # plain typing or another chord

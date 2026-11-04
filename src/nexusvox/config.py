@@ -130,9 +130,19 @@ def model_needs_docker(model_id: str, device: str) -> bool:
     return not (info.get("inprocess_supported") and device == "cpu")
 
 
+# Default bindings, the single source for the dataclasses, the loader and the fallbacks. The legacy ones are what
+# a config file written before the current defaults meant by a section that leaves the modifiers out.
+DEFAULT_HOTKEY_MODIFIERS = ("ctrl", "win")
+LEGACY_HOTKEY_MODIFIERS = ("ctrl", "shift", "alt")
+DEFAULT_MEETING_MODIFIERS = ("ctrl", "shift")
+LEGACY_MEETING_MODIFIERS = ("ctrl", "alt")
+DEFAULT_MEETING_KEY = "F9"
+LEGACY_MEETING_KEY = "M"
+
+
 @dataclass
 class HotkeyConfig:
-    modifiers: list[str] = field(default_factory=lambda: ["ctrl", "shift", "alt"])
+    modifiers: list[str] = field(default_factory=lambda: list(DEFAULT_HOTKEY_MODIFIERS))
     # Optional non-modifier key that completes the combo (e.g. "a", "f9", "space").
     # Empty: the modifiers alone are the hotkey. Its keystrokes are swallowed while
     # it is held as part of the combo, so the target app never sees the letter.
@@ -141,10 +151,10 @@ class HotkeyConfig:
     # "toggle": press once to start recording, press again to stop.
     mode: str = "hold"
     # Pressed during a recording with every modifier down: the recording is dropped and
-    # the last pasted text is pasted again (Ctrl+Shift+Alt+V). Empty turns it off.
+    # the last pasted text is pasted again (Ctrl+Win+V). Empty turns it off.
     paste_key: str = "V"
     # Pressed during a recording with every modifier down: the selected text is rewritten by
-    # the spoken instruction through the [llm] model (Ctrl+Shift+Alt+P). Empty: off.
+    # the spoken instruction through the [llm] model (Ctrl+Win+P). Empty: off.
     polish_key: str = ""
 
 
@@ -227,12 +237,12 @@ class MeetingConfig:
     """Meeting recording (microphone + system audio) started from the dashboard or its own hotkey.
 
     The hotkey is a toggle and always needs a key, so it never collides with the dictation hotkey; the
-    default Ctrl+Alt+M leaves the default dictation chord (Ctrl+Shift+Alt) untouched. Empty device names
-    mean the system default devices.
+    default Ctrl+Shift+F9 leaves the default dictation chord (Ctrl+Win) untouched, has no Alt (no app menu) and
+    avoids Ctrl+Shift+M, the Teams mute shortcut. Empty device names mean the system default devices.
     """
 
-    modifiers: list[str] = field(default_factory=lambda: ["ctrl", "alt"])
-    key: str = "M"
+    modifiers: list[str] = field(default_factory=lambda: list(DEFAULT_MEETING_MODIFIERS))
+    key: str = DEFAULT_MEETING_KEY
     mic_device: str = ""
     output_device: str = ""
     # Show "Inform all participants before you record" before each recording; off after "don't show again".
@@ -281,10 +291,10 @@ def validate_meeting_hotkey(modifiers: list[str], key: str, dictation: HotkeyCon
 
 # Tried in order when a hand-edited file leaves no usable meeting hotkey.
 _MEETING_HOTKEY_FALLBACKS = (
-    (["ctrl", "alt"], "M"),
-    (["ctrl", "shift"], "M"),
-    (["ctrl", "alt"], "F9"),
-    (["ctrl", "shift"], "F9"),
+    (list(DEFAULT_MEETING_MODIFIERS), DEFAULT_MEETING_KEY),
+    (list(DEFAULT_MEETING_MODIFIERS), "F10"),
+    (list(LEGACY_MEETING_MODIFIERS), DEFAULT_MEETING_KEY),
+    (list(LEGACY_MEETING_MODIFIERS), LEGACY_MEETING_KEY),
     (["ctrl", "alt", "win"], "M"),
 )
 
@@ -433,7 +443,7 @@ class AssistantConfig:
 
 
 # Keys that can mark a recording as an os-control command, pressed as the last key of the
-# hotkey chord (Ctrl+Shift+Alt+Y by default). OEM_102 is the "<" key left of Y/Z on a
+# hotkey chord (Ctrl+Win+Y by default). OEM_102 is the "<" key left of Y/Z on a
 # German (ISO) keyboard.
 COMMAND_KEY_VKS: dict[str, int] = {"Y": 0x59, "OEM_102": 0xE2}
 
@@ -719,18 +729,32 @@ def load_config(path: Path | None = None) -> Config:
     general = data.get("general", {})
     hotkey_data = data.get("hotkey", {})
     hotkey_mode = hotkey_data.get("mode", "hold")
-    hotkey_modifiers = list(hotkey_data.get("modifiers", ["ctrl", "shift", "alt"]))
+    # A hotkey section in the file that leaves the modifiers out is an older hand-written one: keep what it meant.
+    hotkey_modifiers = list(
+        hotkey_data.get("modifiers", LEGACY_HOTKEY_MODIFIERS if hotkey_data else DEFAULT_HOTKEY_MODIFIERS)
+    )
     hotkey_key = str(hotkey_data.get("key", ""))
     if validate_hotkey(hotkey_modifiers, hotkey_key) is not None:
         # An unusable binding would make the app unreachable; fall back to the default.
-        hotkey_modifiers, hotkey_key = ["ctrl", "shift", "alt"], ""
+        hotkey_modifiers, hotkey_key = list(DEFAULT_HOTKEY_MODIFIERS), ""
     meeting_data = data.get("meeting", {})
-    meeting_modifiers = [str(m).lower() for m in meeting_data.get("modifiers", ["ctrl", "alt"])]
-    meeting_key = str(meeting_data.get("key", "M"))
+    meeting_modifiers = [
+        str(m).lower()
+        for m in meeting_data.get("modifiers", LEGACY_MEETING_MODIFIERS if meeting_data else DEFAULT_MEETING_MODIFIERS)
+    ]
+    meeting_key = str(meeting_data.get("key", LEGACY_MEETING_KEY if meeting_data else DEFAULT_MEETING_KEY))
     hotkey_config = HotkeyConfig(modifiers=hotkey_modifiers, key=normalize_hotkey_key(hotkey_key) or "")
     if validate_meeting_hotkey(meeting_modifiers, meeting_key, hotkey_config) is not None:
         # An unusable binding in the file falls back to the default, like the dictation hotkey.
-        meeting_modifiers, meeting_key = default_meeting_hotkey(hotkey_config)
+        replacement = default_meeting_hotkey(hotkey_config)
+        logger.warning(
+            "Meeting hotkey %s+%s is unusable or would also start dictation; using %s+%s",
+            "+".join(meeting_modifiers),
+            meeting_key,
+            "+".join(replacement[0]),
+            replacement[1],
+        )
+        meeting_modifiers, meeting_key = replacement
     audio_data = data.get("audio", {})
     inference_data = data.get("inference", {})
     model = inference_data.get("model", DEFAULT_MODEL)
@@ -797,7 +821,7 @@ def load_config(path: Path | None = None) -> Config:
         ),
         meeting=MeetingConfig(
             modifiers=meeting_modifiers,
-            key=normalize_hotkey_key(meeting_key) or "M",
+            key=normalize_hotkey_key(meeting_key) or DEFAULT_MEETING_KEY,
             mic_device=str(meeting_data.get("mic_device", "")),
             output_device=str(meeting_data.get("output_device", "")),
             consent_hint=bool(meeting_data.get("consent_hint", True)),

@@ -340,13 +340,14 @@ function renderLlmOverview(data, m) {
     ["Model", escapeHtml(data.selected)],
     ["Size on disk", size],
     ["Installed", installed],
-    ["Runs on", runs.warn ? `<span class="status-line warn">${runs.text}</span>` : runs.text],
+    ["Runs on", `<span id="llm-runs-on"></span>`],
     ["Memory", llmMemory(data, m)],
     ["Used for", "Cleanup, Polish, upload cleanup"],
   ];
   document.getElementById("llm-overview-grid").innerHTML = rows
     .map(([label, value]) => `<div class="overview-row"><span class="overview-label">${label}</span><span class="overview-value">${value}</span></div>`)
     .join("");
+  setStatus(document.getElementById("llm-runs-on"), runs.warn ? "warn" : undefined, runs.text);
 }
 
 function llmOptionLabel(m) {

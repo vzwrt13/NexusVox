@@ -629,7 +629,7 @@ _DEFAULT_STRUCTURAL = ["new paragraph", "new line", "tab", "all caps"]
 class VoiceCommandsConfig:
     enabled: bool = True
     symbols: list[str] = field(default_factory=lambda: list(_DEFAULT_SYMBOLS))
-    numbers_as_digits: bool = False
+    numbers_as_digits: bool = True
     bypass_symbols: bool = False
     # Structural commands (new line, new paragraph, tab, all caps): own category, own list, own bypass.
     structural: list[str] = field(default_factory=lambda: list(_DEFAULT_STRUCTURAL))
@@ -771,7 +771,7 @@ def load_config(path: Path | None = None) -> Config:
         vc_config = VoiceCommandsConfig(
             enabled=vc_data.get("enabled", True),
             symbols=list(vc_data.get("symbols", _DEFAULT_SYMBOLS)),
-            numbers_as_digits=vc_data.get("numbers_as_digits", False),
+            numbers_as_digits=vc_data.get("numbers_as_digits", True),
             bypass_symbols=vc_data.get("bypass_symbols", False),
             structural=list(vc_data.get("structural", _DEFAULT_STRUCTURAL)),
             bypass_structural=vc_data.get("bypass_structural", False),
@@ -781,7 +781,7 @@ def load_config(path: Path | None = None) -> Config:
         vc_config = VoiceCommandsConfig(
             enabled=general.get("voice_commands_enabled", True),
             symbols=list(_DEFAULT_SYMBOLS),
-            numbers_as_digits=False,
+            numbers_as_digits=True,
         )
 
     config = Config(

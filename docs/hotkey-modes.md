@@ -18,11 +18,10 @@ Code paths: `hotkey.py` (`HotkeyListener`, runs inside the keyboard hook), `app.
   turns the recording into something else (`_handle_marker_key`, `hotkey.py:160`): command
   key (`[os_control]`), paste key (`[hotkey].paste_key`, default `V`), polish key
   (`[hotkey].polish_key`, default off). The first marker wins; the key is swallowed.
-- **Alt release**: with Alt in the binding, the Alt key-up that ends the chord is swallowed in the hook and sent
-  again in one `SendInput` batch behind a neutral mask key (`_take_alt_release`, `injector.send_alt_release`), so
-  menu-bar apps never see a lone Alt release. Only that release is touched. The re-injected key-up passes through
-  when it comes back; a 0.5 s timer, `stop()` and `atexit` send a plain release if it does not.
-  `[hotkey].reinject_alt_release` (on by default) switches it. A Polish chord keeps the plain release: in a live retest the batch made Polish in Notepad find nothing selected (0/3) while dictation went 20/20; the cause is unproven.
+- **Menu keys**: with Alt or Win in the binding, a neutral mask key is typed when the chord completes (and for a
+  genuinely new Alt/Win press, not for an auto-repeat of a held one), so releasing Ctrl/Shift first leaves no lone
+  Alt/Win release. The injector's own modifier release (`_release_all_modifiers`) sends key-ups only for modifiers that
+  are still down; a key-up for an Alt that is already up would toggle Notepad's menu bar.
 
 ## What starts and stops a recording
 

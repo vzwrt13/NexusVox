@@ -19,7 +19,7 @@ def _sequence(alt_down):
 def test_mask_precedes_alt_key_up_when_alt_is_down():
     from nexusvox import injector
 
-    seq = _sequence(True)
+    seq = _sequence({injector.VK_MENU})
     alt_up = seq.index((injector.VK_MENU, True))
     assert seq[alt_up - 2 : alt_up] == [(injector.VK_MENU_MASK, False), (injector.VK_MENU_MASK, True)]
 
@@ -27,7 +27,7 @@ def test_mask_precedes_alt_key_up_when_alt_is_down():
 def test_no_mask_when_alt_is_up():
     from nexusvox import injector
 
-    assert all(vk != injector.VK_MENU_MASK for vk, _ in _sequence(False))
+    assert all(vk != injector.VK_MENU_MASK for vk, _ in _sequence({injector.VK_CONTROL}))
 
 
 def test_win_held_also_gets_the_mask_before_its_key_up():
@@ -85,73 +85,3 @@ def test_polish_sequence_masks_a_forced_alt_release(monkeypatch):
     events = _capture_inputs(monkeypatch, held={injector.VK_MENU})
     assert (injector.VK_MENU, True) in events
     assert events.index((injector.VK_MENU_MASK, True)) < events.index((injector.VK_MENU, True))
-
-
-def test_polish_key_sequence_never_lets_a_lone_alt_release_reach_the_target(monkeypatch):
-    """The whole Polish sequence, in both release orders: chord down, polish key down/up, chord up, then the
-    copy (Ctrl+C) and the paste (Ctrl+V). Every event the target sees is recorded; an Alt key-up must always
-    have a non-Alt key-down after the Alt key-down (that is what keeps Notepad's menu bar closed)."""
-    from nexusvox import injector
-    from nexusvox.config import HotkeyConfig
-    from nexusvox.hotkey import POLISH, HotkeyListener
-
-    LCTRL, LSHIFT, LALT, VK_P = 0xA2, 0xA0, 0xA4, ord("P")
-    for order in ((LALT, LCTRL, LSHIFT), (LCTRL, LSHIFT, LALT), (LSHIFT, LALT, LCTRL)):
-        target = []  # (vk, is_up) as the target window receives them
-        pending = []  # events SendInput queued from inside the hook; they pass the hook again, then the target
-
-        config = HotkeyConfig(modifiers=["ctrl", "shift", "alt"], key="", polish_key="P")
-        hk = HotkeyListener(config, lambda: None, lambda: None)
-        hk._alt_timeout_s = 30
-
-        def reinject(vk, masked, pending=pending):
-            if masked:
-                pending += [(injector.VK_MENU_MASK, False), (injector.VK_MENU_MASK, True)]
-            pending.append((vk, True))
-            return True
-
-        hk._alt_release = reinject
-        hk._mask_sender = lambda pending=pending: pending.extend(
-            [(injector.VK_MENU_MASK, False), (injector.VK_MENU_MASK, True)]
-        )
-
-        def key(vk, pressed, hk=hk, target=target, pending=pending):
-            if not hk._handle(vk, pressed):
-                target.append((vk, not pressed))
-            while pending:  # queued synthetic events come back through the hook
-                svk, up = pending.pop(0)
-                if not hk._handle(svk, not up):
-                    target.append((svk, up))
-
-        for vk in (LCTRL, LSHIFT, LALT):
-            key(vk, True)
-        key(VK_P, True)
-        key(VK_P, False)
-        assert hk.mark == POLISH
-        for vk in order:
-            key(vk, False)
-
-        # Then the app's side: copy and paste with everything physically up
-        sent = []
-        monkeypatch.setattr(injector, "_send_inputs", lambda inputs, name, sent=sent: sent.extend(inputs) or True)
-        monkeypatch.setattr(injector, "_send_ctrl_chord", lambda vk, scan, name: True)
-        monkeypatch.setattr(injector, "_wait_for_physical_release", lambda timeout_s=1.5: True)
-        monkeypatch.setattr(injector, "_held_modifiers", lambda: set())
-        monkeypatch.setattr(injector.time, "sleep", lambda s: None)
-        monkeypatch.setattr(injector.pyperclip, "paste", lambda: "selected")
-        monkeypatch.setattr(injector, "set_text", lambda text: None)
-        injector.copy_selection(0, timeout_s=0.1)
-        injector.inject_text("polished", 0)
-        target += [(i._input.ki.wVk, bool(i._input.ki.dwFlags & injector.KEYEVENTF_KEYUP)) for i in sent]
-
-        alt = (injector.VK_MENU, LALT)
-        down_seen = other_since_down = False
-        for vk, up in target:
-            if vk in alt and not up:
-                down_seen, other_since_down = True, False
-            elif vk in alt and up:
-                assert down_seen and other_since_down, f"lone Alt release reached the target (order {order})"
-                down_seen = False
-            elif down_seen and not up and vk not in (LCTRL, LSHIFT):
-                other_since_down = True
-        assert hk._alt_pending is None

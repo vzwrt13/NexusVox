@@ -124,23 +124,6 @@ def send_menu_mask() -> bool:
     return _send_inputs(menu_mask_inputs(), "menu mask")
 
 
-KEYEVENTF_EXTENDEDKEY = 0x0001
-_RIGHT_ALT_VK = 0xA5  # VK_RMENU, an extended key
-
-
-def _alt_up_input(vk: int) -> INPUT:
-    flags = KEYEVENTF_KEYUP | (KEYEVENTF_EXTENDEDKEY if vk == _RIGHT_ALT_VK else 0)
-    return _make_key_input(vk, SCAN_ALT, flags)
-
-
-def send_alt_release(vk: int, masked: bool = True) -> bool:
-    """Send the Alt key-up `vk` (VK_LMENU / VK_RMENU); with `masked` the menu mask keystroke goes in
-    front of it in the same atomic SendInput batch, so no other input can land between them."""
-    inputs = menu_mask_inputs() if masked else []
-    inputs.append(_alt_up_input(vk))
-    return _send_inputs(inputs, "alt release")
-
-
 # Generic modifier -> every virtual key that counts as it being held
 _MODIFIER_GROUPS = (
     (VK_CONTROL, SCAN_CONTROL, (VK_CONTROL, 0xA2, 0xA3)),
@@ -157,16 +140,13 @@ def _held_modifiers() -> set[int]:
     }
 
 
-def _release_inputs(held: set[int] | bool) -> list[INPUT]:
+def _release_inputs(held: set[int]) -> list[INPUT]:
     """Key-ups for the modifiers in `held` only; with Alt or Win among them, the menu mask goes in before
-    the Alt key-up.
+    the first such key-up.
 
     A key-up for a key that is not down is never sent: for Alt it is a lone Alt release, which menu-bar
-    apps (Notepad, Word) answer by toggling their menu on or off - the pasted text is then lost.
-    `True` stands for "Alt held" and `False` for nothing held (kept for callers that only know that).
+    apps (Notepad, Word) answer by toggling their menu on or off, and for Win it opens the Start menu.
     """
-    if isinstance(held, bool):
-        held = {VK_MENU} if held else set()
     inputs: list[INPUT] = []
     masked = False
     for vk, sc, _vks in _MODIFIER_GROUPS:
@@ -185,11 +165,8 @@ def _release_all_modifiers() -> None:
     Does nothing when none is down, which is the normal case after `_wait_for_physical_release`.
     """
     held = _held_modifiers()
-    if not held:
-        logger.debug("Modifier release: nothing is down, no key-ups sent")
-        return
-    logger.debug("Modifier release: forcing key-ups for %s", sorted(hex(vk) for vk in held))
-    _send_inputs(_release_inputs(held), "modifier release")
+    if held:
+        _send_inputs(_release_inputs(held), "modifier release")
 
 
 def _wait_for_physical_release(timeout_s: float = 1.5) -> bool:
@@ -298,17 +275,6 @@ def _prepare_keyboard(injection_delay_ms: int) -> None:
     """
     _wait_for_physical_release()
     _release_all_modifiers()
-    time.sleep(injection_delay_ms / 1000)
-
-
-def settle_after_chord(injection_delay_ms: int) -> None:
-    """Wait until the hotkey chord is physically released and the key-ups have reached the focused app.
-
-    Polish reads the selection through UI Automation right after the transcript arrives, which can be
-    ~0.3 s after the Alt release (and the re-injected one), before the app has handled it; Ctrl+C only
-    waited afterwards. Waiting here keeps every Polish step behind the chord, like a dictation's paste.
-    """
-    _wait_for_physical_release()
     time.sleep(injection_delay_ms / 1000)
 
 

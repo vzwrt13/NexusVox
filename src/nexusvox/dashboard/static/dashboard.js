@@ -302,14 +302,39 @@ const llmPullCancel = document.getElementById("llm-pull-cancel");
 let llmSavedModel = "";
 let llmPullTimer = null;
 
+// Where the model runs, from what Ollama reports for a loaded model (`/api/ps`); otherwise from the hardware.
+function llmRunsOn(data) {
+  const l = data.loaded;
+  if (!l) return { text: data.device === "gpu" ? "Not loaded (will use the GPU if it fits)" : "Not loaded (no CUDA GPU, will use the CPU)", warn: false };
+  if (l.ram_gb === 0) return { text: "GPU (fully in VRAM)", warn: false };
+  if (l.vram_gb === 0) return { text: "CPU (in RAM)", warn: true };
+  return { text: `GPU + CPU (${Math.round((100 * l.vram_gb) / (l.vram_gb + l.ram_gb))}% on the GPU)`, warn: true };
+}
+
+// Memory the model needs: Ollama's real split when it is loaded, else an estimate from the size on disk.
+function llmMemory(data, m) {
+  if (!data.reachable || data.protocol !== "ollama") return "—";
+  const l = data.loaded;
+  if (l) {
+    const parts = [];
+    if (l.vram_gb > 0) parts.push(`${l.vram_gb} GB VRAM`);
+    if (l.ram_gb > 0) parts.push(`${l.ram_gb} GB RAM`);
+    return parts.join(" + ") || "—";
+  }
+  if (!m || !m.size_gb) return "—";
+  return `~${m.size_gb} GB ${data.device === "gpu" ? "VRAM" : "RAM"} (estimate)`;
+}
+
 function renderLlmOverview(data, m) {
   const installed = !m || m.installed === null ? "Unknown (server not reachable)" : m.installed ? "Yes" : "No";
   const size = m && m.size_gb ? `${m.size_gb} GB` : "Unknown";
+  const runs = llmRunsOn(data);
   const rows = [
     ["Model", escapeHtml(data.selected)],
     ["Size on disk", size],
     ["Installed", installed],
-    ["Runs on", data.device === "gpu" ? "GPU (CUDA)" : "CPU (no CUDA GPU found)"],
+    ["Runs on", runs.warn ? `<span class="status-line warn">${runs.text}</span>` : runs.text],
+    ["Memory", llmMemory(data, m)],
     ["Used for", "Cleanup, Polish, upload cleanup"],
   ];
   document.getElementById("llm-overview-grid").innerHTML = rows

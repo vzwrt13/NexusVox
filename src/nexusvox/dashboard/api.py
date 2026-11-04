@@ -59,6 +59,7 @@ from ..file_transcribe import (
 )
 from ..lang_detect import stored_language
 from ..llm import build_model_list as llm_build_model_list
+from ..llm import loaded_model as llm_loaded_model
 from ..llm import model_pull as llm_pull
 from ..llm import model_status as llm_model_status
 from ..llm import warm_up as llm_warm_up
@@ -423,6 +424,7 @@ class DashboardAPI:
             **llm_build_model_list(self._config.llm, cuda, gpu_vram_gb() if cuda else None),
             "selected": self._config.llm.model,
             "device": "gpu" if cuda else "cpu",
+            "loaded": llm_loaded_model(self._config.llm, self._config.llm.model),
             "slow_hint": not llm_runs_fast(),
         }
 

@@ -133,3 +133,26 @@ def test_dashboard_endpoints(flask_client, monkeypatch):
     assert models["selected"] and models["recommended"][0]["recommended_here"]
     status = flask_client.get("/api/settings/llm-status").get_json()
     assert status["reachable"] is True and "model_installed" in status
+
+
+def test_loaded_model_reports_vram_and_ram(monkeypatch):
+    ps = {"models": [{"name": "gemma4:e4b", "size": 8_000_000_000, "size_vram": 6_000_000_000}]}
+    _serve(monkeypatch, ps)
+    assert llm.loaded_model(LlmConfig(model="gemma4:e4b"), "gemma4:e4b") == {"vram_gb": 6.0, "ram_gb": 2.0}
+    assert llm.loaded_model(LlmConfig(model="x"), "gemma4:e2b") is None
+
+
+def test_loaded_model_none_when_server_down(monkeypatch):
+    _serve(monkeypatch, urllib.error.URLError("down"))
+    assert llm.loaded_model(LlmConfig(model="x"), "x") is None
+
+
+def test_fully_offloaded_model_has_no_gpu_share(monkeypatch):
+    ps = {"models": [{"name": "gemma4:e4b", "size": 7_000_000_000, "size_vram": 0}]}
+    _serve(monkeypatch, ps)
+    assert llm.loaded_model(LlmConfig(model="gemma4:e4b"), "gemma4:e4b") == {"vram_gb": 0.0, "ram_gb": 7.0}
+
+
+def test_loaded_model_none_for_non_ollama_server(monkeypatch):
+    _serve(monkeypatch, {"models": []})
+    assert llm.loaded_model(LlmConfig(model="x", protocol="openai"), "x") is None

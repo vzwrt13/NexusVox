@@ -1300,3 +1300,13 @@ def test_feedback_mode_setting(flask_client):
     assert post("both").get_json()["feedback_mode"] == "both"
     bad = post("flashy")
     assert bad.status_code == 400 and bad.get_json()["feedback_mode"] == "both"
+
+
+def test_llm_models_endpoint_reports_the_loaded_split(flask_client, monkeypatch):
+    from nexusvox.dashboard import api as api_module
+
+    monkeypatch.setattr(api_module, "llm_build_model_list", lambda cfg, cuda, vram: {"reachable": True})
+    monkeypatch.setattr(api_module, "llm_loaded_model", lambda cfg, name: {"vram_gb": 5.0, "ram_gb": 2.0})
+    assert flask_client.get("/api/settings/llm-models").get_json()["loaded"] == {"vram_gb": 5.0, "ram_gb": 2.0}
+    monkeypatch.setattr(api_module, "llm_loaded_model", lambda cfg, name: None)
+    assert flask_client.get("/api/settings/llm-models").get_json()["loaded"] is None

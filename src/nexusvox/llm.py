@@ -190,6 +190,23 @@ def installed_models(config: LlmConfig) -> list[dict] | None:
         return None
 
 
+def loaded_model(config: LlmConfig, name: str) -> dict | None:
+    """Where Ollama really holds `name` right now (`/api/ps`): `{"vram_gb", "ram_gb"}`, or None when the
+    model is not loaded or the server cannot say. `size_vram` of 0 means the whole model sits in RAM (CPU)."""
+    if config.protocol != "ollama":
+        return None
+    try:
+        with urllib.request.urlopen(f"{config.url.rstrip('/')}/api/ps", timeout=_LIST_TIMEOUT_S) as response:
+            running = json.load(response)["models"]
+        for m in running:
+            if isinstance(m, dict) and name in (m.get("name"), m.get("model")):
+                total, vram = float(m.get("size", 0)), float(m.get("size_vram", 0))
+                return {"vram_gb": round(vram / 1e9, 1), "ram_gb": round(max(total - vram, 0) / 1e9, 1)}
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError, KeyError, TypeError):
+        return None
+    return None
+
+
 def model_is_installed(name: str, installed: list[dict]) -> bool:
     """Ollama treats `gemma4:e4b` and `gemma4:e4b:latest`-style tags as the same only for `:latest`."""
     names = {m["name"] for m in installed}

@@ -6,10 +6,7 @@ from nexusvox.cleanup import CleanupResult
 from nexusvox.config import CleanupConfig, Config, VoiceCommandsConfig
 from nexusvox.dictionary import DictionaryEntry
 from nexusvox.pipeline import process_text
-from nexusvox.snippets import Snippet
 from nexusvox.translator import TranslateResult
-
-SIGNATURE = Snippet("meine Signatur", "Viele Grüße\nVincent")
 
 
 def _config(**voice) -> Config:
@@ -24,14 +21,11 @@ def no_cleanup(text, _config, _llm):
     return CleanupResult(text)
 
 
-def _run(
-    raw, config=None, dictionary=(), snippets=(), remote=False, translate_fn=no_translation, cleanup_fn=no_cleanup
-):
+def _run(raw, config=None, dictionary=(), remote=False, translate_fn=no_translation, cleanup_fn=no_cleanup):
     return process_text(
         raw,
         config or _config(),
         list(dictionary),
-        list(snippets),
         remote=remote,
         translate_fn=translate_fn,
         cleanup_fn=cleanup_fn,
@@ -80,36 +74,13 @@ def test_press_enter_stays_text_for_the_phone():
     assert (result.typed, result.press_enter) == ("Bin gleich da, Enter drücken.", False)
 
 
-def test_snippet_survives_voice_commands_and_stays_out_of_the_spoken_words():
-    result = _run("Danke new line meine Signatur", snippets=[SIGNATURE])
-    assert (result.typed, result.saved, result.learnable) == (
-        "Danke\nViele Grüße\nVincent",
-        "Danke\nViele Grüße\nVincent",
-        True,
-    )
-    assert result.spoken.startswith("Danke new line ") and "Viele" not in result.spoken
-
-
 def test_translation_is_typed_but_the_spoken_text_is_saved():
     def to_english(text, _config):
         return TranslateResult(text.replace("Hallo", "Hello"), translated=True, source="de")
 
-    result = _run("Hallo meine Signatur", snippets=[SIGNATURE], translate_fn=to_english)
-    assert (result.typed, result.saved, result.learnable) == (
-        "Hello Viele Grüße\nVincent",
-        "Hallo Viele Grüße\nVincent",
-        False,
-    )
+    result = _run("Hallo Welt", translate_fn=to_english)
+    assert (result.typed, result.saved, result.learnable) == ("Hello Welt", "Hallo Welt", False)
     assert result.translation.translated is True
-
-
-def test_translator_losing_a_placeholder_falls_back_to_the_original():
-    def lossy(_text, _config):
-        return TranslateResult("Hello", translated=True)
-
-    result = _run("Hallo meine Signatur", snippets=[SIGNATURE], translate_fn=lossy)
-    assert result.typed == "Hallo Viele Grüße\nVincent"
-    assert (result.translation.translated, result.translation.error) == (False, "snippet placeholder lost")
 
 
 def test_cleanup_is_typed_and_translated_but_the_spoken_text_is_saved():
@@ -136,15 +107,6 @@ def test_cleaned_dictation_is_not_learnable():
     assert (result.typed, result.saved, result.learnable) == ("Hallo Welt", "ähm Hallo Welt", False)
 
 
-def test_cleanup_sees_snippet_placeholders_and_the_snippet_is_expanded_after():
-    def keep(text, _c, _l):
-        assert "Viele Grüße" not in text  # the stored text is a placeholder here
-        return CleanupResult(text.replace("ähm ", ""), cleaned=True)
-
-    result = _run("ähm Danke meine Signatur", snippets=[SIGNATURE], cleanup_fn=keep)
-    assert result.typed == "Danke Viele Grüße\nVincent"
-
-
 def test_english_passed_through_by_the_translator_stays_learnable():
     def passthrough(text, _config):
         return TranslateResult(text, translated=True, source="en")
@@ -160,26 +122,11 @@ def test_extend_fn_changes_what_is_typed_but_not_what_is_saved():
         "hello world",
         _config(),
         [],
-        [],
         translate_fn=no_translation,
         cleanup_fn=no_cleanup,
         extend_fn=lambda text: text.upper(),
     )
     assert (result.typed, result.saved, result.learnable) == ("HELLO WORLD", "hello world", False)
-
-
-def test_extend_fn_sees_expanded_snippets():
-    seen = []
-    result = process_text(
-        "meine Signatur",
-        _config(),
-        [],
-        [SIGNATURE],
-        translate_fn=no_translation,
-        cleanup_fn=no_cleanup,
-        extend_fn=lambda text: seen.append(text) or text,
-    )
-    assert seen == ["Viele Grüße\nVincent"] and result.learnable
 
 
 def test_without_extend_fn_nothing_changes():
@@ -191,7 +138,7 @@ def test_a_failing_extend_fn_types_the_text_unchanged():
         raise RuntimeError("nope")
 
     result = process_text(
-        "hello world", _config(), [], [], translate_fn=no_translation, cleanup_fn=no_cleanup, extend_fn=boom
+        "hello world", _config(), [], translate_fn=no_translation, cleanup_fn=no_cleanup, extend_fn=boom
     )
     assert (result.typed, result.learnable) == ("hello world", True)
 
@@ -201,7 +148,6 @@ def test_extend_fn_is_not_called_for_an_enter_only_dictation():
     result = process_text(
         "press enter",
         _config(press_enter=True),
-        [],
         [],
         translate_fn=no_translation,
         cleanup_fn=no_cleanup,

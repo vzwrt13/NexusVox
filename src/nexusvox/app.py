@@ -43,14 +43,13 @@ from .llm import warm_up as llm_warm_up
 from .logsetup import Text
 from .mic_guard import MicGuard, create_mic_guard
 from .models import COMMAND_APP
-from .os_commands import WINDOW_ACTIONS, NexusCommand, execute_nexus_command, parse_nexus_command, parse_nexus_open
+from .os_commands import WINDOW_ACTIONS, NexusCommand, execute_nexus_command, parse_nexus_command
 from .overlay import CONFIRMED, ERROR, PROCESSING, RECORDING, Overlay, level_from_rms
 from .paths import DOCKER_UNAVAILABLE_MSG, is_frozen
 from .pipeline import process_text
 from .polish import polish, read_selection
 from .polish_presets import resolve_instruction
 from .remote_mic import RemoteAudioSource, RemoteMicServer
-from .snippets import Snippet, resolve_open_target
 from .transcriber import create_transcriber
 from .tray import SystemTray
 
@@ -591,7 +590,6 @@ class NexusVoxApp:
                 logger.info("Empty transcription, nothing to inject")
                 return
             loop = asyncio.get_running_loop()
-            snippets = self._db.get_snippets()
 
             # A phone recording only wants its text back, never a PC action.
             if not remote:
@@ -600,7 +598,7 @@ class NexusVoxApp:
                     self._flag_last_transcription()
                     await self._transcriber.disconnect()
                     return
-                label = await self._run_command(raw_text, nexus_cmd, snippets)
+                label = await self._run_command(raw_text, nexus_cmd)
                 if label is not None:
                     self._save_command(recording, label, raw_text)
                     await self._transcriber.disconnect()
@@ -613,7 +611,6 @@ class NexusVoxApp:
                     raw_text,
                     self._config,
                     self._db.get_dictionary_entries(),
-                    snippets,
                     remote=remote,
                     extend_fn=None if remote else self._extend_dictation,
                 ),
@@ -921,27 +918,26 @@ class NexusVoxApp:
         logger.info("Nexus flag: flagged transcription id=%d", last_tid)
         self._cue(beep_flag, CONFIRMED)
 
-    async def _run_command(self, raw_text: str, nexus_cmd: NexusCommand | None, snippets: list[Snippet]) -> str | None:
+    def _extension_command(self, raw_text: str) -> tuple[str, bool] | None:
+        """An extension's `on_command` answer for *raw_text* (runs in the executor), or None: nobody took it."""
+        registry = loaded_extensions()  # None while the packages still load: no extension command, never wait
+        if registry is None or not registry.extensions:
+            return None
+        return registry.command(raw_text, self._active_app())
+
+    async def _run_command(self, raw_text: str, nexus_cmd: NexusCommand | None) -> str | None:
         """Run the command *raw_text* is, if any. Returns the label to save it under, or None to type it.
 
-        Checked in order: "nexus open <snippet>" (always available - the user's own
-        snippet is the opt-in), "nexus assistant <text>" (when enabled; falls through
-        to typing if nothing answers), nexus window commands (when enabled).
+        Checked in order: an extension's `on_command` (it consumes the dictation), "nexus assistant <text>"
+        (when enabled; falls through to typing if nothing answers), nexus window commands (when enabled).
         """
         loop = asyncio.get_running_loop()
-        spoken_target = parse_nexus_open(raw_text)
-        target = resolve_open_target(spoken_target, snippets) if spoken_target is not None else None
-        if target is not None:
-            from . import window_manager
-
-            try:
-                opened = await loop.run_in_executor(None, window_manager.open_target, target)
-            except OSError:
-                logger.exception("Opening %r failed", Text(target))
-                opened = False
+        handled = await loop.run_in_executor(None, self._extension_command, raw_text)
+        if handled is not None:
+            label, opened = handled
             if not opened:
                 self._cue(beep_error, ERROR)
-            return f"[nexus] open {target}"
+            return label
 
         assistant_text = parse_assistant_command(raw_text) if self._config.assistant.enabled else None
         if assistant_text is not None:

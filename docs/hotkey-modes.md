@@ -43,12 +43,12 @@ Code paths: `hotkey.py` (`HotkeyListener`, runs inside the keyboard hook), `app.
 
 | Recording kind | How it is chosen | Hold | Toggle | Code |
 |---|---|---|---|---|
-| Plain dictation | No marker | Transcript goes through nexus commands, assistant, dictionary, snippets, voice commands, cleanup, translation, paste | Identical after the stop | `app.py:592-672` |
+| Plain dictation | No marker | Transcript goes through nexus commands, assistant, dictionary, voice commands, cleanup, translation, paste | Identical after the stop | `app.py:592-672` |
 | Paste last | Paste key during the recording | Press chord, speak or not, tap `V` while holding, release: recording dropped, last text pasted again. A quick tap of the chord with `V` pastes too | Press chord (keys up), re-hold the modifiers, press `V`: with a key binding this works; with a **modifier-only** binding, re-pressing all modifiers is a chord press and *stops* the recording first, so `V` is no longer a marker (it types `Ctrl+Win+V` into the app). Only a `V` pressed during the *starting* hold works | `hotkey.py:160-176`, `app.py:556-561`, `793-806` |
 | Polish | Polish key during the recording | Hold chord, speak the instruction, tap the polish key, release. Selection is read after the transcript arrives, rewritten, pasted over the selection | Same marker rule as above: with a key binding, start, speak, re-hold the modifiers + polish key, then press the chord to stop. With a modifier-only binding the polish key has to be pressed in the starting hold, before speaking | `app.py:585-590`, `808-896` |
 | Command (`[os_control]`) | Command key during the recording | Same as polish, but `::show` goes out at the key press, the transcript goes to the Controller, `::hide` on empty or failed | Tested in `tests/test_hotkey.py:294` only for the "still holding" case; same modifier-only restriction | `app.py:282-298`, `570-583` |
 | Voice commands (`new line`, symbols, numbers, press enter) | Spoken words, no hotkey involvement | Applied in the pipeline | Identical | `pipeline.process_text` |
-| nexus open / OS / assistant / flag | Spoken, no hotkey involvement | Run instead of typing | Identical | `app.py:600-610` |
+| Extension command / OS / assistant / flag | Spoken, no hotkey involvement | Run instead of typing | Identical | `app.py:600-610` |
 | Meeting recording | Separate `MeetingHotkey` (its own listener, always toggle, exact modifier match) | n/a | n/a | `hotkey.py:305-367`, `app.py:234-259` |
 
 ### Polish specifics, same in both modes

@@ -47,7 +47,7 @@ $env:NEXUSVOX_NO_EXTENSIONS = "1"; python -m nexusvox
 
 `nexusvox.extensions.API_VERSION` is an integer. It is bumped when a change breaks existing extensions
 (a hook renamed, a field removed or retyped); adding a hook, an optional field or a keyword with a default
-keeps it. The dictation and selected-text hooks below were added this way: the version stays at 1 and every extension built before them loads and behaves as before. NexusVox loads an extension only when its `api_version` equals the core's, so an extension built
+keeps it. The dictation, selected-text and command hooks below were added this way: the version stays at 1 and every extension built before them loads and behaves as before. NexusVox loads an extension only when its `api_version` equals the core's, so an extension built
 for another version is skipped with a log line instead of misbehaving. Every extension must set
 `api_version` itself, as a literal (`api_version = 1`, not `API_VERSION`): there is no default, and an extension
 that does not declare one is skipped.
@@ -222,7 +222,7 @@ def on_dictation(self, text: str, app: ActiveApp) -> str | None: ...
 ```
 
 Called for every dictation that is about to be typed at the cursor, as the last step of the text pipeline:
-the dictionary, snippets, voice commands, cleanup and translation are done and snippets are expanded. Return the
+the dictionary, voice commands, cleanup and translation are done. Return the
 text to type instead, or `None` to leave it.
 
 | `ActiveApp` field | Meaning |
@@ -322,3 +322,50 @@ class SpeakerNames(Extension):
             text = text.replace(f"Speaker {number}:", f"{name}:")
         return text
 ```
+
+## Hook 8: take over a spoken command
+
+```python
+def on_command(self, text: str, app: ActiveApp) -> tuple[str, bool] | None: ...
+```
+
+Called for every dictation before anything else is done with it, as the first step of `App._run_command`: before the
+core's own commands ("nexus assistant ...", the OS/window commands) and before the text pipeline. *text* is the
+transcript as spoken, trimmed; no dictionary, voice command, cleanup or translation has touched it. Return `None`
+when the phrase is not yours. Return `(label, opened)` to consume the dictation:
+
+| Answer | What the core does |
+|--------|--------------------|
+| `None` | Nothing; the next extension is asked, then the core's own commands, then the text is typed as usual |
+| `(label, True)` | Saves the dictation under *label* (e.g. `[nexus] open https://example.com`), types nothing |
+| `(label, False)` | The same, and plays the error cue: the command was recognised but could not be carried out |
+
+- **Order.** Extensions are asked in entry-point order; the first one that answers with a `(label, opened)` pair wins and the others are not called.
+- **Label.** A non-empty string; it is what the dashboard history shows for the dictation. The spoken text is not stored.
+- **Fallback.** An extension that raises, answers something that is not a `(non-empty str, bool)` pair, or is too slow is logged and skipped. All extensions share one budget of 3 seconds per dictation (`HOOK_TIMEOUT_S`), so keep the check cheap and hand long work to a thread of your own; the action itself (opening a link, say) runs inside the hook, within that budget.
+- **Startup.** While the extensions are still loading right after NexusVox starts, a dictation is not offered to any.
+- **Not for the phone.** A remote-mic dictation is inserted by the phone and never runs a command; the hook is not called.
+- **Speech.** Spoken commands must work in English and German; matching them is the extension's job.
+- Added without an `API_VERSION` change: an extension without the hook loads and behaves as before. With no extension installed, dictation is exactly as before.
+
+```python
+class OpenSite(Extension):
+    name = "open-site"
+    api_version = 1
+
+    def on_command(self, text, app):
+        if text.strip().lower().rstrip(".") not in {"open my site", "öffne meine seite"}:
+            return None
+        opened = webbrowser.open("https://example.com")
+        return ("[open-site] https://example.com", opened)
+```
+
+## Snippet matching helpers
+
+The core no longer stores or expands snippets; that is an extension's job (the Pro extension does it). The pure
+matcher stays importable from `nexusvox.snippets` for extensions that offer the same feature: `Snippet`,
+`SnippetOption`, `mark_snippets(text, snippets) -> (text, expansions)`, `expand_snippets(text, expansions)`,
+`placeholders_intact(text, expansions)` and `best_option(spoken, options)`. They are plain functions over plain
+data (no database, no I/O). An extension calls `mark_snippets` in `on_dictation`, lets its own steps work on the
+placeholders, and expands them again before it returns the text. A database that still holds the `snippets` table of
+an earlier NexusVox keeps it untouched; the core never reads or writes it.

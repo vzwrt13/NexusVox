@@ -121,8 +121,6 @@ store_audio = true
 os_commands = false
 # The "nexus flag" voice command and the dashboard Edit tab (Flagged Transcriptions).
 flag_command = false
-# The Snippets button "Fill from GitHub" (reads the repository list of the GitHub CLI account).
-github_snippets = false
 # The developer benchmark page of the dashboard.
 dev_tab = false
 
@@ -257,8 +255,7 @@ keep_alive = "10m"
 # "off" (default), "light": removes fillers ("um", "äh"), false starts and repeated words and
 # fixes punctuation, keeps the wording; "medium": also grammar, slightly more concise.
 # Adds ~0.6 s per dictation with a CUDA GPU, about 2-6 s on the CPU (gemma4:e2b). The transcript is saved as spoken. A reply that
-# does not look like the dictation cleaned up (an answer, a translation, a lost line break or
-# snippet) is ignored, and dictations under 3 words are not sent. Also in the dashboard.
+# does not look like the dictation cleaned up (an answer, a translation, or a lost line break) is ignored, and dictations under 3 words are not sent. Also in the dashboard.
 # Without a CUDA GPU it runs on the CPU and adds about 2-6 s per dictation (the dashboard says so).
 level = "off"
 # A model still loading (10-50 s after [llm].keep_alive ran out) must not hold the dictation

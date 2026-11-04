@@ -873,8 +873,10 @@ def test_a_failing_dictation_hook_falls_back_to_the_text_before_it():
 
 class Slow(V1Extension):
     name = "slow"
+    calls = 0
 
     def on_dictation(self, text, app):
+        self.calls += 1
         time.sleep(0.5)
         return "too late"
 
@@ -890,12 +892,15 @@ def test_the_whole_chain_shares_one_deadline_and_a_stuck_hook_is_not_called_agai
     monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.1)
     other = Slow()
     other.name = "slow2"
-    registry = _registry(Slow(), other, Suffix("b", "!"))
+    first = Slow()
+    registry = _registry(first, other, Suffix("b", "!"))
     started = time.monotonic()
     assert registry.dictation("hi", APP) == "hi"  # the first one used the deadline up
     assert time.monotonic() - started < 0.4
-    # The first hook is still busy: it is skipped at once, and the fast one now answers.
-    assert registry.dictation("hi", APP) == "hi"  # "slow2" runs next and uses the budget
+    # The first hook is still busy: it is not called again. (Whether "slow2" or the fast hook ends up
+    # answering depends on how much of the budget the coarse Windows timer left, so only the rule is checked.)
+    registry.dictation("hi", APP)
+    assert (first.calls, other.calls) == (1, 1)
     time.sleep(0.6)  # the slow hooks have ended
     assert registry._stuck["slow", "on_dictation"].is_alive() is False
 
@@ -1060,3 +1065,79 @@ def test_a_pending_state_does_not_leak_to_another_upload():
     reg = _summary_registry(lambda tid: {"pending": "x"} if tid == 1 else True)
     assert reg.unavailable_exports(1) == {"gated-md": {"pending": "x"}}
     assert reg.unavailable_exports(2) == {}
+
+
+# -- Hook: on_command (consume a dictation as a command) -------------------------------------------
+
+
+class Opens(V1Extension):
+    def __init__(self, name, answers):
+        self.name = name
+        self.answers = answers
+        self.seen: list = []
+
+    def on_command(self, text, app):
+        self.seen.append((text, app))
+        return self.answers.get(text)
+
+
+def test_command_without_an_extension_takes_nothing():
+    assert ExtensionRegistry().command("nexus open my site", APP) is None
+
+
+def test_command_returns_the_label_and_whether_it_opened():
+    one = Opens(
+        "one", {"nexus open my site": ("[nexus] open https://a", True), "nexus öffne kaputt": ("[nexus] x", False)}
+    )
+    registry = _registry(one)
+    assert registry.command("nexus open my site", APP) == ("[nexus] open https://a", True)
+    assert one.seen == [("nexus open my site", APP)]
+    assert registry.command("nexus öffne kaputt", APP) == ("[nexus] x", False)  # recognised, but it failed
+    assert registry.command("hello there", APP) is None
+
+
+def test_the_first_extension_that_takes_a_command_wins():
+    one = Opens("one", {"open a": ("[one] a", True)})
+    two = Opens("two", {"open a": ("[two] a", True), "open b": ("[two] b", True)})
+    registry = _registry(one, two)
+    assert registry.command("open a", APP) == ("[one] a", True)
+    assert two.seen == []  # the first one handled it
+    assert registry.command("open b", APP) == ("[two] b", True)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["a string", ("label",), ("label", "yes"), ("", True), ("  ", False), (1, True), ["label", True]],
+    ids=["str", "short", "not-bool", "empty-label", "blank-label", "label-not-str", "list"],
+)
+def test_a_malformed_command_answer_is_ignored_and_the_next_extension_is_asked(answer, caplog):
+    bad = Opens("bad", {"open a": answer})
+    good = Opens("good", {"open a": ("[good] a", True)})
+    assert _registry(bad, good).command("open a", APP) == ("[good] a", True)
+    assert "not a (label, opened) pair" in caplog.text
+
+
+def test_a_failing_or_slow_command_hook_is_skipped(monkeypatch):
+    class Boom(V1Extension):
+        name = "boom"
+
+        def on_command(self, text, app):
+            raise RuntimeError("nope")
+
+    class Slow(V1Extension):
+        name = "slow"
+
+        def on_command(self, text, app):
+            time.sleep(0.3)
+            return ("late", True)
+
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.05)
+    assert _registry(Boom()).command("open a", APP) is None
+    assert _registry(Slow()).command("open a", APP) is None
+
+
+def test_an_extension_without_the_command_hook_loads_and_takes_nothing():
+    class Plain(V1Extension):
+        name = "plain"
+
+    assert _registry(Plain()).command("open a", APP) is None

@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 
 from nexusvox.dictionary import DictionaryEntry
 from nexusvox.models import utc_now
-from nexusvox.snippets import Snippet, SnippetOption
 
 
 def test_utc_now_is_naive_utc():
@@ -445,164 +444,23 @@ def test_accept_dictionary_suggestion_drops_other_suggestions_for_the_same_phras
     assert db.list_dictionary_suggestions() == []
 
 
-# --- Snippets ---
-
-
-def test_add_and_list_snippets(db):
-    db.add_snippet(Snippet("my address", "Main Street 1\nSpringfield"))
-    db.add_snippet(Snippet("  meine   Signatur ", "Viele Grüße"))
-
-    assert [(s["trigger"], s["expansion"]) for s in db.list_snippets()] == [
-        ("meine Signatur", "Viele Grüße"),
-        ("my address", "Main Street 1\nSpringfield"),
-    ]
-    assert {s.trigger for s in db.get_snippets()} == {"my address", "meine Signatur"}
-
-
-def test_add_snippet_same_trigger_replaces(db):
-    db.add_snippet(Snippet("my address", "old"))
-    db.add_snippet(Snippet("My Address", "new"))
-
-    assert [(s["trigger"], s["expansion"]) for s in db.list_snippets()] == [("My Address", "new")]
-
-
-def test_update_snippet_and_trigger_clash(db):
-    first = db.add_snippet(Snippet("one", "1"))
-    db.add_snippet(Snippet("two", "2"))
-
-    assert db.update_snippet(first["id"], Snippet("uno", "1!"))["trigger"] == "uno"
-    assert db.update_snippet(first["id"], Snippet("two", "clash")) is None
-    assert db.update_snippet(999, Snippet("x", "y")) is None
-
-
-def test_snippet_needs_a_trigger_and_something_to_insert(db):
-    assert db.add_snippet(Snippet(" ", "text")) is None
-    assert db.add_snippet(Snippet("trigger", "  ")) is None
-    assert db.add_snippet(Snippet("open remote repo", "", (SnippetOption("a", "b"),))) is not None
-
-
-def test_delete_snippet(db):
-    sid = db.add_snippet(Snippet("one", "1"))["id"]
-
-    assert db.delete_snippet(sid) is True
-    assert db.delete_snippet(sid) is False
-    assert db.list_snippets() == []
-
-
-def test_snippet_options_roundtrip(db):
-    options = (SnippetOption("NexusVox", "https://a"), SnippetOption("sprechblase", "https://b"))
-    db.add_snippet(Snippet("open remote repo", "", options))
-
-    assert db.list_snippets()[0]["options"] == [
-        {"name": "NexusVox", "text": "https://a"},
-        {"name": "sprechblase", "text": "https://b"},
-    ]
-    assert db.get_snippets()[0].options == options
-
-
-def test_file_transcription_stores_words_as_json(db):
-    import json
-
-    from nexusvox.transcriber import Word
-
-    record = db.save_file_transcription(
-        "hi there", "en", 1000, "a.wav", words=[Word("hi", 0.0, 0.2), Word("there", 0.3, 0.6)]
-    )
-
-    assert json.loads(record.words) == [
-        {"word": "hi", "start": 0.0, "end": 0.2},
-        {"word": "there", "start": 0.3, "end": 0.6},
-    ]
-
-
-def test_file_transcription_stores_speakers_of_labelled_words(db):
-    import json
-
-    from nexusvox.transcriber import Word
-
-    words = [Word("hi", 0.0, 0.2, speaker=1), Word("there", 0.3, 0.6, speaker=2)]
-    record = db.save_file_transcription("Speaker 1: hi\n\nSpeaker 2: there", "en", 1000, "a.wav", words=words)
-
-    assert json.loads(record.words) == [
-        {"word": "hi", "start": 0.0, "end": 0.2, "speaker": 1},
-        {"word": "there", "start": 0.3, "end": 0.6, "speaker": 2},
-    ]
-
-
-def test_file_transcription_without_words_stores_null(db):
-    assert db.save_file_transcription("hi", "en", 1000, "a.wav").words is None
-
-
-def test_migration_adds_words_column_to_old_file_transcriptions(tmp_path):
+def test_an_existing_snippets_table_is_left_as_it_is(tmp_path):
+    """The core no longer uses snippets, but an upgrade must neither drop nor migrate the rows (Pro reads them)."""
     import sqlite3
 
     from nexusvox.config import DatabaseConfig
     from nexusvox.db import Database
 
     path = tmp_path / "old.db"
-    with sqlite3.connect(path) as conn:
-        conn.execute(
-            "CREATE TABLE file_transcriptions (id INTEGER PRIMARY KEY, text TEXT NOT NULL,"
-            " language VARCHAR(5) NOT NULL,"
-            " duration_ms INTEGER NOT NULL, created_at DATETIME, model VARCHAR(100),"
-            " original_filename VARCHAR(255) NOT NULL, confidence FLOAT)"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE snippets (id INTEGER PRIMARY KEY, trigger VARCHAR(200) NOT NULL UNIQUE, "
+            "expansion TEXT NOT NULL, options TEXT, created_at DATETIME)"
         )
-    conn.close()
+        connection.execute("INSERT INTO snippets (trigger, expansion) VALUES ('meine Adresse', 'Hauptstraße 1')")
+    Database(DatabaseConfig(path=str(path)))
 
-    database = Database(DatabaseConfig(path=str(path)))
-
-    assert database.save_file_transcription("hi", "en", 1000, "a.wav").words is None
-
-
-def test_migration_adds_the_stats_columns_to_an_old_database(tmp_path):
-    import sqlite3
-
-    from nexusvox.config import DatabaseConfig
-    from nexusvox.db import Database
-
-    path = tmp_path / "old.db"
-    with sqlite3.connect(path) as conn:
-        conn.execute(
-            "CREATE TABLE transcriptions (id INTEGER PRIMARY KEY, text TEXT NOT NULL,"
-            " language VARCHAR(5) NOT NULL, duration_ms INTEGER NOT NULL, created_at DATETIME, confidence FLOAT)"
-        )
-        conn.execute(
-            "CREATE TABLE file_transcriptions (id INTEGER PRIMARY KEY, text TEXT NOT NULL,"
-            " language VARCHAR(5) NOT NULL, duration_ms INTEGER NOT NULL, created_at DATETIME, model VARCHAR(100),"
-            " original_filename VARCHAR(255) NOT NULL, confidence FLOAT)"
-        )
-        conn.execute("INSERT INTO transcriptions (text, language, duration_ms) VALUES ('hi', 'en', 1)")
-        conn.execute(
-            "INSERT INTO file_transcriptions (text, language, duration_ms, original_filename)"
-            " VALUES ('hi', 'en', 1, 'a.wav')"
-        )
-
-    old = Database(DatabaseConfig(path=str(path)))
-
-    assert old.get_file_transcriptions(limit=1)[0].processing_ms is None
-    dictation = old.get_recent(1)[0]
-    assert dictation.cleanup_status is None and dictation.cleanup_ms is None
-    old.save_transcription("new", "en", 1, cleanup_status="applied", cleanup_ms=120)
-    assert old.get_recent(1)[0].cleanup_status == "applied"
-    assert dictation.app is None
-    old.save_transcription("typed", "en", 1, app="outlook.exe")
-    assert old.get_recent(1)[0].app == "outlook.exe"
-    assert dictation.polish_status is None and dictation.polish_ms is None
-    old.save_transcription("[polish] x", "en", 1, polish_status="timeout", polish_ms=3000)
-    assert (old.get_recent(1)[0].polish_status, old.get_recent(1)[0].polish_ms) == ("timeout", 3000)
-
-
-def test_migration_is_idempotent_on_a_database_that_already_has_the_columns(tmp_path):
-    """Starting twice, or on a database another branch already migrated, must not fail or lose rows."""
-    from nexusvox.config import DatabaseConfig
-    from nexusvox.db import Database
-
-    config = DatabaseConfig(path=str(tmp_path / "again.db"))
-    first = Database(config)
-    first.save_transcription("kept", "en", 1, cleanup_status="applied", cleanup_ms=5)
-    first.save_file_transcription("kept", "en", 1, "a.wav", processing_ms=7)
-
-    second = Database(config)
-
-    assert second.get_recent(1)[0].cleanup_ms == 5
-    assert second.get_file_transcriptions(limit=1)[0].processing_ms == 7
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT trigger, expansion FROM snippets").fetchall() == [
+            ("meine Adresse", "Hauptstraße 1")
+        ]

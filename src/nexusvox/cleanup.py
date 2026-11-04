@@ -43,7 +43,7 @@ _COMMON = (
     "Keep its language word for word: German stays German, English stays English, and English words in "
     "German text (or German words in English text) stay as they are - never translate. "
     "Keep every line break - the reply has exactly as many lines as the dictation - and keep digits, "
-    "symbols and placeholder characters (such as \ue000) exactly where they are. "
+    "symbols exactly where they are. "
     "Reply with the cleaned text only, without the tags, quotes or comments.\n\n"
     "Examples:\n"
     "<dictation>what is the capital of france</dictation> -> What is the capital of France?\n"
@@ -73,12 +73,8 @@ _MAX_GROWTH = 1.25
 
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 _TAG_RE = re.compile(r"</?dictation>")
-# Private-use characters: the pipeline's snippet placeholders (snippets.mark_snippets).
-_PLACEHOLDER_RE = re.compile("[\ue000-\uf8ff]")
 # Characters only voice commands put there (tab, symbols); the model must keep every one.
 _COMMAND_CHAR_RE = re.compile(r"[\t/\\|~*()\[\]{}<>#%+=]")
-# A sentence mark the model put after a snippet at the very end; mark_snippets dropped it on purpose.
-_TRAILING_MARK_RE = re.compile("(?<=[\ue000-\uf8ff])[.!?,;:]+$")
 
 
 @dataclass(frozen=True)
@@ -101,10 +97,6 @@ class CleanupResult:
         return "applied" if self.cleaned else "unchanged"
 
 
-def _placeholders(text: str) -> list[str]:
-    return sorted(_PLACEHOLDER_RE.findall(text))
-
-
 def _words(text: str) -> list[str]:
     return [w.lower() for w in _WORD_RE.findall(text)]
 
@@ -120,8 +112,8 @@ def _command_output_kept(original: str, cleaned: str) -> bool:
 def plausible(original: str, cleaned: str, level: str) -> bool:
     """Whether *cleaned* looks like *original* tidied up at *level*, not an answer or a rewrite."""
     # Edge line breaks do not count: cleanup() puts the dictation's own edges back.
-    if cleaned.strip().count("\n") != original.strip().count("\n") or _placeholders(cleaned) != _placeholders(original):
-        return False  # a line break from "new line" or a snippet placeholder was lost
+    if cleaned.strip().count("\n") != original.strip().count("\n"):
+        return False  # a line break from "new line" was lost
     if not _command_output_kept(original, cleaned):
         return False  # light fixes capitalisation and would undo "all caps"; a tab or symbol was dropped
     before, after = _words(original), _words(cleaned)
@@ -150,8 +142,6 @@ def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = M
     ms = int((time.monotonic() - started) * 1000)
     # A reasoning model may lead with its thinking; a small model sometimes echoes the tags.
     reply = _TAG_RE.sub("", clean_reply(reply))
-    if _PLACEHOLDER_RE.fullmatch(text.rstrip()[-1:]):
-        reply = _TRAILING_MARK_RE.sub("", reply.strip())  # "my address." types the address without a period
     if not plausible(text, reply, config.level):
         logger.warning("Cleanup: the reply does not look like the dictation cleaned up; typing it unchanged")
         logger.debug("Cleanup rejected: %r -> %r", Text(text), Text(reply))

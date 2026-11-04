@@ -5,12 +5,10 @@ here is the path of a dictation that gets typed. The steps, in order:
 
 1. correction dictionary on the raw transcript
 2. a trailing "press enter" is split off (not for the phone, which inserts the text itself)
-3. snippet triggers become placeholders, so later steps never touch their stored text
-4. voice commands (new line, symbols, numbers, ...)
-5. auto cleanup through the [llm] model (`[cleanup].level`), for typing only
-6. translation into English for typing only; a translator that loses a placeholder is ignored
-7. snippet placeholders are expanded again
-8. extensions' `on_dictation` hooks change the final text (not for the phone: there is no active app)
+3. voice commands (new line, symbols, numbers, ...)
+4. auto cleanup through the [llm] model (`[cleanup].level`), for typing only
+5. translation into English for typing only
+6. extensions' `on_dictation` hooks change the final text (not for the phone: there is no active app)
 
 The result says what to type, what to save (as spoken, before cleanup and translation),
 whether Enter follows the paste, and what learning from the user's edits needs: whether
@@ -28,7 +26,6 @@ from .cleanup import MIN_WORDS, CleanupResult, cleanup
 from .config import CleanupConfig, Config, LlmConfig, TranslatorConfig, VoiceCommandsConfig
 from .dictionary import DictionaryEntry, apply_dictionary_counted
 from .logsetup import Text
-from .snippets import Snippet, expand_snippets, mark_snippets, placeholders_intact
 from .translator import TranslateResult, translate
 from .voice_commands import process_voice_commands, split_press_enter
 
@@ -46,8 +43,8 @@ class ProcessedText:
     press_enter: bool  # press Enter after the paste
     cleanup: CleanupResult  # what auto cleanup did
     translation: TranslateResult  # what the translator did (saved with the transcript)
-    learnable: bool  # `typed` holds the spoken words (voice commands and snippets aside), not cleaned or translated
-    spoken: str  # the text after the dictionary, snippets as placeholders: a learned entry must match it
+    learnable: bool  # `typed` holds the spoken words (voice commands aside), not cleaned or translated
+    spoken: str  # the text after the dictionary: a learned entry must match it
     # How often each dictionary entry replaced something.
     dictionary_hits: dict[DictionaryEntry, int] = field(default_factory=dict)
 
@@ -67,7 +64,6 @@ def process_text(
     raw: str,
     config: Config,
     dictionary: list[DictionaryEntry],
-    snippets: list[Snippet],
     *,
     remote: bool = False,
     translate_fn: Translate = translate,
@@ -83,13 +79,9 @@ def process_text(
     if config.voice_commands.enabled and config.voice_commands.press_enter and not remote:
         corrected, press_enter = split_press_enter(corrected)
 
-    marked, expansions = mark_snippets(corrected, snippets)
-    if expansions:
-        logger.info("Snippets matched: %d", len(expansions))
+    processed = _voice_commands(corrected, config.voice_commands)
 
-    processed = _voice_commands(marked, config.voice_commands)
-
-    # Cleanup keeps every placeholder and line break or is not used (cleanup.plausible).
+    # Cleanup keeps every line break or is not used (cleanup.plausible).
     cleaned = cleanup_fn(processed, config.cleanup, config.llm)
     if config.cleanup.level == "off":
         logger.debug("Cleanup: off, typing the dictation as it is")
@@ -97,17 +89,14 @@ def process_text(
         logger.info("Cleanup (%s): skipped, the dictation is shorter than %d words", config.cleanup.level, MIN_WORDS)
 
     translation = translate_fn(cleaned.text, config.translator)
-    if translation.translated and not placeholders_intact(translation.text, expansions):
-        logger.warning("Translator dropped a snippet placeholder; typing the original text")
-        translation = TranslateResult(cleaned.text, error="snippet placeholder lost")
-    typed = expand_snippets(translation.text, expansions)
+    typed = translation.text
     extended = typed
     if extend_fn is not None and typed:  # an Enter-only dictation has no text for an extension to change
         try:
             extended = extend_fn(typed)
         except Exception:
             logger.exception("The extension step failed; typing the text unchanged by it")
-    saved = expand_snippets(processed, expansions)
+    saved = processed
 
     return ProcessedText(
         typed=extended,
@@ -119,6 +108,6 @@ def process_text(
         # The translator passes English through byte for byte (translated=True all the same):
         # only a dictation whose words it actually changed is not learnable.
         learnable=not cleaned.cleaned and translation.text == cleaned.text and extended == typed,
-        spoken=marked,
+        spoken=corrected,
         dictionary_hits=dictionary_hits,
     )

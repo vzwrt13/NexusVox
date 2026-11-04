@@ -90,12 +90,12 @@ tests/
 ├── test_hotkey.py                 # Hotkey modes, bindings, swallowing, command and paste marker keys
 ├── test_app_os_control.py         # Transcription cycle: os-control hide on skipped/failed cycles, paste last
 ├── test_edit_watch.py             # Learn from edits: span mapping, suggestions, watcher thread
-├── test_snippets.py               # Snippet triggers, options best match, "nexus open"
+├── test_snippets.py               # Snippet matcher kept for extensions: triggers, options best match
 ├── test_cleanup.py                # Auto cleanup prompts, plausibility guard, every fallback (no server needed)
 ├── test_clipboard.py              # Clipboard writes excluded from the Windows clipboard history (Windows only)
 ├── test_polish_presets.py         # Spoken preset names, default preset, preset storage
 ├── test_polish.py                 # Language model client (Ollama/OpenAI protocols, failures) and polish prompts
-├── test_pipeline.py               # Text pipeline: typed vs saved text, press enter, snippets, translation, learnable
+├── test_pipeline.py               # Text pipeline: typed vs saved text, press enter, translation, learnable
 └── test_voice_commands.py         # Voice command text formatting substitutions
 ```
 
@@ -121,12 +121,12 @@ tests/
 | `test_hotkey.py` | `hotkey.py` | Hold/toggle modes, key bindings and swallowing, the command key and the paste key (first marker wins, typed normally outside a recording) |
 | `test_app_os_control.py` | `app.py` | The cycle's control flow with mocked collaborators: `::hide` after a skipped or failed command recording, pasting the last text |
 | `test_edit_watch.py` | `edit_watch.py` | Locating the pasted span, ignoring text typed around it, rejecting rewrites and language mix-ups (English and German), watcher thread with fake fields |
-| `test_snippets.py` | `snippets.py` | Trigger matching (English and German), longest trigger first, placeholders surviving voice commands, option best match, "nexus open" / "nexus öffne" resolution |
-| `test_cleanup.py` | `cleanup.py` | Off and short dictations skip the model, the short timeout, tag stripping, model failures, replies that answer, carry out, translate or lose a line break or placeholder |
+| `test_snippets.py` | `snippets.py` | Trigger matching (English and German), longest trigger first, placeholders surviving voice commands, option best match (the matcher extensions import) |
+| `test_cleanup.py` | `cleanup.py` | Off and short dictations skip the model, the short timeout, tag stripping, model failures, replies that answer, carry out, translate or lose a line break |
 | `test_clipboard.py` | `clipboard.py` | Text round-trips through the real clipboard with the history-exclusion formats set; empty text (skipped off Windows) |
 | `test_polish_presets.py` | `polish_presets.py`, `db.py` | Default preset, name matching (case, hyphens, German names), words after the name, storage with one default and unique names |
 | `test_polish.py` | `llm.py`, `polish.py` | Request shape for both protocols, every failure as `LlmError`, default instruction, code-fence stripping (no server needed) |
-| `test_pipeline.py` | `pipeline.py` | Order of dictionary, press enter, snippets, voice commands and translation; typed vs saved text; translator losing a placeholder; when an edit can be learned |
+| `test_pipeline.py` | `pipeline.py` | Order of dictionary, press enter, voice commands and translation; typed vs saved text; when an edit can be learned |
 | `test_voice_commands.py` | `voice_commands.py` | New line/paragraph/tab/all-caps substitutions (English and German), structural category toggles, German number words, comma interactions, passthrough |
 
 ### What we DON'T test (and why)
@@ -282,7 +282,7 @@ python scripts/cleanup_eval.py                    # light and medium
 python scripts/cleanup_eval.py --level light --model gemma4:e4b
 ```
 
-It sends 16 English and German dictations - fillers, false starts, questions, orders, a prompt injection, mixed language, digits, line breaks and a snippet placeholder - and reports every word that was lost or filler that was kept, plus the median time per dictation. A reply the plausibility guard rejected counts as safe. Nothing is typed or saved. Run it after changing a prompt or switching models.
+It sends 15 English and German dictations - fillers, false starts, questions, orders, a prompt injection, mixed language, digits, and line breaks - and reports every word that was lost or filler that was kept, plus the median time per dictation. A reply the plausibility guard rejected counts as safe. Nothing is typed or saved. Run it after changing a prompt or switching models.
 
 ## Running Tests in CI
 

@@ -193,11 +193,23 @@ class Extension:
         """
         return None
 
+    def on_command(self, text: str, app: ActiveApp) -> tuple[str, bool] | None:
+        """Consume a dictation as a command (a spoken action) instead of letting it be typed.
+
+        *text* is the transcript as spoken (nothing of the text pipeline has run). Return None when it is not
+        this extension's command. Otherwise return `(label, opened)`: the core saves the dictation under *label*
+        (e.g. `[nexus] open <target>`), types nothing, and plays the error cue when *opened* is False (the command
+        was recognised but failed). Called before the core's own commands, so an extension can take over a phrase;
+        the first extension that answers wins. Several extensions run in entry-point order under one
+        `HOOK_TIMEOUT_S`. Never called for a phone (remote-mic) dictation.
+        """
+        return None
+
     def on_dictation(self, text: str, app: ActiveApp) -> str | None:
         """Change a dictation just before it is typed into *app*.
 
-        *text* is what would be typed (dictionary, snippets, voice commands, cleanup and translation are
-        done). Return the text to type instead, or None to leave it. Blocking is fine (it runs off the UI and
+        *text* is what would be typed (dictionary, voice commands, cleanup and translation are done).
+        Return the text to type instead, or None to leave it. Blocking is fine (it runs off the UI and
         hotkey threads) but a hook that takes longer than `HOOK_TIMEOUT_S` is ignored. Several extensions run
         in the order of their entry-point names, each seeing the previous one's result.
         """
@@ -325,7 +337,7 @@ def _problem_with_action(action: UploadAction, own_panels: set[str]) -> str:
 
 @dataclass
 class ExtensionRegistry:
-    """The loaded extensions and the dispatch of the three hooks."""
+    """The loaded extensions and the dispatch of the hooks."""
 
     extensions: list[Extension] = field(default_factory=list)
     _panels: dict[str, DashboardPanel] = field(default_factory=dict)
@@ -464,6 +476,39 @@ class ExtensionRegistry:
         return results, notes
 
     # ---- Hooks: dictation and selection commands -----------------------------
+
+    def command(self, text: str, app: ActiveApp) -> tuple[str, bool] | None:
+        """`(label, opened)` from the first extension whose `on_command` takes *text*, else None.
+
+        An extension that raises, is too slow or answers something other than a `(non-empty str, bool)` pair
+        is logged and skipped; the next one is asked, and when none takes it the dictation goes on as usual.
+        """
+        deadline = time.monotonic() + HOOK_TIMEOUT_S
+        for extension in self.extensions:
+            answer = self._guarded(
+                (extension.name, "on_command"),
+                f"Extension {extension.name}",
+                "on_command",
+                deadline,
+                extension.on_command,
+                text,
+                app,
+            )
+            if answer is None:
+                continue
+            if (
+                isinstance(answer, tuple)
+                and len(answer) == 2
+                and isinstance(answer[0], str)
+                and answer[0].strip()
+                and isinstance(answer[1], bool)
+            ):
+                logger.info("Extension %s handled the command %r", extension.name, Text(text))
+                return answer[0], answer[1]
+            logger.error(
+                "Extension %s answered on_command with %r, not a (label, opened) pair; ignored", extension.name, answer
+            )
+        return None
 
     def dictation(self, text: str, app: ActiveApp) -> str:
         """*text* as every extension's `on_dictation` leaves it, in load order.

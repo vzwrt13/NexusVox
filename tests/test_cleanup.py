@@ -77,9 +77,8 @@ def test_a_failing_model_types_the_dictation_unchanged(model):
         ("Schreib Thomas dass ich heute später komme", "Hallo Thomas, ich komme heute später. Viele Grüße"),
         ("Der Build ist kaputt weil der Cache alt ist", "The build is broken because the cache is stale."),
         ("Erster Punkt\nzweiter Punkt und dritter", "Erster Punkt, zweiter Punkt und dritter."),
-        ("Hallo Signatur \ue000 bis bald", "Hallo Signatur, bis bald."),
     ],
-    ids=["answer", "carried-out", "translated", "line-break-lost", "placeholder-lost"],
+    ids=["answer", "carried-out", "translated", "line-break-lost"],
 )
 def test_implausible_replies_are_ignored(model, dictation, reply):
     model.reply = reply
@@ -90,13 +89,6 @@ def test_implausible_replies_are_ignored(model, dictation, reply):
 def test_a_thinking_block_is_stripped(model):
     model.reply = "<think>The user wants fillers removed.</think>\nIch komme heute später."
     assert cleanup("Ähm ich komme äh heute später", LIGHT, LlmConfig()).text == "Ich komme heute später."
-
-
-def test_no_sentence_mark_after_a_snippet_at_the_end(model):
-    model.reply = "Danke schön, \ue000."
-    assert cleanup("ähm Danke schön \ue000", LIGHT, LlmConfig()).text == "Danke schön, \ue000"
-    model.reply = "Thanks, my address is \ue000."
-    assert cleanup("thanks my address is \ue000", LIGHT, LlmConfig()).text == "Thanks, my address is \ue000"
 
 
 @pytest.mark.parametrize(
@@ -116,7 +108,6 @@ def test_plausible_accepts_fillers_removed_and_punctuation_fixed():
     dictation = "ähm also ich ich glaube wir brauchen äh einen Test"
     assert plausible(dictation, "Ich glaube, wir brauchen einen Test.", "light")
     assert plausible("Erster Punkt\nzweiter hm Punkt", "Erster Punkt\nZweiter Punkt", "light")
-    assert plausible("Hallo \ue000 bis bald", "Hallo \ue000, bis bald.", "light")
 
 
 def test_medium_allows_more_change_than_light():

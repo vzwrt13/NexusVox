@@ -8,7 +8,7 @@ path, or by the GPU container with --gpu-url, and scored twice against the refer
   raw       the model output as is, normalised (lowercase, no punctuation) - comparable with the
             numbers in docs/parakeet-cpu-test.md
   pipeline  the output after `pipeline.process_text` with the settings of a real config.toml (numbers
-            as digits, dictionary, snippets), normalised the same way: what the user actually sees.
+            as digits, dictionary), normalised the same way: what the user actually sees.
             FLEURS references write numbers as digits, so this is the fairer figure.
 
 Short clips (up to 20 s) are scored too, to show that dictation does not get worse.
@@ -185,14 +185,13 @@ def main() -> None:
     from nexusvox.translator import TranslateResult
 
     db = Database(config.database)
-    dictionary, snippets = db.get_dictionary_entries(), db.get_snippets()
+    dictionary = db.get_dictionary_entries()
 
     def pipeline_text(raw: str) -> str:
         return process_text(
             raw,
             config,
             dictionary,
-            snippets,
             cleanup_fn=lambda text, *_: CleanupResult(text),
             translate_fn=lambda text, *_: TranslateResult(text),
         ).typed

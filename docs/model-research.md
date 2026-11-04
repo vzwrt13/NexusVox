@@ -160,7 +160,7 @@ Read from the code on this branch.
 | Auto cleanup prompt | `cleanup.py`: filler list "um, uh, er, äh, ähm, hm"; "German stays German, English stays English" | en, de | Spanish fillers ("eh", "este", "o sea") are not named, so the model removes fewer. The language-keeping rule is worded for two languages; a capable model generalises, a small one may translate |
 | Polish prompt | `polish.py`: "keep the meaning, the language and the author's tone", "keep the text's language" | language-neutral | Works as written; quality depends on the LLM's own language skill. Spoken preset names are the user's own words, so they work |
 | Translator (translate before inject) | `translator.py`, local TranslateGemma server | source de/en/mixed, target English | `source` field only models de/en/mixed; other source languages should still translate if the server supports them, but this was not tested and the field mislabels them |
-| Dictionary, snippets, learn-from-edits | `dictionary.py`, `snippets.py`, `edit_watch.py` | language-agnostic, except the lingua gate in `edit_watch.py` | Dictionary and snippets work in any language. Learn-from-edits uses lingua confidence (en/de) to decide which side of a correction is in a clear language |
+| Dictionary, learn-from-edits | `dictionary.py`, `edit_watch.py` | language-agnostic, except the lingua gate in `edit_watch.py` | The dictionary works in any language. Learn-from-edits uses lingua confidence (en/de) to decide which side of a correction is in a clear language |
 | UI strings, docs | dashboard, README | English | Not a speech problem |
 
 The bilingual-speech rule in `CLAUDE.md` is deliberately two languages. Adding a third means: a

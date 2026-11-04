@@ -230,9 +230,8 @@ def judge(
     """Dictionary suggestions from one watched paste, or the reason there are none.
 
     `spoken` is the text the dictionary will see again (the transcript after the
-    dictionary, snippets as placeholders). Voice commands and snippets make the paste
-    differ from it, so only an entry that matches `spoken` is kept: one for "25" or
-    for a snippet's stored text would never match a transcript.
+    dictionary). Voice commands make the paste differ from it, so only an entry that
+    matches `spoken` is kept: one for "25" would never match a transcript.
     """
     edit = _edit_of(before, injected, after)
     if not edit.found:

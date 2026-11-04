@@ -182,8 +182,8 @@ store_audio = true
 [voice_commands]
 # Enable voice command text formatting substitutions
 enabled = true
-# Transcribe numbers as digits ("five" / "fünf" → "5") instead of words
-numbers_as_digits = false
+# Transcribe numbers as digits ("five" / "fünf" → "5"); on by default, set false to keep words
+numbers_as_digits = true
 # Structural commands (new line, new paragraph, tab, all caps) are their own category:
 # pick which ones fire, or bypass them all without clearing the list
 structural = ["new paragraph", "new line", "tab", "all caps"]

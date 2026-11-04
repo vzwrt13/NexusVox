@@ -816,3 +816,35 @@ def test_download_state_of_the_in_process_models(tmp_path):
     (snapshot / "refs" / "main").write_text("abc")
 
     assert model_download_state("parakeet-tdt-0.6b", tmp_path)["downloaded"] is True
+
+
+def test_numbers_as_digits_on_by_default():
+    assert VoiceCommandsConfig().numbers_as_digits is True
+
+
+def test_numbers_as_digits_on_when_key_missing(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[voice_commands]\nenabled = true\n", encoding="utf-8")
+
+    assert load_config(path).voice_commands.numbers_as_digits is True
+
+
+def test_numbers_as_digits_on_when_section_missing(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[general]\nvoice_commands_enabled = true\n", encoding="utf-8")
+
+    assert load_config(path).voice_commands.numbers_as_digits is True
+
+
+def test_numbers_as_digits_saved_false_is_kept(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[voice_commands]\nnumbers_as_digits = false\n", encoding="utf-8")
+
+    assert load_config(path).voice_commands.numbers_as_digits is False
+
+
+def test_numbers_as_digits_false_survives_save_roundtrip(tmp_path):
+    path = tmp_path / "config.toml"
+    save_config(Config(voice_commands=VoiceCommandsConfig(numbers_as_digits=False)), path)
+
+    assert load_config(path).voice_commands.numbers_as_digits is False

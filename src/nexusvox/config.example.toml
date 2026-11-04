@@ -144,8 +144,8 @@ enabled = false
 # Master switch for voice commands. English and German phrases are always both recognised.
 enabled = true
 # When true, spoken number words are converted to digits: "twenty five" / "fünfundzwanzig" → "25".
-# Disabled by default — numbers pass through as spoken text.
-numbers_as_digits = false
+# On by default; set to false to keep numbers as spoken text.
+numbers_as_digits = true
 # When true, symbol substitutions are skipped but your symbol list is preserved.
 # Structural commands (new line, tab, all caps) remain active.
 # Useful for quick benchmarking without losing your configured symbols.

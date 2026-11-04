@@ -458,6 +458,14 @@ def test_saved_hotkeys_survive_the_new_defaults(tmp_path):
     assert cfg.meeting.modifiers == ["ctrl", "alt"] and cfg.meeting.key == "M"
 
 
+def test_partial_hotkey_sections_keep_their_old_meaning(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[hotkey]\nkey = "A"\n[meeting]\nkey = "F8"\n')
+    cfg = load_config(path)
+    assert cfg.hotkey.modifiers == ["ctrl", "shift", "alt"] and cfg.hotkey.key == "A"
+    assert cfg.meeting.modifiers == ["ctrl", "alt"] and cfg.meeting.key == "F8"
+
+
 def test_unusable_hotkey_falls_back_to_default(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text('[hotkey]\nmodifiers = []\nkey = ""\n')

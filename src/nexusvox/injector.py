@@ -155,6 +155,12 @@ def _release_inputs(held: set[int]) -> list[INPUT]:
         if vk in (VK_MENU, VK_LWIN) and not masked:
             inputs.extend(menu_mask_inputs())
             masked = True
+        if (
+            vk == VK_LWIN
+            and not user32.GetAsyncKeyState(VK_LWIN) & 0x8000
+            and user32.GetAsyncKeyState(VK_RWIN) & 0x8000
+        ):
+            vk = VK_RWIN  # only Right Win is down: a key-up for Left Win would leave it held
         inputs.append(_make_key_input(vk, sc, KEYEVENTF_KEYUP))
     return inputs
 

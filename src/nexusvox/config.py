@@ -130,9 +130,17 @@ def model_needs_docker(model_id: str, device: str) -> bool:
     return not (info.get("inprocess_supported") and device == "cpu")
 
 
+# Default bindings, the single source for the dataclasses, the loader and the fallbacks. The legacy ones are what
+# a config file written before the current defaults meant by a section that leaves the modifiers out.
+DEFAULT_HOTKEY_MODIFIERS = ("ctrl", "win")
+LEGACY_HOTKEY_MODIFIERS = ("ctrl", "shift", "alt")
+DEFAULT_MEETING_MODIFIERS = ("ctrl", "shift")
+LEGACY_MEETING_MODIFIERS = ("ctrl", "alt")
+
+
 @dataclass
 class HotkeyConfig:
-    modifiers: list[str] = field(default_factory=lambda: ["ctrl", "win"])
+    modifiers: list[str] = field(default_factory=lambda: list(DEFAULT_HOTKEY_MODIFIERS))
     # Optional non-modifier key that completes the combo (e.g. "a", "f9", "space").
     # Empty: the modifiers alone are the hotkey. Its keystrokes are swallowed while
     # it is held as part of the combo, so the target app never sees the letter.
@@ -231,7 +239,7 @@ class MeetingConfig:
     app menu. Empty device names mean the system default devices.
     """
 
-    modifiers: list[str] = field(default_factory=lambda: ["ctrl", "shift"])
+    modifiers: list[str] = field(default_factory=lambda: list(DEFAULT_MEETING_MODIFIERS))
     key: str = "M"
     mic_device: str = ""
     output_device: str = ""
@@ -281,10 +289,10 @@ def validate_meeting_hotkey(modifiers: list[str], key: str, dictation: HotkeyCon
 
 # Tried in order when a hand-edited file leaves no usable meeting hotkey.
 _MEETING_HOTKEY_FALLBACKS = (
-    (["ctrl", "shift"], "M"),
-    (["ctrl", "shift"], "F9"),
-    (["ctrl", "alt"], "M"),
-    (["ctrl", "alt"], "F9"),
+    (list(DEFAULT_MEETING_MODIFIERS), "M"),
+    (list(DEFAULT_MEETING_MODIFIERS), "F9"),
+    (list(LEGACY_MEETING_MODIFIERS), "M"),
+    (list(LEGACY_MEETING_MODIFIERS), "F9"),
     (["ctrl", "alt", "win"], "M"),
 )
 
@@ -719,18 +727,32 @@ def load_config(path: Path | None = None) -> Config:
     general = data.get("general", {})
     hotkey_data = data.get("hotkey", {})
     hotkey_mode = hotkey_data.get("mode", "hold")
-    hotkey_modifiers = list(hotkey_data.get("modifiers", ["ctrl", "win"]))
+    # A hotkey section in the file that leaves the modifiers out is an older hand-written one: keep what it meant.
+    hotkey_modifiers = list(
+        hotkey_data.get("modifiers", LEGACY_HOTKEY_MODIFIERS if hotkey_data else DEFAULT_HOTKEY_MODIFIERS)
+    )
     hotkey_key = str(hotkey_data.get("key", ""))
     if validate_hotkey(hotkey_modifiers, hotkey_key) is not None:
         # An unusable binding would make the app unreachable; fall back to the default.
-        hotkey_modifiers, hotkey_key = ["ctrl", "win"], ""
+        hotkey_modifiers, hotkey_key = list(DEFAULT_HOTKEY_MODIFIERS), ""
     meeting_data = data.get("meeting", {})
-    meeting_modifiers = [str(m).lower() for m in meeting_data.get("modifiers", ["ctrl", "shift"])]
+    meeting_modifiers = [
+        str(m).lower()
+        for m in meeting_data.get("modifiers", LEGACY_MEETING_MODIFIERS if meeting_data else DEFAULT_MEETING_MODIFIERS)
+    ]
     meeting_key = str(meeting_data.get("key", "M"))
     hotkey_config = HotkeyConfig(modifiers=hotkey_modifiers, key=normalize_hotkey_key(hotkey_key) or "")
     if validate_meeting_hotkey(meeting_modifiers, meeting_key, hotkey_config) is not None:
         # An unusable binding in the file falls back to the default, like the dictation hotkey.
-        meeting_modifiers, meeting_key = default_meeting_hotkey(hotkey_config)
+        replacement = default_meeting_hotkey(hotkey_config)
+        logger.warning(
+            "Meeting hotkey %s+%s is unusable or would also start dictation; using %s+%s",
+            "+".join(meeting_modifiers),
+            meeting_key,
+            "+".join(replacement[0]),
+            replacement[1],
+        )
+        meeting_modifiers, meeting_key = replacement
     audio_data = data.get("audio", {})
     inference_data = data.get("inference", {})
     model = inference_data.get("model", DEFAULT_MODEL)

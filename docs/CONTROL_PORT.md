@@ -10,7 +10,7 @@ Two optional features hand a sentence to another program instead of typing it:
 
 NexusVox only routes the text. The program on the other end is **not part of NexusVox**:
 you run it yourself, and any program that speaks the contract below works. Both features
-are off by default; with them off, `Ctrl+Win+Y` types a plain `y` and "nexus
+are off by default; with them off, `Y` is not a command key (`Ctrl+Win+Y` is then just a Windows shortcut) and "nexus
 assistant ..." is typed like any other sentence.
 
 ## Configuration

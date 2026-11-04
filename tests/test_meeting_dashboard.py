@@ -820,3 +820,15 @@ def test_portaudio_is_only_refreshed_while_no_stream_is_open():
         audio_state.stream_closed()
     assert calls == []
     assert audio_state.streams_open() == 0
+
+
+def test_reset_to_default_is_refused_while_the_meeting_hotkey_contains_the_default_chord(env):
+    client, *_ = env
+    assert (
+        client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "shift", "alt"], "key": ""}).status_code == 200
+    )
+    assert (
+        client.post("/api/settings/meeting-hotkey", json={"modifiers": ["ctrl", "win"], "key": "F8"}).status_code == 200
+    )
+    resp = client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "win"], "key": ""})
+    assert resp.status_code == 400 and "change the meeting hotkey first" in resp.get_json()["error"]

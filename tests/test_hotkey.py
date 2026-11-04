@@ -499,3 +499,19 @@ def test_auto_repeat_of_a_held_modifier_sends_no_extra_mask():
     hk._handle(LALT, False)
     hk._handle(LALT, True)  # a real second press does get one
     assert log == ["mask", "mask"]
+
+
+def test_right_win_counts_as_a_held_win_modifier(monkeypatch):
+    import ctypes
+
+    from nexusvox import hotkey
+
+    class FakeUser32:
+        @staticmethod
+        def GetAsyncKeyState(vk):  # noqa: N802 - Win32 name
+            return 0x8000 if vk in (0xA2, 0x5C) else 0  # Left Ctrl, Right Win
+
+    monkeypatch.setattr(ctypes, "windll", type("W", (), {"user32": FakeUser32})(), raising=False)
+    assert hotkey._physical_modifiers() == {"ctrl", "win"}
+    hk, _, _ = _listener("hold", modifiers=("ctrl", "win"))
+    assert hk.modifiers_physically_down() is True

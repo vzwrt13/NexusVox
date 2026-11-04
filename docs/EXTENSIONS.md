@@ -412,9 +412,7 @@ class Snippets(Extension):
         marked, expansions = mark_snippets(text, self._snippets)
         if not expansions:
             return None
-        return marked, lambda out: (
-            expand_snippets(out, expansions) if placeholders_intact(out, expansions) else None
-        )
+        return marked, lambda out: expand_snippets(out, expansions) if placeholders_intact(out, expansions) else None
 ```
 
 ## Snippet matching helpers

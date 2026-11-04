@@ -62,8 +62,12 @@ basement.studio. The full license text ships next to the fonts as
 
 ## Runtime dependencies
 
-No dependency is redistributed with NexusVox; pip installs them separately. Their licenses
-are recorded here so the compatibility picture is on file.
+The wheel and the source distribution do not contain these dependencies; pip installs them
+separately. **The Windows installer does contain them** (the frozen app bundles every runtime
+dependency, including the FFmpeg libraries inside PyAV and PortAudio inside sounddevice). The
+installer therefore shows and installs `THIRD_PARTY_NOTICES.txt`, generated at build time
+(`packaging/third_party_notices.py`), which reproduces each package's licence text. The table
+below records the main licences so the compatibility picture is on file.
 
 | Dependency | License |
 |---|---|

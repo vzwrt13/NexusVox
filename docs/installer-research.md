@@ -367,12 +367,20 @@ What the build cannot do yet:
 `packaging/nexusvox.iss` is the Inno Setup script, `packaging/build_installer.py` compiles it after
 `packaging/build.py` (`dist/installer/NexusVox-Setup.exe`, version from `pyproject.toml`). It installs per user to
 `%LOCALAPPDATA%\Programs\NexusVox` without admin rights, adds a Start Menu entry, shows `LICENSE` (PolyForm
-Noncommercial 1.0.0) as the licence page and `THIRD_PARTY_LICENSES.md` as an information page, and offers an unchecked
+Noncommercial 1.0.0) as the licence page and `THIRD_PARTY_NOTICES.txt` (generated at build time by
+`packaging/third_party_notices.py`: the licence texts of every package the frozen app bundles) as an information page,
+and offers an unchecked
 task "Start NexusVox when I sign in" (`HKCU\...\Run`, value `NexusVox`). The uninstaller asks two questions, both
 defaulting to keep: delete settings, history, audio and logs, and delete the downloaded models. A silent uninstall keeps
 everything unless `/DELETEDATA` and/or `/DELETEMODELS` are passed. `.github/workflows/installer.yml` builds and
 test-installs it in CI; the release workflow attaches `NexusVox-Setup.exe` (a stable name, the website links to it) to
 every release. Unsigned until the signing ticket; the first-run screen is a separate ticket.
+
+Behaviours worth knowing: `AppMutex` (the app's single-instance mutex) makes Setup and the uninstaller refuse while
+NexusVox runs, because the tray app cannot be closed from outside; an upgrade first deletes `{app}\_internal` so no
+file of the old build survives; unticking the autostart task on an upgrade removes the Run value; the uninstaller
+also removes `{app}\extensions`; the delete-data question covers the default folders only. CI installs, starts the
+installed app, tries to install over it, upgrades, and uninstalls with and without the delete switches.
 
 ## Open questions
 

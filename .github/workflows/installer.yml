@@ -2,14 +2,17 @@ name: Installer
 
 # Builds the frozen app, wraps it in the Inno Setup installer and test-installs it.
 # Called by the release workflow, and run on pull requests that touch what goes into the installer
-# (a Windows build with a 600 MB folder is too slow to run on every pull request).
+# (a Windows build with a 600 MB folder is too slow to run on every pull request). `src/**` is
+# in the list because a new lazy import or data file is what the frozen build misses.
 on:
   workflow_call:
   workflow_dispatch:
   pull_request:
     paths:
       - ".github/workflows/installer.yml"
+      - ".github/workflows/release.yml"
       - "packaging/**"
+      - "src/**"
       - "LICENSE"
       - "THIRD_PARTY_LICENSES.md"
       - "pyproject.toml"
@@ -48,50 +51,88 @@ jobs:
       - name: Build the installer
         run: python packaging/build_installer.py
 
-      - name: Install silently and check the result
+      - name: Install, run, upgrade and uninstall
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $target = Join-Path $env:RUNNER_TEMP "NexusVox-installed"
           $setup = "dist\installer\NexusVox-Setup.exe"
           $run = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-
-          # A per-user install must not need elevation, whatever the runner account is allowed to do.
-          Start-Process $setup -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$target`"", "/TASKS=autostart", "/LOG=`"$env:RUNNER_TEMP\setup.log`""
-          if (-not (Test-Path "$target\NexusVox.exe")) { throw "NexusVox.exe was not installed" }
-          if (-not (Test-Path "$target\unins000.exe")) { throw "No uninstaller was written" }
-          if (-not (Test-Path "$target\LICENSE")) { throw "LICENSE was not installed" }
-          if (-not (Test-Path "$target\THIRD_PARTY_LICENSES.md")) { throw "THIRD_PARTY_LICENSES.md was not installed" }
-          $value = (Get-ItemProperty $run).NexusVox
-          if ($value -ne "`"$target\NexusVox.exe`"") { throw "Unexpected autostart value: $value" }
-
-          # The user's files live outside the install folder. A plain uninstall must keep them.
           $config = Join-Path $env:APPDATA "NexusVox"
           $local = Join-Path $env:LOCALAPPDATA "NexusVox"
-          foreach ($folder in @($config, "$local\data", "$local\logs", "$local\models")) {
-            New-Item -ItemType Directory -Force $folder | Out-Null
-            Set-Content "$folder\keep.txt" "x"
+          $userFolders = @($config, "$local\data", "$local\logs", "$local\models")
+
+          function Install($tasks) {
+            # Per-user: nothing here may need elevation.
+            $arguments = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$target`"", "/LOG=`"$env:RUNNER_TEMP\setup.log`"") + $tasks
+            $process = Start-Process $setup -PassThru -ArgumentList $arguments
+            if (-not $process.WaitForExit(300000)) { $process.Kill(); throw "The installer did not finish" }
+            return $process.ExitCode
           }
 
           function Uninstall($extra) {
             Start-Process "$target\unins000.exe" -Wait -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") + $extra)
-            # The uninstaller hands over to a copy in the temp folder; wait for it to finish.
-            $deadline = (Get-Date).AddSeconds(60)
-            while ((Test-Path "$target\NexusVox.exe") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+            # The uninstaller hands over to a copy of itself in the temp folder, and the data is deleted after the
+            # program folder is gone. Wait for that copy to finish, whatever it is called.
+            $deadline = (Get-Date).AddSeconds(90)
+            do {
+              Start-Sleep -Seconds 1
+              $busy = Get-Process | Where-Object { $_.Name -like "unins*" -or $_.Path -like "$env:TEMP\is-*" }
+            } while ($busy -and (Get-Date) -lt $deadline)
+            if ($busy) { throw "The uninstaller did not finish" }
           }
 
+          # --- Fresh install, with the autostart task.
+          if ((Install @("/TASKS=autostart")) -ne 0) { throw "The installer failed" }
+          foreach ($file in "NexusVox.exe", "unins000.exe", "LICENSE", "THIRD_PARTY_NOTICES.txt", "THIRD_PARTY_LICENSES.md") {
+            if (-not (Test-Path "$target\$file")) { throw "$file was not installed" }
+          }
+          $value = (Get-ItemProperty $run).NexusVox
+          if ($value -ne "`"$target\NexusVox.exe`"") { throw "Unexpected autostart value: $value" }
+
+          # --- The installed app starts and stays up (the frozen build is the part that breaks quietly).
+          $app = Start-Process "$target\NexusVox.exe" -PassThru
+          $started = $false
+          foreach ($i in 1..90) {
+            Start-Sleep -Seconds 1
+            if ($app.HasExited) { break }
+            if (Get-ChildItem "$local\logs" -ErrorAction SilentlyContinue | Select-String -Pattern "NexusVox started" -Quiet) { $started = $true; break }
+          }
+          if (-not $started) {
+            Get-ChildItem "$local\logs" -ErrorAction SilentlyContinue | Get-Content | Select-Object -Last 40
+            throw "The installed NexusVox did not start (exited: $($app.HasExited))"
+          }
+
+          # --- A running NexusVox must stop an install over it, and the old build must stay intact.
+          New-Item -ItemType File -Force "$target\_internal\stale-from-old-build.txt" | Out-Null
+          Install @() | Out-Null
+          if ($app.HasExited) { throw "Installing over a running NexusVox closed it" }
+          if (-not (Test-Path "$target\_internal\stale-from-old-build.txt")) { throw "Setup replaced files under a running NexusVox" }
+          $app.Kill()
+          $app.WaitForExit()
+
+          # --- Upgrade over the old build with the autostart task unticked.
+          if ((Install @("/MERGETASKS=`"!autostart`"")) -ne 0) { throw "The upgrade failed" }
+          if (Test-Path "$target\_internal\stale-from-old-build.txt") { throw "The upgrade left a file of the old build behind" }
+          if (-not (Test-Path "$target\NexusVox.exe")) { throw "The upgrade lost NexusVox.exe" }
+          if ((Get-ItemProperty $run -ErrorAction SilentlyContinue).NexusVox) { throw "Unticking autostart on an upgrade left the Run value" }
+
+          # --- The user's files live outside the install folder. A plain silent uninstall must keep them.
+          New-Item -ItemType File -Force "$target\extensions\addon\marker.txt" | Out-Null
+          foreach ($folder in $userFolders) {
+            New-Item -ItemType Directory -Force $folder | Out-Null
+            Set-Content "$folder\keep.txt" "x"
+          }
           Uninstall @()
-          if (Test-Path "$target\NexusVox.exe") { throw "The uninstaller left NexusVox.exe behind" }
-          if ((Get-ItemProperty $run -ErrorAction SilentlyContinue).NexusVox) { throw "The autostart entry was not removed" }
-          foreach ($folder in @($config, "$local\data", "$local\logs", "$local\models")) {
+          if (Test-Path $target) { throw "The uninstaller left $target behind (add-ons included)" }
+          foreach ($folder in $userFolders) {
             if (-not (Test-Path "$folder\keep.txt")) { throw "A silent uninstall deleted $folder" }
           }
 
-          # With the switches the data and the models go, too.
-          Start-Process $setup -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$target`""
+          # --- With the switches the data and the models go, too.
+          if ((Install @()) -ne 0) { throw "The reinstall failed" }
           Uninstall @("/DELETEDATA", "/DELETEMODELS")
-          Start-Sleep -Seconds 3
-          foreach ($folder in @($config, "$local\data", "$local\logs", "$local\models")) {
+          foreach ($folder in $userFolders) {
             if (Test-Path $folder) { throw "/DELETEDATA and /DELETEMODELS left $folder behind" }
           }
 

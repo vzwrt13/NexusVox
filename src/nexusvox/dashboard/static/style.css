@@ -1306,7 +1306,7 @@ canvas { width: 100% !important; max-height: 260px; }
 .subtab.active { color: var(--text); background: var(--accent-glow); }
 .subtab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .settings-search { margin-bottom: 12px; }
-.settings-search input { width: 100%; max-width: 100%; box-sizing: border-box; }
+.settings-search input { width: 100%; max-width: 100%; box-sizing: border-box; padding: 9px 12px; }
 .search-hidden { display: none !important; }
 #tab-settings .settings-card { scroll-margin-top: 16px; }
 @media (max-width: 800px) {

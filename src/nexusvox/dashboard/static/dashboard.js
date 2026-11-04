@@ -122,7 +122,10 @@ function activateTab(name, { keepScroll = false } = {}) {
   if (name === "analytics") loadAnalytics();
   if (name === "edit") loadFlaggedTranscriptions();
   if (name === "meetings") openMeetingsTab();
-  if (name === "settings") loadMeetingSettings();
+  if (name === "settings") {
+    loadMeetingSettings();
+    markActiveSubtab();
+  }
   if (name === "upload") {
     loadFileTranscriptions();
     refreshDiarizeToggle();
@@ -3192,8 +3195,7 @@ document.getElementById("meeting-settings-link").addEventListener("click", (e) =
   e.preventDefault();
   history.replaceState(null, "", "#settings");
   activateTab("settings", { keepScroll: true });
-  const card = document.getElementById("meeting-settings-card");
-  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  const card = scrollToSettingsCard("meeting-settings-card");
   card.classList.remove("flash-highlight");
   void card.offsetWidth; // restart the animation when the link is clicked again
   card.classList.add("flash-highlight");
@@ -3630,46 +3632,89 @@ function wordDiff(ref, hyp) {
   return parts.reverse().join(" ");
 }
 
-// ── Settings submenu and search ──────────────────────────────────────
+// -- Settings submenu and search ----------------------------------------
 // The sidebar lists one entry per Settings card; the search field hides settings that do not match.
 function settingsCards() {
   return Array.from(document.querySelectorAll("#tab-settings > .settings-card"));
 }
 
+let pinnedSubtab = null; // the entry just clicked stays active until the user scrolls by hand
+let subtabFrame = 0;
+
 function markActiveSubtab() {
+  if (!document.getElementById("tab-settings").classList.contains("active")) return;
   const links = Array.from(document.querySelectorAll("#settings-submenu .subtab"));
+  const entries = links
+    .map((link) => ({ link, card: document.getElementById(link.dataset.card) }))
+    .filter((e) => e.card && !e.card.classList.contains("search-hidden"));
+  const atBottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
   let current = null;
-  for (const link of links) {
-    const card = document.getElementById(link.dataset.card);
-    if (card && !card.classList.contains("search-hidden") && card.getBoundingClientRect().top <= 120) current = link;
+  for (const e of entries) {
+    const top = e.card.getBoundingClientRect().top;
+    // At the end of the page the last cards can never reach the top: the lowest one in view counts.
+    if (top <= 120 || (atBottom && top < window.innerHeight)) current = e.link;
   }
+  if (pinnedSubtab && entries.some((e) => e.link === pinnedSubtab)) current = pinnedSubtab;
   links.forEach((l) => l.classList.toggle("active", l === current));
+}
+
+function scheduleActiveSubtab() {
+  if (subtabFrame) return;
+  subtabFrame = requestAnimationFrame(() => {
+    subtabFrame = 0;
+    markActiveSubtab();
+  });
+}
+
+// Scroll to a Settings card: lifts a search filter that hides it and opens a collapsed card.
+function scrollToSettingsCard(id) {
+  const card = document.getElementById(id);
+  if (card.classList.contains("search-hidden")) clearSettingsSearch();
+  if (card.tagName === "DETAILS") {
+    card.open = true;
+    advancedWasOpen = null; // opened on purpose: clearing the search must not close it again
+  }
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  return card;
 }
 
 document.querySelectorAll("#settings-submenu .subtab").forEach((link) => {
   link.addEventListener("click", (e) => {
     e.preventDefault();
-    const card = document.getElementById(link.dataset.card);
-    if (!card) return;
-    if (card.classList.contains("search-hidden")) clearSettingsSearch();
-    if (card.tagName === "DETAILS") card.open = true;
-    card.scrollIntoView({ behavior: "smooth", block: "start" });
+    scrollToSettingsCard(link.dataset.card);
+    pinnedSubtab = link;
+    markActiveSubtab();
   });
 });
-window.addEventListener("scroll", markActiveSubtab, { passive: true });
+window.addEventListener("scroll", scheduleActiveSubtab, { passive: true });
+["wheel", "touchstart", "keydown"].forEach((type) =>
+  window.addEventListener(
+    type,
+    () => {
+      pinnedSubtab = null;
+    },
+    { passive: true },
+  ),
+);
 
-// A unit is a top-level setting row or sub-block of a card.
+// Text a user can see and read as a label or hint: no option lists, buttons, fields, hidden parts or user data.
+function searchableText(node) {
+  if (node.nodeType === 3) return node.data;
+  if (node.nodeType !== 1 || node.hidden) return "";
+  if (["SELECT", "OPTION", "BUTTON", "INPUT", "TEXTAREA", "SCRIPT"].includes(node.tagName)) return "";
+  if (node.classList.contains("dict-list")) return "";
+  return Array.from(node.childNodes).map(searchableText).join(" ");
+}
+
+// A unit is a direct child of a card (setting row, sub-block, hint), apart from the title.
 function settingsUnits(card) {
-  return Array.from(card.querySelectorAll(".setting-row, .settings-sub")).filter(
-    (u) => !u.parentElement.closest(".setting-row, .settings-sub") && !u.closest("[hidden]"),
-  );
+  return Array.from(card.children).filter((u) => !u.hidden && !["H4", "SUMMARY"].includes(u.tagName));
 }
 
 let advancedWasOpen = null;
 
 function applySettingsSearch() {
-  const input = document.getElementById("settings-search");
-  const query = input.value.trim().toLowerCase();
+  const query = document.getElementById("settings-search").value.trim().toLowerCase();
   const advanced = document.getElementById("settings-advanced");
   let shown = 0;
   for (const card of settingsCards()) {
@@ -3684,7 +3729,7 @@ function applySettingsSearch() {
     }
     let any = false;
     for (const u of units) {
-      if (u.textContent.toLowerCase().includes(query)) any = true;
+      if (searchableText(u).toLowerCase().includes(query)) any = true;
       else u.classList.add("search-hidden");
     }
     if (any) shown++;
@@ -3702,8 +3747,7 @@ function applySettingsSearch() {
 }
 
 function clearSettingsSearch() {
-  const input = document.getElementById("settings-search");
-  input.value = "";
+  document.getElementById("settings-search").value = "";
   applySettingsSearch();
 }
 
@@ -3714,4 +3758,7 @@ document.getElementById("settings-search").addEventListener("keydown", (e) => {
     clearSettingsSearch();
   }
 });
-markActiveSubtab();
+// A user who opens or closes Advanced by hand keeps that state when the search is cleared.
+document.querySelector("#settings-advanced > summary").addEventListener("click", () => {
+  advancedWasOpen = null;
+});

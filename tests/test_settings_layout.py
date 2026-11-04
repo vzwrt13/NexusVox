@@ -124,63 +124,125 @@ def test_search_field_comes_first_and_no_match_message_exists():
     assert re.search(r'<p id="settings-no-match"[^>]*hidden[^>]*>No setting found</p>', section)
 
 
-def _run_search(query: str, advanced_text: str = "Compute device"):
-    """Run applySettingsSearch of dashboard.js against a tiny fake DOM."""
+def _run_js(steps: str):
+    """Run the real search/submenu functions of dashboard.js against a tiny fake DOM; `steps` prints JSON."""
     if shutil.which("node") is None:
         pytest.skip("Node.js is not installed")
-    start = JS.index("let advancedWasOpen")
-    end = JS.index("function clearSettingsSearch")
-    funcs = JS[start:end]
-    script = (
-        """
-    const mk = (text) => {
-      const cls = new Set();
-      return { textContent: text, open: false, tagName: "DIV", _cls: cls,
-        classList: { add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c) },
-        querySelector: () => ({ textContent: text.split("|")[0] }) };
+    start = JS.index("// -- Settings submenu and search")
+    end = JS.index('document.querySelectorAll("#settings-submenu .subtab").forEach((link)')
+    tail_start = JS.index("// Text a user can see")
+    tail_end = JS.index('document.getElementById("settings-search").addEventListener("input"')
+    funcs = JS[start:end] + JS[tail_start:tail_end]
+    fake = r"""
+    class Node {
+      constructor(tag, kids = [], attrs = {}) {
+        this.nodeType = 1; this.tagName = tag; this.childNodes = kids;
+        this.children = kids.filter((k) => k.nodeType === 1);
+        this.hidden = !!attrs.hidden; this.open = false; this.cls = new Set(attrs.cls || []); this.top = attrs.top ?? 0;
+        this.scrolled = 0; this.dataset = attrs.dataset || {};
+        this.classList = { add: (c) => this.cls.add(c), remove: (c) => this.cls.delete(c),
+          contains: (c) => this.cls.has(c), toggle: (c, on) => (on ? this.cls.add(c) : this.cls.delete(c)) };
+      }
+      get textContent() { return this.childNodes.map((k) => (k.nodeType === 3 ? k.data : k.textContent)).join(" "); }
+      querySelector() { return this.children[0]; }
+      getBoundingClientRect() { return { top: this.top }; }
+      scrollIntoView() { this.scrolled++; }
+    }
+    const T = (data) => ({ nodeType: 3, data });
+    const E = (tag, kids, attrs) => new Node(tag, kids, attrs);
+    const row = (...kids) => E("DIV", kids);
+    const card = (t, ...units) => E("DIV", [E("H4", [T(t)]), ...units]);
+    const select = E("SELECT", [E("OPTION", [T("space")])]);
+    const cards = {
+      dict: card("Dictation", E("P", [T("The everyday basics")]), row(E("H3", [T("Hotkey")]), select),
+        row(E("H3", [T("Mode")]), E("BUTTON", [T("Cancel")]), E("SPAN", [T("latency")], { hidden: true }))),
+      voc: card("Vocabulary", row(E("H3", [T("Dictionary")]), E("DIV", [T("secretword")], { cls: ["dict-list"] }))),
     };
-    const units = { dict: [mk("Hotkey|Press a key"), mk("Mode|hold or toggle")], voc: [mk("Dictionary|words")],
-      adv: [mk("ADVTEXT|device")] };
-    const cards = { dict: mk("Dictation|x"), voc: mk("Vocabulary|x"), adv: mk("Advanced|x") };
-    const cardUnits = new Map(Object.keys(cards).map((k) => [cards[k], units[k]]));
+    const adv = E("DETAILS", [E("SUMMARY", [T("Advanced")]), E("P", [T("Rarely needed")]),
+      row(E("H3", [T("Compute device")])), E("P", [T("Takes effect after restart")])]);
+    adv.top = 900; cards.dict.top = 0; cards.voc.top = 400;
+    const allCards = [cards.dict, cards.voc, adv];
     const noMatch = { hidden: true };
-    const input = { value: QUERY };
-    const document = { getElementById: (id) => id === "settings-search" ? input
-      : id === "settings-no-match" ? noMatch : cards.adv };
-    const settingsCards = () => Object.values(cards);
-    const settingsUnits = (card) => cardUnits.get(card);
-    const markActiveSubtab = () => {};
-    FUNCS
-    applySettingsSearch();
-    console.log(JSON.stringify({
-      hidden: Object.fromEntries(Object.entries(cards).map(([k, c]) => [k, c._cls.has("search-hidden")])),
-      noMatch: !noMatch.hidden, advancedOpen: cards.adv.open,
-    }));
-    """.replace("ADVTEXT", advanced_text)
-        .replace("QUERY", json.dumps(query))
-        .replace("FUNCS", funcs)
+    const input = { value: "" };
+    const byId = { "settings-search": input, "settings-no-match": noMatch, "settings-advanced": adv,
+      "tab-settings": new Node("SECTION", [], { cls: ["active"] }) };
+    const links = allCards.map((c, i) => new Node("A", [], { dataset: { card: "c" + i } }));
+    allCards.forEach((c, i) => (byId["c" + i] = c));
+    const window = { scrollY: 0, innerHeight: 800 };
+    const document = { getElementById: (id) => byId[id], documentElement: { scrollHeight: 1500 },
+      querySelectorAll: (sel) => (sel === "#settings-submenu .subtab" ? links : allCards) };
+    const hiddenState = () => Object.fromEntries(allCards.map((c, i) => ["c" + i, c.cls.has("search-hidden")]));
+    const unitsHidden = (c) => c.children.filter((u) => u.cls.has("search-hidden"))
+      .map((u) => u.tagName + ":" + u.textContent.trim().slice(0, 12));
+    const search = (q) => { input.value = q; applySettingsSearch(); };
+    """
+    out = subprocess.run(["node", "-e", fake + funcs + steps], capture_output=True, text=True, check=True, timeout=30)
+    return json.loads(out.stdout)
+
+
+def test_search_matches_labels_and_hints_only():
+    r = _run_js(
+        """
+        const res = {};
+        for (const q of ["hotkey", "everyday", "space", "cancel", "latency", "secretword"]) {
+          search(q); res[q] = [hiddenState(), noMatch.hidden];
+        }
+        console.log(JSON.stringify(res));
+        """
     )
-    out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True, timeout=30).stdout
-    return json.loads(out)
+    assert r["hotkey"][0] == {"c0": False, "c1": True, "c2": True}
+    assert r["everyday"][0]["c0"] is False  # a card-level hint is searchable
+    for word in ("space", "cancel", "latency", "secretword"):  # options, buttons, hidden parts, user data
+        assert r[word][0] == {"c0": True, "c1": True, "c2": True} and r[word][1] is False
 
 
-def test_search_match_hides_other_cards():
-    r = _run_search("hotkey")
-    assert r["hidden"] == {"dict": False, "voc": True, "adv": True}
-    assert not r["noMatch"]
+def test_search_hides_orphan_hints_and_units_that_do_not_match():
+    r = _run_js('search("compute"); console.log(JSON.stringify([unitsHidden(adv), hiddenState(), adv.open]));')
+    assert r[0] == ["P:Rarely neede", "P:Takes effect"]
+    assert r[1] == {"c0": True, "c1": True, "c2": False} and r[2] is True
 
 
-def test_search_without_match_shows_message():
-    r = _run_search("zzzz")
-    assert all(r["hidden"].values()) and r["noMatch"]
+def test_no_match_message_and_clearing_restores_everything():
+    r = _run_js(
+        """
+        search("zzzz"); const none = [hiddenState(), noMatch.hidden];
+        search(""); console.log(JSON.stringify([none, hiddenState(), noMatch.hidden, allCards.map(unitsHidden)]));
+        """
+    )
+    assert all(r[0][0].values()) and r[0][1] is False
+    assert not any(r[1].values()) and r[2] is True and r[3] == [[], [], []]
 
 
-def test_search_match_in_advanced_opens_it():
-    r = _run_search("compute")
-    assert r["hidden"] == {"dict": True, "voc": True, "adv": False}
-    assert r["advancedOpen"] is True
+def test_clearing_restores_advanced_state_unless_opened_on_purpose():
+    r = _run_js(
+        """
+        search("compute"); const during = adv.open; search(""); const closedAgain = adv.open;
+        search("compute"); scrollToSettingsCard("c2"); search(""); const keptOpen = adv.open;
+        console.log(JSON.stringify([during, closedAgain, keptOpen]));
+        """
+    )
+    assert r == [True, False, True]
 
 
-def test_empty_search_restores_everything():
-    r = _run_search("")
-    assert not any(r["hidden"].values()) and not r["noMatch"]
+def test_scroll_to_card_lifts_a_filter_that_hides_it():
+    r = _run_js(
+        'search("compute"); scrollToSettingsCard("c0");'
+        "console.log(JSON.stringify([input.value, cards.dict.scrolled, hiddenState()]));"
+    )
+    assert r[0] == "" and r[1] == 1 and not any(r[2].values())
+
+
+def test_active_entry_follows_scroll_reaches_last_cards_and_ignores_other_tabs():
+    r = _run_js(
+        """
+        const active = () => links.findIndex((l) => l.cls.has("active"));
+        const res = {};
+        markActiveSubtab(); res.top = active();
+        cards.voc.top = 50; markActiveSubtab(); res.second = active();
+        window.scrollY = 700; adv.top = 500; markActiveSubtab(); res.bottom = active();
+        byId["tab-settings"].cls.delete("active"); links.forEach((l) => l.cls.delete("active"));
+        markActiveSubtab(); res.hiddenTab = active();
+        console.log(JSON.stringify(res));
+        """
+    )
+    assert r == {"top": 0, "second": 1, "bottom": 2, "hiddenTab": -1}

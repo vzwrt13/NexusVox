@@ -1,0 +1,111 @@
+name: Installer
+
+# Builds the frozen app, wraps it in the Inno Setup installer and test-installs it.
+# Called by the release workflow, and run on pull requests that touch what goes into the installer
+# (a Windows build with a 600 MB folder is too slow to run on every pull request).
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/installer.yml"
+      - "packaging/**"
+      - "LICENSE"
+      - "THIRD_PARTY_LICENSES.md"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    name: Build and test the installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install NexusVox and PyInstaller
+        # A regular install, not editable: the build must contain what a wheel contains.
+        run: pip install . "pyinstaller>=6,<7"
+
+      - name: Build the app
+        run: python packaging/build.py
+
+      - name: Make sure Inno Setup is installed
+        shell: pwsh
+        run: |
+          $found = (Get-Command ISCC -ErrorAction SilentlyContinue) -or
+            (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe") -or
+            (Test-Path "$env:ProgramFiles\Inno Setup 6\ISCC.exe")
+          if (-not $found) { choco install innosetup --no-progress -y }
+
+      - name: Build the installer
+        run: python packaging/build_installer.py
+
+      - name: Install silently and check the result
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = Join-Path $env:RUNNER_TEMP "NexusVox-installed"
+          $setup = "dist\installer\NexusVox-Setup.exe"
+          $run = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+
+          # A per-user install must not need elevation, whatever the runner account is allowed to do.
+          Start-Process $setup -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$target`"", "/TASKS=autostart", "/LOG=`"$env:RUNNER_TEMP\setup.log`""
+          if (-not (Test-Path "$target\NexusVox.exe")) { throw "NexusVox.exe was not installed" }
+          if (-not (Test-Path "$target\unins000.exe")) { throw "No uninstaller was written" }
+          if (-not (Test-Path "$target\LICENSE")) { throw "LICENSE was not installed" }
+          if (-not (Test-Path "$target\THIRD_PARTY_LICENSES.md")) { throw "THIRD_PARTY_LICENSES.md was not installed" }
+          $value = (Get-ItemProperty $run).NexusVox
+          if ($value -ne "`"$target\NexusVox.exe`"") { throw "Unexpected autostart value: $value" }
+
+          # The user's files live outside the install folder. A plain uninstall must keep them.
+          $config = Join-Path $env:APPDATA "NexusVox"
+          $local = Join-Path $env:LOCALAPPDATA "NexusVox"
+          foreach ($folder in @($config, "$local\data", "$local\logs", "$local\models")) {
+            New-Item -ItemType Directory -Force $folder | Out-Null
+            Set-Content "$folder\keep.txt" "x"
+          }
+
+          function Uninstall($extra) {
+            Start-Process "$target\unins000.exe" -Wait -ArgumentList (@("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") + $extra)
+            # The uninstaller hands over to a copy in the temp folder; wait for it to finish.
+            $deadline = (Get-Date).AddSeconds(60)
+            while ((Test-Path "$target\NexusVox.exe") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 1 }
+          }
+
+          Uninstall @()
+          if (Test-Path "$target\NexusVox.exe") { throw "The uninstaller left NexusVox.exe behind" }
+          if ((Get-ItemProperty $run -ErrorAction SilentlyContinue).NexusVox) { throw "The autostart entry was not removed" }
+          foreach ($folder in @($config, "$local\data", "$local\logs", "$local\models")) {
+            if (-not (Test-Path "$folder\keep.txt")) { throw "A silent uninstall deleted $folder" }
+          }
+
+          # With the switches the data and the models go, too.
+          Start-Process $setup -Wait -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=`"$target`""
+          Uninstall @("/DELETEDATA", "/DELETEMODELS")
+          Start-Sleep -Seconds 3
+          foreach ($folder in @($config, "$local\data", "$local\logs", "$local\models")) {
+            if (Test-Path $folder) { throw "/DELETEDATA and /DELETEMODELS left $folder behind" }
+          }
+
+      - name: Upload the setup log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-logs
+          path: ${{ runner.temp }}/setup.log
+          if-no-files-found: ignore
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer
+          path: dist/installer/NexusVox-Setup.exe
+          if-no-files-found: error

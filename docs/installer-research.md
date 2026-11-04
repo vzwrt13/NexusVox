@@ -362,6 +362,18 @@ What the build cannot do yet:
   `metadata_errors` to `av.open`, which `av` 19 no longer accepts, so Whisper failed on the first transcription in any
   fresh environment. `pyproject.toml` now has `av<19`; verified in a clean venv and in the frozen build.
 
+## Installer and release job (ticket 3, issue #163)
+
+`packaging/nexusvox.iss` is the Inno Setup script, `packaging/build_installer.py` compiles it after
+`packaging/build.py` (`dist/installer/NexusVox-Setup.exe`, version from `pyproject.toml`). It installs per user to
+`%LOCALAPPDATA%\Programs\NexusVox` without admin rights, adds a Start Menu entry, shows `LICENSE` (PolyForm
+Noncommercial 1.0.0) as the licence page and `THIRD_PARTY_LICENSES.md` as an information page, and offers an unchecked
+task "Start NexusVox when I sign in" (`HKCU\...\Run`, value `NexusVox`). The uninstaller asks two questions, both
+defaulting to keep: delete settings, history, audio and logs, and delete the downloaded models. A silent uninstall keeps
+everything unless `/DELETEDATA` and/or `/DELETEMODELS` are passed. `.github/workflows/installer.yml` builds and
+test-installs it in CI; the release workflow attaches `NexusVox-Setup.exe` (a stable name, the website links to it) to
+every release. Unsigned until the signing ticket; the first-run screen is a separate ticket.
+
 ## Open questions
 
 For the maintainer, with my default:

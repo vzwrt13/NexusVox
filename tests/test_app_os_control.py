@@ -711,3 +711,43 @@ def test_offline_hold_gives_the_error_cue_at_once_not_after_the_release(monkeypa
 
     asyncio.run(cycle())
     assert cue_seen_while_waiting == [[app_module.beep_error]]
+
+
+# -- hold mode: the start cue waits, an immediate discard stays silent -----------------
+
+
+def _cue_app(monkeypatch, *, cancelled: bool, hold_s: float):
+    """A hold cycle whose recording ends `hold_s` after it starts; returns the app and the cues it showed."""
+    app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: 0.0)
+    cues: list[tuple] = []
+    app._cue = lambda beep, state: cues.append((state, beep))
+    app._hotkey.active = True
+    app._hotkey.mode = "hold"
+    app._stop_info = None
+
+    def start():
+        def stop():
+            app._stop_info = (None, cancelled, None)
+            app._record_stop_event.set()
+
+        asyncio.get_running_loop().call_later(hold_s, stop)
+
+    app._audio.start.side_effect = start
+    return app, cues
+
+
+def test_hold_start_cue_is_silent_when_the_recording_is_discarded_at_once(monkeypatch):
+    app, cues = _cue_app(monkeypatch, cancelled=True, hold_s=0.01)
+    _run_cycle(app)
+    assert [state for state, _ in cues if state == "recording"] == []
+    app._transcriber.finish.assert_not_called()  # nothing transcribed
+    app._audio.start.assert_called_once()  # audio was captured from the first moment
+
+
+def test_hold_start_cue_comes_after_the_delay(monkeypatch):
+    import nexusvox.app as app_module
+
+    monkeypatch.setattr(app_module, "START_CUE_DELAY_S", 0.02)
+    app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.2)
+    _run_cycle(app)
+    assert [state for state, _ in cues].count("recording") == 1

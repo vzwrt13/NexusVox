@@ -346,10 +346,10 @@ def test_oem_102_still_works_as_command_key():
     hk, events = _command_listener(command_key="OEM_102")
     _press_combo(hk)
     assert hk._handle(VK_OEM_102, True) is True
-    assert hk._handle(VK_Y, True) is False  # Y is not the command key here
+    assert hk._handle(VK_Y, True) is False  # Y is not the command key here: it types, and discards the hold
     hk._handle(VK_OEM_102, False)
     _release_combo(hk)
-    assert events == ["start", "command", "stop"]
+    assert events == ["start", "command", "cancel"]
 
 
 # -- paste key ---------------------------------------------------------------------
@@ -714,3 +714,151 @@ def test_escape_after_the_recording_already_finished_is_not_swallowed():
     FakeTimer.fire_all()  # the timer won the race
     assert hk._handle(VK_ESC, True) is False
     assert events == ["start", "stop"]
+
+
+# -- hold mode: a foreign key joining the chord discards the recording --------------
+
+VK_LEFT, VK_RIGHT, VK_MENU_MASK, LWIN = 0x25, 0x27, 0xE8, 0x5B
+
+
+def _win_listener(mode: str = "hold", key: str = ""):
+    """Default-style binding (Ctrl+Win) with paste, polish and command keys assigned."""
+    events: list[str] = []
+    config = HotkeyConfig(modifiers=["ctrl", "win"], key=key, mode=mode, paste_key="V", polish_key="P")
+    hk = HotkeyListener(
+        config,
+        lambda: events.append("start"),
+        lambda: events.append("stop"),
+        command_config=OsControlConfig(enabled=True, command_key="Y"),
+        on_command=lambda: events.append("command"),
+        on_cancel=lambda: events.append("cancel"),
+        grace_s=0,
+        timer_factory=FakeTimer,
+    )
+    return hk, events
+
+
+def _hold_ctrl_win(hk):
+    hk._handle(LCTRL, True)
+    hk._handle(LWIN, True)
+
+
+@pytest.mark.parametrize("vk", [LALT, RALT, LSHIFT])
+def test_extra_modifier_discards_the_hold_recording(vk):
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    assert hk._handle(vk, True) is False  # the modifier still reaches the application
+    assert events == ["start", "cancel"] and not hk.active
+    hk._handle(vk, False)
+    hk._handle(LWIN, False)
+    hk._handle(LCTRL, False)
+    assert events == ["start", "cancel"]  # releasing the chord afterwards stops nothing
+
+
+@pytest.mark.parametrize("vk", [VK_A, VK_B, ord("1"), 0x70])
+def test_extra_letter_discards_and_is_not_swallowed(vk):
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    assert hk._handle(vk, True) is False
+    assert hk._handle(vk, False) is False
+    assert events == ["start", "cancel"]
+
+
+@pytest.mark.parametrize("vk", [VK_LEFT, VK_RIGHT])
+def test_virtual_desktop_switch_never_records(vk):
+    """Ctrl+Win+Left/Right: the arrow is a foreign key and cancels the hold."""
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    assert hk._handle(vk, True) is False
+    assert events == ["start", "cancel"] and not hk.active
+
+
+def test_discard_happens_once_and_a_second_foreign_key_does_nothing():
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    hk._handle(VK_A, True)
+    hk._handle(VK_B, True)
+    assert events == ["start", "cancel"]
+
+
+def test_assigned_keys_do_not_discard():
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    assert hk._handle(ord("V"), True) is True  # paste key: marker, swallowed
+    assert hk._handle(ord("V"), False) is True
+    assert hk._handle(ord("P"), True) is True  # polish key
+    assert hk._handle(ord("P"), False) is True
+    assert hk._handle(VK_Y, True) is True  # command key
+    assert "cancel" not in events and hk.active
+
+
+def test_binding_key_does_not_discard():
+    hk, events, _ = _listener("hold", ("ctrl", "shift"), "A")
+    hk._handle(LCTRL, True)
+    hk._handle(LSHIFT, True)
+    hk._handle(VK_A, True)
+    assert events == ["start"] and hk.active
+
+
+def test_menu_mask_key_is_not_a_foreign_key():
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    assert hk._handle(VK_MENU_MASK, True) is False
+    assert events == ["start"] and hk.active
+
+
+def test_second_binding_modifier_and_other_side_do_not_discard():
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    hk._handle(RCTRL, True)
+    hk._handle(0x5C, True)  # right Win
+    assert events == ["start"] and hk.active
+
+
+def test_unassigned_paste_key_counts_as_foreign():
+    """An emptied paste key is not a marker any more, so its letter joins the chord like any other."""
+    events: list[str] = []
+    config = HotkeyConfig(modifiers=["ctrl", "win"], key="", mode="hold", paste_key="")
+    hk = HotkeyListener(
+        config,
+        lambda: events.append("start"),
+        lambda: events.append("stop"),
+        on_cancel=lambda: events.append("cancel"),
+        grace_s=0,
+    )
+    _hold_ctrl_win(hk)
+    hk._handle(ord("V"), True)
+    assert events == ["start", "cancel"]
+
+
+def test_foreign_key_before_the_chord_or_after_the_hold_is_plain_typing():
+    hk, events = _win_listener()
+    hk._handle(LCTRL, True)
+    hk._handle(VK_A, True)  # not recording yet
+    hk._handle(VK_A, False)
+    hk._handle(LCTRL, False)
+    _hold_ctrl_win(hk)
+    hk._handle(LWIN, False)  # hold ends normally
+    hk._handle(VK_A, True)
+    assert events == ["start", "stop"]
+
+
+def test_toggle_mode_ignores_foreign_keys():
+    hk, events = _win_listener("toggle")
+    _hold_ctrl_win(hk)
+    hk._handle(LWIN, False)
+    hk._handle(LCTRL, False)
+    assert hk._handle(VK_A, True) is False
+    hk._handle(LALT, True)
+    assert events == ["start"] and hk.active
+
+
+def test_next_recording_works_after_a_discard():
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    hk._handle(VK_LEFT, True)
+    hk._handle(VK_LEFT, False)
+    hk._handle(LWIN, False)
+    hk._handle(LCTRL, False)
+    _hold_ctrl_win(hk)
+    assert events == ["start", "cancel", "start"] and hk.active

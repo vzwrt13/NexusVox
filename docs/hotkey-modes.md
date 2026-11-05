@@ -12,6 +12,7 @@
 | Marker already held at the start | Counts | Counts, also when you end with the plain hotkey |
 | Escape during a recording | Cancels: nothing is pasted, the mic guard is released, the overlay closes | Same |
 | Escape with no recording | Reaches the app unchanged | Same |
+| Another key joins the chord (Ctrl+Win+Alt+letter, Ctrl+Win+Left/Right) | Discards the recording at once: nothing is transcribed or pasted, the mic guard is released, the overlay closes. The key still reaches the app. The start chime and overlay wait 150 ms (`START_CUE_DELAY_S`), so an immediate discard is silent; audio is captured from the first moment | Unchanged: keys are up while recording, other typing is legitimate |
 | After `[hotkey].max_recording_s` (default 600 s) | Stops; what was said so far is processed normally (log line) | Same |
 
 Toggle with a modifier-only binding (the default Ctrl+Win): after the stop chord NexusVox waits about 300 ms

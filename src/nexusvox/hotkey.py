@@ -34,6 +34,9 @@ _WM_KEYDOWN, _WM_KEYUP, _WM_SYSKEYDOWN, _WM_SYSKEYUP = 0x0100, 0x0101, 0x0104, 0
 _PRESS_MESSAGES = (_WM_KEYDOWN, _WM_SYSKEYDOWN)
 
 _VK_ESCAPE = 0x1B
+# The neutral key `_mask_menu_keys` injects when the combo completes; it reaches the hook after `_active`
+# is set and is not the user typing.
+_VK_MENU_MASK = 0xE8
 
 # Toggle with a modifier-only binding: how long after the stop chord a marker key may still
 # turn the recording into polish / paste-last / command before the recording is finished.
@@ -200,6 +203,18 @@ class HotkeyListener:
                 self._on_cancel()
             return True
 
+    def _discard_on_foreign_key(self) -> None:
+        """Hold mode: a key that is neither part of the binding nor an assigned one joined the chord.
+
+        Ctrl+Win+Alt+letter or Ctrl+Win+Left is another shortcut that merely starts with the dictation
+        chord, so the recording is dropped like an Escape cancel. The key is not swallowed. Toggle mode
+        is left alone: there the keys are up during the recording and other typing is legitimate.
+        """
+        with self._lock:
+            if self._active and self.mode == "hold":
+                logger.info("Foreign key joined the chord, recording discarded")
+                self._cancel_recording()
+
     def _marker_keys(self) -> dict[int, str]:
         """Virtual-key code -> marker, from the live config. The command key wins a clash."""
         markers: dict[int, str] = {}
@@ -292,7 +307,9 @@ class HotkeyListener:
 
         modifier = _VK_TO_MODIFIER.get(vk)
         if modifier is None or modifier not in self._modifiers:
-            return False
+            if pressed and vk != _VK_MENU_MASK:
+                self._discard_on_foreign_key()
+            return False  # the key itself always reaches the application
         repeat = pressed and vk in self._modifier_vks_down  # a held key repeats its key-down every ~31 ms
         if pressed:
             self._modifier_vks_down.add(vk)

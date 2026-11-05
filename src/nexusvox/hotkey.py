@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import threading
+import time
 from collections.abc import Callable
 
 from pynput import keyboard
@@ -86,6 +87,7 @@ class HotkeyListener:
         on_cancel: Callable[[], None] | None = None,
         grace_s: float = STOP_GRACE_S,
         timer_factory: Callable[[float, Callable[[], None]], threading.Timer] = threading.Timer,
+        physical_modifiers: Callable[[], set[str]] | None = None,
     ) -> None:
         self._config = config
         self._on_activate = on_activate
@@ -97,7 +99,9 @@ class HotkeyListener:
         self._timer_factory = timer_factory
         self._lock = threading.RLock()  # the grace timer finishes a recording from its own thread
         self._stop_timer: threading.Timer | None = None  # toggle stop chord waiting for a marker key
-        self._start_hold = False  # the combo that started this recording is still held
+        self._start_hold = False  # the modifiers that started this recording are still held
+        self._physical_modifiers = physical_modifiers or _physical_modifiers
+        self._stop_requested = 0.0  # monotonic time of the stop chord / marker (before any grace window)
         self._escape_swallowed = False
         self._mark: str | None = None  # what a marker key turned this recording into
         self._marker_swallowed: set[int] = set()  # marker keys held since a swallowed key-down
@@ -159,6 +163,7 @@ class HotkeyListener:
             if self._active:
                 if self.mode == "toggle" and self._stop_timer is None:
                     self._start_hold = False
+                    self._stop_requested = time.monotonic()
                     if self._key_vk is None and self._mark is None and self._grace_s > 0:
                         # Modifier-only: the keys are already down, so "hotkey + marker" arrives after the chord.
                         self._stop_timer = self._timer_factory(self._grace_s, self._finish)
@@ -182,15 +187,18 @@ class HotkeyListener:
                 self._active = False
                 self._on_deactivate()
 
-    def _cancel_recording(self) -> None:
-        """Escape: drop the recording without finishing it."""
+    def _cancel_recording(self) -> bool:
+        """Escape: drop the recording without finishing it. False when it had already finished."""
         with self._lock:
+            if not self._active:
+                return False
             timer, self._stop_timer = self._stop_timer, None
             if timer is not None:
                 timer.cancel()
             self._active = False
-        if self._on_cancel is not None:
-            self._on_cancel()
+            if self._on_cancel is not None:
+                self._on_cancel()
+            return True
 
     def _marker_keys(self) -> dict[int, str]:
         """Virtual-key code -> marker, from the live config. The command key wins a clash."""
@@ -222,19 +230,24 @@ class HotkeyListener:
             return swallowed
         if vk in self._marker_swallowed:
             return True  # auto-repeat
-        if marker is not None and self._active and self._modifiers <= self._pressed_modifiers:
+        if marker is None:
+            return False
+        with self._lock:  # the grace timer finishes the recording from another thread
+            if not (self._active and self._modifiers <= self._pressed_modifiers):
+                return False
             self._marker_swallowed.add(vk)
             self._mark_recording(marker)
             if self.mode == "toggle" and not self._start_hold:
+                if self._stop_timer is None:
+                    self._stop_requested = time.monotonic()
                 self._finish()  # "hotkey + marker": stop and apply the action in one gesture
             return True
-        return False
 
     def _combo_broken(self) -> None:
         self._combo_down = False
-        self._start_hold = False
         with self._lock:
             if self._active and self.mode == "hold":
+                self._stop_requested = time.monotonic()
                 self._active = False
                 self._on_deactivate()
 
@@ -248,9 +261,12 @@ class HotkeyListener:
                 return swallowed
             if self._escape_swallowed:
                 return True  # auto-repeat of the swallowed Escape
-            if self._active:
-                self._escape_swallowed = True
-                self._cancel_recording()
+            if self._active and not self._other_modifiers_down():
+                with self._lock:
+                    if not self._active:
+                        return False
+                    self._escape_swallowed = True
+                    self._cancel_recording()
                 return True
             return False
 
@@ -292,9 +308,21 @@ class HotkeyListener:
                 self._complete_press()
             return False
         self._pressed_modifiers.discard(modifier)
+        self._start_hold = False  # the hold that started the recording is over
         if self._combo_down:
             self._combo_broken()
         return False
+
+    def _other_modifiers_down(self) -> bool:
+        """Escape inside a shortcut (Ctrl+Shift+Esc, Alt+Esc) is not a cancel. In Hold the binding's own
+        modifiers are down by design; in Toggle none should be."""
+        allowed = self._modifiers if self.mode == "hold" else frozenset()
+        return bool(self._physical_modifiers() - allowed)
+
+    @property
+    def stop_requested_at(self) -> float:
+        """`time.monotonic()` of the latest stop chord, release or marker, before any grace window."""
+        return self._stop_requested
 
     def _mask_menu_keys(self) -> None:
         """Type a neutral key while Alt or Win is certainly down.

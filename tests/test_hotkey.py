@@ -554,7 +554,7 @@ def test_right_win_counts_as_a_held_win_modifier(monkeypatch):
 VK_P, VK_ESC = ord("P"), 0x1B
 
 
-def _toggle(key: str = "", grace_s: float = 0.3):
+def _toggle(key: str = "", grace_s: float = 0.3, physical=None):
     FakeTimer.pending = []
     events: list[str] = []
     config = HotkeyConfig(modifiers=["ctrl", "alt"], key=key, mode="toggle", polish_key="P")
@@ -567,6 +567,7 @@ def _toggle(key: str = "", grace_s: float = 0.3):
         on_cancel=lambda: events.append("cancel"),
         grace_s=grace_s,
         timer_factory=FakeTimer,
+        physical_modifiers=lambda: set(physical or ()),
     )
     return hk, events
 
@@ -658,3 +659,58 @@ def test_escape_during_the_grace_window_cancels_the_pending_stop():
     assert hk._handle(VK_ESC, True) is True
     FakeTimer.fire_all()
     assert events == ["start", "cancel"]
+
+
+def test_escape_inside_an_os_shortcut_is_not_a_cancel():
+    for held in ({"ctrl", "shift"}, {"alt"}, {"ctrl"}):
+        hk, events = _toggle(physical=held)
+        _press_combo(hk)
+        _release_combo(hk)
+        assert hk._handle(VK_ESC, True) is False  # Ctrl+Shift+Esc, Alt+Esc, Ctrl+Esc reach Windows
+        hk._handle(VK_ESC, False)
+        assert events == ["start"] and hk.active
+
+
+def test_escape_in_hold_ignores_the_binding_modifiers_but_not_others():
+    hk, events = _toggle(physical={"ctrl", "alt"})
+    hk._config.mode = "hold"
+    _press_combo(hk)
+    assert hk._handle(VK_ESC, True) is True and events == ["start", "cancel"]
+    hk2, events2 = _toggle(physical={"ctrl", "alt", "shift"})
+    hk2._config.mode = "hold"
+    _press_combo(hk2)
+    assert hk2._handle(VK_ESC, True) is False and events2 == ["start"]
+
+
+def test_key_binding_marker_in_the_starting_hold_only_marks_even_after_the_key_is_released():
+    hk, events = _toggle(key="A")
+    hk._handle(LCTRL, True)
+    hk._handle(LALT, True)
+    hk._handle(VK_A, True)
+    hk._handle(VK_A, False)  # trigger key up, Ctrl+Alt still down
+    assert hk._handle(VK_P, True) is True
+    assert events == ["start"] and hk.active and hk.mark == POLISH
+    _release_combo(hk)
+    hk._handle(LCTRL, True)
+    hk._handle(LALT, True)
+    hk._handle(VK_A, True)  # stop chord keeps the mark
+    assert events == ["start", "stop"] and hk.mark == POLISH
+
+
+def test_stop_gesture_time_is_taken_before_the_grace_window():
+    hk, events = _toggle()
+    _press_combo(hk)
+    _release_combo(hk)
+    before = hk.stop_requested_at
+    _press_combo(hk)
+    assert hk.stop_requested_at > before and events == ["start"]  # set although the stop is still pending
+
+
+def test_escape_after_the_recording_already_finished_is_not_swallowed():
+    hk, events = _toggle()
+    _press_combo(hk)
+    _release_combo(hk)
+    _press_combo(hk)
+    FakeTimer.fire_all()  # the timer won the race
+    assert hk._handle(VK_ESC, True) is False
+    assert events == ["start", "stop"]

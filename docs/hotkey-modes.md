@@ -16,9 +16,12 @@
 
 Toggle with a modifier-only binding (the default Ctrl+Win): after the stop chord NexusVox waits about 300 ms
 for a marker key before it finishes, so "hotkey + `P`" works without a letter key in the binding. A take under
-300 ms in Toggle is dropped with the stop cue. A hotkey press while a phone recording runs plays the error cue.
-Paste-last and a default-instruction Polish also work while the speech server is unreachable (Hold waits for the
-release, so the marker is known; a Toggle recording needs the marker already held).
+300 ms in Toggle is dropped with the stop cue (measured to the stop chord, not to the end of the grace window).
+Only a plain Escape cancels: Ctrl+Esc, Alt+Esc and Ctrl+Shift+Esc reach Windows (in Hold your own hotkey
+modifiers may be down). The cap does not apply to phone recordings, which the phone ends itself. A hotkey press while a phone recording runs plays the error cue.
+Paste-last and a polish tap (hotkey held under about 0.6 s, nothing said) also work while the speech server
+is unreachable; the error cue plays at once. A polish held longer carried a spoken instruction that cannot be
+read without the server, so the selection is left alone (Toggle needs the marker already held).
 
 ## Behaviour in detail (state before this change; the gaps below are fixed unless noted)
 

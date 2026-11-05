@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import shutil
 import subprocess
 import threading
@@ -699,7 +700,11 @@ def _log_level(value: object) -> str:
 
 def _max_recording_s(value: object) -> int:
     """`[hotkey].max_recording_s`: whole seconds, 0 turns the cap off; anything unusable keeps the 10-minute default."""
-    if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return 600
+    if value == 0:
+        return 0
+    if not math.isfinite(value) or value < 1:
         return 600
     return int(value)
 

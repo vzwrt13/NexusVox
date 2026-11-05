@@ -30,6 +30,7 @@ def run_js(body: str):
     for (const f of ["loadAnalytics", "loadFlaggedTranscriptions", "openMeetingsTab", "loadMeetingSettings",
       "loadFileTranscriptions", "refreshDiarizeToggle", "resumeUploadJob", "loadReviewTranscriptions",
       "loadBenchmarks", "openExtensionPanel", "markActiveSubtab"]) globalThis[f] = () => {};
+    globalThis.loadLlmStatus = () => Promise.resolve();
     """
     script = f"{stubs}\n{match.group(0)}\n{body}"
     out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True, timeout=30).stdout

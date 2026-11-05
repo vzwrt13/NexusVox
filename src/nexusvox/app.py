@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import functools
 import logging
@@ -58,6 +59,10 @@ from .tray import SystemTray
 def _play(beep: Callable[[], None]) -> None:
     """Play a feedback sound on its own thread, so neither the hook nor the loop waits for it."""
     threading.Thread(target=beep, daemon=True).start()
+
+
+# A toggle take shorter than this is an accidental double press: dropped, with a neutral cue.
+MIN_TOGGLE_TAKE_S = 0.3
 
 
 def _feedback_mode(config: object) -> str:
@@ -158,7 +163,11 @@ class NexusVoxApp:
             on_deactivate=self._on_hotkey_deactivate,
             command_config=config.os_control,
             on_command=self._on_hotkey_command,
+            on_cancel=self._on_hotkey_cancel,
         )
+        # One entry per hotkey stop, in order: (marker at the stop, cancelled by Escape). Captured in the stop
+        # callback, so a quick next take cannot reset what this one was marked as before its cycle reads it.
+        self._stops: collections.deque[tuple[str | None, bool]] = collections.deque()
 
         # Meeting recording has its own toggle hotkey; dictation is untouched while a meeting runs.
         self._meeting_hotkey = MeetingHotkey(config.meeting, self._on_meeting_hotkey)
@@ -210,6 +219,7 @@ class NexusVoxApp:
             # toggle mode, the next press) does not queue a stale stop that would skip
             # the next dictation, and the phone is not refused as busy meanwhile.
             self._hotkey.cancel()
+            _play(beep_error)  # otherwise the dead hotkey looks broken
             return
         self._press_time = time.monotonic()
         if self._mic_guard is not None and self._config.mic_guard.enabled:
@@ -221,10 +231,58 @@ class NexusVoxApp:
         """Called from hotkey thread when push-to-talk ends."""
         if self._remote_recording:
             return
+        self._stops.append((self._hotkey.mark, False))
         if self._mic_guard is not None:
             self._mic_guard.release_async()
         if self._loop is not None and self._record_stop_event is not None:
             self._loop.call_soon_threadsafe(self._record_stop_event.set)
+
+    def _on_hotkey_cancel(self) -> None:
+        """Called from the hotkey thread when Escape cancels the recording: nothing is pasted."""
+        self._stops.append((None, True))
+        if self._mic_guard is not None:
+            self._mic_guard.release_async()
+        if self._loop is not None and self._record_stop_event is not None:
+            self._loop.call_soon_threadsafe(self._record_stop_event.set)
+
+    def _next_stop(self) -> tuple[str | None, bool]:
+        """What the oldest unread hotkey stop was: (marker, cancelled)."""
+        try:
+            return self._stops.popleft()
+        except IndexError:
+            return None, False
+
+    async def _offline_stop(self) -> None:
+        """The transcription server is unreachable: paste-last and a default-instruction polish need none.
+
+        A recording that can still get a marker (Hold, or a marker already set) waits for its end; a Toggle
+        recording without a marker has no way to say what it wants, so it ends with the error cue at once.
+        """
+        event = self._record_stop_event
+        waits = self._hotkey.active and (self._hotkey.mode == "hold" or self._hotkey.mark is not None)
+        if not event.is_set() and not waits:
+            self._hotkey.cancel()
+            self._cue(beep_error, ERROR)
+            await self._hide_os_control()
+            return
+        if not event.is_set():
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(event.wait(), self._config.hotkey.max_recording_s or None)
+        if event.is_set():
+            event.clear()
+            mark, cancelled = self._next_stop()
+        else:
+            mark, cancelled = self._hotkey.mark, False
+            self._hotkey.cancel()
+        if cancelled:
+            await self._hide_os_control()
+        elif mark == PASTE_LAST:
+            await self._paste_last_text()
+        elif mark == POLISH:
+            await self._polish_selection("", None)
+        else:
+            self._cue(beep_error, ERROR)
+            await self._hide_os_control()
 
     def _on_meeting_hotkey(self) -> None:
         """Called inside the keyboard hook: the work goes to a thread, the hook never blocks."""
@@ -480,7 +538,16 @@ class NexusVoxApp:
         try:
             # Connect to inference server BEFORE signalling readiness so the
             # WebSocket handshake doesn't race against hotkey release.
-            await self._transcriber.connect()
+            try:
+                await self._transcriber.connect()
+            except Exception:
+                if remote:
+                    raise
+                logger.exception("Could not reach the transcription server")
+                with contextlib.suppress(Exception):
+                    await self._transcriber.disconnect()
+                await self._offline_stop()
+                return
 
             # Clear any stop event that arrived while we were connecting.
             # If the user already released the keys, skip this cycle. A phone recording
@@ -488,14 +555,19 @@ class NexusVoxApp:
             # event stays set so the wait below returns at once.
             if not remote and self._record_stop_event.is_set():
                 self._record_stop_event.clear()
+                skip_mark, skip_cancelled = self._next_stop()
                 logger.info("Hotkey released before recording could start, skipping")
                 await self._transcriber.disconnect()
                 await self._hide_os_control()
-                if self._hotkey.mark == PASTE_LAST:
+                if skip_cancelled:
+                    return
+                if skip_mark is None and self._hotkey.mode == "toggle":
+                    self._cue(beep_stop, PROCESSING)  # an accidental double press is not silent
+                if skip_mark == PASTE_LAST:
                     # A quick tap of the paste chord (or one queued behind a running
                     # cycle) needs no recording: paste the last text all the same.
                     await self._paste_last_text()
-                elif self._hotkey.mark == POLISH:
+                elif skip_mark == POLISH:
                     # A quick tap of the polish chord: nothing was said, so the default
                     # instruction; there is no recording, so its row has no audio.
                     await self._polish_selection("", None)
@@ -524,14 +596,31 @@ class NexusVoxApp:
             stream_task = asyncio.create_task(self._stream_audio(audio))
 
             # Wait for hotkey release
-            await self._record_stop_event.wait()
-            self._record_stop_event.clear()
+            cap_s = self._config.hotkey.max_recording_s or None
+            try:
+                await asyncio.wait_for(self._record_stop_event.wait(), cap_s)
+                self._record_stop_event.clear()
+                mark, cancelled = (None, False) if remote else self._next_stop()
+            except TimeoutError:
+                # Nothing ends a forgotten recording: stop it as if the user had, and say so.
+                logger.warning("Recording stopped after the %s s maximum, processing what was said", cap_s)
+                mark, cancelled = (None, False) if remote else (self._hotkey.mark, False)
+                if not remote:
+                    self._hotkey.cancel()
+                    if self._mic_guard is not None:
+                        self._mic_guard.release_async()
             recording_stopped = True
-            mark = None if remote else self._hotkey.mark
 
             # Stop audio (sends None sentinel, ending the stream task)
             audio.stop()
             audio_buffer = await stream_task
+
+            if cancelled:
+                logger.info("Recording cancelled with Escape, nothing to transcribe")
+                self._tray.set_active(False)
+                await self._transcriber.disconnect()
+                await self._hide_os_control()
+                return
 
             stop_time = time.monotonic()
             duration_ms = int((stop_time - start_time) * 1000)
@@ -549,6 +638,11 @@ class NexusVoxApp:
                 _play(beep_stop)
             else:
                 self._cue(beep_stop, PROCESSING)
+
+            if not remote and mark is None and self._hotkey.mode == "toggle" and duration_ms < MIN_TOGGLE_TAKE_S * 1000:
+                logger.info("Toggle take under %d ms, dropped", MIN_TOGGLE_TAKE_S * 1000)
+                await self._transcriber.disconnect()
+                return
 
             if mark == PASTE_LAST:
                 # The paste key was tapped during the hold: drop this recording and paste

@@ -20,7 +20,8 @@ VK_A, VK_B, VK_F9 = ord("A"), ord("B"), 0x78
 def _listener(mode: str, modifiers=("ctrl", "alt"), key: str = ""):
     events: list[str] = []
     config = HotkeyConfig(modifiers=list(modifiers), key=key, mode=mode)
-    hk = HotkeyListener(config, lambda: events.append("start"), lambda: events.append("stop"))
+    # grace_s=0: a Toggle stop chord finishes at once (the grace window has its own tests below)
+    hk = HotkeyListener(config, lambda: events.append("start"), lambda: events.append("stop"), grace_s=0)
     return hk, events, config
 
 
@@ -215,7 +216,35 @@ def test_describe_hotkey():
 VK_Y, VK_OEM_102, RALT = ord("Y"), 0xE2, 0xA5
 
 
-def _command_listener(mode: str = "hold", enabled: bool = True, modifiers=("ctrl", "alt"), command_key: str = "Y"):
+class FakeTimer:
+    """Stands in for threading.Timer: `fire_all()` plays the elapsed grace window."""
+
+    pending: list["FakeTimer"] = []
+
+    def __init__(self, interval, fn):
+        self.fn, self.daemon, self.cancelled = fn, False, False
+
+    def start(self):
+        FakeTimer.pending.append(self)
+
+    def cancel(self):
+        self.cancelled = True
+
+    @classmethod
+    def fire_all(cls):
+        timers, cls.pending = cls.pending, []
+        for t in timers:
+            if not t.cancelled:
+                t.fn()
+
+
+def _command_listener(
+    mode: str = "hold",
+    enabled: bool = True,
+    modifiers=("ctrl", "alt"),
+    command_key: str = "Y",
+    grace_s: float = 0,
+):
     events: list[str] = []
     config = HotkeyConfig(modifiers=list(modifiers), key="", mode=mode)
     hk = HotkeyListener(
@@ -224,6 +253,9 @@ def _command_listener(mode: str = "hold", enabled: bool = True, modifiers=("ctrl
         lambda: events.append("stop"),
         command_config=OsControlConfig(enabled=enabled, command_key=command_key),
         on_command=lambda: events.append("command"),
+        on_cancel=lambda: events.append("cancel"),
+        grace_s=grace_s,
+        timer_factory=FakeTimer,
     )
     return hk, events
 
@@ -515,3 +547,114 @@ def test_right_win_counts_as_a_held_win_modifier(monkeypatch):
     assert hotkey._physical_modifiers() == {"ctrl", "win"}
     hk, _, _ = _listener("hold", modifiers=("ctrl", "win"))
     assert hk.modifiers_physically_down() is True
+
+
+# -- Toggle: marker keys end the recording, grace window, Escape -------------------
+
+VK_P, VK_ESC = ord("P"), 0x1B
+
+
+def _toggle(key: str = "", grace_s: float = 0.3):
+    FakeTimer.pending = []
+    events: list[str] = []
+    config = HotkeyConfig(modifiers=["ctrl", "alt"], key=key, mode="toggle", polish_key="P")
+    hk = HotkeyListener(
+        config,
+        lambda: events.append("start"),
+        lambda: events.append("stop"),
+        command_config=OsControlConfig(enabled=True, command_key="Y"),
+        on_command=lambda: events.append("command"),
+        on_cancel=lambda: events.append("cancel"),
+        grace_s=grace_s,
+        timer_factory=FakeTimer,
+    )
+    return hk, events
+
+
+def test_toggle_modifier_only_plain_stop_waits_for_the_grace_window():
+    hk, events = _toggle()
+    _press_combo(hk)
+    _release_combo(hk)
+    _press_combo(hk)
+    assert events == ["start"] and hk.active  # not finished yet
+    FakeTimer.fire_all()
+    assert events == ["start", "stop"] and not hk.active and hk.mark is None
+
+
+def test_toggle_modifier_only_marker_in_the_grace_window_stops_and_polishes():
+    hk, events = _toggle()
+    _press_combo(hk)
+    _release_combo(hk)
+    _press_combo(hk)
+    assert hk._handle(VK_P, True) is True
+    assert events == ["start", "stop"] and hk.mark == POLISH
+    FakeTimer.fire_all()  # the cancelled timer must not stop a second time
+    assert events == ["start", "stop"]
+
+
+@pytest.mark.parametrize(("vk", "mark"), [(VK_V, PASTE_LAST), (VK_Y, "command")])
+def test_toggle_paste_and_command_markers_also_end_the_recording(vk, mark):
+    hk, events = _toggle()
+    _press_combo(hk)
+    _release_combo(hk)
+    _press_combo(hk)
+    assert hk._handle(vk, True) is True
+    assert events[-1] == "stop" and hk.mark == mark
+
+
+def test_toggle_key_binding_marker_stops_without_a_grace_window():
+    hk, events = _toggle(key="A")
+    hk._handle(LCTRL, True)
+    hk._handle(LALT, True)
+    hk._handle(VK_A, True)  # start
+    hk._handle(VK_A, False)
+    _release_combo(hk)
+    hk._handle(LCTRL, True)
+    hk._handle(LALT, True)  # modifiers back down, no chord press
+    assert hk._handle(VK_P, True) is True
+    assert events == ["start", "stop"] and hk.mark == POLISH
+
+
+def test_toggle_marker_held_at_start_counts_and_plain_hotkey_ends_it():
+    hk, events = _toggle()
+    _press_combo(hk)
+    assert hk._handle(VK_P, True) is True  # same hold that started it: marks only
+    assert events == ["start"] and hk.active and hk.mark == POLISH
+    hk._handle(VK_P, False)
+    _release_combo(hk)
+    _press_combo(hk)  # plain stop chord: the action chosen at the start stays
+    FakeTimer.fire_all()
+    assert events == ["start", "stop"] and hk.mark == POLISH
+
+
+def test_toggle_marker_without_the_modifiers_types_normally():
+    hk, events = _toggle()
+    _press_combo(hk)
+    _release_combo(hk)
+    assert hk._handle(VK_P, True) is False
+    assert events == ["start"] and hk.mark is None
+
+
+@pytest.mark.parametrize("mode", ["hold", "toggle"])
+def test_escape_cancels_a_recording_and_only_that_escape_is_swallowed(mode):
+    hk, events = _toggle()
+    hk._config.mode = mode
+    assert hk._handle(VK_ESC, True) is False  # no recording: passes through
+    assert hk._handle(VK_ESC, False) is False
+    _press_combo(hk)
+    assert hk._handle(VK_ESC, True) is True
+    assert hk._handle(VK_ESC, False) is True
+    assert events == ["start", "cancel"] and not hk.active
+    _release_combo(hk)
+    assert events == ["start", "cancel"]  # releasing after a cancel does not stop anything
+    assert hk._handle(VK_ESC, True) is False  # later Escape is the app's again
+
+
+def test_escape_during_the_grace_window_cancels_the_pending_stop():
+    hk, events = _toggle()
+    _press_combo(hk)
+    _release_combo(hk)
+    _press_combo(hk)
+    assert hk._handle(VK_ESC, True) is True
+    FakeTimer.fire_all()
+    assert events == ["start", "cancel"]

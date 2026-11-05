@@ -584,6 +584,21 @@ function renderHotkeyHint(mode, modifiers, key) {
     mode === "toggle"
       ? "Press " + keys + " once to start recording, press it again to stop."
       : "Hold " + keys + " to record, release to stop.";
+  const toggle = mode === "toggle";
+  const marker = (id, hold, tog) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = toggle ? tog : hold;
+  };
+  marker(
+    "paste-key-help",
+    "While holding the hotkey, press the paste key once (or keep it down). Release to paste the last text again.",
+    "Press the hotkey + the paste key to stop and paste the last text again.",
+  );
+  marker(
+    "polish-key-help",
+    "While holding the hotkey, press the polish key once (or keep it down), e.g. P. Release to finish and polish.",
+    "Press the hotkey + the polish key, e.g. P, to stop and polish. Held when you start also counts.",
+  );
 }
 
 function renderKeycaps(modifiers, key) {

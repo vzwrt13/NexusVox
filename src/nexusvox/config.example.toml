@@ -34,6 +34,10 @@ paste_key = "V"
 # rewritten by the [llm] model and pasted over itself (Ctrl+Z in the app undoes it).
 # Empty (default) turns it off. Also editable in the dashboard Settings tab.
 polish_key = ""
+# Every recording stops after this many seconds and is processed as if you had ended it
+# normally (so a forgotten Toggle recording cannot run, or keep other apps muted, forever).
+# 0 turns the cap off. Escape during a recording cancels it: nothing is pasted.
+max_recording_s = 600
 
 [meeting]
 # Meeting recording: your microphone and the system output (what the other participants say)

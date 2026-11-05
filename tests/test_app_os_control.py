@@ -6,6 +6,7 @@ control flow runs.
 """
 
 import asyncio
+import collections
 import time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -27,7 +28,10 @@ def _app(
     app._transcriber.connect = AsyncMock(side_effect=connect_error)
     app._transcriber.disconnect = AsyncMock()
     mark = COMMAND if command else PASTE_LAST if paste_last else POLISH if polish else None
-    app._hotkey = MagicMock(command=command, mark=mark, active=False)
+    app._hotkey = MagicMock(command=command, mark=mark, active=False, mode="hold")
+    app._stops = collections.deque([(mark, False)])  # what the stop callback recorded for this take
+    app._config = MagicMock(hotkey=MagicMock(max_recording_s=600))
+    app._overlay = None
     app._tray = MagicMock()
     app._mic_guard = None
     app._send_os_command = MagicMock(return_value="ok")
@@ -258,6 +262,7 @@ def _dictation_app(monkeypatch, inject):
     app = _app(command=False)
     app._config = MagicMock(injection_delay_ms=0)
     app._config.learn_from_edits.enabled = True
+    app._config.hotkey.max_recording_s = 600
     app._last_typed = ""
     app._audio = MagicMock()
     app._audio.start.side_effect = lambda: app._record_stop_event.set()  # released right away
@@ -502,3 +507,121 @@ def test_a_take_is_reported_even_when_the_cycle_fails_after_the_recording_starte
     _run_cycle(app)
 
     assert calls == ["begin", "end"]
+
+
+# -- Escape cancel, the recording cap, Toggle takes, server down ------------------------
+
+
+def _record_app(monkeypatch, stops, *, mode="hold", cap=600):
+    """A dictation app whose recording runs until the test sets the stop event itself."""
+    app, beeps = _dictation_app(monkeypatch, lambda text, delay, enter: pytest.fail("nothing may be pasted"))
+    app._audio.start.side_effect = None
+    app._stops = collections.deque(stops)
+    app._hotkey.mode = mode
+    app._config.hotkey.max_recording_s = cap
+    return app, beeps
+
+
+def _run_until(app, after_s=0.05):
+    async def cycle():
+        app._record_stop_event = asyncio.Event()
+        asyncio.get_running_loop().call_later(after_s, app._record_stop_event.set)
+        await app._transcription_cycle()
+
+    asyncio.run(cycle())
+
+
+@pytest.mark.parametrize("mode", ["hold", "toggle"])
+def test_escape_cancels_the_recording_nothing_is_transcribed_or_pasted(monkeypatch, mode):
+    app, _ = _record_app(monkeypatch, [(None, True)], mode=mode)
+    _run_until(app)
+    app._transcriber.finish.assert_not_awaited()
+    app._audio.stop.assert_called_once()
+    app._db.save_transcription.assert_not_called()
+    app._transcriber.disconnect.assert_awaited()
+
+
+def test_escape_before_the_recording_started_skips_the_cycle_without_a_marker_action(monkeypatch):
+    app = _app(command=False, paste_last=True)
+    app._stops = collections.deque([(None, True)])
+    app._paste_last_text = AsyncMock()
+    _run_skipped_cycle(app)
+    app._paste_last_text.assert_not_awaited()
+
+
+def test_the_cap_ends_the_recording_and_the_text_so_far_is_processed(monkeypatch):
+    pasted = []
+    app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: pasted.append(text))
+    app._audio.start.side_effect = None
+    app._stops = collections.deque()
+    app._config.hotkey.max_recording_s = 0.05  # nobody ends this recording
+    app._mic_guard = MagicMock()
+
+    async def cycle():
+        app._record_stop_event = asyncio.Event()
+        await asyncio.wait_for(app._transcription_cycle(), 5)
+
+    asyncio.run(cycle())
+    assert pasted == ["Hallo Welt"]
+    app._hotkey.cancel.assert_called()  # the toggle intent is cleared too
+    app._mic_guard.release_async.assert_called()
+
+
+def test_a_toggle_take_under_300_ms_is_dropped(monkeypatch):
+    app, _ = _record_app(monkeypatch, [(None, False)], mode="toggle")
+    _run_until(app, after_s=0.01)
+    app._transcriber.finish.assert_not_awaited()
+    app._db.save_transcription.assert_not_called()
+
+
+def test_a_marked_toggle_take_is_not_dropped_for_being_short(monkeypatch):
+    app, _ = _record_app(monkeypatch, [(PASTE_LAST, False)], mode="toggle")
+    app._paste_last_text = AsyncMock()
+    _run_until(app, after_s=0.01)
+    app._paste_last_text.assert_awaited_once()
+
+
+def test_stop_marks_are_read_per_take_not_from_the_shared_hotkey_state(monkeypatch):
+    # The hotkey already shows the next take's reset mark (None); this take's stop said paste-last.
+    app, _ = _record_app(monkeypatch, [(PASTE_LAST, False)])
+    app._hotkey.mark = None
+    app._paste_last_text = AsyncMock()
+    _run_until(app)
+    app._paste_last_text.assert_awaited_once()
+
+
+def test_paste_last_works_while_the_server_is_unreachable():
+    app = _app(command=False, connect_error=RuntimeError("server down"), paste_last=True)
+    app._paste_last_text = AsyncMock()
+    _run_skipped_cycle(app)
+    app._paste_last_text.assert_awaited_once()
+
+
+def test_default_polish_works_while_the_server_is_unreachable():
+    app = _app(command=False, connect_error=RuntimeError("server down"), polish=True)
+    app._polish_selection = AsyncMock()
+    _run_skipped_cycle(app)
+    app._polish_selection.assert_awaited_once_with("", None)
+
+
+def test_a_plain_dictation_with_the_server_down_gives_the_error_cue(monkeypatch):
+    import nexusvox.app as app_module
+
+    beeps = []
+    monkeypatch.setattr(app_module, "beep_error", lambda: beeps.append("error"))
+    monkeypatch.setattr(app_module, "_play", lambda beep: beep())
+    app = _app(command=False, connect_error=RuntimeError("server down"))
+    _run_skipped_cycle(app)
+    assert beeps == ["error"]
+
+
+def test_a_hotkey_press_during_a_phone_recording_gives_the_error_cue(monkeypatch):
+    import nexusvox.app as app_module
+
+    beeps = []
+    monkeypatch.setattr(app_module, "_play", lambda beep: beeps.append(beep))
+    app = _app(command=False)
+    app._remote_recording = True
+    app._on_hotkey_activate()
+    assert beeps == [app_module.beep_error]
+    app._hotkey.cancel.assert_called_once()

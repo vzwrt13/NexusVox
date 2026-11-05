@@ -75,6 +75,8 @@
           <div class="setting-info">
             <h3>Hotkey Mode</h3>
             <p id="hotkey-mode-hint">Hold: record while the keys are held. Toggle: press once to start, press again to stop.</p>
+            <p id="hotkey-switch-hint" class="settings-hint">Switching the mode while a recording runs: Hold to Toggle keeps recording until the next press; Toggle to Hold stops at the next key release.</p>
+            <p id="hotkey-escape-help" class="settings-hint">Escape cancels a running recording in both modes: nothing is pasted.</p>
           </div>
           <select id="hotkey-mode-select" class="select-input">
             <option value="hold">Hold (push-to-talk)</option>
@@ -162,6 +164,7 @@
           <div class="setting-info">
             <h3>Paste Last Text Key</h3>
             <p>Start a recording with the hotkey, tap this key while every modifier is still down, let go: nothing is transcribed and the text NexusVox pasted last is pasted again.</p>
+            <p id="paste-key-help" class="settings-hint"></p>
           </div>
           <select id="paste-key-select" class="select-input"></select>
         </div>
@@ -170,6 +173,7 @@
           <div class="setting-info">
             <h3>Polish Selected Text Key</h3>
             <p>Select text, start a recording with the hotkey, tap this key and say what to do ("make it shorter", "mach es formeller") - or nothing for a general polish. A local language model rewrites the selection and pastes it over it; Ctrl+Z in the app undoes it.</p>
+            <p id="polish-key-help" class="settings-hint"></p>
             <p id="llm-status" class="status-line"></p>
           </div>
           <select id="polish-key-select" class="select-input"></select>

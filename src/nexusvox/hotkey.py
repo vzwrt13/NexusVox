@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import threading
 from collections.abc import Callable
 
 from pynput import keyboard
@@ -30,6 +31,12 @@ _VK_TO_MODIFIER: dict[int, str] = {vk: name for name, vks in _MODIFIER_VKS.items
 # Window messages the WH_KEYBOARD_LL hook delivers (SYS* variants while Alt is down)
 _WM_KEYDOWN, _WM_KEYUP, _WM_SYSKEYDOWN, _WM_SYSKEYUP = 0x0100, 0x0101, 0x0104, 0x0105
 _PRESS_MESSAGES = (_WM_KEYDOWN, _WM_SYSKEYDOWN)
+
+_VK_ESCAPE = 0x1B
+
+# Toggle with a modifier-only binding: how long after the stop chord a marker key may still
+# turn the recording into polish / paste-last / command before the recording is finished.
+STOP_GRACE_S = 0.3
 
 # Modifiers whose lone release opens a menu (the app's for Alt, Start for Win)
 _MENU_MODIFIERS = frozenset({"alt", "win"})
@@ -61,6 +68,12 @@ class HotkeyListener:
     The first marker pressed wins and stays readable (`mark`)
     until the next recording starts; the key itself is swallowed so it never types.
     `on_command` fires once when a recording becomes a command.
+
+    In toggle mode a marker key also ends the recording ("hotkey + P" stops and polishes),
+    unless it is pressed in the very hold that started it (then it only marks). With a
+    modifier-only binding the stop chord waits `grace_s` for such a marker before it
+    finishes the recording. Escape during a recording cancels it (`on_cancel`); only that
+    Escape is swallowed.
     """
 
     def __init__(
@@ -70,12 +83,22 @@ class HotkeyListener:
         on_deactivate: Callable[[], None],
         command_config: OsControlConfig | None = None,
         on_command: Callable[[], None] | None = None,
+        on_cancel: Callable[[], None] | None = None,
+        grace_s: float = STOP_GRACE_S,
+        timer_factory: Callable[[float, Callable[[], None]], threading.Timer] = threading.Timer,
     ) -> None:
         self._config = config
         self._on_activate = on_activate
         self._on_deactivate = on_deactivate
         self._command_config = command_config
         self._on_command = on_command
+        self._on_cancel = on_cancel
+        self._grace_s = grace_s
+        self._timer_factory = timer_factory
+        self._lock = threading.RLock()  # the grace timer finishes a recording from its own thread
+        self._stop_timer: threading.Timer | None = None  # toggle stop chord waiting for a marker key
+        self._start_hold = False  # the combo that started this recording is still held
+        self._escape_swallowed = False
         self._mark: str | None = None  # what a marker key turned this recording into
         self._marker_swallowed: set[int] = set()  # marker keys held since a swallowed key-down
 
@@ -132,14 +155,42 @@ class HotkeyListener:
     def _complete_press(self) -> None:
         self._combo_down = True
         self._mask_menu_keys()
-        if self._active:
-            if self.mode == "toggle":
+        with self._lock:
+            if self._active:
+                if self.mode == "toggle" and self._stop_timer is None:
+                    self._start_hold = False
+                    if self._key_vk is None and self._mark is None and self._grace_s > 0:
+                        # Modifier-only: the keys are already down, so "hotkey + marker" arrives after the chord.
+                        self._stop_timer = self._timer_factory(self._grace_s, self._finish)
+                        self._stop_timer.daemon = True
+                        self._stop_timer.start()
+                    else:
+                        self._finish()
+            else:
+                self._active = True
+                self._start_hold = True
+                self._mark = None
+                self._on_activate()
+
+    def _finish(self) -> None:
+        """End the recording: the stop chord (after its grace window) or a marker key in toggle mode."""
+        with self._lock:
+            timer, self._stop_timer = self._stop_timer, None
+            if timer is not None:
+                timer.cancel()
+            if self._active:
                 self._active = False
                 self._on_deactivate()
-        else:
-            self._active = True
-            self._mark = None
-            self._on_activate()
+
+    def _cancel_recording(self) -> None:
+        """Escape: drop the recording without finishing it."""
+        with self._lock:
+            timer, self._stop_timer = self._stop_timer, None
+            if timer is not None:
+                timer.cancel()
+            self._active = False
+        if self._on_cancel is not None:
+            self._on_cancel()
 
     def _marker_keys(self) -> dict[int, str]:
         """Virtual-key code -> marker, from the live config. The command key wins a clash."""
@@ -174,18 +225,34 @@ class HotkeyListener:
         if marker is not None and self._active and self._modifiers <= self._pressed_modifiers:
             self._marker_swallowed.add(vk)
             self._mark_recording(marker)
+            if self.mode == "toggle" and not self._start_hold:
+                self._finish()  # "hotkey + marker": stop and apply the action in one gesture
             return True
         return False
 
     def _combo_broken(self) -> None:
         self._combo_down = False
-        if self._active and self.mode == "hold":
-            self._active = False
-            self._on_deactivate()
+        self._start_hold = False
+        with self._lock:
+            if self._active and self.mode == "hold":
+                self._active = False
+                self._on_deactivate()
 
     def _handle(self, vk: int, pressed: bool) -> bool:
         """Feed one key event. Returns True if the event must be swallowed."""
         self._sync_binding()
+
+        if vk == _VK_ESCAPE:
+            if not pressed:
+                swallowed, self._escape_swallowed = self._escape_swallowed, False
+                return swallowed
+            if self._escape_swallowed:
+                return True  # auto-repeat of the swallowed Escape
+            if self._active:
+                self._escape_swallowed = True
+                self._cancel_recording()
+                return True
+            return False
 
         marker = self._marker_keys().get(vk)
         # A swallowed marker stays one until it is released, even if the config dropped it
@@ -260,7 +327,11 @@ class HotkeyListener:
         would count as the "stop" of a recording that no longer exists, and the
         mic guard would stay muted because `still_recording()` keeps saying yes.
         """
-        self._active = False
+        with self._lock:
+            timer, self._stop_timer = self._stop_timer, None
+            if timer is not None:
+                timer.cancel()
+            self._active = False
 
     def modifiers_physically_down(self) -> bool:
         """True while every key of the binding is physically held, asked straight from Win32.

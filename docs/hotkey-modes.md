@@ -1,5 +1,27 @@
 # Hotkey modes: Hold vs Toggle
 
+## How to end a recording
+
+| Action | Hold (push-to-talk) | Toggle |
+|---|---|---|
+| Start | Hold the hotkey | Press and release the hotkey once |
+| End normally (paste as is) | Release the hotkey | Press the hotkey again |
+| End with Polish | Press the polish key (e.g. `P`) at any moment while holding, then release | Hotkey + polish key: stops and polishes in one gesture |
+| Paste the last text again | Paste key (`V`) while holding | Hotkey + `V` |
+| Command (`[os_control]`) | Command key while holding | Hotkey + command key |
+| Marker already held at the start | Counts | Counts, also when you end with the plain hotkey |
+| Escape during a recording | Cancels: nothing is pasted, the mic guard is released, the overlay closes | Same |
+| Escape with no recording | Reaches the app unchanged | Same |
+| After `[hotkey].max_recording_s` (default 600 s) | Stops; what was said so far is processed normally (log line) | Same |
+
+Toggle with a modifier-only binding (the default Ctrl+Win): after the stop chord NexusVox waits about 300 ms
+for a marker key before it finishes, so "hotkey + `P`" works without a letter key in the binding. A take under
+300 ms in Toggle is dropped with the stop cue. A hotkey press while a phone recording runs plays the error cue.
+Paste-last and a default-instruction Polish also work while the speech server is unreachable (Hold waits for the
+release, so the marker is known; a Toggle recording needs the marker already held).
+
+## Behaviour in detail (state before this change; the gaps below are fixed unless noted)
+
 How the dictation hotkey behaves today in each mode, read from the code (no behaviour was
 changed or run for this document; "tested" below means an existing unit test, not a manual try).
 The last section lists gaps and a proposed target for each.
@@ -60,6 +82,11 @@ alone; success pastes over the selection (`app.py:808-896`). A quick tap of the 
 (`app.py:501-504`). Polish and paste key equal in the config: polish is dropped on load.
 
 ## Gaps, inconsistencies and bugs, with a proposed target
+
+Status: items 1-7 and 9 are implemented (grace window and marker-ends-toggle, Escape in `hotkey.py`;
+`max_recording_s`, the short-take cue, the offline marker path, the per-stop marker snapshot `App._stops` and
+the phone-block cue in `app.py`). Item 8 is explained in the dashboard hint. Not done: Escape for the meeting
+hotkey, and a stronger overlay cue while a Toggle recording runs.
 
 Severity is a judgement from the code only; none was reproduced on a machine.
 

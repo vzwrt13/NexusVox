@@ -156,6 +156,9 @@ class HotkeyConfig:
     # Pressed during a recording with every modifier down: the selected text is rewritten by
     # the spoken instruction through the [llm] model (Ctrl+Win+P). Empty: off.
     polish_key: str = ""
+    # Every recording ends by itself after this many seconds, as if the user had ended it
+    # normally (a forgotten toggle recording would otherwise mute other apps forever). 0: no cap.
+    max_recording_s: int = 600
 
 
 HOTKEY_MODES = ("hold", "toggle")
@@ -694,6 +697,13 @@ def _log_level(value: object) -> str:
     return level if level in LOG_LEVELS else "INFO"
 
 
+def _max_recording_s(value: object) -> int:
+    """`[hotkey].max_recording_s`: whole seconds, 0 turns the cap off; anything unusable keeps the 10-minute default."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+        return 600
+    return int(value)
+
+
 def _polish_key(hotkey_data: dict) -> str:
     """`[hotkey].polish_key`, dropped when it is unknown or the same as the paste key (edited by hand)."""
     polish = normalize_hotkey_key(str(hotkey_data.get("polish_key", ""))) or ""
@@ -816,6 +826,7 @@ def load_config(path: Path | None = None) -> Config:
             mode=hotkey_mode if hotkey_mode in HOTKEY_MODES else "hold",
             paste_key=normalize_hotkey_key(str(hotkey_data.get("paste_key", "V"))) or "",
             polish_key=_polish_key(hotkey_data),
+            max_recording_s=_max_recording_s(hotkey_data.get("max_recording_s", 600)),
         ),
         meeting=MeetingConfig(
             modifiers=meeting_modifiers,
@@ -935,6 +946,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
             f'mode = "{config.hotkey.mode}"',
             f'paste_key = "{config.hotkey.paste_key}"',
             f'polish_key = "{config.hotkey.polish_key}"',
+            f"max_recording_s = {config.hotkey.max_recording_s}",
             "",
             "[meeting]",
             "modifiers = [{}]".format(", ".join(f'"{m}"' for m in config.meeting.modifiers)),

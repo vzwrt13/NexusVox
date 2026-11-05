@@ -414,6 +414,7 @@ class DashboardAPI:
         status = llm_model_status(self._config.llm)
         return {
             "url": self._config.llm.url,
+            "protocol": self._config.llm.protocol,
             "model": self._config.llm.model,
             "reachable": status["state"] != "down",
             "model_installed": {"ok": True, "missing": False}.get(status["state"]),

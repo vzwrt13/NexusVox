@@ -184,6 +184,7 @@
           <div class="setting-info">
             <h3>Auto Cleanup</h3>
             <p>Tidies every dictation through the same model before it is typed. Light: removes fillers ("um", "äh"), false starts and repeated words, fixes punctuation, keeps your wording. Medium: also grammar, slightly more concise. Adds about half a second with a GPU; while the model is still loading, or when its reply does not look like your text cleaned up, the dictation is typed unchanged. Saved as spoken.</p>
+            <p id="cleanup-llm-hint" class="settings-hint status-line" hidden></p>
           </div>
           <select id="cleanup-level-select" class="select-input">
             <option value="off">Off</option>
@@ -746,6 +747,7 @@
         <div class="setting-info">
           <h3>Clean up text</h3>
           <p>Runs the transcript through the language model afterwards, passage by passage: removes fillers and false starts and fixes punctuation (Light), or also grammar (Medium). Speaker labels stay. The original transcript is kept and can be shown instead. Takes a while for a long file; a passage the model fails on keeps its original wording.</p>
+          <p id="upload-llm-hint" class="settings-hint status-line" hidden></p>
         </div>
         <select id="upload-cleanup-level" class="select-input" disabled aria-label="Cleanup level">
           <option value="light">Light</option>

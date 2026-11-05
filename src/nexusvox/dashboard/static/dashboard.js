@@ -300,16 +300,68 @@ let meetingOwnLabelSaved = "";
 const feedbackModeSelect = document.getElementById("feedback-mode-select");
 const cleanupLevelSelect = document.getElementById("cleanup-level-select");
 const llmStatus = document.getElementById("llm-status");
+const cleanupLlmHint = document.getElementById("cleanup-llm-hint");
+const uploadLlmHint = document.getElementById("upload-llm-hint");
+
+// ── Ollama install hint (pure helper, runs under Node in tests) ──────
+// Free 1.0 bundles no language model runtime: dictation works without one, Cleanup, Polish and upload cleanup
+// need Ollama. `ollamaHint` turns /api/settings/llm-status into the hint every area shows; null = nothing to say.
+const OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
+function ollamaHint(s) {
+  if (!s.reachable) {
+    if (s.protocol && s.protocol !== "ollama") {
+      return { state: "down", text: `○ No model server at ${s.url} — Cleanup and Polish are off until it answers.`, link: false };
+    }
+    return {
+      state: "down",
+      text: "○ Ollama is not running. Cleanup, Polish and upload cleanup need it; dictation works without. Install and start Ollama: ",
+      link: true,
+    };
+  }
+  if (s.model_installed === false) {
+    return {
+      state: "down",
+      text: `○ Ollama is running, but model ${s.model} is not installed. Pick a model in Settings > Models to download it.`,
+      link: false,
+    };
+  }
+  return null;
+}
+// Writes the hint through setStatus() and appends the download link; clears and hides the element when all is well.
+function renderOllamaHint(el, s, visible = true) {
+  const hint = visible ? ollamaHint(s) : null;
+  if (!hint) {
+    setStatus(el, undefined, "");
+    el.hidden = true;
+    return;
+  }
+  setStatus(el, hint.state, hint.text);
+  if (hint.link) {
+    const a = document.createElement("a");
+    a.href = OLLAMA_DOWNLOAD_URL;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = "ollama.com/download";
+    el.append(a);
+  }
+  el.hidden = false;
+}
+// ── end of Ollama install hint ───────────────────────────────────────
+
+let lastLlmStatus = null;
+function renderLlmHints() {
+  if (!lastLlmStatus) return;
+  const s = lastLlmStatus;
+  // Polish line: also says "ready"; the others show only a problem.
+  if (ollamaHint(s)) renderOllamaHint(llmStatus, s);
+  else setStatus(llmStatus, "ok", `● Model ready at ${s.url} (model ${s.model})`);
+  renderOllamaHint(cleanupLlmHint, s, cleanupLevelSelect.value !== "off");
+  renderOllamaHint(uploadLlmHint, s);
+}
 
 async function loadLlmStatus() {
-  const s = await api("/api/settings/llm-status");
-  if (!s.reachable) {
-    setStatus(llmStatus, "down", `○ No model server at ${s.url} — polish plays the error beep`);
-  } else if (s.model_installed === false) {
-    setStatus(llmStatus, "down", `○ Model ${s.model} is not installed — pick it above to download it`);
-  } else {
-    setStatus(llmStatus, "ok", `● Model ready at ${s.url} (model ${s.model})`);
-  }
+  lastLlmStatus = await api("/api/settings/llm-status");
+  renderLlmHints();
 }
 
 // ── Language model dropdown ──────────────────────────────────────────
@@ -443,13 +495,11 @@ function renderLlmModels(data, rebuildOptions) {
     }
     llmModelHint.hidden = false;
     // Red: the LLM features do not work while the server cannot be reached.
-    setStatus(
-      llmModelHint,
-      data.protocol === "ollama" ? "down" : "warn",
-      data.protocol === "ollama"
-        ? "Ollama is not reachable, so the installed models cannot be listed. The saved model is kept."
-        : "This server type has no model list. Set [llm].model in config.toml.",
-    );
+    if (data.protocol === "ollama") {
+      renderOllamaHint(llmModelHint, { reachable: false, protocol: "ollama" });
+    } else {
+      setStatus(llmModelHint, "warn", "This server type has no model list. Set [llm].model in config.toml.");
+    }
     renderLlmOverview(data, null);
     return;
   }
@@ -838,6 +888,8 @@ feedbackModeSelect.addEventListener("change", async () => {
   feedbackModeSelect.value = s.feedback_mode;
 });
 cleanupLevelSelect.addEventListener("change", async () => {
+  renderLlmHints(); // the hint follows the chosen level at once
+
   const resp = await postSetting("/api/settings/cleanup-level", { level: cleanupLevelSelect.value });
   const s = await resp.json();
   if (s.error) alert(s.error);
@@ -2166,7 +2218,10 @@ const cleanupLevel = document.getElementById("upload-cleanup-level");
 function syncCleanupLevel() {
   cleanupLevel.disabled = !cleanupToggle.checked;
 }
-cleanupToggle.addEventListener("change", syncCleanupLevel);
+cleanupToggle.addEventListener("change", () => {
+  syncCleanupLevel();
+  if (cleanupToggle.checked) loadLlmStatus().catch(() => {}); // up to date before the user starts
+});
 syncCleanupLevel(); // a reload can restore a checked toggle without a change event
 
 const diarizeToggle = document.getElementById("upload-diarize-toggle");

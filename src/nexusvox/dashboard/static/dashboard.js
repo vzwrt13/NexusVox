@@ -1019,10 +1019,15 @@ async function loadSettings() {
 // ── Vocabulary lists: count, filter, collapse ────────────────────────
 const VOCAB_TITLES = { dict: "Dictionary", preset: "Presets" };
 
+// Lower case, composed form, ß as ss: "Straße" is found by "strasse" and "STRASSE", a decomposed ü by an ü.
+function vocabFold(s) {
+  return String(s ?? "").normalize("NFC").toLowerCase().replace(/ß/g, "ss");
+}
+
 function vocabFilter(items, query, fields) {
-  const q = (query || "").trim().toLowerCase();
+  const q = vocabFold(query).trim();
   if (!q) return items;
-  return items.filter((it) => fields.some((f) => String(it[f] ?? "").toLowerCase().includes(q)));
+  return items.filter((it) => fields.some((f) => vocabFold(it[f]).includes(q)));
 }
 
 function vocabHeader(title, total, shown) {
@@ -1037,24 +1042,53 @@ function vocabSetCollapsed(key, collapsed) {
   try { localStorage.setItem(`vocab-collapsed-${key}`, collapsed ? "1" : "0"); } catch (e) { /* private mode */ }
 }
 
-function vocabRender(key, items, fields, emptyText, rowHtml) {
-  const filtered = vocabFilter(items, document.getElementById(`${key}-filter`).value, fields);
+// Header text, arrow and the hidden state of the body; count is null until the list has loaded.
+function vocabApplyState(key, count, shown) {
   const collapsed = vocabIsCollapsed(key);
   const toggle = document.getElementById(`${key}-toggle`);
-  toggle.textContent = `${collapsed ? "▸" : "▾"} ${vocabHeader(VOCAB_TITLES[key], items.length, filtered.length)}`;
+  const title = count === null ? VOCAB_TITLES[key] : vocabHeader(VOCAB_TITLES[key], count, shown);
+  toggle.textContent = `${collapsed ? "▸" : "▾"} ${title}`;
   toggle.setAttribute("aria-expanded", String(!collapsed));
   document.getElementById(`${key}-body`).hidden = collapsed;
+  return collapsed;
+}
+
+function vocabRender(key, items, fields, emptyText, rowHtml) {
+  const filtered = vocabFilter(items, document.getElementById(`${key}-filter`).value, fields);
+  // A collapsed list builds no rows; expanding renders it.
+  if (vocabApplyState(key, items.length, filtered.length)) return;
   document.getElementById(`${key}-list`).innerHTML = !items.length
     ? `<p class="nexus-empty">${emptyText}</p>`
     : filtered.length ? filtered.map(rowHtml).join("") : '<p class="nexus-empty">No matches.</p>';
 }
 
+// Before a new entry is rendered: drop the filter, open the list and show its top.
+function vocabReveal(key) {
+  document.getElementById(`${key}-filter`).value = "";
+  vocabSetCollapsed(key, false);
+  document.getElementById(`${key}-list`).scrollTop = 0;
+}
+
+// After a render: scroll the row with this id into the visible part of the list.
+function vocabScrollTo(key, id) {
+  const list = document.getElementById(`${key}-list`);
+  const row = list.querySelector(`[data-id="${id}"]`);
+  if (row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+}
+
 function wireVocabBox(key, render) {
+  vocabApplyState(key, null, 0);
   document.getElementById(`${key}-toggle`).addEventListener("click", () => {
-    vocabSetCollapsed(key, !vocabIsCollapsed(key));
+    const collapse = !vocabIsCollapsed(key);
+    vocabSetCollapsed(key, collapse);
+    // A hidden filter must not keep narrowing the list.
+    if (collapse) document.getElementById(`${key}-filter`).value = "";
     render();
   });
-  document.getElementById(`${key}-filter`).addEventListener("input", render);
+  document.getElementById(`${key}-filter`).addEventListener("input", () => {
+    render();
+    document.getElementById(`${key}-list`).scrollTop = 0;
+  });
 }
 // ── end of Vocabulary lists
 
@@ -1083,7 +1117,10 @@ async function addDictionaryEntry(wrong, right) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ wrong, right }),
   }).then((r) => r.json());
-  if (res.ok) loadDictionary();
+  if (res.ok) {
+    vocabReveal("dict");
+    loadDictionary();
+  }
   return res.ok;
 }
 
@@ -1095,10 +1132,13 @@ async function deleteDictionaryEntry(id) {
 // ── Polish presets ───────────────────────────────────────────────────
 let presetCache = [];
 
-async function loadPolishPresets() {
+async function loadPolishPresets(revealName = null) {
   const { presets } = await fetch("/api/polish-presets").then((r) => r.json());
   presetCache = presets;
   renderPolishPresets();
+  // Presets are sorted by name: a new or renamed one can sit below the visible part.
+  const saved = revealName && presets.find((p) => vocabFold(p.name) === vocabFold(revealName));
+  if (saved) vocabScrollTo("preset", saved.id);
 }
 
 function renderPolishPresets() {
@@ -1146,6 +1186,7 @@ document.getElementById("preset-cancel").addEventListener("click", resetPresetFo
 document.getElementById("preset-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const id = document.getElementById("preset-id").value;
+  const savedName = document.getElementById("preset-name").value.trim();
   const res = await fetch("/api/polish-presets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1158,7 +1199,8 @@ document.getElementById("preset-form").addEventListener("submit", async (e) => {
   }).then((r) => r.json());
   if (res.ok) {
     resetPresetForm();
-    loadPolishPresets();
+    vocabReveal("preset");
+    loadPolishPresets(savedName);
   } else {
     alert(res.error);
   }

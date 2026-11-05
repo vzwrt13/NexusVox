@@ -973,6 +973,7 @@ canvas { width: 100% !important; max-height: 260px; }
 .vocab-toggle:hover { color: var(--accent-light); }
 .vocab-body { display: flex; flex-direction: column; gap: 6px; }
 .vocab-body[hidden] { display: none; }
+.vocab-filter { flex: none; }
 .vocab-scroll { max-height: 260px; overflow-y: auto; padding-right: 4px; }
 .snippet-form { align-items: flex-start; }
 .snippet-expansion { flex: 2 1 260px; resize: vertical; font-family: inherit; }

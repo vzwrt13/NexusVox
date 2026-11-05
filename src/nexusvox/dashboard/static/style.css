@@ -959,6 +959,21 @@ canvas { width: 100% !important; max-height: 260px; }
 .dict-arrow { color: var(--text-dim); }
 .dict-add-btn { margin-bottom: 0; }
 .dict-list { display: flex; flex-direction: column; gap: 6px; }
+.vocab-box { display: flex; flex-direction: column; gap: 6px; }
+.vocab-toggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.vocab-toggle:hover { color: var(--accent-light); }
+.vocab-body { display: flex; flex-direction: column; gap: 6px; }
+.vocab-body[hidden] { display: none; }
+.vocab-scroll { max-height: 260px; overflow-y: auto; padding-right: 4px; }
 .snippet-form { align-items: flex-start; }
 .snippet-expansion { flex: 2 1 260px; resize: vertical; font-family: inherit; }
 .snippet-text { flex: 1 1 120px; min-width: 0; white-space: pre-wrap; color: var(--text-dim); max-height: 4.5em; overflow: hidden; }

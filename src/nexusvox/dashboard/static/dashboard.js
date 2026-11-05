@@ -1016,21 +1016,65 @@ async function loadSettings() {
   await Promise.all([loadDeviceSettings(), loadModelSwitcher(), loadOsCommands(), loadVoiceCommands(), loadDictionary(), loadDictionarySuggestions(), loadPolishPresets()]);
 }
 
+// ── Vocabulary lists: count, filter, collapse ────────────────────────
+const VOCAB_TITLES = { dict: "Dictionary", preset: "Presets" };
+
+function vocabFilter(items, query, fields) {
+  const q = (query || "").trim().toLowerCase();
+  if (!q) return items;
+  return items.filter((it) => fields.some((f) => String(it[f] ?? "").toLowerCase().includes(q)));
+}
+
+function vocabHeader(title, total, shown) {
+  return shown === total ? `${title} (${total})` : `${title} (${shown} of ${total})`;
+}
+
+function vocabIsCollapsed(key) {
+  try { return localStorage.getItem(`vocab-collapsed-${key}`) === "1"; } catch (e) { return false; }
+}
+
+function vocabSetCollapsed(key, collapsed) {
+  try { localStorage.setItem(`vocab-collapsed-${key}`, collapsed ? "1" : "0"); } catch (e) { /* private mode */ }
+}
+
+function vocabRender(key, items, fields, emptyText, rowHtml) {
+  const filtered = vocabFilter(items, document.getElementById(`${key}-filter`).value, fields);
+  const collapsed = vocabIsCollapsed(key);
+  const toggle = document.getElementById(`${key}-toggle`);
+  toggle.textContent = `${collapsed ? "▸" : "▾"} ${vocabHeader(VOCAB_TITLES[key], items.length, filtered.length)}`;
+  toggle.setAttribute("aria-expanded", String(!collapsed));
+  document.getElementById(`${key}-body`).hidden = collapsed;
+  document.getElementById(`${key}-list`).innerHTML = !items.length
+    ? `<p class="nexus-empty">${emptyText}</p>`
+    : filtered.length ? filtered.map(rowHtml).join("") : '<p class="nexus-empty">No matches.</p>';
+}
+
+function wireVocabBox(key, render) {
+  document.getElementById(`${key}-toggle`).addEventListener("click", () => {
+    vocabSetCollapsed(key, !vocabIsCollapsed(key));
+    render();
+  });
+  document.getElementById(`${key}-filter`).addEventListener("input", render);
+}
+// ── end of Vocabulary lists
+
 // ── Correction Dictionary ────────────────────────────────────────────
+let dictCache = [];
+
 async function loadDictionary() {
   const { entries } = await fetch("/api/dictionary").then((r) => r.json());
-  const list = document.getElementById("dict-list");
-  if (!entries.length) {
-    list.innerHTML = '<p class="nexus-empty">No entries yet.</p>';
-    return;
-  }
-  list.innerHTML = entries.map((e) => `
+  dictCache = entries;
+  renderDictionary();
+}
+
+function renderDictionary() {
+  vocabRender("dict", dictCache, ["wrong", "right"], "No entries yet.", (e) => `
     <div class="dict-row" data-id="${e.id}">
       <span class="dict-wrong">${escapeHtml(e.wrong)}</span>
       <span class="dict-arrow">&rarr;</span>
       <span class="dict-right">${escapeHtml(e.right)}</span>
       <button class="dict-delete" title="Remove" onclick="deleteDictionaryEntry(${e.id})">&#10005;</button>
-    </div>`).join("");
+    </div>`);
 }
 
 async function addDictionaryEntry(wrong, right) {
@@ -1054,18 +1098,17 @@ let presetCache = [];
 async function loadPolishPresets() {
   const { presets } = await fetch("/api/polish-presets").then((r) => r.json());
   presetCache = presets;
-  const list = document.getElementById("preset-list");
-  if (!presets.length) {
-    list.innerHTML = '<p class="nexus-empty">No presets yet.</p>';
-    return;
-  }
-  list.innerHTML = presets.map((p) => `
+  renderPolishPresets();
+}
+
+function renderPolishPresets() {
+  vocabRender("preset", presetCache, ["name", "instruction"], "No presets yet.", (p) => `
     <div class="dict-row" data-id="${p.id}">
       <span class="dict-wrong">${escapeHtml(p.name)}${p.is_default ? " (default)" : ""}</span>
       <span class="snippet-text">${escapeHtml(p.instruction)}</span>
       <button class="flagged-play-btn" onclick="editPolishPreset(${p.id})">Edit</button>
       <button class="dict-delete" title="Remove" onclick="deletePolishPreset(${p.id})">&#10005;</button>
-    </div>`).join("");
+    </div>`);
 }
 
 function resetPresetForm() {
@@ -1094,6 +1137,9 @@ async function deletePolishPreset(id) {
   if (document.getElementById("preset-id").value === String(id)) resetPresetForm();
   loadPolishPresets();
 }
+
+wireVocabBox("dict", renderDictionary);
+wireVocabBox("preset", renderPolishPresets);
 
 document.getElementById("preset-cancel").addEventListener("click", resetPresetForm);
 

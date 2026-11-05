@@ -32,6 +32,8 @@ def _app(
 ) -> NexusVoxApp:
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._transcriber = MagicMock()
+    app._last_typed_rewritten = False
+    app._edit_watcher = MagicMock()
     app._transcriber.connect = AsyncMock(side_effect=connect_error)
     app._transcriber.disconnect = AsyncMock()
     mark = COMMAND if command else PASTE_LAST if paste_last else POLISH if polish else None
@@ -86,6 +88,8 @@ def test_hide_failure_does_not_escape_the_cycle():
 
 def _paste_app(last_typed: str) -> NexusVoxApp:
     app = NexusVoxApp.__new__(NexusVoxApp)
+    app._last_typed_rewritten = False
+    app._edit_watcher = MagicMock()
     app._last_typed = last_typed
     app._config = MagicMock(injection_delay_ms=0)
     return app
@@ -132,6 +136,7 @@ def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._config = MagicMock(injection_delay_ms=0)
     app._last_typed = ""
+    app._last_typed_rewritten = False
     app._save_command = MagicMock()
     app._edit_watcher = MagicMock()
     app._db = MagicMock(get_polish_presets=MagicMock(return_value=list(presets)))
@@ -786,19 +791,81 @@ def test_toggle_start_cue_comes_after_the_delay(monkeypatch):
     assert [state for state, _ in cues].count("recording") == 1
 
 
-def test_polish_that_pasted_ends_the_edit_watch(monkeypatch):
-    app, _ = _polish_app(monkeypatch, "hi leute", "Sehr geehrte Damen und Herren")
+def _watcher_calls(app):
+    return [c[0] for c in app._edit_watcher.method_calls]
+
+
+def test_polish_that_pasted_pauses_the_edit_watch_before_the_paste_and_ends_it_after(monkeypatch):
+    app, calls = _polish_app(monkeypatch, "hi leute", "Sehr geehrte Damen und Herren")
+    order = []
+    app._edit_watcher.pause.side_effect = lambda: order.append(("pause", len(calls["pasted"])))
+    app._edit_watcher.cancel.side_effect = lambda: order.append(("cancel", len(calls["pasted"])))
     asyncio.run(app._polish_selection("", MagicMock()))
-    app._edit_watcher.cancel.assert_called_once_with()
+    assert order == [("pause", 0), ("cancel", 1)]
 
 
-def test_polish_that_changed_nothing_leaves_the_edit_watch_alone(monkeypatch):
+def test_polish_with_the_model_down_leaves_the_edit_watch_alone(monkeypatch):
     from nexusvox.llm import LlmError
 
     app, _ = _polish_app(monkeypatch, "hi leute", LlmError("refused"))
     asyncio.run(app._polish_selection("", MagicMock()))
-    app, _ = _polish_app(monkeypatch, "hi leute", "Hallo Leute", windows=(1, 2))  # focus moved: not pasted
+    assert _watcher_calls(app) == []
+
+
+def test_polish_with_the_focus_moved_leaves_the_edit_watch_alone(monkeypatch):
+    app, calls = _polish_app(monkeypatch, "hi leute", "Hallo Leute", windows=(1, 2))
     asyncio.run(app._polish_selection("", MagicMock()))
-    app, _ = _polish_app(monkeypatch, "", "unused")  # nothing selected
+    assert calls["pasted"] == [] and _watcher_calls(app) == []
+
+
+def test_polish_without_a_selection_leaves_the_edit_watch_alone(monkeypatch):
+    app, _ = _polish_app(monkeypatch, "", "unused")
     asyncio.run(app._polish_selection("", MagicMock()))
-    assert app._edit_watcher.cancel.call_count == 0
+    assert _watcher_calls(app) == []
+
+
+def test_polish_whose_clipboard_failed_resumes_the_edit_watch(monkeypatch):
+    import nexusvox.app as app_module
+    from nexusvox.clipboard import ClipboardError
+
+    app, _ = _polish_app(monkeypatch, "hi leute", "Hallo Leute")
+
+    def broken(text, delay):
+        raise ClipboardError("busy")
+
+    monkeypatch.setattr(app_module, "inject_text", broken)
+    asyncio.run(app._polish_selection("", MagicMock()))
+    assert _watcher_calls(app) == ["pause", "resume"]
+
+
+@pytest.mark.parametrize("reply", ["hi leute", ""])
+def test_a_reply_that_changes_nothing_leaves_the_edit_watch_alone(monkeypatch, reply):
+    app, _ = _polish_app(monkeypatch, "hi leute", reply)
+    asyncio.run(app._polish_selection("", MagicMock()))
+    assert _watcher_calls(app) == []
+
+
+def test_an_extension_rewrite_ends_the_edit_watch_too(monkeypatch):
+    import nexusvox.app as app_module
+
+    app, calls = _polish_app(monkeypatch, "hi leute", "unused")
+    registry = MagicMock(extensions=[object()])
+    registry.selection_command.return_value = "Hallo Leute"
+    monkeypatch.setattr(app_module, "loaded_extensions", lambda: registry)
+    asyncio.run(app._polish_selection("shout", MagicMock()))
+    assert calls["pasted"] == ["Hallo Leute"] and _watcher_calls(app) == ["pause", "cancel"]
+
+
+def test_the_paste_key_ending_a_polish_reply_ends_the_edit_watch(monkeypatch):
+    import nexusvox.app as app_module
+
+    app, calls = _polish_app(monkeypatch, "hi leute", "Hallo Leute", windows=(1, 2))  # the paste failed
+    asyncio.run(app._polish_selection("", MagicMock()))
+    app._edit_watcher.reset_mock()
+    asyncio.run(app._paste_last_text())
+    assert calls["pasted"] == ["Hallo Leute"] and _watcher_calls(app) == ["pause", "cancel"]
+    app._last_typed_rewritten = False  # a dictation is pasted again: the watch is not touched
+    app._edit_watcher.reset_mock()
+    asyncio.run(app._paste_last_text())
+    assert _watcher_calls(app) == []
+    assert app_module  # keeps the import used

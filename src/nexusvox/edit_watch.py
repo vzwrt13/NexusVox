@@ -82,7 +82,7 @@ OUTCOMES = {
     "no_replacement": "watched, nothing learned: no word was replaced by another",
     "lost_field": "watched, nothing learned: the field became unreadable before an edit was seen",
     "processed": "skipped: auto cleanup or translation changed the text",
-    "polished": "skipped: Polish rewrote the text",
+    "polished": "skipped: Polish or an extension rewrote the text, nothing left to judge",
     "clipboard": "skipped: the paste failed",
     "terminal": "skipped: terminals are not watched",
     "password": "skipped: password field",
@@ -101,6 +101,7 @@ _ENDED = {
     "window": "time window over",
     "next_dictation": "the next dictation arrived",
     "unreadable": "the field could not be read any more",
+    "rewrite": "Polish or an extension rewrote text, the watch stopped before it",
 }
 
 
@@ -357,7 +358,7 @@ class _Watch:
     injected: str
     window_s: float
     spoken: str | None
-    seq: int = 0
+    cancel_gen: int  # `EditWatcher._cancel_gen` when handed in; a later value means the watch was cancelled
 
 
 class EditWatcher:
@@ -365,8 +366,10 @@ class EditWatcher:
 
     `watch()` returns at once. A new `watch()` ends the running one early (its
     result still counts), because the next dictation usually means the user is
-    done fixing the previous one. `cancel()` ends it without judging, when something
-    other than the user rewrote the field (Polish).
+    done fixing the previous one. When Polish or an extension is about to rewrite text,
+    `pause()` stops the reads, so the rewrite is never taken for the user's fix, and `cancel()`
+    (the rewrite landed) ends the watch, judging the last text read before the rewrite, or
+    `resume()` (nothing was pasted) lets it go on.
     """
 
     def __init__(
@@ -385,30 +388,60 @@ class EditWatcher:
         self._lock = threading.Lock()
         self._counts: dict[str, int] = {}
         self._last: tuple[str, float] | None = None  # outcome, time.time()
-        self._seq = 0  # number of the latest watch handed in
-        self._cancelled_upto = 0  # every watch up to this number was cancelled
+        self._cancel_gen = 0  # raised by `cancel()`: every watch handed in before it ends
+        self._paused = False
+        self._epoch = 0  # raised by `pause()` and `cancel()`: a read that began before it is void
 
     def watch(self, injected: str, window_s: float, spoken: str | None = None) -> None:
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, name="edit-watch", daemon=True)
             self._thread.start()
         with self._lock:
-            self._seq += 1
-            seq = self._seq
-        self._queue.put(_Watch(injected, window_s, spoken, seq))
+            gen = self._cancel_gen
+        self._queue.put(_Watch(injected, window_s, spoken, gen))
 
-    def cancel(self) -> None:
-        """End every watch handed in so far without judging it (it is recorded as `polished`).
+    def pause(self) -> None:
+        """Stop reading the field, and void a read in flight, before text is rewritten into it.
 
-        Called when Polish replaced text in the field: the rewrite is not the user's correction of the
-        dictation. A watch handed in later is not affected; with no watch running nothing happens.
+        Follow with `cancel()` once the rewrite is in, or `resume()` when nothing was pasted.
         """
         with self._lock:
-            self._cancelled_upto = self._seq
+            self._paused = True
+            self._epoch += 1
+
+    def resume(self) -> None:
+        """Go on reading after a `pause()` that changed nothing."""
+        with self._lock:
+            self._paused = False
+
+    def cancel(self) -> None:
+        """End every watch handed in so far at the last text read before the rewrite.
+
+        Polish or an extension replaced text in the field: whatever it wrote is not the user's
+        correction. What the user fixed before is still judged. A watch handed in later is not
+        affected; with no watch running nothing happens.
+        """
+        with self._lock:
+            self._cancel_gen += 1
+            self._epoch += 1
+            self._paused = False
 
     def _is_cancelled(self, item: _Watch) -> bool:
         with self._lock:
-            return item.seq <= self._cancelled_upto
+            return item.cancel_gen != self._cancel_gen
+
+    def _paused_now(self) -> bool:
+        with self._lock:
+            return self._paused
+
+    def _epoch_now(self) -> int:
+        with self._lock:
+            return self._epoch
+
+    def _disturbed(self, epoch: int) -> bool:
+        """True when a read that began at `epoch` may hold rewritten text (paused now, or paused/cancelled since)."""
+        with self._lock:
+            return self._paused or self._epoch != epoch
 
     def skip(self, outcome: str) -> None:
         """Record a paste the app does not hand to the watcher (a key of `OUTCOMES`)."""
@@ -457,9 +490,8 @@ class EditWatcher:
 
     def _watch_one(self, item: _Watch) -> _Watch | None:
         """Watch one paste; returns the next queued item (or None to stop)."""
+        first_epoch = self._epoch_now()
         time.sleep(_SETTLE_S)
-        if self._is_cancelled(item):
-            return self._cancelled(item)
         announced = False
 
         def announce_dead(dead: TextField) -> None:
@@ -490,10 +522,12 @@ class EditWatcher:
         except Exception:
             logger.exception("Learn from edits: reading the focused field failed")
             field, before, skip = None, None, "unreadable"
-        if self._is_cancelled(item):
-            return self._cancelled(item)
         if field is None or before is None:
             self._record(skip)
+            return self._queue.get()
+        if self._is_cancelled(item) and self._disturbed(first_epoch):
+            # The first read may hold the rewrite instead of the dictation: nothing to compare against.
+            self._record("polished")
             return self._queue.get()
         after = before
         deadline = time.monotonic() + item.window_s
@@ -503,17 +537,16 @@ class EditWatcher:
         def must_stop() -> bool:
             return time.monotonic() >= deadline or not self._queue.empty() or self._is_cancelled(item)
 
-        while time.monotonic() < deadline:
-            if self._is_cancelled(item):
-                return self._cancelled(item)
+        while time.monotonic() < deadline and not self._is_cancelled(item):
             try:
                 nxt = self._queue.get(timeout=_POLL_S)
                 ended = "next_dictation"
                 break
             except queue.Empty:
                 pass
-            if self._is_cancelled(item):
-                return self._cancelled(item)
+            epoch = self._epoch_now()
+            if self._paused_now():
+                continue
             current = field.read()
             if current is None:
                 # A browser rebuilds its address bar or page: the element we hold is dead, a new one may not be.
@@ -523,25 +556,20 @@ class EditWatcher:
                 except FieldSkipped:  # focus is in a password field or a terminal now
                     refreshed = None
                 if refreshed is None:
-                    if self._is_cancelled(item):
-                        return self._cancelled(item)
                     if must_stop():
                         continue  # the window is over or the next dictation waits: the loop says which
                     ended = "unreadable"
                     break
                 field, current = refreshed
+            if self._disturbed(epoch) or self._is_cancelled(item):
+                continue  # the rewrite may have landed while the field was read: judge only what came before
             # A field cleared on send (or the dictation deleted) keeps the last text that still held it:
             # that is where the user's fixes are. Without an edit it equals `before`, so nothing is learned.
             if len(current) <= MAX_FIELD_CHARS and extract_edit(before, item.injected, current) is not None:
                 after = current
         if self._is_cancelled(item):
-            return self._cancelled(item, nxt)
+            ended = "rewrite"
         self._report(before, item, after, ended)
-        return self._queue.get() if nxt is False else nxt
-
-    def _cancelled(self, item: _Watch, nxt: _Watch | None | bool = False) -> _Watch | None:
-        """Record a cancelled watch without judging it; returns the next queued item (or None to stop)."""
-        self._record("polished", "the watch ended without judging the field")
         return self._queue.get() if nxt is False else nxt
 
     def _refetch(
@@ -632,6 +660,8 @@ class EditWatcher:
         if ended == "unreadable" and outcome in ("unchanged", "too_small"):
             # No edit was ever seen, but the field died: "not changed" would claim more than we know.
             outcome = "lost_field"
+        elif ended == "rewrite" and outcome in ("unchanged", "too_small"):
+            outcome = "polished"  # cut short before any fix was seen
         if outcome != "suggested":
             detail = f"{detail}; {how}" if detail else how
         else:

@@ -215,6 +215,7 @@ class NexusVoxApp:
         # What the last dictation pasted, for the paste key. In memory only: the saved
         # transcript is the spoken text, which differs once it was translated.
         self._last_typed = ""
+        self._last_typed_rewritten = False  # True when it is a Polish or extension reply, not a dictation
 
         # Model switch state
         self._switch_status: str = "idle"
@@ -771,6 +772,7 @@ class NexusVoxApp:
                     pasted = False
                 if processed.typed:  # an Enter-only dictation keeps the last text
                     self._last_typed = processed.typed
+                    self._last_typed_rewritten = False
                 if self._config.learn_from_edits.enabled and processed.typed:
                     if not pasted:
                         self._edit_watcher.skip("clipboard")
@@ -965,13 +967,21 @@ class NexusVoxApp:
             self._cue(beep_error, ERROR)
             return
         logger.info("Paste last: %s", Text(self._last_typed))
+        rewritten = self._last_typed_rewritten  # model text reaching a field must not be learned as a user fix
+        if rewritten:
+            self._edit_watcher.pause()
+        pasted = False
         try:
             await asyncio.get_running_loop().run_in_executor(
                 None, inject_text, self._last_typed, self._config.injection_delay_ms
             )
+            pasted = True
         except ClipboardError as exc:
             logger.warning("Paste last: could not paste (%s)", exc)
             self._cue(beep_error, ERROR)
+        finally:
+            if rewritten:
+                (self._edit_watcher.cancel if pasted else self._edit_watcher.resume)()
 
     async def _polish_selection(self, instruction: str, recording: _Recording | None) -> None:
         """Rewrite the selected text by *instruction* through the [llm] model and paste it over the selection.
@@ -1002,7 +1012,15 @@ class NexusVoxApp:
             )
             if handled is not None:
                 await self._paste_over_selection(
-                    handled, window, "extension", spoken, spoken, recording, status="extension", model_ms=None
+                    handled,
+                    selection,
+                    window,
+                    "extension",
+                    spoken,
+                    spoken,
+                    recording,
+                    status="extension",
+                    model_ms=None,
                 )
                 return
         instruction, preset = resolve_instruction(spoken, self._db.get_polish_presets())
@@ -1027,12 +1045,13 @@ class NexusVoxApp:
             return
         model_ms = round((time.perf_counter() - started) * 1000)
         await self._paste_over_selection(
-            rewritten, window, "polish", detail, spoken, recording, status="applied", model_ms=model_ms
+            rewritten, selection, window, "polish", detail, spoken, recording, status="applied", model_ms=model_ms
         )
 
     async def _paste_over_selection(
         self,
         rewritten: str,
+        selection: str,
         window: int,
         kind: str,
         detail: str,
@@ -1047,20 +1066,28 @@ class NexusVoxApp:
         Nothing pasted (the focus moved, the clipboard refused) is saved as ``failed``, however the reply came.
         """
         self._last_typed = rewritten
+        self._last_typed_rewritten = True
         pasted = False
+        # An empty reply or one equal to the selection changes nothing, so a running edit watch has no reason to end.
+        changed = bool(rewritten) and rewritten != selection
         if foreground_window() != window:
             logger.info("Polish: the focus moved to another window, not pasting (the paste key pastes it)")
             self._cue(beep_error, ERROR)
         else:
             # The selection is still selected, so pasting replaces it; Ctrl+Z in the app undoes it.
+            # The reads of a running edit watch stop before the paste, so the rewrite is never taken for the
+            # user's fix; once it is in, the watch ends on what it read before.
+            if changed:
+                self._edit_watcher.pause()
             try:
                 await asyncio.get_running_loop().run_in_executor(None, inject_text, rewritten, 0)
                 pasted = True
-                # The field now holds text the model wrote: a running watch must not count it as the user's fix.
-                self._edit_watcher.cancel()
             except ClipboardError as exc:
                 logger.warning("Polish: could not paste the reply (%s); the paste key pastes it", exc)
                 self._cue(beep_error, ERROR)
+            finally:
+                if changed:
+                    (self._edit_watcher.cancel if pasted else self._edit_watcher.resume)()
         await self._save_polish(
             recording, kind, detail, spoken, ok=pasted, status=status if pasted else "failed", model_ms=model_ms
         )

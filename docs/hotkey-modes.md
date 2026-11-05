@@ -6,7 +6,7 @@
 |---|---|---|
 | Start | Hold the hotkey | Press and release the hotkey once |
 | End normally (paste as is) | Release the hotkey | Press the hotkey again |
-| End with Polish | Press the polish key (e.g. `P`) at any moment while holding, then release | Hotkey + polish key: stops and polishes in one gesture |
+| End with Polish (rewrites the **selected text**; what you say is the instruction, e.g. "make it shorter") | Select text first. Press the polish key (e.g. `P`) at any moment while holding, then release | Select text first. Hotkey + polish key: stops the recording and rewrites the selection by what you said |
 | Paste the last text again | Paste key (`V`) while holding | Hotkey + `V` |
 | Command (`[os_control]`) | Command key while holding | Hotkey + command key |
 | Marker already held at the start | Counts | Counts, also when you end with the plain hotkey |

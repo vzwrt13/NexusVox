@@ -596,8 +596,8 @@ function renderHotkeyHint(mode, modifiers, key) {
   );
   marker(
     "polish-key-help",
-    "While holding the hotkey, press the polish key once (or keep it down), e.g. P. Release to finish and polish.",
-    "Press the hotkey + the polish key, e.g. P, to stop and polish. Held when you start also counts.",
+    "Select text first. While holding the hotkey, press the polish key once (or keep it down), e.g. P, and say what to do with the selection. Release to rewrite the selected text.",
+    "Select text first, then start and say what to do with it. Press the hotkey + the polish key, e.g. P, to stop and rewrite the selected text. Held when you start also counts.",
   );
 }
 

@@ -876,3 +876,17 @@ def test_meeting_fallback_list_starts_with_the_default_and_stays_alt_free_first(
     assert first == (list(MeetingConfig().modifiers), MeetingConfig().key) and first[1] == "F9"
     clash = HotkeyConfig(modifiers=["ctrl", "shift"], key="F9")
     assert config_module.default_meeting_hotkey(clash) == (["ctrl", "shift"], "F10")
+
+
+def test_max_recording_s_defaults_to_ten_minutes_round_trips_and_ignores_junk(tmp_path):
+    path = tmp_path / "config.toml"
+    cfg = load_config(path)
+    assert cfg.hotkey.max_recording_s == 600
+    cfg.hotkey.max_recording_s = 120
+    save_config(cfg, path)
+    assert load_config(path).hotkey.max_recording_s == 120
+    for bad in ("-5", '"soon"', "true", "inf", "nan", "0.5"):
+        path.write_text(f"[hotkey]\nmax_recording_s = {bad}\n", encoding="utf-8")
+        assert load_config(path).hotkey.max_recording_s == 600
+    path.write_text("[hotkey]\nmax_recording_s = 0\n", encoding="utf-8")
+    assert load_config(path).hotkey.max_recording_s == 0  # 0 turns the cap off

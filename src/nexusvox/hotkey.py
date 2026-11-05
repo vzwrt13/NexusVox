@@ -34,6 +34,23 @@ _WM_KEYDOWN, _WM_KEYUP, _WM_SYSKEYDOWN, _WM_SYSKEYUP = 0x0100, 0x0101, 0x0104, 0
 _PRESS_MESSAGES = (_WM_KEYDOWN, _WM_SYSKEYDOWN)
 
 _VK_ESCAPE = 0x1B
+# The neutral key `_mask_menu_keys` injects when the combo completes; it reaches the hook after `_active`
+# is set and is not the user typing.
+_VK_MENU_MASK = 0xE8
+_LLKHF_INJECTED = 0x10  # flag of a low-level keyboard event that came from SendInput, not the keyboard
+
+# Hold mode: a foreign key discards the recording only this long after it started. A longer shortcut that
+# begins with the chord (Ctrl+Win+Alt+letter) joins it within a fraction of a second; a key struck minutes
+# into a dictation is the user typing on, and must not throw the take away.
+FOREIGN_KEY_WINDOW_S = 1.0
+
+
+def _is_typing_key(vk: int) -> bool:
+    """False for virtual keys that are not a key the user struck as part of a shortcut: mouse buttons, browser,
+    volume, media and launch keys (macro pads and keyboards send them any time), VK_PACKET, the menu mask and
+    the reserved/OEM-clear codes at the top of the range."""
+    return not (vk < 0x07 or 0xA6 <= vk <= 0xB7 or vk in (0xE7, _VK_MENU_MASK) or vk >= 0xF6)
+
 
 # Toggle with a modifier-only binding: how long after the stop chord a marker key may still
 # turn the recording into polish / paste-last / command before the recording is finished.
@@ -75,6 +92,14 @@ class HotkeyListener:
     modifier-only binding the stop chord waits `grace_s` for such a marker before it
     finishes the recording. Escape during a recording cancels it (`on_cancel`); only that
     Escape is swallowed.
+
+    A recording is also dropped through `on_cancel` when another shortcut turns out to be meant: a key that
+    is neither a binding modifier, the binding's key, a marker nor Escape, or an extra modifier, goes down
+    while the start chord is still held (Hold: within `FOREIGN_KEY_WINDOW_S` of the start; Toggle: until
+    the chord is released; Ctrl+Win+Alt+letter, Ctrl+Win+Left). That key is not swallowed.
+    Injected events and non-typing keys (volume, media, VK_PACKET) never count,
+    and a chord that completes while a modifier outside the binding is already physically down does not
+    start a recording at all.
     """
 
     def __init__(
@@ -103,6 +128,7 @@ class HotkeyListener:
         self._physical_modifiers = physical_modifiers or _physical_modifiers
         self._stop_requested = 0.0  # monotonic time of the stop chord / marker (before any grace window)
         self._escape_swallowed = False
+        self._active_since = 0.0  # monotonic time the current recording started (hold: foreign-key window)
         self._mark: str | None = None  # what a marker key turned this recording into
         self._marker_swallowed: set[int] = set()  # marker keys held since a swallowed key-down
 
@@ -156,6 +182,17 @@ class HotkeyListener:
 
     # -- core -----------------------------------------------------------------
 
+    def _extra_modifiers_down(self) -> bool:
+        """A modifier outside the binding is already held as the chord completes: another shortcut.
+
+        Only for a start; a Toggle stop chord is never refused."""
+        if self._active:
+            return False
+        try:
+            return bool(self._physical_modifiers() - self._modifiers)
+        except Exception:
+            return False  # no Win32 (a headless runner): nothing to compare with
+
     def _complete_press(self) -> None:
         self._combo_down = True
         self._mask_menu_keys()
@@ -173,6 +210,7 @@ class HotkeyListener:
                         self._finish()
             else:
                 self._active = True
+                self._active_since = time.monotonic()
                 self._start_hold = True
                 self._mark = None
                 self._on_activate()
@@ -188,7 +226,8 @@ class HotkeyListener:
                 self._on_deactivate()
 
     def _cancel_recording(self) -> bool:
-        """Escape: drop the recording without finishing it. False when it had already finished."""
+        """Escape, or a foreign key in hold mode: drop the recording without finishing it (`on_cancel`).
+        False when it had already finished."""
         with self._lock:
             if not self._active:
                 return False
@@ -199,6 +238,26 @@ class HotkeyListener:
             if self._on_cancel is not None:
                 self._on_cancel()
             return True
+
+    def _discard_on_foreign_key(self) -> None:
+        """A key that is neither part of the binding nor an assigned one joined the start chord.
+
+        Ctrl+Win+Alt+letter or Ctrl+Win+Left is another shortcut that merely starts with the dictation
+        chord, so the recording is dropped like an Escape cancel. The key is not swallowed. Hold: within
+        `FOREIGN_KEY_WINDOW_S` of the start (the keys are held for the whole recording, so later typing
+        is the user dictating on). Toggle: while the keys of the start chord are still held
+        (`_start_hold`); once they are released, the recording runs on and typing never touches it.
+        The checks run without the lock, like Escape's: this is called for every key typed anywhere.
+        """
+        if not self._active:
+            return
+        if self.mode == "hold":
+            if time.monotonic() - self._active_since > FOREIGN_KEY_WINDOW_S:
+                return
+        elif not self._start_hold:
+            return
+        if self._cancel_recording():
+            logger.info("Foreign key joined the chord, recording discarded")
 
     def _marker_keys(self) -> dict[int, str]:
         """Virtual-key code -> marker, from the live config. The command key wins a clash."""
@@ -251,8 +310,12 @@ class HotkeyListener:
                 self._active = False
                 self._on_deactivate()
 
-    def _handle(self, vk: int, pressed: bool) -> bool:
-        """Feed one key event. Returns True if the event must be swallowed."""
+    def _handle(self, vk: int, pressed: bool, injected: bool = False) -> bool:
+        """Feed one key event. Returns True if the event must be swallowed.
+
+        `injected` (LLKHF_INJECTED) only keeps an event from discarding a hold recording; it is otherwise
+        treated like a real key, since remapping tools deliver the user's keys that way.
+        """
         self._sync_binding()
 
         if vk == _VK_ESCAPE:
@@ -282,6 +345,8 @@ class HotkeyListener:
                     return True  # auto-repeat while held as part of the combo
                 if self._combo_down or not self._modifiers <= self._pressed_modifiers:
                     return False  # plain typing: the modifiers are not (all) down
+                if self._extra_modifiers_down():
+                    return False  # another shortcut that contains the binding: the key is not ours
                 self._key_swallowed = True
                 self._complete_press()
                 return True
@@ -292,7 +357,9 @@ class HotkeyListener:
 
         modifier = _VK_TO_MODIFIER.get(vk)
         if modifier is None or modifier not in self._modifiers:
-            return False
+            if pressed and not injected and _is_typing_key(vk):
+                self._discard_on_foreign_key()
+            return False  # the key itself always reaches the application
         repeat = pressed and vk in self._modifier_vks_down  # a held key repeats its key-down every ~31 ms
         if pressed:
             self._modifier_vks_down.add(vk)
@@ -305,7 +372,8 @@ class HotkeyListener:
             # A modifier-only binding completes on its last modifier. With a key, the key
             # has to come last, otherwise "hold A, then press Ctrl" would start recording.
             if self._key_vk is None and not self._combo_down and self._modifiers <= self._pressed_modifiers:
-                self._complete_press()
+                if not self._extra_modifiers_down():
+                    self._complete_press()
             return False
         self._pressed_modifiers.discard(modifier)
         self._start_hold = False  # the hold that started the recording is over
@@ -342,7 +410,8 @@ class HotkeyListener:
 
     def _win32_event_filter(self, msg: int, data) -> None:
         """pynput hook callback, runs synchronously inside WH_KEYBOARD_LL."""
-        if self._handle(data.vkCode, msg in _PRESS_MESSAGES) and self._listener is not None:
+        injected = bool(getattr(data, "flags", 0) & _LLKHF_INJECTED)
+        if self._handle(data.vkCode, msg in _PRESS_MESSAGES, injected) and self._listener is not None:
             self._listener.suppress_event()
 
     # -- state queries --------------------------------------------------------

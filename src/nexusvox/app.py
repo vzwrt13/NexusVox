@@ -65,6 +65,10 @@ MIN_TOGGLE_TAKE_S = 0.3
 # A polish chord held shorter than this is a tap (nothing was said); longer means an instruction that a
 # missing server would lose, so the selection is left alone.
 QUICK_TAP_S = 0.6
+# Hold mode: the start chime and the overlay appear this long after the key press, so a longer shortcut that
+# begins with the chord (Ctrl+Win+Alt+letter) discards the recording while it is still silent. Audio is captured
+# from the first moment; only the cue waits.
+START_CUE_DELAY_S = 0.15
 
 
 def _feedback_mode(config: object) -> str:
@@ -167,7 +171,7 @@ class NexusVoxApp:
             on_command=self._on_hotkey_command,
             on_cancel=self._on_hotkey_cancel,
         )
-        # The latest hotkey stop: (marker at the stop, cancelled by Escape, monotonic time of the stop gesture).
+        # The latest hotkey stop: (marker at the stop, dropped by Escape or a foreign key, time of the stop gesture).
         # Captured in the stop callback, so a quick next take cannot reset what this one was marked as before
         # its cycle reads it. One slot, not a queue: start/stop events collapse when several presses arrive while
         # a cycle runs, and a queue would then go out of step with its cycles for good.
@@ -242,7 +246,8 @@ class NexusVoxApp:
             self._loop.call_soon_threadsafe(self._record_stop_event.set)
 
     def _on_hotkey_cancel(self) -> None:
-        """Called from the hotkey thread when Escape cancels the recording: nothing is pasted."""
+        """Called from the hotkey thread when the recording is dropped, by Escape or (Hold) by a foreign key
+        joining the chord: nothing is transcribed or pasted."""
         self._stop_info = (None, True, None)
         if self._mic_guard is not None:
             self._mic_guard.release_async()
@@ -532,6 +537,17 @@ class NexusVoxApp:
         take: tuple[int | None, float] | None = None  # (meeting token, start) while a take is open
         audio: AudioCapture | RemoteAudioSource | None = None  # set once recording started
         stream_task: asyncio.Task | None = None
+        cue_timer: asyncio.TimerHandle | None = None  # the delayed start cue of a hold recording
+        cue_shown = False
+
+        def show_start_cue(force: bool = False) -> None:
+            """The hold recording's start signal; the timer skips it once the recording ended or was dropped."""
+            nonlocal cue_shown
+            if cue_shown or not (force or (self._hotkey.active and not self._record_stop_event.is_set())):
+                return
+            cue_shown = True
+            self._tray.set_active(True)
+            self._cue(beep_start, RECORDING)
 
         async def end_take(end: float) -> None:
             nonlocal take
@@ -578,17 +594,22 @@ class NexusVoxApp:
                 return
 
             # Now we are ready — start recording
-            self._tray.set_active(True)
-            if remote:  # the phone shows its own state
-                _play(beep_start)
-            else:
-                self._cue(beep_start, RECORDING)
             logger.info("Recording started")
             start_time = time.monotonic()
-
-            # Start audio capture
             audio = self._remote_audio if remote else self._audio
+            if remote:
+                # A phone recording cues before the microphone opens, as it always did.
+                self._tray.set_active(True)
+                _play(beep_start)
             audio.start()
+            if not remote:
+                # Hold and Toggle: audio runs from the first moment, but the tray, the chime and the overlay
+                # wait a moment, so a longer shortcut that starts with the chord (Ctrl+Win+Alt+letter,
+                # Ctrl+Win+Arrow) is discarded before anything shows. Counted from the key press, so the
+                # connection and the microphone opening already used up part of the wait. (The mic guard
+                # mutes at the press and is released again by the discard.)
+                wait_s = max(0.0, START_CUE_DELAY_S - (time.monotonic() - self._press_time))
+                cue_timer = loop.call_later(wait_s, show_start_cue)
             if not remote:
                 # From the key press if the connection took a while, so the first words are inside the range.
                 pressed = (
@@ -615,13 +636,17 @@ class NexusVoxApp:
                     if self._mic_guard is not None:
                         self._mic_guard.release_async()
             recording_stopped = True
+            if cue_timer is not None:
+                cue_timer.cancel()
+                if not cancelled:
+                    show_start_cue(force=True)  # a tap shorter than the delay still gets its start/stop pair
 
             # Stop audio (sends None sentinel, ending the stream task)
             audio.stop()
             audio_buffer = await stream_task
 
             if cancelled:
-                logger.info("Recording cancelled with Escape, nothing to transcribe")
+                logger.info("Recording discarded (Escape or a foreign key), nothing to transcribe")
                 self._tray.set_active(False)
                 await self._transcriber.disconnect()
                 await self._hide_os_control()
@@ -796,6 +821,8 @@ class NexusVoxApp:
                 await self._hide_os_control()
             await self._transcriber.disconnect()
         finally:
+            if cue_timer is not None:
+                cue_timer.cancel()
             await end_take(time.monotonic())  # a take that died before its stop is stored too
             # Key-up already queued a release; this covers a cycle that died mid-hold.
             # Skip it while the hotkey is held again: the user may already be in the

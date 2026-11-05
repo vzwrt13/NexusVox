@@ -1127,6 +1127,7 @@ def test_polish_key_and_model_settings(flask_client, monkeypatch):
     status = flask_client.get("/api/settings/llm-status").get_json()
     assert status == {
         "url": "http://127.0.0.1:11434",
+        "protocol": "ollama",
         "model": "gemma4:12b",
         "reachable": False,
         "model_installed": None,

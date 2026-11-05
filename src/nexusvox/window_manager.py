@@ -5,12 +5,9 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
-import re
 import subprocess
 import time
 from ctypes import wintypes
-
-from .logsetup import Text
 
 logger = logging.getLogger(__name__)
 
@@ -264,21 +261,6 @@ def open_app(exe_path: str) -> None:
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         close_fds=True,
     )
-
-
-def open_target(target: str) -> bool:
-    """Open a URL or an existing file/folder with its default handler. Returns False for anything else.
-
-    ShellExecute hands a URL to the running default browser, which opens it as a new
-    tab in its last-used window instead of starting a fresh window.
-    """
-    is_url = re.match(r"^(?:https?://|mailto:)\S+$", target, re.IGNORECASE) is not None
-    if not is_url and not os.path.exists(target):
-        logger.warning("Not a URL or an existing path, not opening: %r", Text(target))
-        return False
-    logger.info("Opening target: %s", Text(target))
-    os.startfile(target)  # noqa: S606 - the user's own snippet text
-    return True
 
 
 def close_app(app_name: str, exe_path: str) -> None:

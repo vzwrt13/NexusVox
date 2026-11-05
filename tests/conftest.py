@@ -167,7 +167,7 @@ def flask_client(db, session_factory, monkeypatch):
 @pytest.fixture
 def experimental_client(db, session_factory, monkeypatch):
     """Like ``flask_client``, with every `[experimental]` feature on (OS commands, Edit tab, GitHub, Dev)."""
-    flags = ExperimentalConfig(os_commands=True, flag_command=True, github_snippets=True, dev_tab=True)
+    flags = ExperimentalConfig(os_commands=True, flag_command=True, dev_tab=True)
     yield from _dashboard_client(db, session_factory, monkeypatch, Config(experimental=flags))
 
 

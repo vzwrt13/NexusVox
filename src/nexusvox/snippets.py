@@ -1,9 +1,8 @@
 """Snippets: a spoken trigger phrase expands into a stored text.
 
-The user defines every snippet in the dashboard - a trigger ("my address",
-"meine Signatur") and an expansion of any length, line breaks included. A
-trigger matches anywhere in the dictation, whole-word and case-insensitive, in
-whatever language the user wrote it. No snippets ship with NexusVox.
+A snippet is a trigger ("my address", "meine Signatur") and an expansion of any
+length, line breaks included. A trigger matches anywhere in the dictation,
+whole-word and case-insensitive, in whatever language the user wrote it.
 
 A snippet can also carry *options*, name -> text pairs ("NexusVox" ->
 "https://github.com/..."). The words after its trigger then pick the option
@@ -17,8 +16,9 @@ in two steps: `mark_snippets` swaps each match for a private-use placeholder
 character before voice commands and translation run, and `expand_snippets`
 puts the stored text back in right before injection.
 
-`resolve_open_target` serves "nexus open <snippet>" (the grammar lives in
-`os_commands`): the spoken phrase must be exactly one snippet match.
+The core itself no longer stores or expands snippets (they are a Pro feature); this module stays as the
+matcher that extensions import (`Snippet`, `mark_snippets`, `expand_snippets`, `placeholders_intact`) and
+that `polish_presets` uses to match a spoken preset name (`best_option`).
 """
 
 from __future__ import annotations
@@ -27,8 +27,6 @@ import difflib
 import re
 from dataclasses import dataclass
 from typing import NamedTuple
-
-from .os_commands import strip_open_verb
 
 # One Unicode private-use character per expansion; voice commands and the dictionary ignore them.
 _PLACEHOLDER_BASE = 0xE000
@@ -127,20 +125,6 @@ def mark_snippets(text: str, snippets: list[Snippet]) -> tuple[str, list[str]]:
         out.append(text[pos:])
         text = "".join(out)
     return text, expansions
-
-
-def resolve_open_target(spoken: str, snippets: list[Snippet]) -> str | None:
-    """The text "nexus open <spoken>" should open, or None.
-
-    *spoken* is what follows the open verb. Each trigger is compared without its
-    own leading open verb, so the trigger "open remote repo" answers both
-    "nexus open remote repo …" and "nexus öffne remote repo …".
-    """
-    bare = [Snippet(strip_open_verb(s.trigger), s.expansion, s.options) for s in snippets]
-    marked, expansions = mark_snippets(spoken.strip(), bare)
-    if len(expansions) == 1 and marked.strip(" .,!?") == chr(_PLACEHOLDER_BASE):
-        return expansions[0].strip()
-    return None
 
 
 def placeholders_intact(text: str, expansions: list[str]) -> bool:

@@ -372,3 +372,45 @@ def test_remote_text_goes_back_to_the_phone_and_is_not_typed(monkeypatch):
     inject.assert_not_called()
     assistant.assert_not_called()
     assert app._remote_text == "nexus assistant hallo welt"
+
+
+@needs_app
+def test_a_phone_dictation_runs_the_extensions_protect_and_restore(monkeypatch):
+    from nexusvox.extensions import API_VERSION, Extension, ExtensionRegistry
+
+    class Shield(Extension):
+        name = "shield"
+        api_version = API_VERSION
+
+        def protect(self, text, app):
+            return text.replace("my address", "[1]"), lambda out: out.replace("[1]", "Hauptstrasse 1")
+
+        def on_dictation(self, text, app):
+            raise AssertionError("the phone has no active app")
+
+    registry = ExtensionRegistry()
+    assert registry.add(Shield())
+    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: registry)
+    app = _app()
+    app._config.database.store_audio = False
+    app._remote_text = ""
+    app._db = MagicMock()
+    app._db.get_dictionary_entries.return_value = []
+    app._transcriber = MagicMock()
+    app._transcriber.connect = AsyncMock()
+    app._transcriber.disconnect = AsyncMock()
+    app._transcriber.send_audio_chunk = AsyncMock()
+    app._transcriber.finish = AsyncMock(return_value=MagicMock(text="write to my address", confidence=None))
+    app._tray = MagicMock()
+    monkeypatch.setattr("nexusvox.app.inject_text", MagicMock())
+
+    async def cycle():
+        app._record_stop_event = asyncio.Event()
+        task = asyncio.create_task(app._transcription_cycle(remote=True))
+        await asyncio.sleep(0.05)
+        app._record_stop_event.set()
+        await task
+
+    asyncio.run(cycle())
+    assert app._remote_text == "write to Hauptstrasse 1"
+    assert app._db.save_transcription.call_args.kwargs["text"] == "write to Hauptstrasse 1"

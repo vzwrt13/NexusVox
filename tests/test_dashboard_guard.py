@@ -49,41 +49,40 @@ def _client(app, cookie: str | None = None, host: str = HOST) -> _Client:
 
 
 def test_valid_request_passes(app, guard):
-    assert _client(app, guard.session_token).get("/api/snippets").status_code == 200
+    assert _client(app, guard.session_token).get("/api/dictionary").status_code == 200
 
 
 def test_missing_token_is_rejected(app):
     client = _client(app)
-    assert client.get("/api/snippets").status_code == 403
-    assert client.get("/api/snippets/github-repos").status_code == 403
+    assert client.get("/api/dictionary").status_code == 403
     assert client.post("/api/models/switch", json={"model": "x"}).status_code == 403
     assert client.get("/").status_code == 403
 
 
 def test_wrong_token_is_rejected(app):
-    assert _client(app, "not-the-token").get("/api/snippets").status_code == 403
+    assert _client(app, "not-the-token").get("/api/dictionary").status_code == 403
 
 
 @pytest.mark.parametrize("host", ["evil.example.com", "evil.example.com:47392", "127.0.0.1", "127.0.0.1:1234"])
 def test_foreign_host_is_rejected_even_with_token(app, guard, host):
     client = _client(app, guard.session_token, host)
-    assert client.get("/api/snippets").status_code == 403
+    assert client.get("/api/dictionary").status_code == 403
 
 
 def test_localhost_host_is_accepted(app, guard):
     client = _client(app, guard.session_token, f"localhost:{_PORT}")
-    assert client.get("/api/snippets").status_code == 200
+    assert client.get("/api/dictionary").status_code == 200
 
 
 def test_cross_origin_is_rejected_even_with_token(app, guard):
     client = _client(app, guard.session_token)
-    assert client.get("/api/snippets", headers={"Origin": "https://evil.example.com"}).status_code == 403
+    assert client.get("/api/dictionary", headers={"Origin": "https://evil.example.com"}).status_code == 403
     assert client.post("/api/models/switch", json={}, headers={"Origin": "null"}).status_code == 403
 
 
 def test_same_origin_is_accepted(app, guard):
     client = _client(app, guard.session_token)
-    assert client.get("/api/snippets", headers={"Origin": f"http://{HOST}"}).status_code == 200
+    assert client.get("/api/dictionary", headers={"Origin": f"http://{HOST}"}).status_code == 200
 
 
 def test_launch_secret_is_traded_for_the_cookie_once(app, guard):
@@ -94,7 +93,7 @@ def test_launch_secret_is_traded_for_the_cookie_once(app, guard):
     assert first.headers["Location"].endswith("/#meetings")
     cookie = first.headers["Set-Cookie"]
     assert "HttpOnly" in cookie and "SameSite=Strict" in cookie
-    assert client._client.get("/api/snippets", base_url=f"http://{HOST}").status_code == 200  # cookie jar holds it
+    assert client._client.get("/api/dictionary", base_url=f"http://{HOST}").status_code == 200  # cookie jar holds it
 
     assert _client(app).get(f"/?{LAUNCH_PARAM}={secret}").status_code == 403  # spent
 
@@ -106,9 +105,9 @@ def test_unknown_launch_secret_is_rejected(app):
 def test_cross_port_same_site_request_is_rejected(app, guard):
     """A page on another localhost port is same-site: the cookie rides along, but it is not same-origin."""
     client = _client(app, guard.session_token)
-    assert client.get("/api/snippets", headers={"Sec-Fetch-Site": "same-site"}).status_code == 403
-    assert client.get("/api/snippets", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
-    assert client.get("/api/snippets", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 200
+    assert client.get("/api/dictionary", headers={"Sec-Fetch-Site": "same-site"}).status_code == 403
+    assert client.get("/api/dictionary", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+    assert client.get("/api/dictionary", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 200
     assert client.get("/", headers={"Sec-Fetch-Site": "none"}).status_code == 200  # typed or bookmarked
 
 

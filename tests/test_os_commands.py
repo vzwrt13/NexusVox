@@ -12,8 +12,6 @@ from nexusvox.os_commands import (
     NexusCommand,
     execute_nexus_command,
     parse_nexus_command,
-    parse_nexus_open,
-    strip_open_verb,
 )
 
 # --- Parsing: valid commands ---
@@ -202,28 +200,3 @@ def test_execute_unknown_app_returns_false(mock_wm):
     cmd = NexusCommand(action="open", app_name="unknown")
     assert execute_nexus_command(cmd, config) is False
     mock_wm.open_app.assert_not_called()
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="window_manager needs the Win32 API")
-def test_open_target_rejects_plain_text(monkeypatch):
-    from nexusvox import window_manager
-
-    opened = []
-    monkeypatch.setattr(window_manager.os, "startfile", opened.append, raising=False)
-
-    assert window_manager.open_target("Hauptstraße 1, Berlin") is False
-    assert window_manager.open_target("https://github.com/vzwrt13/NexusVox") is True
-    assert opened == ["https://github.com/vzwrt13/NexusVox"]
-
-
-def test_parse_nexus_open_both_languages():
-    assert parse_nexus_open("Nexus, öffne remote repo NexusVox.") == "remote repo NexusVox."
-    assert parse_nexus_open("nexus open: my site") == "my site"
-    assert parse_nexus_open("nexus opener") is None
-    assert parse_nexus_open("please nexus open x") is None
-
-
-def test_strip_open_verb():
-    assert strip_open_verb("open remote repo") == "remote repo"
-    assert strip_open_verb("Öffne meine Webseite") == "meine Webseite"
-    assert strip_open_verb("opening hours") == "opening hours"

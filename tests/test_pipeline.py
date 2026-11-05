@@ -6,10 +6,7 @@ from nexusvox.cleanup import CleanupResult
 from nexusvox.config import CleanupConfig, Config, VoiceCommandsConfig
 from nexusvox.dictionary import DictionaryEntry
 from nexusvox.pipeline import process_text
-from nexusvox.snippets import Snippet
 from nexusvox.translator import TranslateResult
-
-SIGNATURE = Snippet("meine Signatur", "Viele Grüße\nVincent")
 
 
 def _config(**voice) -> Config:
@@ -24,14 +21,11 @@ def no_cleanup(text, _config, _llm):
     return CleanupResult(text)
 
 
-def _run(
-    raw, config=None, dictionary=(), snippets=(), remote=False, translate_fn=no_translation, cleanup_fn=no_cleanup
-):
+def _run(raw, config=None, dictionary=(), remote=False, translate_fn=no_translation, cleanup_fn=no_cleanup):
     return process_text(
         raw,
         config or _config(),
         list(dictionary),
-        list(snippets),
         remote=remote,
         translate_fn=translate_fn,
         cleanup_fn=cleanup_fn,
@@ -80,36 +74,13 @@ def test_press_enter_stays_text_for_the_phone():
     assert (result.typed, result.press_enter) == ("Bin gleich da, Enter drücken.", False)
 
 
-def test_snippet_survives_voice_commands_and_stays_out_of_the_spoken_words():
-    result = _run("Danke new line meine Signatur", snippets=[SIGNATURE])
-    assert (result.typed, result.saved, result.learnable) == (
-        "Danke\nViele Grüße\nVincent",
-        "Danke\nViele Grüße\nVincent",
-        True,
-    )
-    assert result.spoken.startswith("Danke new line ") and "Viele" not in result.spoken
-
-
 def test_translation_is_typed_but_the_spoken_text_is_saved():
     def to_english(text, _config):
         return TranslateResult(text.replace("Hallo", "Hello"), translated=True, source="de")
 
-    result = _run("Hallo meine Signatur", snippets=[SIGNATURE], translate_fn=to_english)
-    assert (result.typed, result.saved, result.learnable) == (
-        "Hello Viele Grüße\nVincent",
-        "Hallo Viele Grüße\nVincent",
-        False,
-    )
+    result = _run("Hallo Welt", translate_fn=to_english)
+    assert (result.typed, result.saved, result.learnable) == ("Hello Welt", "Hallo Welt", False)
     assert result.translation.translated is True
-
-
-def test_translator_losing_a_placeholder_falls_back_to_the_original():
-    def lossy(_text, _config):
-        return TranslateResult("Hello", translated=True)
-
-    result = _run("Hallo meine Signatur", snippets=[SIGNATURE], translate_fn=lossy)
-    assert result.typed == "Hallo Viele Grüße\nVincent"
-    assert (result.translation.translated, result.translation.error) == (False, "snippet placeholder lost")
 
 
 def test_cleanup_is_typed_and_translated_but_the_spoken_text_is_saved():
@@ -136,15 +107,6 @@ def test_cleaned_dictation_is_not_learnable():
     assert (result.typed, result.saved, result.learnable) == ("Hallo Welt", "ähm Hallo Welt", False)
 
 
-def test_cleanup_sees_snippet_placeholders_and_the_snippet_is_expanded_after():
-    def keep(text, _c, _l):
-        assert "Viele Grüße" not in text  # the stored text is a placeholder here
-        return CleanupResult(text.replace("ähm ", ""), cleaned=True)
-
-    result = _run("ähm Danke meine Signatur", snippets=[SIGNATURE], cleanup_fn=keep)
-    assert result.typed == "Danke Viele Grüße\nVincent"
-
-
 def test_english_passed_through_by_the_translator_stays_learnable():
     def passthrough(text, _config):
         return TranslateResult(text, translated=True, source="en")
@@ -160,26 +122,11 @@ def test_extend_fn_changes_what_is_typed_but_not_what_is_saved():
         "hello world",
         _config(),
         [],
-        [],
         translate_fn=no_translation,
         cleanup_fn=no_cleanup,
         extend_fn=lambda text: text.upper(),
     )
     assert (result.typed, result.saved, result.learnable) == ("HELLO WORLD", "hello world", False)
-
-
-def test_extend_fn_sees_expanded_snippets():
-    seen = []
-    result = process_text(
-        "meine Signatur",
-        _config(),
-        [],
-        [SIGNATURE],
-        translate_fn=no_translation,
-        cleanup_fn=no_cleanup,
-        extend_fn=lambda text: seen.append(text) or text,
-    )
-    assert seen == ["Viele Grüße\nVincent"] and result.learnable
 
 
 def test_without_extend_fn_nothing_changes():
@@ -191,7 +138,7 @@ def test_a_failing_extend_fn_types_the_text_unchanged():
         raise RuntimeError("nope")
 
     result = process_text(
-        "hello world", _config(), [], [], translate_fn=no_translation, cleanup_fn=no_cleanup, extend_fn=boom
+        "hello world", _config(), [], translate_fn=no_translation, cleanup_fn=no_cleanup, extend_fn=boom
     )
     assert (result.typed, result.learnable) == ("hello world", True)
 
@@ -201,7 +148,6 @@ def test_extend_fn_is_not_called_for_an_enter_only_dictation():
     result = process_text(
         "press enter",
         _config(press_enter=True),
-        [],
         [],
         translate_fn=no_translation,
         cleanup_fn=no_cleanup,
@@ -243,3 +189,163 @@ def test_german_dictionary_hits_are_reported():
     result = _run("viele grüße und grüße", dictionary=[entry])
 
     assert result.dictionary_hits == {entry: 2}
+
+
+# -- extension protect / restore ---------------------------------------------------------------------------
+
+
+def _protect(trigger="my address", token="⟦1⟧", expansion="Hauptstrasse 1"):
+    """A protect_fn like an extension's: swaps the trigger for a token and restores the expansion."""
+    calls = {"protect": [], "restore": []}
+
+    def restore(text):
+        calls["restore"].append(text)
+        return text.replace(token, expansion) if token in text else None
+
+    def protect(text):
+        calls["protect"].append(text)
+        return (text.replace(trigger, token), restore) if trigger in text else None
+
+    return protect, calls
+
+
+def _run_protected(raw, protect_fn, config=None, remote=False, translate_fn=no_translation, cleanup_fn=no_cleanup):
+    return process_text(
+        raw,
+        config or _config(),
+        [],
+        remote=remote,
+        translate_fn=translate_fn,
+        cleanup_fn=cleanup_fn,
+        protect_fn=protect_fn,
+    )
+
+
+def test_protect_runs_before_voice_commands_cleanup_and_translation_and_restore_after_them():
+    protect, calls = _protect()
+    seen = {}
+
+    def cleanup_fn(text, _c, _l):
+        seen["cleanup"] = text
+        return CleanupResult(text.replace("ähm ", ""), cleaned=True)
+
+    def translate_fn(text, _c):
+        seen["translate"] = text
+        return TranslateResult(text.replace("schick das an", "send that to"), translated=True, source="de")
+
+    result = _run_protected("ähm schick das an my address", protect, cleanup_fn=cleanup_fn, translate_fn=translate_fn)
+    assert seen == {"cleanup": "ähm schick das an ⟦1⟧", "translate": "schick das an ⟦1⟧"}
+    assert result.typed == "send that to Hauptstrasse 1"
+    assert result.saved == "ähm schick das an Hauptstrasse 1"  # as spoken, restored
+    assert result.learnable is False
+    assert calls["restore"] == ["send that to ⟦1⟧", "ähm schick das an ⟦1⟧"]
+
+
+def test_protect_sees_the_text_after_the_dictionary_and_the_press_enter_split():
+    protect, calls = _protect()
+    result = process_text(
+        "my addr press enter",
+        _config(press_enter=True),
+        [DictionaryEntry("addr", "address")],
+        translate_fn=no_translation,
+        cleanup_fn=no_cleanup,
+        protect_fn=protect,
+    )
+    assert calls["protect"] == ["my address"]
+    assert (result.typed, result.press_enter) == ("Hauptstrasse 1", True)
+
+
+def test_voice_commands_cannot_touch_a_protected_phrase():
+    # "new line" inside the shielded phrase is not turned into a line break; the one outside still is
+    protect, _ = _protect(trigger="the new line sign", token="⟦1⟧", expansion="<new line>")
+    result = _run_protected("the new line sign new line done", protect)
+    assert result.typed == "<new line>\ndone"
+
+
+def test_a_phone_dictation_is_protected_and_restored_too():
+    protect, calls = _protect()
+    result = _run_protected("write to my address", protect, remote=True)
+    assert calls["protect"] == ["write to my address"]
+    assert (result.typed, result.saved) == ("write to Hauptstrasse 1", "write to Hauptstrasse 1")
+
+
+def test_a_phone_dictation_through_translation_is_restored():
+    protect, _ = _protect()
+
+    def translate_fn(text, _c):
+        return TranslateResult(text.replace("schreib an", "write to"), translated=True, source="de")
+
+    result = _run_protected("schreib an my address", protect, remote=True, translate_fn=translate_fn)
+    assert result.typed == "write to Hauptstrasse 1"
+    assert result.translation.translated is True
+
+
+def test_a_text_the_extension_leaves_alone_goes_through_unchanged_and_stays_learnable():
+    protect, calls = _protect()
+    result = _run_protected("hello there", protect)
+    assert (result.typed, result.learnable, calls["restore"]) == ("hello there", True, [])
+
+
+def test_a_failing_protect_types_the_dictation_unprotected(caplog):
+    def boom(_text):
+        raise RuntimeError("nope")
+
+    result = _run_protected("hello there my address", boom)
+    assert (result.typed, result.learnable) == ("hello there my address", True)
+    assert "protect step failed" in caplog.text
+
+
+def test_a_restore_that_gives_up_processes_the_dictation_again_without_protect():
+    # The translator drops the token: the extension's restore answers None, so nothing half-restored is typed.
+    protect, calls = _protect()
+    cleanups = []
+
+    def cleanup_fn(text, _c, _l):
+        cleanups.append(text)
+        return CleanupResult(text)
+
+    def translate_fn(text, _c):
+        return TranslateResult(text.replace("⟦1⟧", "").strip(), translated=True, source="de")
+
+    result = _run_protected("schick an my address", protect, translate_fn=translate_fn, cleanup_fn=cleanup_fn)
+    assert cleanups == ["schick an ⟦1⟧", "schick an my address"]  # the second pass is unprotected
+    assert "⟦1⟧" not in result.typed and "⟦1⟧" not in result.saved
+    assert len(calls["protect"]) == 1  # protect is not asked a second time
+
+
+def test_a_raising_restore_processes_the_dictation_again_without_protect():
+    def protect(text):
+        def restore(_out):
+            raise RuntimeError("nope")
+
+        return text.replace("my address", "⟦1⟧"), restore
+
+    result = _run_protected("write to my address", protect)
+    assert (result.typed, result.saved) == ("write to my address", "write to my address")
+
+
+def test_protect_is_not_called_for_an_enter_only_dictation():
+    protect, calls = _protect()
+    result = process_text(
+        "press enter",
+        _config(press_enter=True),
+        [],
+        translate_fn=no_translation,
+        cleanup_fn=no_cleanup,
+        protect_fn=protect,
+    )
+    assert (result.typed, result.press_enter, calls["protect"]) == ("", True, [])
+
+
+def test_extend_fn_sees_the_restored_text():
+    protect, _ = _protect()
+    result = process_text(
+        "mail my address",
+        _config(),
+        [],
+        translate_fn=no_translation,
+        cleanup_fn=no_cleanup,
+        extend_fn=lambda text: text.upper(),
+        protect_fn=protect,
+    )
+    assert (result.typed, result.saved) == ("MAIL HAUPTSTRASSE 1", "mail Hauptstrasse 1")

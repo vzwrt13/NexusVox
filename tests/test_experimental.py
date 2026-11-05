@@ -17,7 +17,6 @@ _HIDDEN_ENDPOINTS = [
     ("post", "/api/os-commands/apps"),
     ("get", "/api/flagged"),
     ("post", "/api/flagged/1/correct"),
-    ("get", "/api/snippets/github-repos"),
     ("get", "/api/benchmarks"),
     ("get", "/api/benchmarks/compare"),
     ("get", "/api/benchmarks/x.json"),
@@ -31,7 +30,7 @@ def _client(db, session_factory, **flags):
 
 
 def test_everything_is_off_by_default():
-    assert Config().experimental == ExperimentalConfig(False, False, False, False)
+    assert Config().experimental == ExperimentalConfig(False, False, False)
 
 
 def test_config_roundtrip_and_missing_section(tmp_path):
@@ -41,7 +40,7 @@ def test_config_roundtrip_and_missing_section(tmp_path):
 
     save_config(Config(experimental=ExperimentalConfig(os_commands=True, dev_tab=True)), path)
     loaded = load_config(path).experimental
-    assert loaded == ExperimentalConfig(os_commands=True, flag_command=False, github_snippets=False, dev_tab=True)
+    assert loaded == ExperimentalConfig(os_commands=True, flag_command=False, dev_tab=True)
 
 
 def test_shipped_template_keeps_everything_off():
@@ -50,7 +49,6 @@ def test_shipped_template_keeps_everything_off():
     assert re.findall(r"^(\w+) = (\w+)$", section, re.M) == [
         ("os_commands", "false"),
         ("flag_command", "false"),
-        ("github_snippets", "false"),
         ("dev_tab", "false"),
     ]
 
@@ -75,7 +73,6 @@ def test_features_endpoint_reports_the_flags(db, session_factory):
     assert _client(db, session_factory).get("/api/features").get_json() == {
         "os_commands": False,
         "flag_command": False,
-        "github_snippets": False,
         "dev_tab": False,
     }
     on = _client(db, session_factory, flag_command=True).get("/api/features").get_json()
@@ -87,7 +84,6 @@ def test_features_endpoint_reports_the_flags(db, session_factory):
     [
         ("os_commands", ["/api/os-commands"]),
         ("flag_command", ["/api/flagged"]),
-        ("github_snippets", []),  # shells out to `gh`; only its registration is checked
         ("dev_tab", ["/api/benchmarks", "/api/benchmarks/compare"]),
     ],
 )
@@ -96,7 +92,6 @@ def test_each_flag_brings_back_only_its_endpoints(db, session_factory, flag, pat
     for path in paths:
         assert client.get(path).status_code == 200
     registered = {r.rule for r in client.application.url_map.iter_rules()}
-    assert ("/api/snippets/github-repos" in registered) == (flag == "github_snippets")
     assert ("/api/os-commands" in registered) == (flag == "os_commands")
     assert ("/api/flagged" in registered) == (flag == "flag_command")
     assert ("/api/benchmarks" in registered) == (flag == "dev_tab")
@@ -104,7 +99,7 @@ def test_each_flag_brings_back_only_its_endpoints(db, session_factory, flag, pat
 
 def test_page_ships_every_experimental_element_hidden():
     html = (_STATIC / "index.html").read_text(encoding="utf-8")
-    for feature in ("os_commands", "flag_command", "github_snippets", "dev_tab"):
+    for feature in ("os_commands", "flag_command", "dev_tab"):
         tags = re.findall(rf'<[^>]*data-feature="{feature}"[^>]*>', html)
         assert tags, feature
         assert all(" hidden" in tag for tag in tags), tags

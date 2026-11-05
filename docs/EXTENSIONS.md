@@ -47,7 +47,7 @@ $env:NEXUSVOX_NO_EXTENSIONS = "1"; python -m nexusvox
 
 `nexusvox.extensions.API_VERSION` is an integer. It is bumped when a change breaks existing extensions
 (a hook renamed, a field removed or retyped); adding a hook, an optional field or a keyword with a default
-keeps it. The dictation and selected-text hooks below were added this way: the version stays at 1 and every extension built before them loads and behaves as before. NexusVox loads an extension only when its `api_version` equals the core's, so an extension built
+keeps it. The dictation, selected-text and command hooks below were added this way: the version stays at 1 and every extension built before them loads and behaves as before. NexusVox loads an extension only when its `api_version` equals the core's, so an extension built
 for another version is skipped with a log line instead of misbehaving. Every extension must set
 `api_version` itself, as a literal (`api_version = 1`, not `API_VERSION`): there is no default, and an extension
 that does not declare one is skipped.
@@ -222,7 +222,7 @@ def on_dictation(self, text: str, app: ActiveApp) -> str | None: ...
 ```
 
 Called for every dictation that is about to be typed at the cursor, as the last step of the text pipeline:
-the dictionary, snippets, voice commands, cleanup and translation are done and snippets are expanded. Return the
+the dictionary, voice commands, cleanup and translation are done. Return the
 text to type instead, or `None` to leave it.
 
 | `ActiveApp` field | Meaning |
@@ -322,3 +322,106 @@ class SpeakerNames(Extension):
             text = text.replace(f"Speaker {number}:", f"{name}:")
         return text
 ```
+
+## Hook 8: take over a spoken command
+
+```python
+def on_command(self, text: str, app: ActiveApp) -> tuple[str, bool] | None: ...
+```
+
+Called for every dictation before the text pipeline, as the first step of `App._run_command`: before the core's own
+commands ("nexus assistant ...", the OS/window commands). The one exception is "nexus flag" (only with
+`[experimental].flag_command`): the core handles it first and never offers it to the extensions. *text* is the
+transcript as spoken, trimmed; no dictionary, voice command, cleanup or translation has touched it. Return `None`
+when the phrase is not yours. Return `(label, opened)` to consume the dictation:
+
+| Answer | What the core does |
+|--------|--------------------|
+| `None` | Nothing; the next extension is asked, then the core's own commands, then the text is typed as usual |
+| `(label, True)` | Saves the dictation under *label* (e.g. `[nexus] open https://example.com`), types nothing |
+| `(label, False)` | The same, and plays the error cue: the command was recognised but could not be carried out |
+
+- **Order.** Extensions are asked in entry-point order; the first one that answers with a `(label, opened)` pair wins and the others are not called.
+- **Label.** A non-empty string; it is what the dashboard history shows for the dictation. The spoken text is not stored.
+- **Fallback.** An extension that raises, answers something that is not a `(non-empty str, bool)` pair, or is too slow is logged and skipped, and the dictation goes on and is typed: a broken extension never loses a dictation. That also means a hook that times out may already have carried out its action, and the phrase is then typed as well. So the hook must be quick: check the phrase, do an action that returns at once (`os.startfile` does), or start a thread of your own and answer `(label, True)`.
+- **Budget.** `on_command` and `on_dictation` share the 3 seconds of one dictation (`HOOK_TIMEOUT_S`): what `on_command` takes is missing from `on_dictation`. An extension that does not override `on_command` is not called and costs nothing.
+- **Startup.** While the extensions are still loading right after NexusVox starts, a dictation is not offered to any.
+- **Not for the phone.** A remote-mic dictation is inserted by the phone and never runs a command; the hook is not called.
+- **Speech.** Spoken commands must work in English and German; matching them is the extension's job.
+- Added without an `API_VERSION` change: an extension without the hook loads and behaves as before. With no extension installed, dictation is exactly as before.
+
+```python
+class OpenSite(Extension):
+    name = "open-site"
+    api_version = 1
+
+    def on_command(self, text, app):
+        if text.strip().lower().rstrip(".") not in {"open my site", "öffne meine seite"}:
+            return None
+        os.startfile("https://example.com")  # hands the link to the default browser and returns at once
+        return ("[open-site] https://example.com", True)
+```
+
+## Hook 9: protect parts of a dictation from the pipeline
+
+```python
+def protect(self, text: str, app: ActiveApp) -> tuple[str, Callable[[str], str | None]] | None: ...
+```
+
+For an extension that recognises something in the spoken words and must get it through voice commands, cleanup and
+translation unharmed (a trigger phrase that stands for a longer text, say). Return `None` to leave the dictation alone.
+Otherwise return `(protected, restore)`:
+
+1. The core runs the pipeline on *protected* instead of *text*: swap what you want shielded for a placeholder the
+   language model and the translator will not touch (a token without spaces, such as `⟦1⟧`, is safest).
+2. At the end of the pipeline the core calls `restore(text)` twice: on the text to type and on the text to save.
+   `restore` puts the real content back and returns the final text.
+
+```
+dictionary -> press enter -> protect -> voice commands -> cleanup -> translation -> restore -> on_dictation
+```
+
+- **When.** *text* is the transcript after the correction dictionary and a trailing "press enter" was split off; no
+  voice command, cleanup or translation has touched it. `on_command` has already declined it.
+- **Phone too.** The hook is also called for a phone (remote-mic) dictation, with an empty `ActiveApp` (`process` and
+  `title` are `""`), and `restore` runs there as well. `on_dictation` is not called for the phone.
+- **Restore.** `restore(text) -> str | None` must return the whole text. Return `None` (or raise) when it cannot, for
+  example because the translator dropped a placeholder: the core then processes the dictation again without any
+  `protect`, so a half-restored text is never typed or saved. That runs cleanup and translation a second time.
+- **Fallback.** An extension whose `protect` raises, is too slow or answers something that is not a
+  `(str, callable)` pair is logged and skipped; the dictation goes through unprotected. The core never loses a
+  dictation to this hook.
+- **Order.** Several extensions run in entry-point order and each sees the previous one's *protected* text; their
+  `restore` calls run in reverse order. An extension that does not override `protect` is not called and costs nothing.
+- **Budget.** `on_command`, `protect`, `restore` and `on_dictation` share the 3 seconds of one dictation
+  (`HOOK_TIMEOUT_S`). Time spent in cleanup and translation between `protect` and `restore` is not charged. Keep all
+  of them quick.
+- **Learning.** A dictation whose text `restore` changed is not offered to "learn from edits".
+- **Speech.** Matching spoken phrases must work in English and German; that is the extension's job.
+- Added without an `API_VERSION` change: an extension without the hook loads and behaves as before.
+
+```python
+from nexusvox.snippets import Snippet, expand_snippets, mark_snippets, placeholders_intact
+
+
+class Snippets(Extension):
+    name = "snippets"
+    api_version = 1
+
+    def protect(self, text, app):
+        marked, expansions = mark_snippets(text, self._snippets)
+        if not expansions:
+            return None
+        return marked, lambda out: expand_snippets(out, expansions) if placeholders_intact(out, expansions) else None
+```
+
+## Snippet matching helpers
+
+The core no longer stores or expands snippets; that is an extension's job (the Pro extension does it). The pure
+matcher stays importable from `nexusvox.snippets` for extensions that offer the same feature: `Snippet`,
+`SnippetOption`, `mark_snippets(text, snippets) -> (text, expansions)`, `expand_snippets(text, expansions)`,
+`placeholders_intact(text, expansions)` and `best_option(spoken, options)`. They are plain functions over plain
+data (no database, no I/O). Call `mark_snippets` in `protect` and `expand_snippets` in the `restore` it returns
+(Hook 9), so the placeholders pass through voice commands, cleanup and translation, also for a phone dictation. A
+database that still holds the `snippets` table of an earlier NexusVox keeps it untouched; the core never reads or
+writes it.

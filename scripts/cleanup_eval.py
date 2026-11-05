@@ -36,7 +36,6 @@ SAMPLES: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
     ("Okay the the function returns null when the list is is empty", ("null", "empty"), ()),
     ("Also ich ich glaube wir brauchen noch einen Test für den Fall", ("Test", "Fall"), ()),
     ("Mach es kürzer", ("kürzer",), ()),
-    ("Hallo Signatur \ue000 bis bald", ("\ue000",), ()),
     ("Yeah no I mean the build is broken because the the cache is stale", ("build", "cache", "stale"), ()),
     ("Kannst du bitte äh die Datei config.toml öffnen und den Port auf 8080 setzen", ("config.toml", "8080"), ("äh",)),
 ]

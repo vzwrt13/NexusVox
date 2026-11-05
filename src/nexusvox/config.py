@@ -420,13 +420,11 @@ class ExperimentalConfig:
 
     - ``os_commands``: Nexus OS commands (voice window management) and their Settings card.
     - ``flag_command``: the "nexus flag" voice command and the Edit tab ("Flagged Transcriptions").
-    - ``github_snippets``: the Snippets button "Fill from GitHub" and its endpoint.
     - ``dev_tab``: the developer benchmark page of the dashboard.
     """
 
     os_commands: bool = False
     flag_command: bool = False
-    github_snippets: bool = False
     dev_tab: bool = False
 
 
@@ -858,7 +856,6 @@ def load_config(path: Path | None = None) -> Config:
         experimental=ExperimentalConfig(
             os_commands=_experimental_flag(experimental_data, "os_commands"),
             flag_command=_experimental_flag(experimental_data, "flag_command"),
-            github_snippets=_experimental_flag(experimental_data, "github_snippets"),
             dev_tab=_experimental_flag(experimental_data, "dev_tab"),
         ),
         voice_commands=vc_config,
@@ -980,7 +977,6 @@ def save_config(config: Config, path: Path | None = None) -> None:
             "[experimental]",
             f"os_commands = {'true' if config.experimental.os_commands else 'false'}",
             f"flag_command = {'true' if config.experimental.flag_command else 'false'}",
-            f"github_snippets = {'true' if config.experimental.github_snippets else 'false'}",
             f"dev_tab = {'true' if config.experimental.dev_tab else 'false'}",
             "",
             "[voice_commands]",

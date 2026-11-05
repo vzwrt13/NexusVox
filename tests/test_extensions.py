@@ -873,8 +873,10 @@ def test_a_failing_dictation_hook_falls_back_to_the_text_before_it():
 
 class Slow(V1Extension):
     name = "slow"
+    calls = 0
 
     def on_dictation(self, text, app):
+        self.calls += 1
         time.sleep(0.5)
         return "too late"
 
@@ -890,12 +892,15 @@ def test_the_whole_chain_shares_one_deadline_and_a_stuck_hook_is_not_called_agai
     monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.1)
     other = Slow()
     other.name = "slow2"
-    registry = _registry(Slow(), other, Suffix("b", "!"))
+    first = Slow()
+    registry = _registry(first, other, Suffix("b", "!"))
     started = time.monotonic()
     assert registry.dictation("hi", APP) == "hi"  # the first one used the deadline up
     assert time.monotonic() - started < 0.4
-    # The first hook is still busy: it is skipped at once, and the fast one now answers.
-    assert registry.dictation("hi", APP) == "hi"  # "slow2" runs next and uses the budget
+    # The first hook is still busy: it is not called again. (Whether "slow2" or the fast hook ends up
+    # answering depends on how much of the budget the coarse Windows timer left, so only the rule is checked.)
+    registry.dictation("hi", APP)
+    assert (first.calls, other.calls) == (1, 1)
     time.sleep(0.6)  # the slow hooks have ended
     assert registry._stuck["slow", "on_dictation"].is_alive() is False
 
@@ -1060,3 +1065,257 @@ def test_a_pending_state_does_not_leak_to_another_upload():
     reg = _summary_registry(lambda tid: {"pending": "x"} if tid == 1 else True)
     assert reg.unavailable_exports(1) == {"gated-md": {"pending": "x"}}
     assert reg.unavailable_exports(2) == {}
+
+
+# -- Hook: on_command (consume a dictation as a command) -------------------------------------------
+
+
+class Opens(V1Extension):
+    def __init__(self, name, answers):
+        self.name = name
+        self.answers = answers
+        self.seen: list = []
+
+    def on_command(self, text, app):
+        self.seen.append((text, app))
+        return self.answers.get(text)
+
+
+def test_command_without_an_extension_takes_nothing():
+    assert ExtensionRegistry().command("nexus open my site", APP) is None
+
+
+def test_command_returns_the_label_and_whether_it_opened():
+    one = Opens(
+        "one", {"nexus open my site": ("[nexus] open https://a", True), "nexus öffne kaputt": ("[nexus] x", False)}
+    )
+    registry = _registry(one)
+    assert registry.command("nexus open my site", APP) == ("[nexus] open https://a", True)
+    assert one.seen == [("nexus open my site", APP)]
+    assert registry.command("nexus öffne kaputt", APP) == ("[nexus] x", False)  # recognised, but it failed
+    assert registry.command("hello there", APP) is None
+
+
+def test_the_first_extension_that_takes_a_command_wins():
+    one = Opens("one", {"open a": ("[one] a", True)})
+    two = Opens("two", {"open a": ("[two] a", True), "open b": ("[two] b", True)})
+    registry = _registry(one, two)
+    assert registry.command("open a", APP) == ("[one] a", True)
+    assert two.seen == []  # the first one handled it
+    assert registry.command("open b", APP) == ("[two] b", True)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["a string", ("label",), ("label", "yes"), ("", True), ("  ", False), (1, True), ["label", True]],
+    ids=["str", "short", "not-bool", "empty-label", "blank-label", "label-not-str", "list"],
+)
+def test_a_malformed_command_answer_is_ignored_and_the_next_extension_is_asked(answer, caplog):
+    bad = Opens("bad", {"open a": answer})
+    good = Opens("good", {"open a": ("[good] a", True)})
+    assert _registry(bad, good).command("open a", APP) == ("[good] a", True)
+    assert "not a (label, opened) pair" in caplog.text
+
+
+def test_a_failing_or_slow_command_hook_is_skipped(monkeypatch):
+    class Boom(V1Extension):
+        name = "boom"
+
+        def on_command(self, text, app):
+            raise RuntimeError("nope")
+
+    class Slow(V1Extension):
+        name = "slow"
+
+        def on_command(self, text, app):
+            time.sleep(0.3)
+            return ("late", True)
+
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.05)
+    assert _registry(Boom()).command("open a", APP) is None
+    assert _registry(Slow()).command("open a", APP) is None
+
+
+def test_an_extension_without_the_command_hook_loads_and_takes_nothing():
+    class Plain(V1Extension):
+        name = "plain"
+
+    assert _registry(Plain()).command("open a", APP) is None
+
+
+def test_has_command_hook_is_true_only_for_an_extension_that_overrides_it():
+    class Plain(V1Extension):
+        name = "plain"
+
+    assert _registry(Plain()).has_command_hook() is False
+    assert ExtensionRegistry().has_command_hook() is False
+    assert _registry(Plain(), Opens("opens", {})).has_command_hook() is True
+
+
+def test_command_skips_extensions_that_do_not_override_it(monkeypatch):
+    class Plain(V1Extension):
+        name = "plain"
+
+    real = ext._start_call
+    started = []
+    monkeypatch.setattr(ext, "_start_call", lambda fn, *args: started.append(fn) or real(fn, *args))
+    one = Opens("opens", {"open a": ("[opens] a", True)})
+    assert _registry(Plain(), one).command("open a", APP) == ("[opens] a", True)
+    assert len(started) == 1  # no helper thread for the extension without the hook
+
+
+def test_a_malformed_command_answer_never_logs_the_dictated_text(caplog):
+    secret = "my private address Hauptstrasse 1"
+    bad = Opens("bad", {"open a": (secret, "yes")})
+    assert _registry(bad).command("open a", APP) is None
+    assert secret not in caplog.text and "tuple" in caplog.text
+
+
+def test_command_and_dictation_share_the_budget_the_caller_passes(monkeypatch):
+    suffix = Suffix("b", "!")
+    registry = _registry(suffix)
+    assert registry.dictation("hi", APP, budget_s=0) == "hi" and suffix.seen == []  # nothing left after on_command
+    assert registry.dictation("hi", APP, budget_s=1.0) == "hi!"
+
+
+# -- Hook: protect (shield parts of a dictation from the pipeline, restore them at its end) -------------------
+
+
+class Protects(V1Extension):
+    """Swaps `trigger` for `token`; its restore puts `expansion` back."""
+
+    def __init__(self, name, trigger="my address", token="⟦1⟧", expansion="Hauptstrasse 1"):
+        self.name = name
+        self.trigger, self.token, self.expansion = trigger, token, expansion
+        self.seen: list = []
+        self.restored: list = []
+
+    def protect(self, text, app):
+        self.seen.append((text, app))
+        if self.trigger not in text:
+            return None
+        return text.replace(self.trigger, self.token), self.restore
+
+    def restore(self, text):
+        self.restored.append(text)
+        return text.replace(self.token, self.expansion)
+
+
+def test_protect_without_an_extension_changes_nothing():
+    assert ExtensionRegistry().protect("my address", APP) is None
+    assert ExtensionRegistry().has_protect_hook() is False
+
+
+def test_protect_swaps_the_text_and_restore_puts_it_back():
+    one = Protects("one")
+    protected, restore = _registry(one).protect("send it to my address now", APP)
+    assert protected == "send it to ⟦1⟧ now"
+    assert one.seen == [("send it to my address now", APP)]
+    assert restore("Send it to ⟦1⟧ now.") == "Send it to Hauptstrasse 1 now."
+
+
+def test_protect_answers_none_when_no_extension_shields_anything():
+    assert _registry(Protects("one")).protect("hello there", APP) is None
+
+
+def test_protect_chains_in_order_and_restores_in_reverse():
+    one = Protects("one", "my address", "⟦1⟧", "Hauptstrasse 1")
+    two = Protects("two", "my mail", "⟦2⟧", "me@example.com")
+    protected, restore = _registry(one, two).protect("my address and my mail", APP)
+    assert protected == "⟦1⟧ and ⟦2⟧"
+    assert two.seen[0][0] == "⟦1⟧ and my mail"  # sees the previous extension's protected text
+    assert restore("⟦1⟧ and ⟦2⟧") == "Hauptstrasse 1 and me@example.com"
+    assert (two.restored, one.restored) == (["⟦1⟧ and ⟦2⟧"], ["⟦1⟧ and me@example.com"])  # two first, then one
+
+
+@pytest.mark.parametrize(
+    "answer",
+    ["text", ("text",), ("text", "not callable"), (1, print), ("", print), ["text", print]],
+    ids=["str", "short", "not-callable", "text-not-str", "emptied", "list"],
+)
+def test_a_malformed_protect_answer_is_ignored_and_the_next_extension_goes_on(answer, caplog):
+    class Bad(V1Extension):
+        name = "bad"
+
+        def protect(self, text, app):
+            return answer
+
+    protected, restore = _registry(Bad(), Protects("good")).protect("my address", APP)
+    assert protected == "⟦1⟧" and "not a (text, restore) pair" in caplog.text
+
+
+def test_a_failing_or_slow_protect_hook_is_skipped(monkeypatch):
+    class Boom(V1Extension):
+        name = "boom"
+
+        def protect(self, text, app):
+            raise RuntimeError("nope")
+
+    class Slow(V1Extension):
+        name = "slow"
+
+        def protect(self, text, app):
+            time.sleep(0.3)
+            return "late", print
+
+    monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.05)
+    assert _registry(Boom()).protect("my address", APP) is None
+    assert _registry(Slow()).protect("my address", APP) is None
+
+
+def test_protect_skips_extensions_that_do_not_override_it(monkeypatch):
+    class Plain(V1Extension):
+        name = "plain"
+
+    assert _registry(Plain()).has_protect_hook() is False
+    assert _registry(Plain(), Protects("p")).has_protect_hook() is True
+    real = ext._start_call
+    started = []
+    monkeypatch.setattr(ext, "_start_call", lambda fn, *args: started.append(fn) or real(fn, *args))
+    assert _registry(Plain(), Protects("p")).protect("my address", APP) is not None
+    assert len(started) == 1  # no helper thread for the extension without the hook
+
+
+@pytest.mark.parametrize("answer", [None, 5, ""], ids=["none", "not-text", "emptied"])
+def test_a_restore_that_cannot_restore_answers_none_so_nothing_half_restored_is_typed(answer):
+    class Fussy(V1Extension):
+        name = "fussy"
+
+        def protect(self, text, app):
+            return "⟦1⟧", lambda out: answer
+
+    _, restore = _registry(Fussy()).protect("my address", APP)
+    assert restore("⟦1⟧") is None
+
+
+def test_a_raising_or_slow_restore_answers_none():
+    class Boom(V1Extension):
+        name = "boom"
+
+        def protect(self, text, app):
+            return "⟦1⟧", self.restore
+
+        def restore(self, text):
+            raise RuntimeError("nope")
+
+    class Slow(Boom):
+        name = "slow"
+
+        def restore(self, text):
+            time.sleep(0.3)
+            return "late"
+
+    _, restore = _registry(Boom()).protect("my address", APP)
+    assert restore("⟦1⟧") is None
+    _, restore = _registry(Slow()).protect("my address", APP)
+    assert restore("⟦1⟧", budget_s=0.05) is None
+    assert restore("⟦1⟧", budget_s=0.05) is None  # still stuck: skipped at once
+
+
+def test_protect_and_restore_each_take_the_budget_the_caller_passes():
+    one = Protects("one")
+    registry = _registry(one)
+    assert registry.protect("my address", APP, budget_s=0) is None and one.seen == []
+    _, restore = registry.protect("my address", APP, budget_s=1.0)
+    assert restore("⟦1⟧", budget_s=0) is None and one.restored == []
+    assert restore("⟦1⟧", budget_s=1.0) == "Hauptstrasse 1"

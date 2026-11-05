@@ -43,17 +43,27 @@ def run_js(body: str):
 
 
 def test_unreachable_shows_red_hint_with_download_link():
-    out = run_js(f"const e = el(); renderOllamaHint(e, {DOWN});"
-                 "console.log(JSON.stringify([e.hidden, e._c.has('down'), e.textContent, e.children]));")
+    out = run_js(
+        f"const e = el(); renderOllamaHint(e, {DOWN});"
+        "console.log(JSON.stringify([e.hidden, e._c.has('down'), e.textContent, e.children]));"
+    )
     assert out[0] is False and out[1] is True
     assert "Ollama is not running" in out[2]
-    assert out[3] == [{"href": "https://ollama.com/download", "target": "_blank",
-                       "rel": "noopener noreferrer", "textContent": "ollama.com/download"}]
+    assert out[3] == [
+        {
+            "href": "https://ollama.com/download",
+            "target": "_blank",
+            "rel": "noopener noreferrer",
+            "textContent": "ollama.com/download",
+        }
+    ]
 
 
 def test_reachable_without_model_points_to_settings_models():
-    out = run_js(f"const e = el(); renderOllamaHint(e, {NO_MODEL});"
-                 "console.log(JSON.stringify([e.hidden, e.textContent, e.children.length]));")
+    out = run_js(
+        f"const e = el(); renderOllamaHint(e, {NO_MODEL});"
+        "console.log(JSON.stringify([e.hidden, e.textContent, e.children.length]));"
+    )
     assert out[0] is False
     assert "gemma4:e4b" in out[1] and "Settings > Models" in out[1]
     assert out[2] == 0

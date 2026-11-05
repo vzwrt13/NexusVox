@@ -1056,6 +1056,8 @@ class NexusVoxApp:
             try:
                 await asyncio.get_running_loop().run_in_executor(None, inject_text, rewritten, 0)
                 pasted = True
+                # The field now holds text the model wrote: a running watch must not count it as the user's fix.
+                self._edit_watcher.cancel()
             except ClipboardError as exc:
                 logger.warning("Polish: could not paste the reply (%s); the paste key pastes it", exc)
                 self._cue(beep_error, ERROR)

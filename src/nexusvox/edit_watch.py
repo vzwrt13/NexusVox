@@ -82,6 +82,7 @@ OUTCOMES = {
     "no_replacement": "watched, nothing learned: no word was replaced by another",
     "lost_field": "watched, nothing learned: the field became unreadable before an edit was seen",
     "processed": "skipped: auto cleanup or translation changed the text",
+    "polished": "skipped: Polish rewrote the text",
     "clipboard": "skipped: the paste failed",
     "terminal": "skipped: terminals are not watched",
     "password": "skipped: password field",
@@ -356,6 +357,7 @@ class _Watch:
     injected: str
     window_s: float
     spoken: str | None
+    seq: int = 0
 
 
 class EditWatcher:
@@ -363,7 +365,8 @@ class EditWatcher:
 
     `watch()` returns at once. A new `watch()` ends the running one early (its
     result still counts), because the next dictation usually means the user is
-    done fixing the previous one.
+    done fixing the previous one. `cancel()` ends it without judging, when something
+    other than the user rewrote the field (Polish).
     """
 
     def __init__(
@@ -382,12 +385,30 @@ class EditWatcher:
         self._lock = threading.Lock()
         self._counts: dict[str, int] = {}
         self._last: tuple[str, float] | None = None  # outcome, time.time()
+        self._seq = 0  # number of the latest watch handed in
+        self._cancelled_upto = 0  # every watch up to this number was cancelled
 
     def watch(self, injected: str, window_s: float, spoken: str | None = None) -> None:
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, name="edit-watch", daemon=True)
             self._thread.start()
-        self._queue.put(_Watch(injected, window_s, spoken))
+        with self._lock:
+            self._seq += 1
+            seq = self._seq
+        self._queue.put(_Watch(injected, window_s, spoken, seq))
+
+    def cancel(self) -> None:
+        """End every watch handed in so far without judging it (it is recorded as `polished`).
+
+        Called when Polish replaced text in the field: the rewrite is not the user's correction of the
+        dictation. A watch handed in later is not affected; with no watch running nothing happens.
+        """
+        with self._lock:
+            self._cancelled_upto = self._seq
+
+    def _is_cancelled(self, item: _Watch) -> bool:
+        with self._lock:
+            return item.seq <= self._cancelled_upto
 
     def skip(self, outcome: str) -> None:
         """Record a paste the app does not hand to the watcher (a key of `OUTCOMES`)."""
@@ -437,6 +458,8 @@ class EditWatcher:
     def _watch_one(self, item: _Watch) -> _Watch | None:
         """Watch one paste; returns the next queued item (or None to stop)."""
         time.sleep(_SETTLE_S)
+        if self._is_cancelled(item):
+            return self._cancelled(item)
         announced = False
 
         def announce_dead(dead: TextField) -> None:
@@ -467,6 +490,8 @@ class EditWatcher:
         except Exception:
             logger.exception("Learn from edits: reading the focused field failed")
             field, before, skip = None, None, "unreadable"
+        if self._is_cancelled(item):
+            return self._cancelled(item)
         if field is None or before is None:
             self._record(skip)
             return self._queue.get()
@@ -476,15 +501,19 @@ class EditWatcher:
         ended = "window"
 
         def must_stop() -> bool:
-            return time.monotonic() >= deadline or not self._queue.empty()
+            return time.monotonic() >= deadline or not self._queue.empty() or self._is_cancelled(item)
 
         while time.monotonic() < deadline:
+            if self._is_cancelled(item):
+                return self._cancelled(item)
             try:
                 nxt = self._queue.get(timeout=_POLL_S)
                 ended = "next_dictation"
                 break
             except queue.Empty:
                 pass
+            if self._is_cancelled(item):
+                return self._cancelled(item)
             current = field.read()
             if current is None:
                 # A browser rebuilds its address bar or page: the element we hold is dead, a new one may not be.
@@ -494,6 +523,8 @@ class EditWatcher:
                 except FieldSkipped:  # focus is in a password field or a terminal now
                     refreshed = None
                 if refreshed is None:
+                    if self._is_cancelled(item):
+                        return self._cancelled(item)
                     if must_stop():
                         continue  # the window is over or the next dictation waits: the loop says which
                     ended = "unreadable"
@@ -503,7 +534,14 @@ class EditWatcher:
             # that is where the user's fixes are. Without an edit it equals `before`, so nothing is learned.
             if len(current) <= MAX_FIELD_CHARS and extract_edit(before, item.injected, current) is not None:
                 after = current
+        if self._is_cancelled(item):
+            return self._cancelled(item, nxt)
         self._report(before, item, after, ended)
+        return self._queue.get() if nxt is False else nxt
+
+    def _cancelled(self, item: _Watch, nxt: _Watch | None | bool = False) -> _Watch | None:
+        """Record a cancelled watch without judging it; returns the next queued item (or None to stop)."""
+        self._record("polished", "the watch ended without judging the field")
         return self._queue.get() if nxt is False else nxt
 
     def _refetch(

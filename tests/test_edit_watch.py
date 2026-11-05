@@ -676,3 +676,73 @@ def test_watcher_survives_a_failing_store():
     watcher = EditWatcher(lambda s: None, lambda: [], on_outcome=broken)
     watcher.skip("terminal")
     assert watcher.status()["counts"] == {"terminal": 1}
+
+
+# --- cancel (Polish rewrote the field) ---
+
+
+def _wait_for_outcome(watcher):
+    deadline = time.monotonic() + 2
+    while not watcher.status()["counts"] and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+
+@pytest.mark.parametrize(
+    ("injected", "polished"),
+    [
+        ("I use nexus fox daily", "I use NexusVox daily"),  # one word: would be learned if the user did it
+        ("Ich nutze nexus fox heute", "Ich nutze NexusVox heute"),
+    ],
+)
+def test_a_polish_inside_the_window_is_not_learned(injected, polished, caplog):
+    suggestions = []
+    field = FakeField([injected, polished])
+    watcher = EditWatcher(suggestions.extend, lambda: [], field_factory=lambda: field)
+    with caplog.at_level("INFO", logger=edit_watch.logger.name):
+        watcher.watch(injected, 5)
+        time.sleep(0.1)  # the watch is running
+        watcher.cancel()
+        _wait_for_outcome(watcher)
+        watcher.stop()
+    assert suggestions == []
+    assert watcher.status()["counts"] == {"polished": 1}
+    assert watcher.status()["last"]["message"] == OUTCOMES["polished"]
+    assert any(OUTCOMES["polished"] in r.getMessage() for r in caplog.records)
+
+
+def test_a_cancel_before_the_worker_picked_the_watch_up_still_ends_it(monkeypatch):
+    monkeypatch.setattr(edit_watch, "_SETTLE_S", 0.2)
+    field = FakeField(["I use nexus fox", "I use NexusVox"])
+    watcher = EditWatcher(lambda s: None, lambda: [], field_factory=lambda: field)
+    watcher.watch("I use nexus fox", 5)
+    watcher.cancel()
+    _wait_for_outcome(watcher)
+    watcher.stop()
+    assert watcher.status()["counts"] == {"polished": 1}
+
+
+def test_a_cancel_does_not_touch_a_later_watch():
+    got = []
+    field = FakeField(["I use nexus fox", "I use NexusVox"])
+    watcher = EditWatcher(got.extend, lambda: [], field_factory=lambda: field)
+    watcher.cancel()  # nothing running
+    watcher.watch("I use nexus fox", 0.2)
+    _wait_for_outcome(watcher)
+    watcher.stop()
+    assert watcher.status()["counts"] == {"suggested": 1}
+    assert got == [DictionaryEntry(wrong="nexus fox", right="NexusVox")]
+
+
+def test_a_dictation_after_the_polish_is_watched_normally():
+    got = []
+    fields = iter([FakeField(["first dictation text"]), FakeField(["I use nexus fox", "I use NexusVox"])])
+    watcher = EditWatcher(got.extend, lambda: [], field_factory=lambda: next(fields))
+    watcher.watch("first dictation text", 5)
+    time.sleep(0.1)
+    watcher.cancel()
+    watcher.watch("I use nexus fox", 0.2)
+    deadline = time.monotonic() + 2
+    while watcher.status()["counts"].get("suggested") is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    watcher.stop()
+    assert watcher.status()["counts"] == {"polished": 1, "suggested": 1}

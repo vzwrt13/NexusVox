@@ -133,6 +133,7 @@ def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows
     app._config = MagicMock(injection_delay_ms=0)
     app._last_typed = ""
     app._save_command = MagicMock()
+    app._edit_watcher = MagicMock()
     app._db = MagicMock(get_polish_presets=MagicMock(return_value=list(presets)))
     calls = {"pasted": [], "beeps": []}
 
@@ -783,3 +784,21 @@ def test_toggle_start_cue_comes_after_the_delay(monkeypatch):
     app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.2, mode="toggle")
     _run_cycle(app)
     assert [state for state, _ in cues].count("recording") == 1
+
+
+def test_polish_that_pasted_ends_the_edit_watch(monkeypatch):
+    app, _ = _polish_app(monkeypatch, "hi leute", "Sehr geehrte Damen und Herren")
+    asyncio.run(app._polish_selection("", MagicMock()))
+    app._edit_watcher.cancel.assert_called_once_with()
+
+
+def test_polish_that_changed_nothing_leaves_the_edit_watch_alone(monkeypatch):
+    from nexusvox.llm import LlmError
+
+    app, _ = _polish_app(monkeypatch, "hi leute", LlmError("refused"))
+    asyncio.run(app._polish_selection("", MagicMock()))
+    app, _ = _polish_app(monkeypatch, "hi leute", "Hallo Leute", windows=(1, 2))  # focus moved: not pasted
+    asyncio.run(app._polish_selection("", MagicMock()))
+    app, _ = _polish_app(monkeypatch, "", "unused")  # nothing selected
+    asyncio.run(app._polish_selection("", MagicMock()))
+    assert app._edit_watcher.cancel.call_count == 0

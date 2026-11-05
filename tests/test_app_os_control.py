@@ -716,13 +716,13 @@ def test_offline_hold_gives_the_error_cue_at_once_not_after_the_release(monkeypa
 # -- hold mode: the start cue waits, an immediate discard stays silent -----------------
 
 
-def _cue_app(monkeypatch, *, cancelled: bool, hold_s: float):
+def _cue_app(monkeypatch, *, cancelled: bool, hold_s: float, mode: str = "hold"):
     """A hold cycle whose recording ends `hold_s` after it starts; returns the app and the cues it showed."""
     app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: 0.0)
     cues: list[tuple] = []
     app._cue = lambda beep, state: cues.append((state, beep))
     app._hotkey.active = True
-    app._hotkey.mode = "hold"
+    app._hotkey.mode = mode
     app._stop_info = None
 
     def start():
@@ -749,5 +749,37 @@ def test_hold_start_cue_comes_after_the_delay(monkeypatch):
 
     monkeypatch.setattr(app_module, "START_CUE_DELAY_S", 0.02)
     app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.2)
+    _run_cycle(app)
+    assert [state for state, _ in cues].count("recording") == 1
+
+
+def test_hold_tap_shorter_than_the_delay_still_gets_its_start_cue(monkeypatch):
+    """A normal release before the delay: the start cue is shown right before the stop cue, as a pair."""
+    app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.01)
+    _run_cycle(app)
+    states = [state for state, _ in cues]
+    assert states.index("recording") < states.index("processing")
+    assert states.count("recording") == 1
+
+
+def test_hold_discard_leaves_the_tray_untouched(monkeypatch):
+    app, _ = _cue_app(monkeypatch, cancelled=True, hold_s=0.01)
+    _run_cycle(app)
+    assert all(call.args != (True,) for call in app._tray.set_active.call_args_list)
+
+
+def test_toggle_start_cue_is_silent_when_the_recording_is_discarded_at_once(monkeypatch):
+    app, cues = _cue_app(monkeypatch, cancelled=True, hold_s=0.01, mode="toggle")
+    _run_cycle(app)
+    assert [state for state, _ in cues if state == "recording"] == []
+    app._transcriber.finish.assert_not_called()
+    assert all(call.args != (True,) for call in app._tray.set_active.call_args_list)
+
+
+def test_toggle_start_cue_comes_after_the_delay(monkeypatch):
+    import nexusvox.app as app_module
+
+    monkeypatch.setattr(app_module, "START_CUE_DELAY_S", 0.02)
+    app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.2, mode="toggle")
     _run_cycle(app)
     assert [state for state, _ in cues].count("recording") == 1

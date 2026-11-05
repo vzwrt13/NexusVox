@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip("pynput.keyboard", reason="pynput needs a display backend", exc_type=ImportError)
 
 from nexusvox.config import HotkeyConfig, OsControlConfig  # noqa: E402
-from nexusvox.hotkey import PASTE_LAST, POLISH, HotkeyListener, describe_hotkey  # noqa: E402
+from nexusvox.hotkey import FOREIGN_KEY_WINDOW_S, PASTE_LAST, POLISH, HotkeyListener, describe_hotkey  # noqa: E402
 
 LCTRL, RCTRL, LSHIFT, LALT = 0xA2, 0xA3, 0xA0, 0xA4
 VK_A, VK_B, VK_F9 = ord("A"), ord("B"), 0x78
@@ -21,7 +21,9 @@ def _listener(mode: str, modifiers=("ctrl", "alt"), key: str = ""):
     events: list[str] = []
     config = HotkeyConfig(modifiers=list(modifiers), key=key, mode=mode)
     # grace_s=0: a Toggle stop chord finishes at once (the grace window has its own tests below)
-    hk = HotkeyListener(config, lambda: events.append("start"), lambda: events.append("stop"), grace_s=0)
+    hk = HotkeyListener(
+        config, lambda: events.append("start"), lambda: events.append("stop"), grace_s=0, physical_modifiers=set
+    )
     return hk, events, config
 
 
@@ -256,6 +258,7 @@ def _command_listener(
         on_cancel=lambda: events.append("cancel"),
         grace_s=grace_s,
         timer_factory=FakeTimer,
+        physical_modifiers=set,
     )
     return hk, events
 
@@ -663,9 +666,11 @@ def test_escape_during_the_grace_window_cancels_the_pending_stop():
 
 def test_escape_inside_an_os_shortcut_is_not_a_cancel():
     for held in ({"ctrl", "shift"}, {"alt"}, {"ctrl"}):
-        hk, events = _toggle(physical=held)
+        physical: set[str] = set()
+        hk, events = _toggle(physical=physical)
         _press_combo(hk)
         _release_combo(hk)
+        physical |= held  # pressed after the recording started
         assert hk._handle(VK_ESC, True) is False  # Ctrl+Shift+Esc, Alt+Esc, Ctrl+Esc reach Windows
         hk._handle(VK_ESC, False)
         assert events == ["start"] and hk.active
@@ -676,9 +681,11 @@ def test_escape_in_hold_ignores_the_binding_modifiers_but_not_others():
     hk._config.mode = "hold"
     _press_combo(hk)
     assert hk._handle(VK_ESC, True) is True and events == ["start", "cancel"]
-    hk2, events2 = _toggle(physical={"ctrl", "alt", "shift"})
+    physical = {"ctrl", "alt"}
+    hk2, events2 = _toggle(physical=physical)
     hk2._config.mode = "hold"
     _press_combo(hk2)
+    physical.add("shift")  # Ctrl+Shift+Alt+Esc: another shortcut
     assert hk2._handle(VK_ESC, True) is False and events2 == ["start"]
 
 
@@ -734,6 +741,7 @@ def _win_listener(mode: str = "hold", key: str = ""):
         on_cancel=lambda: events.append("cancel"),
         grace_s=0,
         timer_factory=FakeTimer,
+        physical_modifiers=set,
     )
     return hk, events
 
@@ -843,14 +851,67 @@ def test_foreign_key_before_the_chord_or_after_the_hold_is_plain_typing():
     assert events == ["start", "stop"]
 
 
-def test_toggle_mode_ignores_foreign_keys():
+@pytest.mark.parametrize("vk", [VK_LEFT, VK_RIGHT])
+def test_toggle_virtual_desktop_switch_never_records(vk):
+    """Ctrl+Win+Left/Right in Toggle: the arrow joins the start chord and discards, and is not swallowed."""
+    hk, events = _win_listener("toggle")
+    _hold_ctrl_win(hk)
+    assert hk._handle(vk, True) is False
+    assert events == ["start", "cancel"] and not hk.active
+
+
+@pytest.mark.parametrize("vk", [LALT, VK_A])
+def test_toggle_extra_modifier_or_letter_discards_while_the_chord_is_held(vk):
+    hk, events = _win_listener("toggle")
+    _hold_ctrl_win(hk)
+    assert hk._handle(vk, True) is False
+    hk._handle(vk, False)
+    hk._handle(LWIN, False)
+    hk._handle(LCTRL, False)
+    assert events == ["start", "cancel"]
+
+
+def test_toggle_typing_after_the_chord_was_released_keeps_the_recording():
     hk, events = _win_listener("toggle")
     _hold_ctrl_win(hk)
     hk._handle(LWIN, False)
     hk._handle(LCTRL, False)
-    assert hk._handle(VK_A, True) is False
-    hk._handle(LALT, True)
+    for vk in (VK_A, VK_LEFT, LALT):
+        assert hk._handle(vk, True) is False
+        hk._handle(vk, False)
     assert events == ["start"] and hk.active
+
+
+def test_toggle_markers_binding_key_and_stop_keep_their_meaning():
+    hk, events = _win_listener("toggle")
+    _hold_ctrl_win(hk)
+    assert hk._handle(ord("V"), True) is True  # marker in the starting hold: only marks
+    assert hk.mark == PASTE_LAST and events == ["start"]
+    hk._handle(ord("V"), False)
+    hk._handle(LWIN, False)
+    hk._handle(LCTRL, False)
+    hk._handle(LCTRL, True)
+    hk._handle(LWIN, True)  # stop chord
+    assert events == ["start", "stop"]
+
+
+def test_toggle_stop_chord_is_not_refused_by_a_held_extra_modifier():
+    physical: set[str] = set()
+    config = HotkeyConfig(modifiers=["ctrl", "win"], key="", mode="toggle")
+    events: list[str] = []
+    hk = HotkeyListener(
+        config,
+        lambda: events.append("start"),
+        lambda: events.append("stop"),
+        grace_s=0,
+        physical_modifiers=lambda: set(physical),
+    )
+    _hold_ctrl_win(hk)
+    hk._handle(LWIN, False)
+    hk._handle(LCTRL, False)
+    physical.add("alt")
+    _hold_ctrl_win(hk)
+    assert events == ["start", "stop"]
 
 
 def test_next_recording_works_after_a_discard():
@@ -862,3 +923,69 @@ def test_next_recording_works_after_a_discard():
     hk._handle(LCTRL, False)
     _hold_ctrl_win(hk)
     assert events == ["start", "cancel", "start"] and hk.active
+
+
+@pytest.mark.parametrize("vk", [0xAF, 0xB3, 0xA6, 0xE7, 0xE8, 0xFF, 0x01])
+def test_non_typing_keys_do_not_discard(vk):
+    """Volume, media, browser keys, VK_PACKET, the mask key and mouse buttons are not part of a shortcut."""
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    hk._handle(vk, True)
+    assert events == ["start"] and hk.active
+
+
+def test_injected_keys_do_not_discard():
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    assert hk._handle(VK_A, True, injected=True) is False
+    assert hk._handle(LALT, True, injected=True) is False
+    assert events == ["start"] and hk.active
+    hk._handle(VK_A, True)  # a real key still does
+    assert events == ["start", "cancel"]
+
+
+def test_a_foreign_key_after_the_window_is_plain_typing():
+    hk, events = _win_listener()
+    _hold_ctrl_win(hk)
+    hk._active_since -= FOREIGN_KEY_WINDOW_S + 1  # the dictation has been running for a while
+    assert hk._handle(VK_A, True) is False
+    assert events == ["start"] and hk.active
+
+
+def test_chord_with_an_extra_modifier_already_down_does_not_start():
+    events: list[str] = []
+    config = HotkeyConfig(modifiers=["ctrl", "win"], key="", mode="hold")
+    hk = HotkeyListener(
+        config,
+        lambda: events.append("start"),
+        lambda: events.append("stop"),
+        on_cancel=lambda: events.append("cancel"),
+        physical_modifiers=lambda: {"alt", "ctrl", "win"},
+    )
+    _hold_ctrl_win(hk)
+    assert events == []
+
+
+def test_key_binding_with_an_extra_modifier_down_does_not_start_or_swallow():
+    events: list[str] = []
+    config = HotkeyConfig(modifiers=["ctrl", "shift"], key="A", mode="hold")
+    hk = HotkeyListener(
+        config,
+        lambda: events.append("start"),
+        lambda: events.append("stop"),
+        physical_modifiers=lambda: {"alt", "ctrl", "shift"},
+    )
+    hk._handle(LCTRL, True)
+    hk._handle(LSHIFT, True)
+    assert hk._handle(VK_A, True) is False
+    assert events == []
+
+
+def test_toggle_chord_with_an_extra_modifier_already_down_does_not_start():
+    events: list[str] = []
+    config = HotkeyConfig(modifiers=["ctrl", "win"], key="", mode="toggle")
+    hk = HotkeyListener(
+        config, lambda: events.append("start"), lambda: events.append("stop"), physical_modifiers=lambda: {"alt"}
+    )
+    _hold_ctrl_win(hk)
+    assert events == []

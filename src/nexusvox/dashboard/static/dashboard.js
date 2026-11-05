@@ -35,6 +35,16 @@ function setStatus(el, state, text) {
   if (text !== undefined) el.textContent = text;
 }
 
+// ── Alt hotkey hint ──────────────────────────────────────────────────
+// Yellow ("works with a caveat"): Alt in a hotkey can open the menu bar of the focused app.
+const ALT_HOTKEY_HINT = "Alt in a hotkey can open the menu bar in apps such as Notepad. Pasted text can then get lost.";
+function renderAltHint(el, modifiers) {
+  const hasAlt = (modifiers || []).includes("alt");
+  setStatus(el, hasAlt ? "warn" : undefined, hasAlt ? ALT_HOTKEY_HINT : "");
+  el.hidden = !hasAlt;
+}
+// ── end of Alt hotkey hint ───────────────────────────────────────────
+
 // ── Globals ──────────────────────────────────────────────────────────
 // Chart colors come from the :root variables in style.css, so the stylesheet is the single source
 // of the theme. The fallbacks only matter when the stylesheet failed to load.
@@ -566,6 +576,7 @@ llmPullCancel.addEventListener("click", () => fetch("/api/settings/llm-pull", { 
 
 const hotkeyRecordBtn = document.getElementById("hotkey-record-btn");
 const hotkeyStatus = document.getElementById("hotkey-status");
+const hotkeyAltHint = document.getElementById("hotkey-alt-hint");
 const hotkeyResetBtn = document.getElementById("hotkey-reset-btn");
 const hotkeyKeycaps = document.getElementById("hotkey-keycaps");
 const hotkeyBadge = document.getElementById("hotkey-badge");
@@ -629,6 +640,7 @@ function renderHotkey(s) {
   hotkeyBadge.textContent = isDefault ? "default" : "custom";
   hotkeyResetBtn.disabled = isDefault;
   renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers, key);
+  renderAltHint(hotkeyAltHint, s.hotkey_modifiers);
 }
 
 function showHotkeyStatus(text, cls) {
@@ -2767,6 +2779,7 @@ let meetingLiveGeneration = 0;
 const meetingHotkeyMods = Array.from(document.querySelectorAll("#meeting-hotkey-mods input"));
 const meetingHotkeyKey = document.getElementById("meeting-hotkey-key");
 const meetingHotkeyStatus = document.getElementById("meeting-hotkey-status");
+const meetingAltHint = document.getElementById("meeting-hotkey-alt-hint");
 const meetingMicSelect = document.getElementById("meeting-mic-select");
 const meetingOutputSelect = document.getElementById("meeting-output-select");
 let meetingRecording = false;
@@ -3034,6 +3047,7 @@ function renderMeetingHotkey(s) {
   }
   for (const cb of meetingHotkeyMods) cb.checked = s.meeting_modifiers.includes(cb.value);
   meetingHotkeyKey.value = s.meeting_key;
+  renderAltHint(meetingAltHint, s.meeting_modifiers);
 }
 
 async function saveMeetingHotkey() {

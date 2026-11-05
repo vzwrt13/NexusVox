@@ -54,6 +54,7 @@
             <p class="hotkey-current">Current: <span id="hotkey-keycaps" class="keycaps"></span> <span id="hotkey-badge" class="badge" hidden></span></p>
             <p>Default is <span id="hotkey-default-name">Ctrl+Win</span>. Tick the modifiers you want and optionally pick one key to complete the combo, or click <em>Record</em> and press the combo. A key such as <code>A</code> is swallowed while it is held as part of the combo, so the letter never reaches the app you are dictating into.</p>
             <p id="hotkey-status" class="status-line" hidden></p>
+            <p id="hotkey-alt-hint" class="status-line warn" hidden></p>
           </div>
           <div class="hotkey-editor">
             <div class="hotkey-mods" id="hotkey-mods">
@@ -332,6 +333,7 @@
             <h3>Meeting hotkey</h3>
             <p>Starts and stops a meeting from anywhere. It needs a key and at least one modifier, and must not be the dictation hotkey. Documentation: <code>docs/MEETINGS.md</code>.</p>
             <p id="meeting-hotkey-status" class="status-line" hidden></p>
+            <p id="meeting-hotkey-alt-hint" class="status-line warn" hidden></p>
           </div>
           <div class="hotkey-editor">
             <div class="hotkey-mods" id="meeting-hotkey-mods">

@@ -138,6 +138,7 @@ function activateTab(name, { keepScroll = false } = {}) {
   }
   if (name === "upload") {
     loadFileTranscriptions();
+    loadLlmStatus().catch(() => {}); // the cleanup hint must reflect Ollama as it is now
     refreshDiarizeToggle();
     resumeUploadJob();
   }
@@ -303,36 +304,54 @@ const llmStatus = document.getElementById("llm-status");
 const cleanupLlmHint = document.getElementById("cleanup-llm-hint");
 const uploadLlmHint = document.getElementById("upload-llm-hint");
 
-// ── Ollama install hint (pure helper, runs under Node in tests) ──────
+// ── Ollama install hint (pure helpers, run under Node in tests) ──────
 // Free 1.0 bundles no language model runtime: dictation works without one, Cleanup, Polish and upload cleanup
 // need Ollama. `ollamaHint` turns /api/settings/llm-status into the hint every area shows; null = nothing to say.
 const OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
-function ollamaHint(s) {
+function isLocalLlmUrl(url) {
+  try {
+    return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+// `here`: the hint sits in the Models card, next to the download button.
+function ollamaHint(s, { here = false } = {}) {
   if (!s.reachable) {
     if (s.protocol && s.protocol !== "ollama") {
       return { state: "down", text: `○ No model server at ${s.url} — Cleanup and Polish are off until it answers.`, link: false };
     }
+    if (!isLocalLlmUrl(s.url)) {
+      return {
+        state: "down",
+        text: `○ No Ollama server answers at ${s.url}. Check that it is running and that [llm].url in config.toml is right.${here ? " The saved model is kept." : ""}`,
+        link: false,
+      };
+    }
     return {
       state: "down",
-      text: "○ Ollama is not running. Cleanup, Polish and upload cleanup need it; dictation works without. Install and start Ollama: ",
+      text: `○ Ollama is not running at ${s.url}. Cleanup, Polish and upload cleanup need it; dictation works without.${here ? " The saved model is kept." : ""} Install and start Ollama: `,
       link: true,
     };
   }
   if (s.model_installed === false) {
     return {
       state: "down",
-      text: `○ Ollama is running, but model ${s.model} is not installed. Pick a model in Settings > Models to download it.`,
+      text: `○ Ollama is running, but model ${s.model} is not installed. ${here ? "Download it with the button below." : "Open Settings > Models to download it."}`,
       link: false,
     };
   }
   return null;
 }
+function hideHint(el) {
+  setStatus(el, undefined, "");
+  el.hidden = true;
+}
 // Writes the hint through setStatus() and appends the download link; clears and hides the element when all is well.
-function renderOllamaHint(el, s, visible = true) {
-  const hint = visible ? ollamaHint(s) : null;
+function renderOllamaHint(el, s, visible = true, opts = {}) {
+  const hint = visible ? ollamaHint(s, opts) : null;
   if (!hint) {
-    setStatus(el, undefined, "");
-    el.hidden = true;
+    hideHint(el);
     return;
   }
   setStatus(el, hint.state, hint.text);
@@ -346,23 +365,66 @@ function renderOllamaHint(el, s, visible = true) {
   }
   el.hidden = false;
 }
+// The Models card's own line: it also knows whether the model list could be read (`data` = /api/settings/llm-models).
+function renderModelsHint(el, s, data) {
+  if (!data) return hideHint(el);
+  if (data.reachable) return renderOllamaHint(el, s, true, { here: true });
+  if (data.protocol !== "ollama") {
+    setStatus(el, "warn", "This server type has no model list. Set [llm].model in config.toml.");
+  } else if (s.reachable) {
+    // The server answers but the model list does not come back: not a missing install.
+    setStatus(el, "down", `○ Ollama answers at ${s.url}, but the installed models cannot be listed. The saved model is kept.`);
+  } else {
+    return renderOllamaHint(el, s, true, { here: true });
+  }
+  el.hidden = false;
+}
+// All areas at once from one llm-status reply. `ui` = the elements and whether each feature is wanted, so the red
+// hint only appears where the user turned the feature on (dictation alone never looks broken).
+function renderLlmHints(s, ui) {
+  if (!s) return;
+  if (!ui.polishOn) hideHint(ui.polish);
+  else if (ollamaHint(s)) renderOllamaHint(ui.polish, s);
+  else {
+    setStatus(ui.polish, "ok", `● Model ready at ${s.url} (model ${s.model})`);
+    ui.polish.hidden = false;
+  }
+  renderOllamaHint(ui.cleanup, s, ui.cleanupOn);
+  renderOllamaHint(ui.upload, s, ui.uploadOn);
+  renderModelsHint(ui.models, s, ui.modelsData);
+}
 // ── end of Ollama install hint ───────────────────────────────────────
 
 let lastLlmStatus = null;
-function renderLlmHints() {
-  if (!lastLlmStatus) return;
-  const s = lastLlmStatus;
-  // Polish line: also says "ready"; the others show only a problem.
-  if (ollamaHint(s)) renderOllamaHint(llmStatus, s);
-  else setStatus(llmStatus, "ok", `● Model ready at ${s.url} (model ${s.model})`);
-  renderOllamaHint(cleanupLlmHint, s, cleanupLevelSelect.value !== "off");
-  renderOllamaHint(uploadLlmHint, s);
+let lastLlmModels = null;
+function refreshLlmHints() {
+  renderLlmHints(lastLlmStatus, {
+    polish: llmStatus,
+    cleanup: cleanupLlmHint,
+    upload: uploadLlmHint,
+    models: llmModelHint,
+    polishOn: polishKeySelect.value !== "",
+    cleanupOn: cleanupLevelSelect.value !== "off",
+    uploadOn: document.getElementById("upload-cleanup-toggle").checked,
+    modelsData: lastLlmModels,
+  });
 }
 
 async function loadLlmStatus() {
   lastLlmStatus = await api("/api/settings/llm-status");
-  renderLlmHints();
+  refreshLlmHints();
 }
+
+// The hints have their own poll, independent of the model list: that one is skipped when its payload is unchanged
+// or its card is hidden. Runs while a tab with a hint is open and the page is visible.
+setInterval(() => {
+  if (document.hidden) return;
+  const open = ["tab-settings", "tab-upload"].some((id) => document.getElementById(id).classList.contains("active"));
+  if (open) loadLlmStatus().catch(() => {});
+}, 5000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) loadLlmStatus().catch(() => {});
+});
 
 // ── Language model dropdown ──────────────────────────────────────────
 const llmModelHint = document.getElementById("llm-model-hint");
@@ -371,6 +433,7 @@ const llmPullBox = document.getElementById("llm-pull-status");
 const llmPullText = document.getElementById("llm-pull-text");
 const llmPullProgress = document.getElementById("llm-pull-progress");
 const llmPullCancel = document.getElementById("llm-pull-cancel");
+const llmPullSelected = document.getElementById("llm-pull-selected");
 let llmSavedModel = "";
 let llmPullTimer = null;
 
@@ -485,7 +548,9 @@ function llmOptionLabel(m) {
 
 function renderLlmModels(data, rebuildOptions) {
   llmSavedModel = data.selected;
-  loadLlmStatus().catch(() => {}); // the status line follows the same data (reachable, installed)
+  lastLlmModels = data;
+  refreshLlmHints();
+  loadLlmStatus().catch(() => {}); // the hints follow the live status, fetched on its own
   llmSlowHint.hidden = !data.slow_hint;
   if (!data.reachable) {
     // Server down (or no model list): show the saved value only, nothing else can break.
@@ -493,17 +558,10 @@ function renderLlmModels(data, rebuildOptions) {
       llmModelSelect.replaceChildren(new Option(data.selected, data.selected));
       llmModelSelect.value = data.selected;
     }
-    llmModelHint.hidden = false;
-    // Red: the LLM features do not work while the server cannot be reached.
-    if (data.protocol === "ollama") {
-      renderOllamaHint(llmModelHint, { reachable: false, protocol: "ollama" });
-    } else {
-      setStatus(llmModelHint, "warn", "This server type has no model list. Set [llm].model in config.toml.");
-    }
+    llmPullSelected.hidden = true;
     renderLlmOverview(data, null);
     return;
   }
-  llmModelHint.hidden = true;
   if (rebuildOptions) {
     llmModelSelect.replaceChildren();
     const rec = document.createElement("optgroup");
@@ -522,7 +580,12 @@ function renderLlmModels(data, rebuildOptions) {
     }
     llmModelSelect.value = data.selected;
   }
-  renderLlmOverview(data, [...data.recommended, ...data.other].find((m) => m.name === data.selected) || null);
+  const selectedModel = [...data.recommended, ...data.other].find((m) => m.name === data.selected) || null;
+  renderLlmOverview(data, selectedModel);
+  const selectedMissing = Boolean(selectedModel) && selectedModel.installed === false && data.protocol === "ollama";
+  llmPullSelected.hidden = !selectedMissing || llmModelSelect.disabled;
+  llmPullSelected.textContent = `Download ${data.selected}`;
+  llmPullSelected.dataset.sizeGb = selectedModel && selectedModel.size_gb ? selectedModel.size_gb : "";
   llmModelSelect.dataset.notInstalled = JSON.stringify(
     Object.fromEntries(data.recommended.filter((m) => !m.installed).map((m) => [m.name, m.size_gb])),
   );
@@ -603,6 +666,22 @@ function pollLlmPull() {
   }, 1000);
 }
 
+// Asks, then downloads `name` through Ollama; the model is selected only after the pull succeeded.
+async function startLlmPull(name, sizeGb) {
+  const size = sizeGb ? ` (${sizeGb} GB)` : "";
+  if (!confirm(`${name} is not installed. Download it now${size} through Ollama?`)) return;
+  const resp = await postSetting("/api/settings/llm-pull", { model: name });
+  const p = await resp.json();
+  if (p.error && p.status !== "pulling") {
+    alert(p.error);
+    return;
+  }
+  llmModelSelect.disabled = true;
+  llmPullSelected.hidden = true;
+  showLlmPull(`Downloading ${name}...`, null, true);
+  pollLlmPull();
+}
+
 llmModelSelect.addEventListener("change", async () => {
   const name = llmModelSelect.value;
   const missing = JSON.parse(llmModelSelect.dataset.notInstalled || "{}");
@@ -611,17 +690,10 @@ llmModelSelect.addEventListener("change", async () => {
     return;
   }
   llmModelSelect.value = llmSavedModel; // the old model stays selected until the pull succeeded
-  if (!confirm(`${name} is not installed. Download it now (${missing[name]} GB) through Ollama?`)) return;
-  const resp = await postSetting("/api/settings/llm-pull", { model: name });
-  const p = await resp.json();
-  if (p.error && p.status !== "pulling") {
-    alert(p.error);
-    return;
-  }
-  llmModelSelect.disabled = true;
-  showLlmPull(`Downloading ${name}...`, null, true);
-  pollLlmPull();
+  await startLlmPull(name, missing[name]);
 });
+// The saved model itself can be missing (a fresh Ollama): selecting it again fires no change, so it has a button.
+llmPullSelected.addEventListener("click", () => startLlmPull(llmSavedModel, Number(llmPullSelected.dataset.sizeGb) || null));
 llmPullCancel.addEventListener("click", () => fetch("/api/settings/llm-pull", { method: "DELETE" }));
 
 const hotkeyRecordBtn = document.getElementById("hotkey-record-btn");
@@ -869,6 +941,7 @@ polishKeySelect.addEventListener("change", async () => {
   const s = await resp.json();
   if (s.error) alert(s.error);
   polishKeySelect.value = s.polish_key;
+  refreshLlmHints();
 });
 meetingOwnLabelInput.addEventListener("change", async () => {
   try {
@@ -888,12 +961,12 @@ feedbackModeSelect.addEventListener("change", async () => {
   feedbackModeSelect.value = s.feedback_mode;
 });
 cleanupLevelSelect.addEventListener("change", async () => {
-  renderLlmHints(); // the hint follows the chosen level at once
-
+  refreshLlmHints(); // the hint follows the chosen level at once
   const resp = await postSetting("/api/settings/cleanup-level", { level: cleanupLevelSelect.value });
   const s = await resp.json();
   if (s.error) alert(s.error);
-  cleanupLevelSelect.value = s.cleanup_level;
+  cleanupLevelSelect.value = s.cleanup_level; // the server's answer wins, and so does the hint
+  refreshLlmHints();
 });
 pasteKeySelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/paste-key", { key: pasteKeySelect.value });
@@ -2220,6 +2293,7 @@ function syncCleanupLevel() {
 }
 cleanupToggle.addEventListener("change", () => {
   syncCleanupLevel();
+  refreshLlmHints();
   if (cleanupToggle.checked) loadLlmStatus().catch(() => {}); // up to date before the user starts
 });
 syncCleanupLevel(); // a reload can restore a checked toggle without a change event

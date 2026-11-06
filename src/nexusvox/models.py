@@ -15,8 +15,8 @@ def utc_now() -> datetime:
     Naive UTC is what the schema and every row already written assume, and that
     contract is kept deliberately rather than modernised. SQLite has no datetime
     type, so these are stored as ISO strings; making them timezone-aware would
-    append a "+00:00" offset that `analytics.py` cannot handle -- it compares
-    `created_at` against plain date strings and runs SQLite `strftime()` over the
+    append a "+00:00" offset that `analytics_*.py` cannot handle -- they compare
+    `created_at` against plain date strings and run SQLite `strftime()` over the
     column. New aware rows would also sort inconsistently against existing naive
     ones, and the API output format would change.
 

@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 from flask import Flask, jsonify, request
 
 if TYPE_CHECKING:
-    from ..config import ExperimentalConfig
     from .api import DashboardAPI
 
 
-def register(app: Flask, api: DashboardAPI, experimental: ExperimentalConfig) -> None:
+def register(app: Flask, api: DashboardAPI) -> None:
     """The Analytics tab's queries; the benchmarks only with `[experimental].dev_tab`."""
+    experimental = api.experimental
 
     def _date_args():
         """Extract optional start/end date query params."""

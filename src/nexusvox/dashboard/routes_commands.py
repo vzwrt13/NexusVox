@@ -9,12 +9,12 @@ from flask import Flask, jsonify, request
 from .routes_base import _switch
 
 if TYPE_CHECKING:
-    from ..config import ExperimentalConfig
     from .api import DashboardAPI
 
 
-def register(app: Flask, api: DashboardAPI, experimental: ExperimentalConfig) -> None:
+def register(app: Flask, api: DashboardAPI) -> None:
     """Voice command settings; the OS commands only with `[experimental].os_commands`."""
+    experimental = api.experimental
 
     @app.route("/api/voice-commands")
     def get_voice_commands():

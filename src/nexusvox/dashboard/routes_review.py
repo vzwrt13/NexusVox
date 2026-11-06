@@ -7,12 +7,13 @@ from typing import TYPE_CHECKING
 from flask import Flask, jsonify, request, send_file
 
 if TYPE_CHECKING:
-    from ..config import ExperimentalConfig
     from .api import DashboardAPI
 
 
-def register(app: Flask, api: DashboardAPI, experimental: ExperimentalConfig) -> None:
+def register(app: Flask, api: DashboardAPI) -> None:
     """The review queue and recording audio; the flagged list only with `[experimental].flag_command`."""
+    experimental = api.experimental
+
     # ---- Flagged / Corrections endpoints -----------------------------------
 
     if experimental.flag_command:

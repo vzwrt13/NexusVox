@@ -81,6 +81,7 @@ tests/
 ├── test_analytics.py              # Dashboard analytics queries
 ├── test_analytics_exports.py      # Every name dashboard.analytics has to keep exporting
 ├── test_dashboard_api.py          # Flask API endpoint integration tests
+├── test_dashboard_routes.py       # Every routes_*.py module is registered
 ├── test_transcriber.py            # Transcriber ABC, factory, and implementations
 ├── test_docker_ctl.py             # Docker profile start/stop and health checks
 ├── test_file_transcribe.py        # Audio file upload conversion and transcription
@@ -114,6 +115,7 @@ tests/
 | `test_db.py` | `db.py` | Save, retrieve, flag, correct transcriptions; empty database edge cases |
 | `test_analytics.py` | `dashboard/analytics_*.py` | Overview stats, word counting, time grouping, heatmap shape, date filtering |
 | `test_analytics_exports.py` | `dashboard/analytics.py` | The names `nexusvox.dashboard.analytics` must keep exporting |
+| `test_dashboard_routes.py` | `dashboard/__init__.py`, `dashboard/routes_*.py` | Every topic module's routes reach the app |
 | `test_dashboard_api.py` | `dashboard/routes_*.py` | All `/api/*` HTTP endpoints return correct status codes and JSON shape |
 | `test_transcriber.py` | `transcriber.py` | BaseTranscriber ABC, factory function, VoxtralRealtimeTranscriber (the custom realtime client), OpenAIHttpTranscriber |
 | `test_docker_ctl.py` | `docker_ctl.py` | Docker profile start/stop, health-check waiting |

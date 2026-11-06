@@ -48,6 +48,18 @@ _start_failed = False  # every port was held: the API is built, there is no serv
 _api: DashboardAPI | None = None
 _guard: DashboardGuard | None = None
 _lock = threading.Lock()
+# Every topic's routes, registered in this order; `tests/test_dashboard_routes.py` fails on a module left out.
+_ROUTE_MODULES = (
+    routes_models,
+    routes_settings,
+    routes_meetings,
+    routes_commands,
+    routes_analytics,
+    routes_review,
+    routes_vocabulary,
+    routes_files,
+    routes_extensions,
+)
 
 
 def _listen_socket(port: int) -> socket.socket:
@@ -108,15 +120,8 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     def get_features():
         return jsonify(asdict(experimental))
 
-    routes_models.register(app, api)
-    routes_settings.register(app, api)
-    routes_meetings.register(app, api)
-    routes_commands.register(app, api, experimental)
-    routes_analytics.register(app, api, experimental)
-    routes_review.register(app, api, experimental)
-    routes_vocabulary.register(app, api)
-    routes_files.register(app, api)
-    routes_extensions.register(app, api)
+    for routes in _ROUTE_MODULES:
+        routes.register(app, api)
 
     return app
 

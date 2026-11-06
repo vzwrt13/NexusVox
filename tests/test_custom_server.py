@@ -8,6 +8,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from app_parts import patch_app
 
 from nexusvox.config import (
     Config,
@@ -134,13 +135,13 @@ def _switch(model_id: str, inference: InferenceConfig, monkeypatch):
         pytest.skip("nexusvox.app needs the Windows runtime")
 
     docker = MagicMock()
-    monkeypatch.setattr("nexusvox.app.docker_ctl", docker)
-    monkeypatch.setattr("nexusvox.app.save_config", lambda cfg: None)
+    patch_app(monkeypatch, "docker_ctl", docker)
+    patch_app(monkeypatch, "save_config", lambda cfg: None)
 
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._config = Config(inference=inference)
     app._device = "cuda"
-    app._recording = False
+    app._cycle_running = False
     app._switch_status = "idle"
     app._switch_error = None
     old = MagicMock(needs_docker=True, disconnect=AsyncMock())

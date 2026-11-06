@@ -7,9 +7,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from dashboard_js import dashboard_source
 
 _STATIC = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static"
-JS = _STATIC / "dashboard.js"
 HTML = (_STATIC / "index.html").read_text(encoding="utf-8")
 TEXT = "Alt in a hotkey can open the menu bar in apps such as Notepad. Pasted text can then get lost."
 
@@ -17,7 +17,7 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is
 
 
 def run_js(body: str):
-    source = JS.read_text(encoding="utf-8")
+    source = dashboard_source()
     status = re.search(r"const STATUS_STATES.*?\n\}\n", source, re.S).group(0)
     hint = source[source.index("// ── Alt hotkey hint") : source.index("// ── end of Alt hotkey hint")]
     fake = (
@@ -56,6 +56,6 @@ def test_hint_shows_with_alt_and_clears_without():
 
 
 def test_both_hotkey_renderers_call_the_hint():
-    source = JS.read_text(encoding="utf-8")
+    source = dashboard_source()
     assert "renderAltHint(hotkeyAltHint, s.hotkey_modifiers)" in source
     assert "renderAltHint(meetingAltHint, s.meeting_modifiers)" in source

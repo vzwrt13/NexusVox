@@ -7,10 +7,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from dashboard_js import dashboard_source
 
 STATIC = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static"
 HTML = (STATIC / "index.html").read_text(encoding="utf-8")
-JS = (STATIC / "dashboard.js").read_text(encoding="utf-8")
+JS = dashboard_source()
 
 
 def _settings_section() -> str:
@@ -125,7 +126,7 @@ def test_search_field_comes_first_and_no_match_message_exists():
 
 
 def _run_js(steps: str):
-    """Run the real search/submenu functions of dashboard.js against a tiny fake DOM; `steps` prints JSON."""
+    """Run the real search/submenu functions of the dashboard scripts against a tiny fake DOM; `steps` prints JSON."""
     if shutil.which("node") is None:
         pytest.skip("Node.js is not installed")
     start = JS.index("// -- Settings submenu and search")

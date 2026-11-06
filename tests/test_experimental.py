@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
+from dashboard_js import dashboard_source
 
 from nexusvox.config import EXAMPLE_CONFIG_PATH, Config, ExperimentalConfig, load_config, save_config
 from nexusvox.dashboard import _create_app
@@ -104,7 +105,7 @@ def test_page_ships_every_experimental_element_hidden():
         assert tags, feature
         assert all(" hidden" in tag for tag in tags), tags
     assert "?dev" not in html
-    assert "?dev" not in (_STATIC / "dashboard.js").read_text(encoding="utf-8")
+    assert "?dev" not in dashboard_source()
 
 
 def test_store_audio_hint_does_not_mention_the_edit_tab():

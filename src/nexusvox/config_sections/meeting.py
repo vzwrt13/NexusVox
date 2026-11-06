@@ -112,8 +112,16 @@ _MEETING_HOTKEY_FALLBACKS = (
 
 
 def default_meeting_hotkey(dictation: HotkeyConfig) -> tuple[list[str], str]:
-    """The default meeting hotkey, or the first fallback that does not clash with the dictation hotkey."""
-    for modifiers, key in _MEETING_HOTKEY_FALLBACKS:
+    """The default meeting hotkey, or the first fallback that does not clash with the dictation hotkey.
+
+    When the listed fallbacks all clash, every function key on a few three-modifier chords is tried, so the
+    result is valid whenever any such chord can be. Only a dictation hotkey made of all four modifiers and no
+    key clashes with every chord; then the last candidate is returned.
+    """
+    candidates = list(_MEETING_HOTKEY_FALLBACKS)
+    for modifiers in (["ctrl", "alt", "win"], ["ctrl", "shift", "alt"], ["ctrl", "shift", "win"]):
+        candidates.extend((modifiers, f"F{n}") for n in range(12, 0, -1))
+    for modifiers, key in candidates:
         if validate_meeting_hotkey(modifiers, key, dictation) is None:
             return list(modifiers), key
     return ["ctrl", "alt", "win"], "F12"

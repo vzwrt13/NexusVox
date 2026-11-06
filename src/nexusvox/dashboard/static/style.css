@@ -220,7 +220,7 @@ body::before {
 .setting-info h3 { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
 .setting-info p { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
 .setting-info code { font-family: var(--mono); font-size: 12px; background: var(--surface3); padding: 1px 5px; border-radius: 4px; }
-/* Status colour rule (setStatus in dashboard.js): green .ok = works as expected; yellow .warn = works, with a
+/* Status colour rule (setStatus in dashboard-core.js): green .ok = works as expected; yellow .warn = works, with a
    caveat the user should know; red .down = does not work or is not reachable. No class = neutral. */
 .status-line { margin-top: 6px; }
 .status-line.ok { color: var(--green); }

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from app_parts import patch_app
 
 from nexusvox.overlay import (
     CONFIRMED,
@@ -18,10 +19,9 @@ from nexusvox.overlay import (
 )
 
 try:
-    from nexusvox import app as app_module
     from nexusvox.app import NexusVoxApp
 except Exception:  # Windows-only imports (PortAudio, pynput hook, tray) on other platforms
-    app_module = NexusVoxApp = None
+    NexusVoxApp = None
 
 needs_app = pytest.mark.skipif(NexusVoxApp is None, reason="nexusvox.app needs the Windows runtime")
 
@@ -103,7 +103,7 @@ def _app(mode):
 )
 def test_cue_follows_the_feedback_mode(monkeypatch, mode, sound, visual):
     played = []
-    monkeypatch.setattr(app_module, "_play", played.append)
+    patch_app(monkeypatch, "_play", played.append)
     app = _app(mode)
     beep = object()
     app._cue(beep, RECORDING)
@@ -114,7 +114,7 @@ def test_cue_follows_the_feedback_mode(monkeypatch, mode, sound, visual):
 @needs_app
 def test_cue_without_a_config_keeps_the_sound_only_behaviour(monkeypatch):
     played = []
-    monkeypatch.setattr(app_module, "_play", played.append)
+    patch_app(monkeypatch, "_play", played.append)
     app = NexusVoxApp.__new__(NexusVoxApp)  # built without __init__: no config, no overlay
     app._cue("beep", ERROR)
     assert played == ["beep"]
@@ -123,7 +123,7 @@ def test_cue_without_a_config_keeps_the_sound_only_behaviour(monkeypatch):
 @needs_app
 def test_visual_error_without_a_sound(monkeypatch):
     played = []
-    monkeypatch.setattr(app_module, "_play", played.append)
+    patch_app(monkeypatch, "_play", played.append)
     app = _app("visual")
     app._cue(None, ERROR)
     assert played == []
@@ -160,7 +160,7 @@ def test_every_recording_gets_a_new_generation():
 @needs_app
 def test_visual_mode_falls_back_to_the_sound_when_the_window_failed(monkeypatch):
     played = []
-    monkeypatch.setattr(app_module, "_play", played.append)
+    patch_app(monkeypatch, "_play", played.append)
     app = _app("visual")
     app._overlay.failed = True
     app._cue("beep", ERROR)
@@ -171,7 +171,7 @@ def test_visual_mode_falls_back_to_the_sound_when_the_window_failed(monkeypatch)
 
 @needs_app
 def test_flag_confirmation_is_visible_in_visual_mode(monkeypatch):
-    monkeypatch.setattr(app_module, "_play", lambda beep: None)
+    patch_app(monkeypatch, "_play", lambda beep: None)
     app = _app("visual")
     app._cue("beep", CONFIRMED)
     app._overlay.show.assert_called_once_with(CONFIRMED)

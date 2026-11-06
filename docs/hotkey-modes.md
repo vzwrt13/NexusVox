@@ -31,9 +31,9 @@ How the dictation hotkey behaves today in each mode, read from the code (no beha
 changed or run for this document; "tested" below means an existing unit test, not a manual try).
 The last section lists gaps and a proposed target for each.
 
-Code paths: `hotkey.py` (`HotkeyListener`, runs inside the keyboard hook), `app.py`
-(`_on_hotkey_activate/deactivate`, `_transcription_cycle`, `_polish_selection`,
-`_paste_last_text`), `mic_guard.py`. Tests: `tests/test_hotkey.py`.
+Code paths: `hotkey.py` (`HotkeyListener`, runs inside the keyboard hook), `app_events.py`
+(`_on_hotkey_activate/deactivate`), `app_cycle.py` (`_transcription_cycle`), `app_polish.py`
+(`_polish_selection`, `_paste_last_text`), `mic_guard.py`. Tests: `tests/test_hotkey.py`.
 
 ## Vocabulary
 
@@ -57,40 +57,40 @@ Code paths: `hotkey.py` (`HotkeyListener`, runs inside the keyboard hook), `app.
 | Start | Chord press (`hotkey.py:137-140`) | Chord press (same) |
 | Stop | First key of the binding going up (`_combo_broken`, `hotkey.py:178`) | Next chord press (`hotkey.py:133-136`); releasing keys does nothing |
 | Second press while recording | Not reachable (keys are already down) | Stops the recording |
-| Press during transcription | Starts the next take, queued behind the running cycle (`app.py:211-223`, `1051-1062`) | Same; the "held again" overlay check uses `active`, which is true for the whole toggle recording (`app.py:696`) |
-| Very short press (stop arrives before the server connection is up) | Cycle sees the stop event, logs "released before recording could start", records nothing, no beep (`app.py:492-505`) | Same path (start press + stop press both before the connection is up) |
-| Short press after recording began | Tiny audio goes to the transcriber; an empty transcript is dropped silently (`app.py:592-595`) | Same |
+| Press during transcription | Starts the next take, queued behind the running cycle (`app_events.py`, the main loop in `app.py`) | Same; the "held again" overlay check uses `active`, which is true for the whole toggle recording (`app.py:696`) |
+| Very short press (stop arrives before the server connection is up) | Cycle sees the stop event, logs "released before recording could start", records nothing, no beep (`app_cycle.py`) | Same path (start press + stop press both before the connection is up) |
+| Short press after recording began | Tiny audio goes to the transcriber; an empty transcript is dropped silently (`app_cycle.py`) | Same |
 | Escape | Not handled anywhere (no `Escape` in `src/` outside the dashboard JS) | Same |
 | Key swallowing | Binding key dead for the whole hold, even after modifiers go up | Binding key types again as soon as it is released |
 | Mic guard | Mutes on press, restores on release; watchdog re-arms while keys are physically down (`still_recording`, `hotkey.py:270`) | Mutes on start, restores on the stop press; watchdog re-arms while `_active` is true, i.e. forever |
-| Server unreachable at start | `connect()` raises, error cue, `cancel()` clears the intent (`app.py:674-687`) | Same; without `cancel()` the next press would count as a stop |
+| Server unreachable at start | `connect()` raises, error cue, `cancel()` clears the intent (`_offline_stop`, `app_events.py`) | Same; without `cancel()` the next press would count as a stop |
 | Mode changed mid-recording | hold to toggle: keeps recording until the next press | toggle to hold: stops on the next key release |
 
 ## What the recording turns into
 
 | Recording kind | How it is chosen | Hold | Toggle | Code |
 |---|---|---|---|---|
-| Plain dictation | No marker | Transcript goes through nexus commands, assistant, dictionary, voice commands, cleanup, translation, paste | Identical after the stop | `app.py:592-672` |
-| Paste last | Paste key during the recording | Press chord, speak or not, tap `V` while holding, release: recording dropped, last text pasted again. A quick tap of the chord with `V` pastes too | Press chord (keys up), re-hold the modifiers, press `V`: with a key binding this works; with a **modifier-only** binding, re-pressing all modifiers is a chord press and *stops* the recording first, so `V` is no longer a marker (it types `Ctrl+Win+V` into the app). Only a `V` pressed during the *starting* hold works | `hotkey.py:160-176`, `app.py:556-561`, `793-806` |
-| Polish | Polish key during the recording | Hold chord, speak the instruction, tap the polish key, release. Selection is read after the transcript arrives, rewritten, pasted over the selection | Same marker rule as above: with a key binding, start, speak, re-hold the modifiers + polish key, then press the chord to stop. With a modifier-only binding the polish key has to be pressed in the starting hold, before speaking | `app.py:585-590`, `808-896` |
-| Command (`[os_control]`) | Command key during the recording | Same as polish, but `::show` goes out at the key press, the transcript goes to the Controller, `::hide` on empty or failed | Tested in `tests/test_hotkey.py:294` only for the "still holding" case; same modifier-only restriction | `app.py:282-298`, `570-583` |
+| Plain dictation | No marker | Transcript goes through nexus commands, assistant, dictionary, voice commands, cleanup, translation, paste | Identical after the stop | `app_cycle.py` |
+| Paste last | Paste key during the recording | Press chord, speak or not, tap `V` while holding, release: recording dropped, last text pasted again. A quick tap of the chord with `V` pastes too | Press chord (keys up), re-hold the modifiers, press `V`: with a key binding this works; with a **modifier-only** binding, re-pressing all modifiers is a chord press and *stops* the recording first, so `V` is no longer a marker (it types `Ctrl+Win+V` into the app). Only a `V` pressed during the *starting* hold works | `hotkey.py:160-176`, `app_cycle.py`, `app_polish.py` |
+| Polish | Polish key during the recording | Hold chord, speak the instruction, tap the polish key, release. Selection is read after the transcript arrives, rewritten, pasted over the selection | Same marker rule as above: with a key binding, start, speak, re-hold the modifiers + polish key, then press the chord to stop. With a modifier-only binding the polish key has to be pressed in the starting hold, before speaking | `app_cycle.py`, `app_polish.py` |
+| Command (`[os_control]`) | Command key during the recording | Same as polish, but `::show` goes out at the key press, the transcript goes to the Controller, `::hide` on empty or failed | Tested in `tests/test_hotkey.py:294` only for the "still holding" case; same modifier-only restriction | `app_events.py`, `app_cycle.py` |
 | Voice commands (`new line`, symbols, numbers, press enter) | Spoken words, no hotkey involvement | Applied in the pipeline | Identical | `pipeline.process_text` |
-| Extension command / OS / assistant / flag | Spoken, no hotkey involvement | Run instead of typing | Identical | `app.py:600-610` |
-| Meeting recording | Separate `MeetingHotkey` (its own listener, always toggle, exact modifier match) | n/a | n/a | `hotkey.py:305-367`, `app.py:234-259` |
+| Extension command / OS / assistant / flag | Spoken, no hotkey involvement | Run instead of typing | Identical | `app_commands.py` |
+| Meeting recording | Separate `MeetingHotkey` (its own listener, always toggle, exact modifier match) | n/a | n/a | `hotkey.py:305-367`, `app_events.py` |
 
 ### Polish specifics, same in both modes
 
 Outcome table (all after the stop): nothing selected, terminal without `in_terminals`, model
 failure, focus moved, clipboard refused each give the error cue and leave the selection
-alone; success pastes over the selection (`app.py:808-896`). A quick tap of the polish chord
+alone; success pastes over the selection (`app_polish.py`). A quick tap of the polish chord
 (stop before the recording started) polishes with the default instruction
-(`app.py:501-504`). Polish and paste key equal in the config: polish is dropped on load.
+(`app_cycle.py`). Polish and paste key equal in the config: polish is dropped on load.
 
 ## Gaps, inconsistencies and bugs, with a proposed target
 
 Status: items 1-7 and 9 are implemented (grace window and marker-ends-toggle, Escape in `hotkey.py`;
 `max_recording_s`, the short-take cue, the offline marker path, the per-stop marker snapshot `App._stops` and
-the phone-block cue in `app.py`). Item 8 is explained in the dashboard hint. Not done: Escape for the meeting
+the phone-block cue in `app_events.py`). Item 8 is explained in the dashboard hint. Not done: Escape for the meeting
 hotkey, and a stronger overlay cue while a Toggle recording runs.
 
 Severity is a judgement from the code only; none was reproduced on a machine.
@@ -123,20 +123,20 @@ Severity is a judgement from the code only; none was reproduced on a machine.
    like "nothing happened". *Target:* no change for hold; for toggle, a brief neutral cue
    when a take under a minimum length (e.g. 300 ms) is dropped.
 6. **Paste and polish do nothing when the server is unreachable (known gap).** The cycle
-   connects before it records (`app.py:486`), so a failed connect hits the generic error
+   connects before it records (`app_cycle.py`), so a failed connect hits the generic error
    path and the marker is never read. Polish does not need the transcriber when no
    instruction is spoken. *Target:* read the marker before connecting on the failure path
    and run paste-last (and a default-instruction polish) without a server.
 7. **`mark` is shared state read after the stop (race, low risk).** `_mark` is reset on the
    next chord press (`hotkey.py:139`), but the cycle reads it after the stop event
-   (`app.py:533`). A very fast stop then start could read the next take's reset mark.
+   (`app_cycle.py`). A very fast stop then start could read the next take's reset mark.
    *Target:* capture the mark at the stop callback and hand it to the cycle with the event.
 8. **Toggle state can desync after a mode switch or a failed cycle (low).** `cancel()`
    covers failed cycles; a switch toggle to hold mid-recording stops on the next key
    release, which is not obvious from the dashboard. *Target:* show the mode-switch effect
    in the dashboard hint text; no code change.
 9. **Phone recording blocks the hotkey silently (design note).** While `[remote_mic]` is
-   recording, a chord press is dropped and cancelled (`app.py:213-218`) with no cue.
+   recording, a chord press is dropped and cancelled (`app_events.py`) with no cue.
    *Target:* error cue, so the press is not mistaken for a broken hotkey.
 
 ## Open questions for the maintainer

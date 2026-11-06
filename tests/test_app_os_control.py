@@ -6,14 +6,17 @@ control flow runs.
 """
 
 import asyncio
+import threading
 import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from app_parts import patch_app
 
 try:
     from nexusvox.app import NexusVoxApp
     from nexusvox.extensions import API_VERSION, ActiveApp, Extension, ExtensionRegistry
+    from nexusvox.feedback import beep_error
     from nexusvox.hotkey import COMMAND, PASTE_LAST, POLISH
 except Exception:  # Windows-only imports (pynput hook, tray, SendInput) on other platforms
     pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
@@ -22,9 +25,8 @@ except Exception:  # Windows-only imports (pynput hook, tray, SendInput) on othe
 @pytest.fixture(autouse=True)
 def _silent_cues(monkeypatch):
     """No real chimes (CI has no audio device); tests that count cues patch `_play` again."""
-    import nexusvox.app as app_module
 
-    monkeypatch.setattr(app_module, "_play", lambda beep: None)
+    patch_app(monkeypatch, "_play", lambda beep: None)
 
 
 def _app(
@@ -96,30 +98,24 @@ def _paste_app(last_typed: str) -> NexusVoxApp:
 
 
 def test_paste_last_pastes_the_last_typed_text(monkeypatch):
-    import nexusvox.app as app_module
-
     pasted = []
-    monkeypatch.setattr(app_module, "inject_text", lambda text, delay: pasted.append(text))
+    patch_app(monkeypatch, "inject_text", lambda text, delay: pasted.append(text))
     asyncio.run(_paste_app("Bin gleich da")._paste_last_text())
     assert pasted == ["Bin gleich da"]
 
 
 def test_paste_last_with_nothing_yet_beeps(monkeypatch):
-    import nexusvox.app as app_module
-
     beeps = []
-    monkeypatch.setattr(app_module, "inject_text", lambda *_a: pytest.fail("nothing to paste"))
-    monkeypatch.setattr(app_module, "beep_error", lambda: beeps.append("error"))
-    monkeypatch.setattr(app_module, "_play", lambda beep: beep())
+    patch_app(monkeypatch, "inject_text", lambda *_a: pytest.fail("nothing to paste"))
+    patch_app(monkeypatch, "beep_error", lambda: beeps.append("error"))
+    patch_app(monkeypatch, "_play", lambda beep: beep())
     asyncio.run(_paste_app("")._paste_last_text())
     assert beeps == ["error"]
 
 
 def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
-    import nexusvox.app as app_module
-
     pasted = []
-    monkeypatch.setattr(app_module, "inject_text", lambda text, delay: pasted.append(text))
+    patch_app(monkeypatch, "inject_text", lambda text, delay: pasted.append(text))
     app = _app(command=False, paste_last=True)
     app._last_typed = "Bin gleich da"
     app._config = MagicMock(injection_delay_ms=0)
@@ -131,8 +127,6 @@ def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
 
 
 def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows=(1, 1), presets=()):
-    import nexusvox.app as app_module
-
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._config = MagicMock(injection_delay_ms=0)
     app._last_typed = ""
@@ -148,15 +142,15 @@ def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows
             raise rewritten
         return rewritten
 
-    monkeypatch.setattr(app_module, "read_selection", lambda delay, in_terminals: selection)
+    patch_app(monkeypatch, "read_selection", lambda delay, in_terminals: selection)
     focus = iter(windows)
-    monkeypatch.setattr(app_module, "foreground_window", lambda: next(focus))
-    monkeypatch.setattr(app_module, "polish", fake_polish)
+    patch_app(monkeypatch, "foreground_window", lambda: next(focus))
+    patch_app(monkeypatch, "polish", fake_polish)
     monkeypatch.setattr(NexusVoxApp, "_active_app", staticmethod(lambda: ActiveApp("Code.exe", "main.py")))
-    monkeypatch.setattr(app_module, "loaded_extensions", lambda: ExtensionRegistry())
-    monkeypatch.setattr(app_module, "inject_text", lambda text, delay: calls["pasted"].append(text))
-    monkeypatch.setattr(app_module, "beep_error", lambda: calls["beeps"].append("error"))
-    monkeypatch.setattr(app_module, "_play", lambda beep: beep())
+    patch_app(monkeypatch, "loaded_extensions", lambda: ExtensionRegistry())
+    patch_app(monkeypatch, "inject_text", lambda text, delay: calls["pasted"].append(text))
+    patch_app(monkeypatch, "beep_error", lambda: calls["beeps"].append("error"))
+    patch_app(monkeypatch, "_play", lambda beep: beep())
     return app, calls
 
 
@@ -231,7 +225,6 @@ def test_polish_does_not_paste_when_the_focus_moved(monkeypatch):
 
 
 def test_polish_beeps_when_the_clipboard_is_busy(monkeypatch):
-    import nexusvox.app as app_module
     from nexusvox.clipboard import ClipboardError
 
     app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
@@ -239,14 +232,13 @@ def test_polish_beeps_when_the_clipboard_is_busy(monkeypatch):
     def busy(text, delay):
         raise ClipboardError("OpenClipboard failed")
 
-    monkeypatch.setattr(app_module, "inject_text", busy)
+    patch_app(monkeypatch, "inject_text", busy)
     asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
     assert calls["beeps"] == ["error"]
     assert app._last_typed == "Hallo zusammen"  # the paste key still pastes it
 
 
 def test_polish_beeps_when_the_selection_cannot_be_copied(monkeypatch):
-    import nexusvox.app as app_module
     from nexusvox.clipboard import ClipboardError
 
     app, calls = _polish_app(monkeypatch, "unused", "unused")
@@ -254,7 +246,7 @@ def test_polish_beeps_when_the_selection_cannot_be_copied(monkeypatch):
     def busy(delay, in_terminals):
         raise ClipboardError("OpenClipboard failed")
 
-    monkeypatch.setattr(app_module, "read_selection", busy)
+    patch_app(monkeypatch, "read_selection", busy)
     asyncio.run(app._polish_selection("", MagicMock()))
     assert calls == {"pasted": [], "beeps": ["error"]}
 
@@ -268,7 +260,6 @@ def test_quick_tap_of_the_polish_chord_polishes_with_the_default_instruction():
 
 def _dictation_app(monkeypatch, inject):
     """An app whose next cycle records "hallo welt" and pastes it through `inject`."""
-    import nexusvox.app as app_module
     from nexusvox.cleanup import CleanupResult
     from nexusvox.pipeline import ProcessedText
     from nexusvox.translator import TranslateResult
@@ -285,7 +276,7 @@ def _dictation_app(monkeypatch, inject):
     app._run_command = AsyncMock(return_value=None)
     app._db = MagicMock()
     app._store_audio = MagicMock()
-    monkeypatch.setattr(app_module, "stored_language", lambda _text: "de")
+    patch_app(monkeypatch, "stored_language", lambda _text: "de")
     app._edit_watcher = MagicMock()
     processed = ProcessedText(
         "Hallo Welt",
@@ -296,14 +287,14 @@ def _dictation_app(monkeypatch, inject):
         True,
         "Hallo Welt",
     )
-    monkeypatch.setattr(app_module, "process_text", lambda *a, **k: processed)
-    monkeypatch.setattr(app_module, "inject_text", inject)
+    patch_app(monkeypatch, "process_text", lambda *a, **k: processed)
+    patch_app(monkeypatch, "inject_text", inject)
     beeps = []
-    monkeypatch.setattr(app_module, "beep_error", lambda: beeps.append("error"))
+    patch_app(monkeypatch, "beep_error", lambda: beeps.append("error"))
     # CI runners have no audio device: a real start/stop beep would raise and end the cycle.
-    monkeypatch.setattr(app_module, "beep_start", lambda: None)
-    monkeypatch.setattr(app_module, "beep_stop", lambda: None)
-    monkeypatch.setattr(app_module, "_play", lambda beep: beep())
+    patch_app(monkeypatch, "beep_start", lambda: None)
+    patch_app(monkeypatch, "beep_stop", lambda: None)
+    patch_app(monkeypatch, "_play", lambda beep: beep())
     return app, beeps
 
 
@@ -321,6 +312,21 @@ def test_dictation_is_pasted_and_watched_for_edits(monkeypatch):
     _run_cycle(app)
     assert (pasted, beeps) == (["Hallo Welt"], [])
     app._edit_watcher.watch.assert_called_once_with("Hallo Welt", app._config.learn_from_edits.window_s, "Hallo Welt")
+
+
+def test_a_dictation_is_saved_off_the_event_loop(monkeypatch):
+    app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: time.monotonic())
+    seen = []
+
+    def note(*_args, **_kwargs):
+        seen.append(threading.get_ident())
+        return MagicMock(id=1)
+
+    app._db.save_transcription.side_effect = note
+    app._store_audio.side_effect = note
+    app._stats_pool = MagicMock()
+    _run_cycle(app)
+    assert len(seen) == 2 and threading.get_ident() not in seen
 
 
 def test_dictation_stores_the_process_name_of_the_target_app_only(monkeypatch):
@@ -383,7 +389,6 @@ def test_dictation_beeps_and_is_kept_when_the_clipboard_is_busy(monkeypatch):
 
 
 def test_paste_last_beeps_when_the_clipboard_is_busy(monkeypatch):
-    import nexusvox.app as app_module
     from nexusvox.clipboard import ClipboardError
 
     def busy(text, delay):
@@ -391,7 +396,7 @@ def test_paste_last_beeps_when_the_clipboard_is_busy(monkeypatch):
 
     app, calls = _polish_app(monkeypatch, "unused", "unused")
     app._last_typed = "Hallo Welt"
-    monkeypatch.setattr(app_module, "inject_text", busy)
+    patch_app(monkeypatch, "inject_text", busy)
     asyncio.run(app._paste_last_text())
     assert calls["beeps"] == ["error"]
 
@@ -419,7 +424,7 @@ def test_polish_lets_an_extension_handle_the_spoken_command(monkeypatch):
     app, calls = _polish_app(monkeypatch, "hi leute", RuntimeError("the model must not run"))
     registry = ExtensionRegistry()
     registry.add(Upper())
-    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: registry)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
 
     asyncio.run(app._polish_selection("shout", MagicMock()))
     assert calls["pasted"] == ["HI LEUTE"]
@@ -429,7 +434,7 @@ def test_polish_lets_an_extension_handle_the_spoken_command(monkeypatch):
 
     # A command the extension does not know falls through to the language model.
     app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
-    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: registry)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
     asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
     assert calls["pasted"] == ["Hallo zusammen"]
 
@@ -447,7 +452,7 @@ def test_a_slow_extension_answer_is_pasted_without_a_second_polish(monkeypatch):
     app, calls = _polish_app(monkeypatch, "hi leute", RuntimeError("the model must not run"))
     registry = ExtensionRegistry()
     registry.add(Slow())
-    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: registry)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
     asyncio.run(app._polish_selection("go", MagicMock()))
     assert calls["pasted"] == ["LATE"]
 
@@ -465,7 +470,7 @@ def test_a_selection_hook_over_its_budget_falls_back_to_the_core_polish(monkeypa
     app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
     registry = ExtensionRegistry()
     registry.add(Slow())
-    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: registry)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
     asyncio.run(app._polish_selection("go", MagicMock()))
     assert calls["pasted"] == ["Hallo zusammen"]
 
@@ -481,7 +486,7 @@ def test_an_extension_paste_is_dropped_when_the_focus_moved_during_the_hook(monk
     app, calls = _polish_app(monkeypatch, "hi leute", RuntimeError("no model"), windows=(1, 2))
     registry = ExtensionRegistry()
     registry.add(Slow())
-    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: registry)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
     asyncio.run(app._polish_selection("go", MagicMock()))
     assert (calls["pasted"], calls["beeps"]) == ([], ["error"])
 
@@ -491,9 +496,9 @@ def test_dictation_skips_extensions_while_they_still_load_or_when_none_is_instal
     monkeypatch.setattr(
         NexusVoxApp, "_active_app", staticmethod(lambda: pytest.fail("the active app must not be read"))
     )
-    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: None)
+    patch_app(monkeypatch, "loaded_extensions", lambda: None)
     assert app._extend_dictation("hi") == "hi"
-    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: ExtensionRegistry())
+    patch_app(monkeypatch, "loaded_extensions", lambda: ExtensionRegistry())
     assert app._extend_dictation("hi") == "hi"
 
 
@@ -619,25 +624,21 @@ def test_default_polish_works_while_the_server_is_unreachable():
 
 
 def test_a_plain_dictation_with_the_server_down_gives_the_error_cue(monkeypatch):
-    import nexusvox.app as app_module
-
     beeps = []
-    monkeypatch.setattr(app_module, "beep_error", lambda: beeps.append("error"))
-    monkeypatch.setattr(app_module, "_play", lambda beep: beep())
+    patch_app(monkeypatch, "beep_error", lambda: beeps.append("error"))
+    patch_app(monkeypatch, "_play", lambda beep: beep())
     app = _app(command=False, connect_error=RuntimeError("server down"))
     _run_skipped_cycle(app)
     assert beeps == ["error"]
 
 
 def test_a_hotkey_press_during_a_phone_recording_gives_the_error_cue(monkeypatch):
-    import nexusvox.app as app_module
-
     beeps = []
-    monkeypatch.setattr(app_module, "_play", lambda beep: beeps.append(beep))
+    patch_app(monkeypatch, "_play", lambda beep: beeps.append(beep))
     app = _app(command=False)
     app._remote_recording = True
     app._on_hotkey_activate()
-    assert beeps == [app_module.beep_error]
+    assert beeps == [beep_error]
     app._hotkey.cancel.assert_called_once()
 
 
@@ -696,10 +697,8 @@ def test_offline_hold_polish_held_longer_than_a_tap_leaves_the_selection_alone()
 
 
 def test_offline_hold_gives_the_error_cue_at_once_not_after_the_release(monkeypatch):
-    import nexusvox.app as app_module
-
     beeps = []
-    monkeypatch.setattr(app_module, "_play", lambda beep: beeps.append(beep))
+    patch_app(monkeypatch, "_play", lambda beep: beeps.append(beep))
     app = _app(command=False, connect_error=RuntimeError("server down"))
     app._hotkey.active = True  # still held
     cue_seen_while_waiting = []
@@ -716,7 +715,7 @@ def test_offline_hold_gives_the_error_cue_at_once_not_after_the_release(monkeypa
         await app._transcription_cycle()
 
     asyncio.run(cycle())
-    assert cue_seen_while_waiting == [[app_module.beep_error]]
+    assert cue_seen_while_waiting == [[beep_error]]
 
 
 # -- hold mode: the start cue waits, an immediate discard stays silent -----------------
@@ -751,9 +750,7 @@ def test_hold_start_cue_is_silent_when_the_recording_is_discarded_at_once(monkey
 
 
 def test_hold_start_cue_comes_after_the_delay(monkeypatch):
-    import nexusvox.app as app_module
-
-    monkeypatch.setattr(app_module, "START_CUE_DELAY_S", 0.02)
+    patch_app(monkeypatch, "START_CUE_DELAY_S", 0.02)
     app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.2)
     _run_cycle(app)
     assert [state for state, _ in cues].count("recording") == 1
@@ -783,9 +780,7 @@ def test_toggle_start_cue_is_silent_when_the_recording_is_discarded_at_once(monk
 
 
 def test_toggle_start_cue_comes_after_the_delay(monkeypatch):
-    import nexusvox.app as app_module
-
-    monkeypatch.setattr(app_module, "START_CUE_DELAY_S", 0.02)
+    patch_app(monkeypatch, "START_CUE_DELAY_S", 0.02)
     app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.2, mode="toggle")
     _run_cycle(app)
     assert [state for state, _ in cues].count("recording") == 1
@@ -825,7 +820,6 @@ def test_polish_without_a_selection_leaves_the_edit_watch_alone(monkeypatch):
 
 
 def test_polish_whose_clipboard_failed_resumes_the_edit_watch(monkeypatch):
-    import nexusvox.app as app_module
     from nexusvox.clipboard import ClipboardError
 
     app, _ = _polish_app(monkeypatch, "hi leute", "Hallo Leute")
@@ -833,7 +827,7 @@ def test_polish_whose_clipboard_failed_resumes_the_edit_watch(monkeypatch):
     def broken(text, delay):
         raise ClipboardError("busy")
 
-    monkeypatch.setattr(app_module, "inject_text", broken)
+    patch_app(monkeypatch, "inject_text", broken)
     asyncio.run(app._polish_selection("", MagicMock()))
     assert _watcher_calls(app) == ["pause", "resume"]
 
@@ -846,19 +840,15 @@ def test_a_reply_that_changes_nothing_leaves_the_edit_watch_alone(monkeypatch, r
 
 
 def test_an_extension_rewrite_ends_the_edit_watch_too(monkeypatch):
-    import nexusvox.app as app_module
-
     app, calls = _polish_app(monkeypatch, "hi leute", "unused")
     registry = MagicMock(extensions=[object()])
     registry.selection_command.return_value = "Hallo Leute"
-    monkeypatch.setattr(app_module, "loaded_extensions", lambda: registry)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
     asyncio.run(app._polish_selection("shout", MagicMock()))
     assert calls["pasted"] == ["Hallo Leute"] and _watcher_calls(app) == ["pause", "cancel"]
 
 
 def test_the_paste_key_ending_a_polish_reply_ends_the_edit_watch(monkeypatch):
-    import nexusvox.app as app_module
-
     app, calls = _polish_app(monkeypatch, "hi leute", "Hallo Leute", windows=(1, 2))  # the paste failed
     asyncio.run(app._polish_selection("", MagicMock()))
     app._edit_watcher.reset_mock()
@@ -868,4 +858,3 @@ def test_the_paste_key_ending_a_polish_reply_ends_the_edit_watch(monkeypatch):
     app._edit_watcher.reset_mock()
     asyncio.run(app._paste_last_text())
     assert _watcher_calls(app) == []
-    assert app_module  # keeps the import used

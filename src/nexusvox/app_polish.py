@@ -1,0 +1,174 @@
+"""Text that goes in without a dictation: the paste key and Polish on the selected text."""
+
+from __future__ import annotations
+
+import asyncio
+import functools
+import time
+
+from .app_common import logger
+from .app_records import _Recording
+from .clipboard import ClipboardError
+from .extensions import loaded_extensions
+from .feedback import beep_error
+from .injector import foreground_window, inject_text
+from .llm import LlmError
+from .logsetup import Text
+from .overlay import ERROR
+from .polish import polish, read_selection
+from .polish_presets import resolve_instruction
+
+
+class SelectionPolish:
+    """The paste-key and Polish part of `NexusVoxApp`."""
+
+    async def _paste_last_text(self) -> None:
+        """Paste what the last dictation pasted, once more; the error beep when there is none yet."""
+        if not self._last_typed:
+            logger.info("Paste last: nothing pasted yet in this session")
+            self._cue(beep_error, ERROR)
+            return
+        logger.info("Paste last: %s", Text(self._last_typed))
+        rewritten = self._last_typed_rewritten  # model text reaching a field must not be learned as a user fix
+        if rewritten:
+            self._edit_watcher.pause()
+        pasted = False
+        try:
+            await asyncio.get_running_loop().run_in_executor(
+                None, inject_text, self._last_typed, self._config.injection_delay_ms
+            )
+            pasted = True
+        except ClipboardError as exc:
+            logger.warning("Paste last: could not paste (%s)", exc)
+            self._cue(beep_error, ERROR)
+        finally:
+            if rewritten:
+                (self._edit_watcher.cancel if pasted else self._edit_watcher.resume)()
+
+    async def _polish_selection(self, instruction: str, recording: _Recording | None) -> None:
+        """Rewrite the selected text by *instruction* through the [llm] model and paste it over the selection.
+
+        Nothing selected, or the model unreachable or failing: the error beep, and the
+        selection stays as it was. When the focus moved to another window while the model
+        worked, nothing is pasted (error beep); the paste key still pastes the reply.
+        """
+        loop = asyncio.get_running_loop()
+        try:
+            selection = await loop.run_in_executor(
+                None, read_selection, self._config.injection_delay_ms, self._config.polish.in_terminals
+            )
+        except ClipboardError as exc:
+            logger.warning("Polish: could not copy the selection (%s)", exc)
+            self._cue(beep_error, ERROR)
+            return
+        if not selection.strip():
+            logger.info("Polish: nothing selected")
+            self._cue(beep_error, ERROR)
+            return
+        spoken = instruction
+        window = foreground_window()  # before any hook runs: the paste checks the focus did not move meanwhile
+        registry = loaded_extensions()
+        if registry is not None and registry.extensions:
+            handled = await loop.run_in_executor(
+                None, registry.selection_command, selection, spoken, self._active_app()
+            )
+            if handled is not None:
+                await self._paste_over_selection(
+                    handled,
+                    selection,
+                    window,
+                    "extension",
+                    spoken,
+                    spoken,
+                    recording,
+                    status="extension",
+                    model_ms=None,
+                )
+                return
+        instruction, preset = resolve_instruction(spoken, self._db.get_polish_presets())
+        if preset:
+            logger.info("Polish: preset %r", preset)
+        detail = preset or spoken or "default"
+        started = time.perf_counter()  # not monotonic(): its tick is ~15 ms on Windows
+        try:
+            rewritten = await loop.run_in_executor(None, polish, selection, instruction, self._config.llm)
+        except LlmError as exc:
+            logger.warning("Polish: model at %s failed (%s); the selection stays as it was", self._config.llm.url, exc)
+            self._cue(beep_error, ERROR)
+            await self._save_polish(
+                recording,
+                "polish",
+                detail,
+                spoken,
+                ok=False,
+                status="timeout" if exc.timed_out else "failed",
+                model_ms=round((time.perf_counter() - started) * 1000),
+            )
+            return
+        model_ms = round((time.perf_counter() - started) * 1000)
+        await self._paste_over_selection(
+            rewritten, selection, window, "polish", detail, spoken, recording, status="applied", model_ms=model_ms
+        )
+
+    async def _paste_over_selection(
+        self,
+        rewritten: str,
+        selection: str,
+        window: int,
+        kind: str,
+        detail: str,
+        spoken: str,
+        recording: _Recording | None,
+        *,
+        status: str,
+        model_ms: int | None,
+    ) -> None:
+        """Paste *rewritten* over the still-selected text, unless the focus left *window*; save the outcome.
+
+        Nothing pasted (the focus moved, the clipboard refused) is saved as ``failed``, however the reply came.
+        """
+        self._last_typed = rewritten
+        self._last_typed_rewritten = True
+        pasted = False
+        # An empty reply or one equal to the selection changes nothing, so a running edit watch has no reason to end.
+        changed = bool(rewritten) and rewritten != selection
+        if foreground_window() != window:
+            logger.info("Polish: the focus moved to another window, not pasting (the paste key pastes it)")
+            self._cue(beep_error, ERROR)
+        else:
+            # The selection is still selected, so pasting replaces it; Ctrl+Z in the app undoes it.
+            # The reads of a running edit watch stop before the paste, so the rewrite is never taken for the
+            # user's fix; once it is in, the watch ends on what it read before.
+            if changed:
+                self._edit_watcher.pause()
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, inject_text, rewritten, 0)
+                pasted = True
+            except ClipboardError as exc:
+                logger.warning("Polish: could not paste the reply (%s); the paste key pastes it", exc)
+                self._cue(beep_error, ERROR)
+            finally:
+                if changed:
+                    (self._edit_watcher.cancel if pasted else self._edit_watcher.resume)()
+        await self._save_polish(
+            recording, kind, detail, spoken, ok=pasted, status=status if pasted else "failed", model_ms=model_ms
+        )
+
+    async def _save_polish(
+        self,
+        recording: _Recording | None,
+        kind: str,
+        detail: str,
+        spoken: str,
+        *,
+        ok: bool,
+        status: str,
+        model_ms: int | None,
+    ) -> None:
+        """Save a polish (or extension) attempt, off the event loop, as ``[kind] detail`` or ``[kind failed] detail``.
+
+        A failed attempt gets its own label so the history does not show it as a polish that happened.
+        """
+        label = f"[{kind}{'' if ok else ' failed'}] {detail}"
+        save = functools.partial(self._save_command, recording, label, spoken, polish_status=status, polish_ms=model_ms)
+        await asyncio.get_running_loop().run_in_executor(None, save)

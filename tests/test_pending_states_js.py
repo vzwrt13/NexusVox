@@ -1,13 +1,12 @@
-"""The dashboard's pending/failed row states: the pure helpers of dashboard.js, run under Node."""
+"""The dashboard's pending/failed row states: the pure helpers of the dashboard scripts, run under Node."""
 
 import json
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
+from dashboard_js import dashboard_source
 
-JS = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static" / "dashboard.js"
 START = "// ── Pending and failed states"
 END = "// ── end of pending and failed states"
 
@@ -15,7 +14,7 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is
 
 
 def run_js(body: str):
-    source = JS.read_text(encoding="utf-8")
+    source = dashboard_source()
     helpers = source[source.index(START) : source.index(END)]
     script = f"{helpers}\n{body}"
     out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True, timeout=30).stdout

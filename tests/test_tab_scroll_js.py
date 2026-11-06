@@ -1,20 +1,18 @@
-"""Tab switching opens every tab at the top: activateTab of dashboard.js, run under Node with a stubbed page."""
+"""Tab switching opens every tab at the top: activateTab, run under Node with a stubbed page."""
 
 import json
 import re
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
-
-JS = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static" / "dashboard.js"
+from dashboard_js import dashboard_source
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
 
 
 def run_js(body: str):
-    source = JS.read_text(encoding="utf-8")
+    source = dashboard_source()
     match = re.search(r"^function activateTab\(.*?^}\n", source, re.S | re.M)
     assert match, "activateTab not found"
     stubs = """
@@ -51,7 +49,7 @@ def test_a_deliberate_jump_keeps_the_scroll():
 
 
 def test_meeting_settings_link_and_transcript_jump_are_the_deliberate_jumps():
-    source = JS.read_text(encoding="utf-8")
+    source = dashboard_source()
     assert source.count("keepScroll: true") == 2
     assert 'activateTab("settings", { keepScroll: true })' in source
     assert "showTranscript(id)" in source

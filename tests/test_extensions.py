@@ -461,7 +461,7 @@ def test_panel_static_files_stay_inside_the_panel_folder(ext_client, tmp_path):
     assert ext_client.get("/ext/no-such-panel/panel.js").status_code == 404
 
 
-def test_a_clashing_blueprint_does_not_take_the_dashboard_down(db, session_factory, tmp_path):
+def test_a_clashing_blueprint_does_not_take_the_dashboard_down(db, session_factory, tmp_path, caplog):
     def blueprint():
         bp = Blueprint("same_name", __name__)
         bp.add_url_rule("/x", "x", lambda: "x")
@@ -483,6 +483,8 @@ def test_a_clashing_blueprint_does_not_take_the_dashboard_down(db, session_facto
     with app.test_client() as client:
         assert client.get("/api/extensions").status_code == 200
         assert client.get("/api/ext/first/x").data == b"x"
+    # The line keeps the logger name it had before the routes left `nexusvox.dashboard`.
+    assert [r.name for r in caplog.records if "Could not mount" in r.getMessage()] == ["nexusvox.dashboard"]
 
 
 # ---- Hook: export targets ----------------------------------------------------

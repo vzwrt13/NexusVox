@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+import time
+from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from nexusvox.dashboard.analytics import (
     _command_kind,
@@ -361,6 +364,23 @@ def test_top_words(session_factory):
     assert result["values"][0] == 3
 
 
+def test_top_words_leaves_out_the_labels_of_command_rows(session_factory):
+    def row(text, **fields):
+        return {"text": text, "language": "en", "duration_ms": 1, "created_at": datetime(2026, 3, 15), **fields}
+
+    _seed(
+        session_factory,
+        [
+            row("hello hello world"),
+            row("guten tag", app="notepad.exe"),
+            row("[nexus] open github", app=COMMAND_APP),
+            row("[os-control] volume up", app=COMMAND_APP),
+        ],
+    )
+
+    assert get_top_words(session_factory)["labels"] == ["hello", "world", "guten", "tag"]
+
+
 def test_top_words_skips_single_char(session_factory):
     """Single-character words (after punctuation stripping) should be excluded."""
     _seed(
@@ -395,6 +415,36 @@ def test_peak_usage_hours_24_entries(session_factory):
     assert result["labels"][23] == "23"
 
 
+@pytest.fixture
+def berlin(monkeypatch):
+    """The process in Europe/Berlin, which SQLite's `localtime` follows; Windows has no `tzset`."""
+    if not hasattr(time, "tzset"):
+        pytest.skip("needs time.tzset")
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def _at(created_at):
+    return {"text": "test", "language": "en", "duration_ms": 1000, "created_at": created_at}
+
+
+def test_peak_usage_hours_are_local_in_winter_and_in_summer(session_factory, berlin):
+    _seed(session_factory, [_at(datetime(2026, 1, 15, 8, 0)), _at(datetime(2026, 7, 15, 7, 0))])
+
+    assert get_peak_usage_hours(session_factory)["values"][9] == 2  # 09:00 on the clock both times
+
+
+def test_peak_usage_hours_follow_the_clock_of_this_machine(session_factory):
+    utc = datetime(2026, 1, 15, 8, 0)
+    _seed(session_factory, [_at(utc)])
+
+    local = utc.replace(tzinfo=UTC).astimezone()
+    assert get_peak_usage_hours(session_factory)["values"][local.hour] == 1
+
+
 # ---- get_activity_heatmap --------------------------------------------------
 
 
@@ -410,6 +460,22 @@ def test_activity_heatmap_7x24(session_factory):
     assert len(result["hours"]) == 24
     assert len(result["grid"]) == 7
     assert all(len(row) == 24 for row in result["grid"])
+
+
+def test_activity_heatmap_moves_a_dictation_after_local_midnight_to_the_next_day(session_factory, berlin):
+    _seed(session_factory, [_at(datetime(2026, 1, 4, 23, 30))])  # Sunday in UTC, Monday 00:30 in Berlin
+
+    grid = get_activity_heatmap(session_factory)["grid"]
+
+    assert grid[1][0] == 1 and grid[0][23] == 0
+
+
+def test_activity_heatmap_follows_the_clock_of_this_machine(session_factory):
+    utc = datetime(2026, 1, 4, 23, 30)
+    _seed(session_factory, [_at(utc)])
+
+    local = utc.replace(tzinfo=UTC).astimezone()
+    assert get_activity_heatmap(session_factory)["grid"][local.isoweekday() % 7][local.hour] == 1
 
 
 # ---- get_flagged_transcriptions -------------------------------------------
@@ -579,6 +645,33 @@ def test_unreviewed_pages_with_before_id(session_factory):
     page3 = get_unreviewed_transcriptions(session_factory, limit=2, before_id=page2["items"][-1]["id"])
     assert [r["text"] for r in page3["items"]] == ["rec 0"]
     assert page3["remaining"] == 0
+
+
+def test_unreviewed_pages_list_every_row_when_the_clock_went_back(session_factory):
+    # Row 4 was stamped before row 3, so created_at order differs from id order.
+    minutes = [0, 1, 3, 2, 4]
+    _seed(
+        session_factory,
+        [
+            {
+                "text": f"rec {i + 1}",
+                "language": "en",
+                "duration_ms": 1000,
+                "audio_path": f"audio/{i}.wav",
+                "created_at": datetime(2026, 3, 1) + timedelta(minutes=minute),
+            }
+            for i, minute in enumerate(minutes)
+        ],
+    )
+
+    page = get_unreviewed_transcriptions(session_factory, limit=2)
+    assert page["remaining"] == 3
+    seen = [r["text"] for r in page["items"]]
+    while page["remaining"]:
+        page = get_unreviewed_transcriptions(session_factory, limit=2, before_id=page["items"][-1]["id"])
+        seen += [r["text"] for r in page["items"]]
+
+    assert seen == ["rec 5", "rec 4", "rec 3", "rec 2", "rec 1"]
 
 
 def test_unreviewed_empty_page(session_factory):

@@ -11,7 +11,7 @@ from nexusvox.models import utc_now
 def test_utc_now_is_naive_utc():
     """Timestamps must stay naive, and must actually be UTC.
 
-    analytics.py compares created_at against plain date strings and runs SQLite
+    analytics_*.py compare created_at against plain date strings and run SQLite
     strftime() over the column, neither of which survives a "+00:00" offset. It
     would also sort new rows inconsistently against every row already stored. If
     this test ever fails because someone made the timestamps timezone-aware,

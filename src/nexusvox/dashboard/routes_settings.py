@@ -1,0 +1,125 @@
+"""Dashboard routes: the Settings tab, its language model and the translator."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from flask import Flask, jsonify, request
+
+from .routes_base import _json_object, _switch
+
+if TYPE_CHECKING:
+    from .api import DashboardAPI
+
+
+def register(app: Flask, api: DashboardAPI) -> None:
+    """The settings page's switches, keys and language model."""
+
+    @app.route("/api/settings")
+    def get_settings():
+        return jsonify(api.get_settings())
+
+    @app.route("/api/settings/hotkey-mode", methods=["POST"])
+    def set_hotkey_mode():
+        data = _json_object()
+        result = api.set_hotkey_mode(data.get("mode", ""))
+        return jsonify(result), (400 if "error" in result else 200)
+
+    @app.route("/api/settings/hotkey", methods=["POST"])
+    def set_hotkey():
+        data = _json_object()
+        modifiers = data.get("modifiers", [])
+        if not isinstance(modifiers, list):
+            return jsonify({"error": "modifiers must be a list", **api.get_settings()}), 400
+        result = api.set_hotkey(modifiers, data.get("key", ""))
+        return jsonify(result), (400 if "error" in result else 200)
+
+    @app.route("/api/settings/learn-from-edits", methods=["POST"])
+    def set_learn_from_edits():
+        data = _json_object()
+        return jsonify(api.set_learn_from_edits(_switch(data, False)))
+
+    @app.route("/api/settings/learn-from-edits-status")
+    def get_learn_status():
+        return jsonify(api.get_learn_status())
+
+    @app.route("/api/settings/paste-key", methods=["POST"])
+    def set_paste_key():
+        data = _json_object()
+        resp = api.set_paste_key(data.get("key", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
+    @app.route("/api/settings/polish-key", methods=["POST"])
+    def set_polish_key():
+        data = _json_object()
+        resp = api.set_polish_key(data.get("key", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
+    @app.route("/api/settings/feedback-mode", methods=["POST"])
+    def set_feedback_mode():
+        data = _json_object()
+        resp = api.set_feedback_mode(data.get("mode", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
+    @app.route("/api/settings/cleanup-level", methods=["POST"])
+    def set_cleanup_level():
+        data = _json_object()
+        resp = api.set_cleanup_level(data.get("level", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
+    @app.route("/api/settings/polish-terminals", methods=["POST"])
+    def set_polish_in_terminals():
+        data = _json_object()
+        return jsonify(api.set_polish_in_terminals(_switch(data, False)))
+
+    @app.route("/api/settings/llm-model", methods=["POST"])
+    def set_llm_model():
+        data = _json_object()
+        resp = api.set_llm_model(data.get("model", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
+    @app.route("/api/settings/llm-models")
+    def get_llm_models():
+        return jsonify(api.get_llm_models())
+
+    @app.route("/api/settings/llm-pull", methods=["GET", "POST", "DELETE"])
+    def llm_pull():
+        if request.method == "POST":
+            resp = api.start_llm_pull(_json_object().get("model", ""))
+            return jsonify(resp), (400 if "error" in resp and resp.get("status") != "pulling" else 200)
+        if request.method == "DELETE":
+            return jsonify(api.cancel_llm_pull())
+        return jsonify(api.get_llm_pull())
+
+    @app.route("/api/settings/llm-status")
+    def get_llm_status():
+        return jsonify(api.get_llm_status())
+
+    @app.route("/api/settings/mic-guard", methods=["POST"])
+    def set_mic_guard():
+        data = _json_object()
+        return jsonify(api.set_mic_guard_enabled(_switch(data, False)))
+
+    @app.route("/api/settings/log-full-text", methods=["POST"])
+    def set_log_full_text():
+        data = _json_object()
+        return jsonify(api.set_log_full_text(_switch(data, None)))
+
+    @app.route("/api/log-folder/open", methods=["POST"])
+    def open_log_folder():
+        resp = api.open_log_folder()
+        return jsonify(resp), (500 if "error" in resp else 200)
+
+    @app.route("/api/settings/store-audio", methods=["POST"])
+    def set_store_audio():
+        data = _json_object()
+        return jsonify(api.set_store_audio(_switch(data, True)))
+
+    @app.route("/api/settings/translate", methods=["POST"])
+    def set_translate():
+        data = _json_object()
+        return jsonify(api.set_translate_enabled(_switch(data, False)))
+
+    @app.route("/api/settings/translator-status")
+    def get_translator_status():
+        return jsonify(api.get_translator_status())

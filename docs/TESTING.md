@@ -79,7 +79,9 @@ tests/
 ├── test_lang_detect.py            # Language detection (en/de/unknown)
 ├── test_db.py                     # Database CRUD operations
 ├── test_analytics.py              # Dashboard analytics queries
+├── test_analytics_exports.py      # Every name dashboard.analytics has to keep exporting
 ├── test_dashboard_api.py          # Flask API endpoint integration tests
+├── test_dashboard_routes.py       # Every routes_*.py module is registered
 ├── test_transcriber.py            # Transcriber ABC, factory, and implementations
 ├── test_docker_ctl.py             # Docker profile start/stop and health checks
 ├── test_file_transcribe.py        # Audio file upload conversion and transcription
@@ -111,8 +113,10 @@ tests/
 | `test_config_exports.py` | `config.py`, `config_sections/` | The names `nexusvox.config` must keep exporting, sections never importing it back, hardware patches reaching the defaults |
 | `test_lang_detect.py` | `lang_detect.py` | English detection, German detection, unknown for unsupported languages |
 | `test_db.py` | `db.py` | Save, retrieve, flag, correct transcriptions; empty database edge cases |
-| `test_analytics.py` | `dashboard/analytics.py` | Overview stats, word counting, time grouping, heatmap shape, date filtering |
-| `test_dashboard_api.py` | `dashboard/__init__.py` | All `/api/*` HTTP endpoints return correct status codes and JSON shape |
+| `test_analytics.py` | `dashboard/analytics_*.py` | Overview stats, word counting, time grouping, heatmap shape, date filtering |
+| `test_analytics_exports.py` | `dashboard/analytics.py` | The names `nexusvox.dashboard.analytics` must keep exporting |
+| `test_dashboard_routes.py` | `dashboard/__init__.py`, `dashboard/routes_*.py` | Every topic module's routes reach the app |
+| `test_dashboard_api.py` | `dashboard/routes_*.py` | All `/api/*` HTTP endpoints return correct status codes and JSON shape |
 | `test_transcriber.py` | `transcriber.py` | BaseTranscriber ABC, factory function, VoxtralRealtimeTranscriber (the custom realtime client), OpenAIHttpTranscriber |
 | `test_docker_ctl.py` | `docker_ctl.py` | Docker profile start/stop, health-check waiting |
 | `test_file_transcribe.py` | `file_transcribe.py` | Extension detection, WAV passthrough, audio conversion, chunking |
@@ -121,7 +125,7 @@ tests/
 | `test_dashboard_scripts.py` | `dashboard/static/dashboard-*.js` | The fixed load order in `index.html`, no script left out, no function declared twice, and all scripts running together under Node against a stand-in page, `DOMContentLoaded` included: a name used before a later file defines it, or an id missing from `index.html` and used at load, fails. Code that runs only after a reply or a user action is not exercised |
 | `test_extensions.py` | `extensions.py` | Entry-point loading, a failing / mis-versioned / badly named extension skipped, the upload hook with a dummy extension, the dictation hook (order, chaining, failure and timeout fallback) and the selected-text command hook, panel static files and blueprint, export download |
 | `test_os_commands.py` | `os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
-| `test_experimental.py` | `config.py`, `dashboard/__init__.py` | `[experimental]` flags: strict bool parsing, endpoints not registered and page elements hidden by default, each flag bringing back only its feature |
+| `test_experimental.py` | `config.py`, `dashboard/routes_*.py` | `[experimental]` flags: strict bool parsing, endpoints not registered and page elements hidden by default, each flag bringing back only its feature |
 | `test_experimental_voice.py` | `app_commands.py` | The voice commands "nexus <window action>" and "nexus flag" are typed as text by default and run with their flag |
 | `test_hotkey.py` | `hotkey.py` | Hold/toggle modes, key bindings and swallowing, the command key and the paste key (first marker wins, typed normally outside a recording) |
 | `test_app_os_control.py` | `app_cycle.py`, `app_polish.py` | The cycle's control flow with mocked collaborators: `::hide` after a skipped or failed command recording, pasting the last text |

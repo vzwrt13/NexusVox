@@ -86,7 +86,7 @@ from .config_sections.voice_commands import (  # noqa: F401
     _DEFAULT_SYMBOLS,
     VoiceCommandsConfig,
 )
-from .paths import default_config_path, resolve_data_path
+from .system.paths import default_config_path, resolve_data_path
 
 logger = logging.getLogger(__name__)
 

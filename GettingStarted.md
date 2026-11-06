@@ -296,36 +296,56 @@ NexusVox/
 │   ├── parakeet_server.py      # FastAPI wrapper for Parakeet
 │   └── whisper_server.py       # FastAPI wrapper for Whisper
 └── src/nexusvox/
-    ├── config.example.toml     # Configuration template, shipped inside the package
     ├── __main__.py             # Entry point
-    ├── app.py                  # Main application orchestrator: start, main loop, shutdown
-    ├── app_commands.py         # Extension hooks, assistant and nexus commands
-    ├── app_common.py           # Logger and constant the app_* modules share
-    ├── app_cycle.py            # One transcription cycle: record, transcribe, type
-    ├── app_events.py           # Hotkey, phone and os-control callbacks
-    ├── app_feedback.py         # Chimes and overlay cues of a dictation
-    ├── app_models.py           # Model switching and warm-up
-    ├── app_polish.py           # Paste key and Polish on the selected text
-    ├── app_records.py          # Saved rows, audio files and statistics
-    ├── audio.py                # Microphone capture (16kHz PCM16)
+    ├── config.example.toml     # Configuration template, shipped inside the package
     ├── config.py               # Configuration loader
-    ├── db.py                   # Database session management
-    ├── dictionary.py           # Correction dictionary matching and suggestions
-    ├── docker_ctl.py           # Docker Compose profile control (start/stop/health-check)
-    ├── edit_watch.py           # Learn from edits: UI Automation field watcher
-    ├── feedback.py             # Audio beep feedback
-    ├── overlay.py              # Visual feedback: live waveform at the bottom centre
-    ├── file_transcribe.py      # Audio file upload conversion and transcription
-    ├── hotkey.py               # Global push-to-talk hotkey listener
-    ├── injector.py             # Text injection via clipboard + SendInput
-    ├── lang_detect.py          # Language detection
-    ├── models.py               # SQLAlchemy models
-    ├── os_commands.py          # Nexus OS command parsing and dispatch
+    ├── extensions.py           # Extension interface
+    ├── file_cleanup.py         # Transcript cleanup for uploaded files
+    ├── llm.py                  # Language model client
     ├── snippets.py             # Snippet matcher (for extensions) and fuzzy name matching
-    ├── transcriber.py          # Transcriber ABC, factory, and model implementations
-    ├── tray.py                 # System tray icon & menu
-    ├── voice_commands.py       # Voice command text formatting substitutions
-    ├── window_manager.py       # Win32 window management functions
+    ├── app/
+    │   ├── core.py             # Main application orchestrator: start, main loop, shutdown
+    │   ├── commands.py         # Extension hooks, assistant and nexus commands
+    │   ├── common.py           # Logger and constant the app modules share
+    │   ├── cycle.py            # One transcription cycle: record, transcribe, type
+    │   ├── events.py           # Hotkey, phone and os-control callbacks
+    │   ├── feedback.py         # Chimes and overlay cues of a dictation
+    │   ├── models.py           # Model switching and warm-up
+    │   ├── polish.py           # Paste key and Polish on the selected text
+    │   └── records.py          # Saved rows, audio files and statistics
+    ├── audio/
+    │   ├── capture.py          # Microphone capture (16kHz PCM16)
+    │   ├── mic_guard.py        # Mutes other apps' capture sessions while recording
+    │   ├── remote_mic.py       # Phone microphone over WebSocket
+    │   └── state.py            # Which audio streams are open
+    ├── dictation/
+    │   ├── dictionary.py       # Correction dictionary matching and suggestions
+    │   ├── edit_watch.py       # Learn from edits: UI Automation field watcher
+    │   ├── feedback.py         # Audio beep feedback
+    │   ├── hotkey.py           # Global push-to-talk hotkey listener
+    │   ├── injector.py         # Text injection via clipboard + SendInput
+    │   ├── lang_detect.py      # Language detection
+    │   ├── os_commands.py      # Nexus OS command parsing and dispatch
+    │   ├── overlay.py          # Visual feedback: live waveform at the bottom centre
+    │   ├── pipeline.py         # Dictionary to translation: what gets typed and saved
+    │   ├── voice_commands.py   # Voice command text formatting substitutions
+    │   └── ...                 # assistant, cleanup, clipboard, polish, polish_presets, translator
+    ├── meetings/               # Meeting recording and its transcription
+    ├── storage/
+    │   ├── db.py               # Database session management
+    │   ├── models.py           # SQLAlchemy models
+    │   └── vocabulary.py       # Plain dictionary and preset records
+    ├── system/
+    │   ├── docker_ctl.py       # Docker Compose profile control (start/stop/health-check)
+    │   ├── tray.py             # System tray icon & menu
+    │   ├── window_manager.py   # Win32 window management functions
+    │   └── ...                 # com, feedback_form, keyboard, logsetup, paths, single_instance, uia
+    ├── transcription/
+    │   ├── file_transcribe.py  # Audio file upload conversion and transcription
+    │   ├── transcriber.py      # Transcriber ABC, factory, and model implementations
+    │   └── ...                 # diarization, exports
+    ├── transcribers/           # In-process Parakeet and Whisper backends
+    ├── config_sections/        # The config dataclasses, one file per topic
     └── dashboard/
         ├── __init__.py         # Flask app and dashboard server
         ├── analytics*.py       # Database queries for dashboard stats, one file per topic

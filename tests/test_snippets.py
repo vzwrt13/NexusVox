@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from nexusvox.dictation.voice_commands import process_voice_commands
 from nexusvox.snippets import (
     Snippet,
     SnippetOption,
@@ -11,7 +12,6 @@ from nexusvox.snippets import (
     mark_snippets,
     placeholders_intact,
 )
-from nexusvox.voice_commands import process_voice_commands
 
 ADDRESS = "Jane Doe\nMain Street 1\n12345 Springfield"
 SIGNATURE = "Viele Grüße\nVincent"

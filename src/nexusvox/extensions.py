@@ -26,13 +26,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from .logsetup import Text
-from .transcriber import Word
+from .system.logsetup import Text
+from .transcription.transcriber import Word
 
 if TYPE_CHECKING:
     from flask import Blueprint
 
-    from .models import FileTranscription
+    from .storage.models import FileTranscription
 
 logger = logging.getLogger(__name__)
 
@@ -462,7 +462,7 @@ class ExtensionRegistry:
     def add_builtin_exports(self) -> None:
         """Register the export targets NexusVox ships (TXT, SRT, VTT) before the extensions, so their ids stay ours."""
         try:
-            from .exports import builtin_export_targets  # imported here: exports.py imports this module
+            from .transcription.exports import builtin_export_targets  # imported here: exports imports this module
 
             self._targets.update({t.id: t for t in builtin_export_targets(self.display_texts)})
         except Exception:

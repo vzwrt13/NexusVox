@@ -17,9 +17,9 @@ from flask import Flask, jsonify
 from werkzeug.serving import ThreadedWSGIServer
 
 from ..config import Config
-from ..db import Database
 from ..extensions import load_extensions
-from ..single_instance import show_message
+from ..storage.db import Database
+from ..system.single_instance import show_message
 from . import (
     routes_analytics,
     routes_commands,
@@ -35,7 +35,7 @@ from .api import DashboardAPI
 from .guard import LAUNCH_PARAM, DashboardGuard, install_guard
 
 if TYPE_CHECKING:
-    from ..app import NexusVoxApp
+    from ..app.core import NexusVoxApp
 
 logger = logging.getLogger(__name__)
 

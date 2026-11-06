@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import threading
 
-from nexusvox.mic_guard import STATE_FILENAME, MicGuard
+from nexusvox.audio.mic_guard import STATE_FILENAME, MicGuard
 
 
 class FakeSession:

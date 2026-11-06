@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..dictionary import suggest_entries
-from ..file_transcribe import convert_to_wav
+from ..dictation.dictionary import suggest_entries
+from ..transcription.file_transcribe import convert_to_wav
 from . import analytics
 from .api_base import DashboardState, logger
 
@@ -22,7 +22,7 @@ class ReviewMixin(DashboardState):
         """Resolve the absolute path to a transcription's audio file."""
         if self._db is None:
             return None
-        from ..models import Transcription
+        from ..storage.models import Transcription
 
         with self._sf() as session:
             row = session.get(Transcription, tid)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..models import Transcription
+from ..storage.models import Transcription
 
 
 def _apply_date_filter(query, start: str | None, end: str | None, model=Transcription, *, polish: bool = False):

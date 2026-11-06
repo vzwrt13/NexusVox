@@ -13,9 +13,9 @@ from ..config import (
     save_config,
     validate_meeting_hotkey,
 )
-from ..meeting_live import LIVE_OTHERS_LABEL
-from ..meeting_recorder import META_FILENAME, list_devices, read_meeting_meta
-from ..transcriber import BaseTranscriber, create_transcriber
+from ..meetings.live import LIVE_OTHERS_LABEL
+from ..meetings.recorder import META_FILENAME, list_devices, read_meeting_meta
+from ..transcription.transcriber import BaseTranscriber, create_transcriber
 from .api_base import DashboardState, logger
 
 

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from ..config import save_config
-from ..os_commands import NEXUS_ACTIONS
-from ..voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
+from ..dictation.os_commands import NEXUS_ACTIONS
+from ..dictation.voice_commands import ALL_STRUCTURAL_INFO, ALL_STRUCTURAL_KEYWORDS, ALL_SYMBOL_INFO
 from .api_base import DashboardState
 
 

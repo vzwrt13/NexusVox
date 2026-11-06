@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nexusvox.voice_commands import process_voice_commands, split_press_enter
+from nexusvox.dictation.voice_commands import process_voice_commands, split_press_enter
 
 # --- New line ---
 

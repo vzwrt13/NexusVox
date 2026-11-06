@@ -31,10 +31,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from llm_bench import SUMMARY_SYSTEM, chat, looks_german, unload  # noqa: E402
 from llm_eval_items import CLEANUP, POLISH  # noqa: E402
 
-from nexusvox.cleanup import _TAG_RE, PROMPTS, plausible  # noqa: E402
+from nexusvox.dictation.cleanup import _TAG_RE, PROMPTS, plausible  # noqa: E402
+from nexusvox.dictation.polish import SYSTEM_PROMPT as POLISH_PROMPT  # noqa: E402
+from nexusvox.dictation.polish import build_user_message  # noqa: E402
 from nexusvox.llm import clean_reply  # noqa: E402
-from nexusvox.polish import SYSTEM_PROMPT as POLISH_PROMPT  # noqa: E402
-from nexusvox.polish import build_user_message  # noqa: E402
 
 JUDGE = "gemma4:12b-it-qat"
 SUMMARY_CTX = 8192  # AMI transcripts of about 3,300 words are 4,500-5,500 tokens

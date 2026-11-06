@@ -7,9 +7,8 @@ import tempfile
 from pathlib import Path
 
 from ..config import numbered_speaker_label
-from ..file_transcribe import MAX_CHUNK_MS, NO_SPEAKER_LABELS
-from ..meeting_recorder import META_FILENAME, read_meeting_meta
-from ..meeting_transcribe import (
+from ..meetings.recorder import META_FILENAME, read_meeting_meta
+from ..meetings.transcribe import (
     MAX_DETECTION_S,
     MIX_FILENAME,
     SPEAKER_FIRST_SYSTEM,
@@ -23,6 +22,7 @@ from ..meeting_transcribe import (
     track_offset,
     track_shifts,
 )
+from ..transcription.file_transcribe import MAX_CHUNK_MS, NO_SPEAKER_LABELS
 from .api_base import DashboardState, logger
 from .file_jobs import FileJob
 

@@ -13,10 +13,10 @@ from app_parts import patch_app
 from nexusvox.config import Config
 
 try:
-    from nexusvox.app import NexusVoxApp
-    from nexusvox.hotkey import COMMAND, POLISH
+    from nexusvox.app.core import NexusVoxApp
+    from nexusvox.dictation.hotkey import COMMAND, POLISH
 except Exception:  # Windows-only imports (pynput hook, tray, SendInput) on other platforms
-    pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
+    pytest.skip("nexusvox.app.core needs the Windows runtime", allow_module_level=True)
 
 
 @pytest.fixture(autouse=True)
@@ -298,7 +298,7 @@ def test_a_take_without_any_audio_stores_no_file(tmp_path):
 
 def test_a_polish_tap_without_any_audio_saves_its_row(tmp_path, monkeypatch):
     patch_app(monkeypatch, "stored_language", lambda text: "und")
-    from nexusvox.app_records import _Recording
+    from nexusvox.app.records import _Recording
 
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._config = Config()

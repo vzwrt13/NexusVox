@@ -7,8 +7,8 @@ from collections import Counter
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
-from ..lang_detect import UNDETERMINED
-from ..models import COMMAND_APP, Transcription
+from ..dictation.lang_detect import UNDETERMINED
+from ..storage.models import COMMAND_APP, Transcription
 from .analytics_common import _apply_date_filter
 
 

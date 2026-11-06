@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nexusvox.diarization import (
+from nexusvox.transcription.diarization import (
     TIMEOUT_BASE_S,
     diarization_timeout,
     format_transcript,
@@ -10,7 +10,7 @@ from nexusvox.diarization import (
     speaker_at,
     speaker_paragraphs,
 )
-from nexusvox.transcriber import SpeakerTurn, Word, diarization_url, parse_turns
+from nexusvox.transcription.transcriber import SpeakerTurn, Word, diarization_url, parse_turns
 
 
 def _words(*spans: tuple[str, float, float]) -> list[Word]:
@@ -125,7 +125,7 @@ def test_diarization_url_sits_next_to_the_transcription_endpoint():
 
 
 def test_speaker_detection_models_come_from_the_registry(monkeypatch):
-    from nexusvox import diarization
+    from nexusvox.transcription import diarization
 
     assert diarization.speaker_detection_models() == ["Parakeet TDT 0.6B"]
     monkeypatch.setitem(diarization.MODEL_REGISTRY, "other", {"display_name": "Other", "diarization": True})

@@ -27,7 +27,7 @@ from typing import BinaryIO
 from urllib.parse import urlsplit, urlunsplit
 
 from ..config import MODEL_REGISTRY, InferenceConfig
-from ..transcriber import (
+from ..transcription.transcriber import (
     BaseTranscriber,
     OpenAIHttpTranscriber,
     SpeakerTurn,

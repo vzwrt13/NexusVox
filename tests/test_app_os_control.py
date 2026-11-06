@@ -14,12 +14,12 @@ import pytest
 from app_parts import patch_app
 
 try:
-    from nexusvox.app import NexusVoxApp
+    from nexusvox.app.core import NexusVoxApp
+    from nexusvox.dictation.feedback import beep_error
+    from nexusvox.dictation.hotkey import COMMAND, PASTE_LAST, POLISH
     from nexusvox.extensions import API_VERSION, ActiveApp, Extension, ExtensionRegistry
-    from nexusvox.feedback import beep_error
-    from nexusvox.hotkey import COMMAND, PASTE_LAST, POLISH
 except Exception:  # Windows-only imports (pynput hook, tray, SendInput) on other platforms
-    pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
+    pytest.skip("nexusvox.app.core needs the Windows runtime", allow_module_level=True)
 
 
 @pytest.fixture(autouse=True)
@@ -165,7 +165,7 @@ def test_polish_pastes_the_rewritten_selection(monkeypatch):
 
 
 def test_polish_uses_a_spoken_preset_and_saves_its_name(monkeypatch):
-    from nexusvox.polish_presets import PolishPreset
+    from nexusvox.storage.vocabulary import PolishPreset
 
     preset = PolishPreset("formelle Mail", "Schreib das als formelle E-Mail.")
     app, calls = _polish_app(monkeypatch, "hi leute", "Sehr geehrte Damen und Herren", presets=[preset])
@@ -175,7 +175,7 @@ def test_polish_uses_a_spoken_preset_and_saves_its_name(monkeypatch):
 
 
 def test_polish_without_an_instruction_uses_the_default_preset(monkeypatch):
-    from nexusvox.polish_presets import PolishPreset
+    from nexusvox.storage.vocabulary import PolishPreset
 
     preset = PolishPreset("kürzer", "Mach den Text kürzer.", is_default=True)
     app, calls = _polish_app(monkeypatch, "hi leute", "hi", presets=[preset])
@@ -225,7 +225,7 @@ def test_polish_does_not_paste_when_the_focus_moved(monkeypatch):
 
 
 def test_polish_beeps_when_the_clipboard_is_busy(monkeypatch):
-    from nexusvox.clipboard import ClipboardError
+    from nexusvox.dictation.clipboard import ClipboardError
 
     app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
 
@@ -239,7 +239,7 @@ def test_polish_beeps_when_the_clipboard_is_busy(monkeypatch):
 
 
 def test_polish_beeps_when_the_selection_cannot_be_copied(monkeypatch):
-    from nexusvox.clipboard import ClipboardError
+    from nexusvox.dictation.clipboard import ClipboardError
 
     app, calls = _polish_app(monkeypatch, "unused", "unused")
 
@@ -260,9 +260,9 @@ def test_quick_tap_of_the_polish_chord_polishes_with_the_default_instruction():
 
 def _dictation_app(monkeypatch, inject):
     """An app whose next cycle records "hallo welt" and pastes it through `inject`."""
-    from nexusvox.cleanup import CleanupResult
-    from nexusvox.pipeline import ProcessedText
-    from nexusvox.translator import TranslateResult
+    from nexusvox.dictation.cleanup import CleanupResult
+    from nexusvox.dictation.pipeline import ProcessedText
+    from nexusvox.dictation.translator import TranslateResult
 
     app = _app(command=False)
     app._config = MagicMock(injection_delay_ms=0)
@@ -341,7 +341,7 @@ def test_dictation_stores_the_process_name_of_the_target_app_only(monkeypatch):
 
 
 def test_dictation_the_clipboard_refused_is_not_credited_to_an_app(monkeypatch):
-    from nexusvox.clipboard import ClipboardError
+    from nexusvox.dictation.clipboard import ClipboardError
     from nexusvox.extensions import ActiveApp
 
     def busy(text, delay, enter):
@@ -354,7 +354,7 @@ def test_dictation_the_clipboard_refused_is_not_credited_to_an_app(monkeypatch):
 
 
 def test_a_command_row_is_marked_so_analytics_can_skip_it():
-    from nexusvox.models import COMMAND_APP
+    from nexusvox.storage.models import COMMAND_APP
 
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._db, app._transcriber, app._config = MagicMock(), MagicMock(), MagicMock()
@@ -374,7 +374,7 @@ def test_dictation_stores_no_app_when_it_cannot_be_read(monkeypatch):
 
 
 def test_dictation_beeps_and_is_kept_when_the_clipboard_is_busy(monkeypatch):
-    from nexusvox.clipboard import ClipboardError
+    from nexusvox.dictation.clipboard import ClipboardError
 
     def busy(text, delay, enter):
         raise ClipboardError("OpenClipboard failed")
@@ -389,7 +389,7 @@ def test_dictation_beeps_and_is_kept_when_the_clipboard_is_busy(monkeypatch):
 
 
 def test_paste_last_beeps_when_the_clipboard_is_busy(monkeypatch):
-    from nexusvox.clipboard import ClipboardError
+    from nexusvox.dictation.clipboard import ClipboardError
 
     def busy(text, delay):
         raise ClipboardError("OpenClipboard failed")
@@ -820,7 +820,7 @@ def test_polish_without_a_selection_leaves_the_edit_watch_alone(monkeypatch):
 
 
 def test_polish_whose_clipboard_failed_resumes_the_edit_watch(monkeypatch):
-    from nexusvox.clipboard import ClipboardError
+    from nexusvox.dictation.clipboard import ClipboardError
 
     app, _ = _polish_app(monkeypatch, "hi leute", "Hallo Leute")
 

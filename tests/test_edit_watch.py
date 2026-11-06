@@ -7,9 +7,9 @@ import time
 
 import pytest
 
-from nexusvox import edit_watch
-from nexusvox.dictionary import DictionaryEntry
-from nexusvox.edit_watch import OUTCOMES, EditWatcher, FieldSkipped, extract_edit, learn
+from nexusvox.dictation import edit_watch
+from nexusvox.dictation.edit_watch import OUTCOMES, EditWatcher, FieldSkipped, extract_edit, learn
+from nexusvox.storage.vocabulary import DictionaryEntry
 
 # --- extract_edit ---
 

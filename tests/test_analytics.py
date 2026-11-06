@@ -27,8 +27,8 @@ from nexusvox.dashboard.analytics import (
     get_unreviewed_transcriptions,
     get_upload_overview,
 )
-from nexusvox.dictionary import DictionaryEntry
-from nexusvox.models import COMMAND_APP, DictionaryUsageRow, FileTranscription, Transcription, utc_now
+from nexusvox.storage.models import COMMAND_APP, DictionaryUsageRow, FileTranscription, Transcription, utc_now
+from nexusvox.storage.vocabulary import DictionaryEntry
 
 
 def _seed(session_factory, records):

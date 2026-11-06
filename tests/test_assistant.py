@@ -7,8 +7,8 @@ import threading
 
 import pytest
 
-from nexusvox.assistant import parse_assistant_command, send_to_assistant, send_to_service
 from nexusvox.config import AssistantConfig
+from nexusvox.dictation.assistant import parse_assistant_command, send_to_assistant, send_to_service
 
 # --- Parsing ---
 

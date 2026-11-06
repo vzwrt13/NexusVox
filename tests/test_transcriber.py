@@ -8,7 +8,7 @@ import wave
 import pytest
 
 from nexusvox.config import InferenceConfig
-from nexusvox.transcriber import (
+from nexusvox.transcription.transcriber import (
     BaseTranscriber,
     OpenAIHttpTranscriber,
     VoxtralRealtimeTranscriber,
@@ -289,7 +289,7 @@ async def test_word_timestamps_requested_but_engine_returns_none(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_diarize_posts_the_whole_file_to_the_diarization_endpoint(monkeypatch):
-    from nexusvox.transcriber import SpeakerTurn
+    from nexusvox.transcription.transcriber import SpeakerTurn
 
     payload = {"segments": [{"speaker": 0, "start": 0.0, "end": 1.2}, {"speaker": 1, "start": 1.2, "end": 2.0}]}
     posted = _patch_httpx(monkeypatch, payload)
@@ -304,7 +304,7 @@ async def test_diarize_posts_the_whole_file_to_the_diarization_endpoint(monkeypa
 
 @pytest.mark.asyncio
 async def test_engines_without_speaker_detection_refuse_to_diarize():
-    from nexusvox.transcriber import BaseTranscriber, VoxtralRealtimeTranscriber
+    from nexusvox.transcription.transcriber import BaseTranscriber, VoxtralRealtimeTranscriber
 
     assert BaseTranscriber.supports_diarization is False
     assert OpenAIHttpTranscriber.supports_diarization is True

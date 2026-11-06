@@ -51,7 +51,7 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 ; A running NexusVox (usually in the tray) holds its files open and cannot be closed from outside: it has no window
-; to send WM_CLOSE to. It owns this mutex (single_instance.py), so Setup and the uninstaller both stop and ask the
+; to send WM_CLOSE to. It owns this mutex (system/single_instance.py), so Setup and the uninstaller both stop and ask the
 ; user to quit it from the tray first. A silent install or uninstall fails instead of replacing files under a running
 ; app.
 AppMutex=Local\NexusVox-single-instance

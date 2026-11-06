@@ -8,8 +8,8 @@ from collections import Counter
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
-from ..models import COMMAND_APP, FileTranscription, Transcription
-from ..os_commands import NEXUS_ACTIONS
+from ..dictation.os_commands import NEXUS_ACTIONS
+from ..storage.models import COMMAND_APP, FileTranscription, Transcription
 from .analytics_common import _apply_date_filter
 
 # Assumed average typing speed for "time saved" calculation.

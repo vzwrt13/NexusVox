@@ -4,7 +4,13 @@ import json
 
 import pytest
 
-from nexusvox.dictionary import DictionaryEntry, apply_dictionary, apply_dictionary_counted, suggest_entries, usage_key
+from nexusvox.dictation.dictionary import (
+    DictionaryEntry,
+    apply_dictionary,
+    apply_dictionary_counted,
+    suggest_entries,
+)
+from nexusvox.storage.vocabulary import usage_key
 
 # ---- apply_dictionary -----------------------------------------------------
 

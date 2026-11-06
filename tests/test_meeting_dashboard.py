@@ -19,8 +19,8 @@ from nexusvox.config import (
 )
 from nexusvox.dashboard import _create_app
 from nexusvox.dashboard.api import DashboardAPI
-from nexusvox.meeting_recorder import META_FILENAME
-from nexusvox.meeting_session import MeetingSession
+from nexusvox.meetings.recorder import META_FILENAME
+from nexusvox.meetings.session import MeetingSession
 
 # -- config ---------------------------------------------------------------------------------------
 
@@ -102,7 +102,7 @@ VK_F9, VK_F8 = 0x78, 0x77
 
 def _hotkey():
     pytest.importorskip("pynput.keyboard", reason="pynput needs a display backend", exc_type=ImportError)
-    from nexusvox.hotkey import MeetingHotkey
+    from nexusvox.dictation.hotkey import MeetingHotkey
 
     toggles: list[int] = []
     config = MeetingConfig()
@@ -551,9 +551,9 @@ class _NamedRecorder(FakeRecorder):
 
 def _app(monkeypatch, result, beeps, opened):
     try:
-        import nexusvox.app as app_module
+        import nexusvox.app.core as app_module
     except Exception:  # Windows-only imports (pynput hook, tray, SendInput, PortAudio) on other platforms
-        pytest.skip("nexusvox.app needs the Windows runtime")
+        pytest.skip("nexusvox.app.core needs the Windows runtime")
     app = app_module.NexusVoxApp.__new__(app_module.NexusVoxApp)
     app._meeting_toggle_lock = threading.Lock()
     app._db, app._config = None, Config()
@@ -766,7 +766,7 @@ def test_a_locked_file_keeps_meeting_json_so_the_delete_can_be_retried(env, monk
 
 
 def test_an_output_named_like_another_one_gets_its_own_loopback():
-    from nexusvox.meeting_recorder import LoopbackSource
+    from nexusvox.meetings.recorder import LoopbackSource
 
     outputs = [
         {"name": "Speakers (Realtek)", "maxOutputChannels": 2, "index": 1},
@@ -798,7 +798,8 @@ def test_an_output_named_like_another_one_gets_its_own_loopback():
 
 
 def test_portaudio_is_only_refreshed_while_no_stream_is_open():
-    from nexusvox import audio_state, meeting_recorder
+    from nexusvox.audio import state as audio_state
+    from nexusvox.meetings import recorder as meeting_recorder
 
     calls: list[str] = []
 

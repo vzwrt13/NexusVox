@@ -11,11 +11,11 @@ from nexusvox.config import Config, ExperimentalConfig
 from nexusvox.extensions import HOOK_TIMEOUT_S, ActiveApp
 
 if sys.platform != "win32":  # pynput hook, tray, SendInput and PortAudio imports; on Windows a failure must show
-    pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
+    pytest.skip("nexusvox.app.core needs the Windows runtime", allow_module_level=True)
 
-import nexusvox.app as app_module  # noqa: E402
-from nexusvox.os_commands import parse_nexus_command  # noqa: E402
-from nexusvox.overlay import ERROR  # noqa: E402
+import nexusvox.app.core as app_module  # noqa: E402
+from nexusvox.dictation.os_commands import parse_nexus_command  # noqa: E402
+from nexusvox.dictation.overlay import ERROR  # noqa: E402
 
 
 def _app(flags: ExperimentalConfig):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import sessionmaker
 
-from ..models import Transcription
+from ..storage.models import Transcription
 
 
 def get_flagged_transcriptions(session_factory: sessionmaker, limit: int = 50) -> list[dict]:

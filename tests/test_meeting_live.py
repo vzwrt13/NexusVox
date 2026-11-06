@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 
 from nexusvox.config import MeetingConfig
-from nexusvox.meeting_live import LiveTranscriber, _block_rms
-from nexusvox.meeting_recorder import AudioFormat, MeetingRecorder
-from nexusvox.meeting_session import MeetingSession
+from nexusvox.meetings.live import LiveTranscriber, _block_rms
+from nexusvox.meetings.recorder import AudioFormat, MeetingRecorder
+from nexusvox.meetings.session import MeetingSession
 
 RATE = 16_000
 
@@ -77,7 +77,7 @@ def test_the_cut_lands_in_a_pause_not_inside_a_word():
     live = LiveTranscriber(lambda wav: "x", window_s=1.0)
     pcm = np.frombuffer(_tone(1.5, 4000), dtype="<i2").copy()
     pcm[int(0.8 * RATE) : int(0.85 * RATE)] = 0  # a 50 ms pause inside the window's last third
-    from nexusvox.meeting_live import _Pending
+    from nexusvox.meetings.live import _Pending
 
     pending = _Pending(RATE)
     pending.add(pcm, 1.5)
@@ -259,7 +259,7 @@ def test_blocks_fed_before_start_are_timed_from_the_meeting_start():
 
 
 def test_audio_fed_during_a_slow_window_is_kept_and_the_backlog_limit_applies(monkeypatch):
-    monkeypatch.setattr("nexusvox.meeting_live.MAX_BACKLOG_S", 10.0)
+    monkeypatch.setattr("nexusvox.meetings.live.MAX_BACKLOG_S", 10.0)
     release = threading.Event()
     texts = iter(["first", "second", "third", "fourth"])
     live = _live(lambda wav: release.wait(5) and next(texts))
@@ -312,7 +312,7 @@ class _Transcriber:
         pass
 
     async def finish(self, timeout=30.0):
-        from nexusvox.transcriber import TranscriptionResult
+        from nexusvox.transcription.transcriber import TranscriptionResult
 
         result = TranscriptionResult()
         result.finalize(text=self.text)
@@ -324,8 +324,8 @@ class _Transcriber:
 
 
 def test_window_transcriber_reuses_one_transcriber_and_loop_and_closes_them():
-    from nexusvox.meeting_live import WindowTranscriber
-    from nexusvox.meeting_transcribe import _wav_bytes
+    from nexusvox.meetings.live import WindowTranscriber
+    from nexusvox.meetings.transcribe import _wav_bytes
 
     made = []
     t = _Transcriber()
@@ -338,8 +338,8 @@ def test_window_transcriber_reuses_one_transcriber_and_loop_and_closes_them():
 
 
 def test_a_window_the_server_did_not_finish_is_an_error_not_a_silent_success():
-    from nexusvox.meeting_live import WindowTranscriber
-    from nexusvox.meeting_transcribe import _wav_bytes
+    from nexusvox.meetings.live import WindowTranscriber
+    from nexusvox.meetings.transcribe import _wav_bytes
 
     wt = WindowTranscriber(lambda: _Transcriber(done=False, text=""))
     with pytest.raises(TimeoutError):
@@ -410,7 +410,7 @@ def test_the_shipped_config_template_leaves_it_off():
 def test_the_dashboard_labels_the_live_system_track_others_but_the_stored_one_stays_numbered(tmp_path):
     from nexusvox.config import Config
     from nexusvox.dashboard.api import DashboardAPI
-    from nexusvox.meeting_transcribe import SPEAKER_FIRST_SYSTEM
+    from nexusvox.meetings.transcribe import SPEAKER_FIRST_SYSTEM
 
     config = Config()
     config.meeting.own_voice_label = "Vincent"

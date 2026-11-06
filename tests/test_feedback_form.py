@@ -3,7 +3,7 @@
 from urllib.parse import parse_qs, urlsplit
 
 from nexusvox.config import Config, SupportConfig, load_config, save_config
-from nexusvox.feedback_form import build_feedback_url, hardware_tier, windows_version
+from nexusvox.system.feedback_form import build_feedback_url, hardware_tier, windows_version
 
 FACTS = {"app_version": "1.2.3", "windows": "Windows 11 (10.0.26200)", "hardware": "CPU-only"}
 
@@ -46,11 +46,11 @@ def test_defaults_come_from_the_running_app():
 
 
 def test_hardware_tier_follows_the_device_in_use(monkeypatch):
-    monkeypatch.setattr("nexusvox.feedback_form._gpu_present", lambda: True)
+    monkeypatch.setattr("nexusvox.system.feedback_form._gpu_present", lambda: True)
     assert hardware_tier("auto") == "NVIDIA GPU"
     assert hardware_tier("cuda") == "NVIDIA GPU"
     assert hardware_tier("cpu") == "CPU-only"
-    monkeypatch.setattr("nexusvox.feedback_form._gpu_present", lambda: False)
+    monkeypatch.setattr("nexusvox.system.feedback_form._gpu_present", lambda: False)
     assert hardware_tier("auto") == "CPU-only"
 
 

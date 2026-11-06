@@ -7,10 +7,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nexusvox.docker_ctl import start_profile, stop_profile, wait_for_healthy
+from nexusvox.system.docker_ctl import DOCKER_DIR, start_profile, stop_profile, wait_for_healthy
 
 
-@patch("nexusvox.docker_ctl.subprocess.run")
+def test_docker_dir_finds_the_compose_file():
+    """The path is counted up from the module's own folder, so moving the module breaks it without an error."""
+    assert (DOCKER_DIR / "docker-compose.yml").is_file()
+
+
+@patch("nexusvox.system.docker_ctl.subprocess.run")
 def test_stop_profile_calls_docker_compose(mock_run):
     mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
 
@@ -21,7 +26,7 @@ def test_stop_profile_calls_docker_compose(mock_run):
     assert args == ["docker", "compose", "--profile", "voxtral", "stop"]
 
 
-@patch("nexusvox.docker_ctl.subprocess.run")
+@patch("nexusvox.system.docker_ctl.subprocess.run")
 def test_start_profile_calls_docker_compose(mock_run):
     mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
 
@@ -32,7 +37,7 @@ def test_start_profile_calls_docker_compose(mock_run):
     assert args == ["docker", "compose", "--profile", "cohere", "up", "-d"]
 
 
-@patch("nexusvox.docker_ctl.subprocess.run")
+@patch("nexusvox.system.docker_ctl.subprocess.run")
 def test_stop_profile_raises_on_failure(mock_run):
     mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1, stderr="error msg")
 
@@ -40,7 +45,7 @@ def test_stop_profile_raises_on_failure(mock_run):
         stop_profile("voxtral")
 
 
-@patch("nexusvox.docker_ctl.subprocess.run")
+@patch("nexusvox.system.docker_ctl.subprocess.run")
 def test_start_profile_raises_on_failure(mock_run):
     mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1, stderr="error msg")
 
@@ -48,8 +53,8 @@ def test_start_profile_raises_on_failure(mock_run):
         start_profile("cohere")
 
 
-@patch("nexusvox.docker_ctl.time.sleep")
-@patch("nexusvox.docker_ctl.httpx.Client")
+@patch("nexusvox.system.docker_ctl.time.sleep")
+@patch("nexusvox.system.docker_ctl.httpx.Client")
 def test_wait_for_healthy_returns_true_on_success(mock_client_cls, mock_sleep):
     mock_client = MagicMock()
     mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
@@ -63,9 +68,9 @@ def test_wait_for_healthy_returns_true_on_success(mock_client_cls, mock_sleep):
     assert result is True
 
 
-@patch("nexusvox.docker_ctl.time.sleep")
-@patch("nexusvox.docker_ctl.time.monotonic")
-@patch("nexusvox.docker_ctl.httpx.Client")
+@patch("nexusvox.system.docker_ctl.time.sleep")
+@patch("nexusvox.system.docker_ctl.time.monotonic")
+@patch("nexusvox.system.docker_ctl.httpx.Client")
 def test_wait_for_healthy_returns_false_on_timeout(mock_client_cls, mock_monotonic, mock_sleep):
     mock_client = MagicMock()
     mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
@@ -81,7 +86,7 @@ def test_wait_for_healthy_returns_false_on_timeout(mock_client_cls, mock_monoton
     assert result is False
 
 
-@patch("nexusvox.docker_ctl.subprocess.run")
+@patch("nexusvox.system.docker_ctl.subprocess.run")
 def test_start_profile_raises_clear_error_when_docker_missing(mock_run):
     mock_run.side_effect = FileNotFoundError("docker not found")
 
@@ -89,7 +94,7 @@ def test_start_profile_raises_clear_error_when_docker_missing(mock_run):
         start_profile("voxtral")
 
 
-@patch("nexusvox.docker_ctl.subprocess.run")
+@patch("nexusvox.system.docker_ctl.subprocess.run")
 def test_stop_profile_raises_clear_error_when_docker_missing(mock_run):
     mock_run.side_effect = FileNotFoundError("docker not found")
 

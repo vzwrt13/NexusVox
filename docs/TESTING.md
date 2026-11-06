@@ -100,6 +100,7 @@ tests/
 ├── test_clipboard.py              # Clipboard writes excluded from the Windows clipboard history (Windows only)
 ├── test_polish_presets.py         # Spoken preset names, default preset, preset storage
 ├── test_polish.py                 # Language model client (Ollama/OpenAI protocols, failures) and polish prompts
+├── test_package_layout.py         # Logger names, layers, package inits, the paths Pro imports
 ├── test_pipeline.py               # Text pipeline: typed vs saved text, press enter, translation, learnable
 └── test_voice_commands.py         # Voice command text formatting substitutions
 ```
@@ -108,47 +109,48 @@ tests/
 
 | File | Source Module | What It Verifies |
 |------|-------------|-----------------|
-| `test_transcription_result.py` | `transcriber.py` | Text accumulation from streaming deltas, confidence calculation from logprobs |
+| `test_transcription_result.py` | `transcription/transcriber.py` | Text accumulation from streaming deltas, confidence calculation from logprobs |
 | `test_config.py` | `config.py` | TOML loading with missing files/sections/keys, save/load roundtrip, default values |
 | `test_config_exports.py` | `config.py`, `config_sections/` | The names `nexusvox.config` must keep exporting, sections never importing it back, hardware patches reaching the defaults |
-| `test_lang_detect.py` | `lang_detect.py` | English detection, German detection, unknown for unsupported languages |
-| `test_db.py` | `db.py` | Save, retrieve, flag, correct transcriptions; empty database edge cases |
+| `test_lang_detect.py` | `dictation/lang_detect.py` | English detection, German detection, unknown for unsupported languages |
+| `test_db.py` | `storage/db.py` | Save, retrieve, flag, correct transcriptions; empty database edge cases |
 | `test_analytics.py` | `dashboard/analytics_*.py` | Overview stats, word counting, time grouping, heatmap shape, date filtering |
 | `test_analytics_exports.py` | `dashboard/analytics.py` | The names `nexusvox.dashboard.analytics` must keep exporting |
 | `test_dashboard_routes.py` | `dashboard/__init__.py`, `dashboard/routes_*.py` | Every topic module's routes reach the app |
 | `test_dashboard_api.py` | `dashboard/routes_*.py` | All `/api/*` HTTP endpoints return correct status codes and JSON shape |
-| `test_transcriber.py` | `transcriber.py` | BaseTranscriber ABC, factory function, VoxtralRealtimeTranscriber (the custom realtime client), OpenAIHttpTranscriber |
-| `test_docker_ctl.py` | `docker_ctl.py` | Docker profile start/stop, health-check waiting |
-| `test_file_transcribe.py` | `file_transcribe.py` | Extension detection, WAV passthrough, audio conversion, chunking |
+| `test_transcriber.py` | `transcription/transcriber.py` | BaseTranscriber ABC, factory function, VoxtralRealtimeTranscriber (the custom realtime client), OpenAIHttpTranscriber |
+| `test_docker_ctl.py` | `system/docker_ctl.py` | Docker profile start/stop, health-check waiting |
+| `test_file_transcribe.py` | `transcription/file_transcribe.py` | Extension detection, WAV passthrough, audio conversion, chunking |
 | `test_file_cleanup.py` | `file_cleanup.py` | Chunking at paragraphs and sentences (English and German), speaker labels kept, per-passage fallback, giving up on a dead model, progress |
 | `test_file_jobs.py` | `dashboard/file_jobs.py` | Upload job stages and progress, done/error mapping, one running job at a time, pruning, unread finished job |
 | `test_dashboard_scripts.py` | `dashboard/static/dashboard-*.js` | The fixed load order in `index.html`, no script left out, no function declared twice, and all scripts running together under Node against a stand-in page, `DOMContentLoaded` included: a name used before a later file defines it, or an id missing from `index.html` and used at load, fails. Code that runs only after a reply or a user action is not exercised |
 | `test_extensions.py` | `extensions.py` | Entry-point loading, a failing / mis-versioned / badly named extension skipped, the upload hook with a dummy extension, the dictation hook (order, chaining, failure and timeout fallback) and the selected-text command hook, panel static files and blueprint, export download |
-| `test_os_commands.py` | `os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
+| `test_os_commands.py` | `dictation/os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
 | `test_experimental.py` | `config.py`, `dashboard/routes_*.py` | `[experimental]` flags: strict bool parsing, endpoints not registered and page elements hidden by default, each flag bringing back only its feature |
-| `test_experimental_voice.py` | `app_commands.py` | The voice commands "nexus <window action>" and "nexus flag" are typed as text by default and run with their flag |
-| `test_hotkey.py` | `hotkey.py` | Hold/toggle modes, key bindings and swallowing, the command key and the paste key (first marker wins, typed normally outside a recording) |
-| `test_app_os_control.py` | `app_cycle.py`, `app_polish.py` | The cycle's control flow with mocked collaborators: `::hide` after a skipped or failed command recording, pasting the last text |
-| `test_app_lifecycle.py` | `app.py`, `app_cycle.py`, `app_models.py` | Quit reaches the shutdown, a model switch is refused during a dictation, a stale stop does not skip a held press, press times stay per take, saving stays off the event loop |
-| `test_edit_watch.py` | `edit_watch.py` | Locating the pasted span, ignoring text typed around it, rejecting rewrites and language mix-ups (English and German), watcher thread with fake fields |
+| `test_experimental_voice.py` | `app/commands.py` | The voice commands "nexus <window action>" and "nexus flag" are typed as text by default and run with their flag |
+| `test_hotkey.py` | `dictation/hotkey.py` | Hold/toggle modes, key bindings and swallowing, the command key and the paste key (first marker wins, typed normally outside a recording) |
+| `test_app_os_control.py` | `app/cycle.py`, `app/polish.py` | The cycle's control flow with mocked collaborators: `::hide` after a skipped or failed command recording, pasting the last text |
+| `test_app_lifecycle.py` | `app/core.py`, `app/cycle.py`, `app/models.py` | Quit reaches the shutdown, a model switch is refused during a dictation, a stale stop does not skip a held press, press times stay per take, saving stays off the event loop |
+| `test_edit_watch.py` | `dictation/edit_watch.py` | Locating the pasted span, ignoring text typed around it, rejecting rewrites and language mix-ups (English and German), watcher thread with fake fields |
 | `test_snippets.py` | `snippets.py` | Trigger matching (English and German), longest trigger first, placeholders surviving voice commands, option best match (the matcher extensions import) |
-| `test_cleanup.py` | `cleanup.py` | Off and short dictations skip the model, the short timeout, tag stripping, model failures, replies that answer, carry out, translate or lose a line break |
-| `test_clipboard.py` | `clipboard.py` | Text round-trips through the real clipboard with the history-exclusion formats set; empty text (skipped off Windows) |
-| `test_polish_presets.py` | `polish_presets.py`, `db.py` | Default preset, name matching (case, hyphens, German names), words after the name, storage with one default and unique names |
-| `test_polish.py` | `llm.py`, `polish.py` | Request shape for both protocols, every failure as `LlmError`, default instruction, code-fence stripping (no server needed) |
-| `test_pipeline.py` | `pipeline.py` | Order of dictionary, press enter, voice commands and translation; typed vs saved text; when an edit can be learned |
-| `test_voice_commands.py` | `voice_commands.py` | New line/paragraph/tab/all-caps substitutions (English and German), structural category toggles, German number words, comma interactions, passthrough |
+| `test_cleanup.py` | `dictation/cleanup.py` | Off and short dictations skip the model, the short timeout, tag stripping, model failures, replies that answer, carry out, translate or lose a line break |
+| `test_clipboard.py` | `dictation/clipboard.py` | Text round-trips through the real clipboard with the history-exclusion formats set; empty text (skipped off Windows) |
+| `test_polish_presets.py` | `dictation/polish_presets.py`, `storage/db.py` | Default preset, name matching (case, hyphens, German names), words after the name, storage with one default and unique names |
+| `test_polish.py` | `llm.py`, `dictation/polish.py` | Request shape for both protocols, every failure as `LlmError`, default instruction, code-fence stripping (no server needed) |
+| `test_package_layout.py` | the whole package | Fixed logger names, `storage/` and `system/` import nothing built on them, every package `__init__.py` is a docstring only, the paths Pro imports stay real modules |
+| `test_pipeline.py` | `dictation/pipeline.py` | Order of dictionary, press enter, voice commands and translation; typed vs saved text; when an edit can be learned |
+| `test_voice_commands.py` | `dictation/voice_commands.py` | New line/paragraph/tab/all-caps substitutions (English and German), structural category toggles, German number words, comma interactions, passthrough |
 
 ### What we DON'T test (and why)
 
 These modules depend on Windows APIs or real hardware and can't run in a test environment:
 
-- `injector.py` — Win32 SendInput, clipboard access
-- `hotkey.py` — pynput keyboard hooks
-- `audio.py` — sounddevice microphone capture
-- `tray.py` — pystray system tray
-- `feedback.py` — sounddevice audio output
-- `app.py` and the `app_*` modules — orchestrate all of the above
+- `dictation/injector.py` — Win32 SendInput, clipboard access
+- `dictation/hotkey.py` — pynput keyboard hooks
+- `audio/capture.py` — sounddevice microphone capture
+- `system/tray.py` — pystray system tray
+- `dictation/feedback.py` — sounddevice audio output
+- `app/` — orchestrates all of the above
 
 ## Key Concepts
 
@@ -219,7 +221,7 @@ def test_load_config_defaults_when_no_file(tmp_path, monkeypatch):
 
 The change is automatically undone after the test finishes.
 
-`NexusVoxApp` is spread over `app.py` and the `app_*` modules, and each module holds its own imports, so a name such as `inject_text` exists in several of them. Replace it with `patch_app(monkeypatch, "inject_text", fake)` from `tests/app_parts.py`, which patches every part that holds the name and fails when none does.
+`NexusVoxApp` is spread over the modules in `app/`, and each module holds its own imports, so a name such as `inject_text` exists in several of them. Replace it with `patch_app(monkeypatch, "inject_text", fake)` from `tests/app_parts.py`, which patches every part that holds the name and fails when none does.
 
 ### `pytest.approx`
 
@@ -245,7 +247,7 @@ If `lingua` can't be imported, the entire test file is skipped (not failed).
 
 ### Step 1: Decide where it goes
 
-- Testing a new function in `db.py`? Add to `tests/test_db.py`.
+- Testing a new function in `storage/db.py`? Add to `tests/test_db.py`.
 - Testing a new analytics query? Add to `tests/test_analytics.py`.
 - Testing a completely new module? Create `tests/test_<module_name>.py`.
 

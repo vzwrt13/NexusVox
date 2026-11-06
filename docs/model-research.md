@@ -81,8 +81,8 @@ Today the registry has 10 entries (`MODEL_REGISTRY`, `src/nexusvox/config.py`). 
 | `cohere-transcribe`, `voxtral-mini-4b` | Maintainer decision (recommend: hide) | Docker plus 6 to 16+ GB VRAM for a narrow gain; keeps the choice list short |
 
 Result: three real choices (Parakeet, Whisper Turbo, Whisper Small) plus custom, instead of ten.
-Removing a registry entry affects users whose `config.toml` names it: `app_models.py` already has a fallback
-path for unknown models (`apply_startup_fallback`), so a removal PR should check it covers this case and note it
+Removing a registry entry affects users whose `config.toml` names it: `load_config` in `config.py` already has a
+fallback for unknown models, so a removal PR should check it covers this case and note it
 in the release notes.
 
 ## Licences

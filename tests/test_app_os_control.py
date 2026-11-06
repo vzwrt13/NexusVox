@@ -6,6 +6,7 @@ control flow runs.
 """
 
 import asyncio
+import threading
 import time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -97,7 +98,6 @@ def _paste_app(last_typed: str) -> NexusVoxApp:
 
 
 def test_paste_last_pastes_the_last_typed_text(monkeypatch):
-
     pasted = []
     patch_app(monkeypatch, "inject_text", lambda text, delay: pasted.append(text))
     asyncio.run(_paste_app("Bin gleich da")._paste_last_text())
@@ -105,7 +105,6 @@ def test_paste_last_pastes_the_last_typed_text(monkeypatch):
 
 
 def test_paste_last_with_nothing_yet_beeps(monkeypatch):
-
     beeps = []
     patch_app(monkeypatch, "inject_text", lambda *_a: pytest.fail("nothing to paste"))
     patch_app(monkeypatch, "beep_error", lambda: beeps.append("error"))
@@ -115,7 +114,6 @@ def test_paste_last_with_nothing_yet_beeps(monkeypatch):
 
 
 def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
-
     pasted = []
     patch_app(monkeypatch, "inject_text", lambda text, delay: pasted.append(text))
     app = _app(command=False, paste_last=True)
@@ -129,7 +127,6 @@ def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
 
 
 def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows=(1, 1), presets=()):
-
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._config = MagicMock(injection_delay_ms=0)
     app._last_typed = ""
@@ -315,6 +312,21 @@ def test_dictation_is_pasted_and_watched_for_edits(monkeypatch):
     _run_cycle(app)
     assert (pasted, beeps) == (["Hallo Welt"], [])
     app._edit_watcher.watch.assert_called_once_with("Hallo Welt", app._config.learn_from_edits.window_s, "Hallo Welt")
+
+
+def test_a_dictation_is_saved_off_the_event_loop(monkeypatch):
+    app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: time.monotonic())
+    seen = []
+
+    def note(*_args, **_kwargs):
+        seen.append(threading.get_ident())
+        return MagicMock(id=1)
+
+    app._db.save_transcription.side_effect = note
+    app._store_audio.side_effect = note
+    app._stats_pool = MagicMock()
+    _run_cycle(app)
+    assert len(seen) == 2 and threading.get_ident() not in seen
 
 
 def test_dictation_stores_the_process_name_of_the_target_app_only(monkeypatch):
@@ -612,7 +624,6 @@ def test_default_polish_works_while_the_server_is_unreachable():
 
 
 def test_a_plain_dictation_with_the_server_down_gives_the_error_cue(monkeypatch):
-
     beeps = []
     patch_app(monkeypatch, "beep_error", lambda: beeps.append("error"))
     patch_app(monkeypatch, "_play", lambda beep: beep())
@@ -622,7 +633,6 @@ def test_a_plain_dictation_with_the_server_down_gives_the_error_cue(monkeypatch)
 
 
 def test_a_hotkey_press_during_a_phone_recording_gives_the_error_cue(monkeypatch):
-
     beeps = []
     patch_app(monkeypatch, "_play", lambda beep: beeps.append(beep))
     app = _app(command=False)
@@ -687,7 +697,6 @@ def test_offline_hold_polish_held_longer_than_a_tap_leaves_the_selection_alone()
 
 
 def test_offline_hold_gives_the_error_cue_at_once_not_after_the_release(monkeypatch):
-
     beeps = []
     patch_app(monkeypatch, "_play", lambda beep: beeps.append(beep))
     app = _app(command=False, connect_error=RuntimeError("server down"))
@@ -741,7 +750,6 @@ def test_hold_start_cue_is_silent_when_the_recording_is_discarded_at_once(monkey
 
 
 def test_hold_start_cue_comes_after_the_delay(monkeypatch):
-
     patch_app(monkeypatch, "START_CUE_DELAY_S", 0.02)
     app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.2)
     _run_cycle(app)
@@ -772,7 +780,6 @@ def test_toggle_start_cue_is_silent_when_the_recording_is_discarded_at_once(monk
 
 
 def test_toggle_start_cue_comes_after_the_delay(monkeypatch):
-
     patch_app(monkeypatch, "START_CUE_DELAY_S", 0.02)
     app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.2, mode="toggle")
     _run_cycle(app)
@@ -833,7 +840,6 @@ def test_a_reply_that_changes_nothing_leaves_the_edit_watch_alone(monkeypatch, r
 
 
 def test_an_extension_rewrite_ends_the_edit_watch_too(monkeypatch):
-
     app, calls = _polish_app(monkeypatch, "hi leute", "unused")
     registry = MagicMock(extensions=[object()])
     registry.selection_command.return_value = "Hallo Leute"
@@ -843,7 +849,6 @@ def test_an_extension_rewrite_ends_the_edit_watch_too(monkeypatch):
 
 
 def test_the_paste_key_ending_a_polish_reply_ends_the_edit_watch(monkeypatch):
-
     app, calls = _polish_app(monkeypatch, "hi leute", "Hallo Leute", windows=(1, 2))  # the paste failed
     asyncio.run(app._polish_selection("", MagicMock()))
     app._edit_watcher.reset_mock()

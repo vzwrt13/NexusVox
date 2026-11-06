@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 
 from . import docker_ctl
+from .app_common import logger
 from .config import DEFAULT_MODEL, MODEL_REGISTRY, InferenceConfig, model_needs_docker, save_config
 from .paths import DOCKER_UNAVAILABLE_MSG, is_frozen
 from .transcriber import create_transcriber
-
-# All parts of `NexusVoxApp` log under the one name `app.py` has.
-logger = logging.getLogger("nexusvox.app")
 
 
 def apply_startup_fallback(inference: InferenceConfig, device: str) -> None:
@@ -37,6 +34,8 @@ def apply_startup_fallback(inference: InferenceConfig, device: str) -> None:
 class ModelSwitching:
     """The model part of `NexusVoxApp`."""
 
+    _switch_reset: asyncio.Future | None = None  # puts the status back to idle after a finished switch
+
     def get_switch_status(self) -> dict:
         """Return the current model-switch status for the dashboard.
 
@@ -60,14 +59,17 @@ class ModelSwitching:
         """
         if model_id not in MODEL_REGISTRY:
             raise ValueError(f"Unknown model: {model_id}")
-        if self._recording:
-            raise RuntimeError("Cannot switch model while recording")
         if self._switch_status not in ("idle", "ready", "error"):
             raise RuntimeError("Model switch already in progress")
 
         old_model = self._config.inference.model
         if old_model == model_id:
             return
+        if self._cycle_running:
+            # The cycle holds the live transcriber. The dashboard reads the refusal from the switch status.
+            self._switch_status = "error"
+            self._switch_error = "Cannot switch the model during a dictation"
+            raise RuntimeError(self._switch_error)
         old_url = self._config.inference.server_url
 
         new_info = MODEL_REGISTRY[model_id]
@@ -78,6 +80,10 @@ class ModelSwitching:
         old_was_docker = self._transcriber.needs_docker
         if new_needs_docker and is_frozen():
             raise RuntimeError(DOCKER_UNAVAILABLE_MSG)
+
+        if self._switch_reset is not None:
+            self._switch_reset.cancel()  # its 5 s are for the last switch, not for this one
+            self._switch_reset = None
 
         try:
             self._switch_status = "stopping"
@@ -114,7 +120,7 @@ class ModelSwitching:
                 self._switch_status = "idle"
                 self._switch_error = None
 
-            asyncio.ensure_future(_reset_status())
+            self._switch_reset = asyncio.ensure_future(_reset_status())
 
         except Exception as exc:
             self._switch_status = "error"

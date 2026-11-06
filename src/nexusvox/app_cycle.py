@@ -5,10 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
-import logging
 import time
 
-from .app_events import QUICK_TAP_S
+from .app_common import QUICK_TAP_S, logger
 from .app_feedback import _play
 from .app_records import _Recording
 from .audio import AudioCapture
@@ -33,9 +32,6 @@ MIN_TOGGLE_TAKE_S = 0.3
 START_CUE_DELAY_S = 0.15
 # A key press older than this before the recording started is not the start of this take.
 MAX_TAKE_LEAD_S = 10.0
-
-# All parts of `NexusVoxApp` log under the one name `app.py` has.
-logger = logging.getLogger("nexusvox.app")
 
 
 class TranscriptionCycle:
@@ -62,6 +58,7 @@ class TranscriptionCycle:
         never a command recording and leaves the hotkey state alone.
         """
         recording_stopped = False
+        pressed_at = self._press_time  # `_press_time` moves on with the next press, while this take still runs
         loop = asyncio.get_running_loop()
         take: tuple[int | None, float] | None = None  # (meeting token, start) while a take is open
         audio: AudioCapture | RemoteAudioSource | None = None  # set once recording started
@@ -95,8 +92,16 @@ class TranscriptionCycle:
                 logger.exception("Could not reach the transcription server")
                 with contextlib.suppress(Exception):
                     await self._transcriber.disconnect()
-                await self._offline_stop()
+                await self._offline_stop(pressed_at)
                 return
+
+            # A stop left from an earlier tap while the keys are down again: this press is the take, so record it.
+            # Skipping would leave its release as a stop with no cycle to read it, and every later take would
+            # find a stale stop and be skipped too.
+            if not remote and self._record_stop_event.is_set() and self._hotkey.active:
+                self._record_stop_event.clear()
+                self._next_stop()
+                logger.info("Dropped a stop from an earlier press, the hotkey is held again")
 
             # Clear any stop event that arrived while we were connecting.
             # If the user already released the keys, skip this cycle. A phone recording
@@ -216,7 +221,7 @@ class TranscriptionCycle:
             try:
                 result = await self._transcriber.finish()
             except Exception:
-                if remote or mark != POLISH or stop_at is None or stop_at - self._press_time >= QUICK_TAP_S:
+                if remote or mark != POLISH or stop_at is None or stop_at - pressed_at >= QUICK_TAP_S:
                     raise
                 # A polish tap needs no transcript (HTTP backends only fail here, not in connect()).
                 logger.exception("Transcription failed; polishing with the default instruction")
@@ -239,7 +244,9 @@ class TranscriptionCycle:
                 if reply is None or reply.startswith("error:"):
                     self._cue(beep_error, ERROR)
                 if command_text:
-                    self._save_command(recording, f"[os-control] {command_text}", command_text)
+                    await loop.run_in_executor(
+                        None, self._save_command, recording, f"[os-control] {command_text}", command_text
+                    )
                 await self._transcriber.disconnect()
                 return
 
@@ -266,7 +273,7 @@ class TranscriptionCycle:
                     return
                 label = await self._run_command(raw_text, nexus_cmd)
                 if label is not None:
-                    self._save_command(recording, label, raw_text)
+                    await loop.run_in_executor(None, self._save_command, recording, label, raw_text)
                     await self._transcriber.disconnect()
                     return
 
@@ -313,7 +320,8 @@ class TranscriptionCycle:
             latency_ms = int(((done_at or time.monotonic()) - stop_time) * 1000)
             # lingua loads its models on first use: keep that off the event loop.
             language = await loop.run_in_executor(None, stored_language, raw_text)
-            record = self._db.save_transcription(
+            save = functools.partial(
+                self._db.save_transcription,
                 text=processed.saved,
                 language=language,
                 duration_ms=duration_ms,
@@ -329,11 +337,12 @@ class TranscriptionCycle:
                 cleanup_ms=processed.cleanup.ms,
                 app=target_app,
             )
+            record = await loop.run_in_executor(None, save)
             logger.info(
                 "%s after %dms: %s", "Sent to phone" if remote else "Injected", latency_ms, Text(processed.typed)
             )
             self._stats_pool.submit(self._store_stat, self._db.record_dictionary_hits, processed.dictionary_hits)
-            self._store_audio(audio_buffer, record.id)
+            await loop.run_in_executor(None, self._store_audio, audio_buffer, record.id)
 
         except Exception:
             logger.exception("Transcription cycle failed")

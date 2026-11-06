@@ -45,9 +45,8 @@ class FeedbackCues:
         never come through here for the overlay. A window that could not start or died leaves the sounds
         on, whatever the mode."""
         mode = _feedback_mode(getattr(self, "_config", None))
-        overlay = self._overlay
-        visual = overlay is not None and not overlay.failed and mode != "sound"
+        visual = self._shows_overlay()
         if beep is not None and (mode != "visual" or not visual):
             _play(beep)
         if visual:
-            overlay.show(state)
+            self._overlay.show(state)

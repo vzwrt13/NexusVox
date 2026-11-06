@@ -8,15 +8,13 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 
+from .app_common import logger
 from .assistant import parse_assistant_command, send_to_assistant
 from .extensions import HOOK_TIMEOUT_S, ActiveApp, loaded_extensions
 from .feedback import beep_error, beep_flag
 from .logsetup import Text
 from .os_commands import WINDOW_ACTIONS, NexusCommand, execute_nexus_command
 from .overlay import CONFIRMED, ERROR
-
-# All parts of `NexusVoxApp` log under the one name `app.py` has.
-logger = logging.getLogger("nexusvox.app")
 
 
 class CommandHandling:

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 import threading
 import time
 
+from .app_common import QUICK_TAP_S, logger
 from .app_feedback import _play
 from .assistant import send_to_service
 from .dashboard import ensure_dashboard_api, open_dashboard
@@ -15,13 +15,6 @@ from .feedback import beep_error, beep_start, beep_stop
 from .hotkey import PASTE_LAST, POLISH
 from .logsetup import Text
 from .overlay import ERROR
-
-# A polish chord held shorter than this is a tap (nothing was said); longer means an instruction that a
-# missing server would lose, so the selection is left alone.
-QUICK_TAP_S = 0.6
-
-# All parts of `NexusVoxApp` log under the one name `app.py` has.
-logger = logging.getLogger("nexusvox.app")
 
 
 class InputEvents:
@@ -66,13 +59,14 @@ class InputEvents:
         info, self._stop_info = self._stop_info, None
         return info if info is not None else (None, False, None)
 
-    async def _offline_stop(self) -> None:
+    async def _offline_stop(self, pressed_at: float) -> None:
         """The transcription server is unreachable: paste-last and a quick polish tap need none.
 
         The error cue goes out at once, so a Hold user is not left dictating into nothing. A recording that can
         still get a marker (Hold, or a marker already set) then waits for its end; a Toggle recording without a
         marker has no way to say what it wants and ends here. A polish held longer than a tap carried an
-        instruction that is lost: the selection stays as it is.
+        instruction that is lost: the selection stays as it is. *pressed_at* is this take's key press: by the
+        time the stop arrives, `_press_time` may already be the next one.
         """
         self._cue(beep_error, ERROR)
         event = self._record_stop_event
@@ -90,7 +84,7 @@ class InputEvents:
         else:
             mark, cancelled, at = self._hotkey.mark, False, None
             self._hotkey.cancel()
-        held_s = (at or time.monotonic()) - self._press_time
+        held_s = (at or time.monotonic()) - pressed_at
         if cancelled:
             await self._hide_os_control()
         elif mark == PASTE_LAST:

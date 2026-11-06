@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import logging
 import time
 
+from .app_common import logger
 from .app_records import _Recording
 from .clipboard import ClipboardError
 from .extensions import loaded_extensions
@@ -17,9 +17,6 @@ from .logsetup import Text
 from .overlay import ERROR
 from .polish import polish, read_selection
 from .polish_presets import resolve_instruction
-
-# All parts of `NexusVoxApp` log under the one name `app.py` has.
-logger = logging.getLogger("nexusvox.app")
 
 
 class SelectionPolish:

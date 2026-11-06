@@ -141,7 +141,7 @@ def _switch(model_id: str, inference: InferenceConfig, monkeypatch):
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._config = Config(inference=inference)
     app._device = "cuda"
-    app._recording = False
+    app._cycle_running = False
     app._switch_status = "idle"
     app._switch_error = None
     old = MagicMock(needs_docker=True, disconnect=AsyncMock())

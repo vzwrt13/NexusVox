@@ -7,12 +7,12 @@ mixin each; they all work on the state set up here.
 from __future__ import annotations
 
 import asyncio
-import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .app_commands import CommandHandling
+from .app_common import logger
 from .app_cycle import TranscriptionCycle
 from .app_events import InputEvents
 from .app_feedback import FeedbackCues, _feedback_mode
@@ -33,8 +33,6 @@ from .remote_mic import RemoteAudioSource, RemoteMicServer
 from .transcriber import create_transcriber
 from .tray import SystemTray
 
-logger = logging.getLogger(__name__)
-
 
 class NexusVoxApp(
     InputEvents,
@@ -50,6 +48,7 @@ class NexusVoxApp(
     # When the hotkey last went down: a take starts here, not when the connection to the server is up.
     _press_time = 0.0
     _overlay: Overlay | None = None  # the visual feedback window; a test App built without __init__ has none
+    _main_task: asyncio.Task | None = None  # what Quit cancels; set in `_run`
 
     def __init__(self, config: Config) -> None:
         self._config = config
@@ -129,7 +128,6 @@ class NexusVoxApp(
         )
 
         # Signals between hotkey thread and asyncio loop
-        self._recording = False
         self._record_start_event: asyncio.Event | None = None
         self._record_stop_event: asyncio.Event | None = None
 
@@ -168,18 +166,30 @@ class NexusVoxApp(
         logger.info("Translate before inject: %s", "on" if self._config.translator.enabled else "off")
 
     def _on_quit(self) -> None:
-        """Handle quit from system tray."""
+        """Handle quit from system tray: end the main task at once, whatever it waits for.
+
+        Not `loop.stop()`: that leaves `_run` unfinished, so `_shutdown` never runs (an open meeting would keep
+        its WAV files without proper headers) and `asyncio.run` raises.
+        """
         self._running = False
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._loop is not None and self._main_task is not None:
+            self._loop.call_soon_threadsafe(self._main_task.cancel)
 
     async def _run(self) -> None:
-        """Main async run loop."""
+        """Serve until Quit, then clean up."""
         self._loop = asyncio.get_event_loop()
+        self._main_task = asyncio.current_task()
         self._running = True
         self._record_start_event = asyncio.Event()
         self._record_stop_event = asyncio.Event()
+        try:
+            await self._serve()
+        except asyncio.CancelledError:
+            logger.info("Quit requested")
+        await self._shutdown()
 
+    async def _serve(self) -> None:
+        """Start the components, then run a transcription cycle for each hotkey press."""
         # Start components
         self._hotkey.start()
         self._meeting_hotkey.start()
@@ -240,9 +250,6 @@ class NexusVoxApp(
                     self._record_stop_event.clear()
                     if self._remote_mic is not None:
                         self._remote_mic.finished(self._remote_text)
-
-        # Cleanup
-        await self._shutdown()
 
     async def _shutdown(self) -> None:
         """Clean up all components."""

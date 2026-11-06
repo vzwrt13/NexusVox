@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import time
 import wave
@@ -12,11 +11,9 @@ from pathlib import Path
 
 import numpy as np
 
+from .app_common import logger
 from .lang_detect import stored_language
 from .models import COMMAND_APP
-
-# All parts of `NexusVoxApp` log under the one name `app.py` has.
-logger = logging.getLogger("nexusvox.app")
 
 
 @dataclass(frozen=True)
@@ -55,9 +52,10 @@ class RecordKeeping:
         """Keep the recording's WAV next to the database, unless `[database].store_audio` is off.
 
         The flag is read per recording, so the dashboard toggle is live. The transcript
-        row is saved either way; only the playback file is skipped.
+        row is saved either way; only the playback file is skipped. So it is for a take that
+        stopped before the first audio block: there is nothing to play back.
         """
-        if not self._config.database.store_audio:
+        if not self._config.database.store_audio or not pcm_buffer:
             return
         self._db.update_audio_path(record_id, self._save_audio_wav(pcm_buffer, record_id))
 

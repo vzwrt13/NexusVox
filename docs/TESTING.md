@@ -90,6 +90,7 @@ tests/
 ├── test_experimental_voice.py     # [experimental] voice side: OS commands and "nexus flag" typed as text by default
 ├── test_hotkey.py                 # Hotkey modes, bindings, swallowing, command and paste marker keys
 ├── test_app_os_control.py         # Transcription cycle: os-control hide on skipped/failed cycles, paste last
+├── test_app_lifecycle.py          # Run loop and takes: Quit, model switch guards, stale stops, press times, saving off the loop
 ├── test_edit_watch.py             # Learn from edits: span mapping, suggestions, watcher thread
 ├── test_snippets.py               # Snippet matcher kept for extensions: triggers, options best match
 ├── test_cleanup.py                # Auto cleanup prompts, plausibility guard, every fallback (no server needed)
@@ -121,6 +122,7 @@ tests/
 | `test_experimental_voice.py` | `app_commands.py` | The voice commands "nexus <window action>" and "nexus flag" are typed as text by default and run with their flag |
 | `test_hotkey.py` | `hotkey.py` | Hold/toggle modes, key bindings and swallowing, the command key and the paste key (first marker wins, typed normally outside a recording) |
 | `test_app_os_control.py` | `app_cycle.py`, `app_polish.py` | The cycle's control flow with mocked collaborators: `::hide` after a skipped or failed command recording, pasting the last text |
+| `test_app_lifecycle.py` | `app.py`, `app_cycle.py`, `app_models.py` | Quit reaches the shutdown, a model switch is refused during a dictation, a stale stop does not skip a held press, press times stay per take, saving stays off the event loop |
 | `test_edit_watch.py` | `edit_watch.py` | Locating the pasted span, ignoring text typed around it, rejecting rewrites and language mix-ups (English and German), watcher thread with fake fields |
 | `test_snippets.py` | `snippets.py` | Trigger matching (English and German), longest trigger first, placeholders surviving voice commands, option best match (the matcher extensions import) |
 | `test_cleanup.py` | `cleanup.py` | Off and short dictations skip the model, the short timeout, tag stripping, model failures, replies that answer, carry out, translate or lose a line break |

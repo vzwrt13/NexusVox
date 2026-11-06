@@ -7,13 +7,15 @@ or `EXAMPLE_CONFIG_PATH` reaches the code that uses it.
 
 from __future__ import annotations
 
-import json  # noqa: F401  (still part of the pinned module namespace, see tests/test_config_exports.py)
+import json
 import logging
 import math
+import os
 import re
 import shutil
 import subprocess
 import threading
+import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -241,6 +243,9 @@ class Config:
     # The file `load_config` read, as an absolute path; `save_config` writes back to it, whatever the working
     # directory is by then. None for a Config that was not loaded from a file.
     source_path: Path | None = field(default=None, repr=False, compare=False)
+    # `[database].path` as the file wrote it, before `load_config` resolved it into the data folder of the installed
+    # app. `save_config` writes it back while it still resolves to `database.path`, so a relative path stays relative.
+    database_path_configured: str | None = field(default=None, repr=False, compare=False)
 
 
 def _experimental_flag(section: dict, key: str) -> bool:
@@ -299,8 +304,19 @@ def load_config(path: Path | None = None) -> Config:
         else:
             return with_hardware_defaults(Config())
 
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        # A file the old `save_config` broke (an unescaped Windows path) would otherwise keep the app from starting.
+        # Keep it next to the config so nothing is lost, and start from the template.
+        backup = path.with_name(f"{path.name}.broken-{time.strftime('%Y%m%d-%H%M%S')}")
+        try:
+            os.replace(path, backup)
+        except OSError:
+            raise exc from None
+        logger.warning("%s is not valid TOML (%s); moved it to %s and started from the defaults", path, exc, backup)
+        return load_config(path)
 
     general = data.get("general", {})
     hotkey_data = data.get("hotkey", {})
@@ -490,6 +506,7 @@ def load_config(path: Path | None = None) -> Config:
         ),
     )
     config.source_path = path.resolve()
+    config.database_path_configured = db_data.get("path", "nexusvox.db")
     return config
 
 
@@ -497,168 +514,250 @@ _config_lock = threading.Lock()
 
 
 _BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
-_TOML_ESCAPES = {'"': '\\"', "\\": "\\\\", "\n": "\\n", "\t": "\\t", "\r": "\\r"}
+# A lone surrogate (JSON such as "\ud83d" produces one) cannot be encoded as UTF-8.
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
-def _toml_str(value: object) -> str:
-    """Render *value* as a TOML basic string: quote and backslash escaped, control characters as escapes.
+def _toml_str(value: str) -> str:
+    """Render *value* as a TOML basic string.
 
-    Everything else, non-ASCII included, stays literal: the file is written as UTF-8. ``json.dumps`` is not a
-    substitute, it would write an astral character as a surrogate pair, which TOML rejects.
+    ``json.dumps`` without ``ensure_ascii`` escapes the quote, the backslash and every control character with the
+    same escapes TOML knows; DEL is the one control character it leaves and TOML forbids. Non-ASCII stays literal
+    (the file is UTF-8), and a lone surrogate, which cannot be written, becomes U+FFFD.
     """
-    out = []
-    for ch in str(value):
-        if ch in _TOML_ESCAPES:
-            out.append(_TOML_ESCAPES[ch])
-        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
-            out.append(f"\\u{ord(ch):04x}")
-        else:
-            out.append(ch)
-    return '"' + "".join(out) + '"'
+    if not isinstance(value, str):
+        raise TypeError(f"a config string must be str, not {type(value).__name__}")
+    return json.dumps(_LONE_SURROGATE.sub("�", value), ensure_ascii=False).replace("\x7f", "\\u007f")
 
 
 def _toml_key(name: str) -> str:
     """A TOML key: bare when it only holds letters, digits, ``_`` and ``-``, else a quoted one."""
-    return name if _BARE_KEY.fullmatch(name) else _toml_str(name)
+    return name if name and _BARE_KEY.fullmatch(name) else _toml_str(name)
+
+
+def _toml_value(value: object) -> str:
+    """Render a bool, number, string or list of those; anything else is a bug in the caller and raises."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "nan"
+        return "inf" if value == math.inf else "-inf" if value == -math.inf else repr(value)
+    if isinstance(value, str):
+        return _toml_str(value)
+    if isinstance(value, (list, tuple)):
+        return "[{}]".format(", ".join(_toml_value(item) for item in value))
+    raise TypeError(f"cannot write a {type(value).__name__} to the config")
+
+
+def _section(name: str, *items: tuple[str, object] | str) -> list[str]:
+    """The lines of one ``[name]`` table: ``(key, value)`` pairs, and plain strings which are written as they are
+    (comments). Every value goes through `_toml_value`, so no field can be written unescaped."""
+    lines = [f"[{name}]"]
+    for item in items:
+        if isinstance(item, str):
+            lines.append(item)
+        else:
+            key, value = item
+            lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
+    lines.append("")
+    return lines
+
+
+def _only_strings(items: object, what: str) -> list[str]:
+    """The string entries of a list a setter filled from JSON; anything else is dropped with a warning."""
+    kept = [item for item in items if isinstance(item, str)]
+    if len(kept) != len(items):
+        logger.warning("Dropped %d non-string entries of %s from the saved config", len(items) - len(kept), what)
+    return kept
+
+
+def _only_string_pairs(mapping: dict, what: str) -> dict[str, str]:
+    """The string -> string entries of a table a setter filled from JSON; anything else is dropped with a warning."""
+    kept = {k: v for k, v in mapping.items() if isinstance(k, str) and isinstance(v, str)}
+    if len(kept) != len(mapping):
+        logger.warning(
+            "Dropped %d entries of %s that are not text from the saved config", len(mapping) - len(kept), what
+        )
+    return kept
+
+
+def _configured_database_path(config: Config) -> str:
+    """What `[database].path` should say: the value the file had while it still resolves to the live path.
+
+    `load_config` resolves a relative path into the data folder of the installed app; writing that back would pin
+    the profile of the user who saved first.
+    """
+    configured = config.database_path_configured
+    if configured is not None and resolve_data_path(configured) == config.database.path:
+        return configured
+    return config.database.path
+
+
+def _write_atomic(path: Path, data: bytes) -> None:
+    """Replace *path* with *data* in one step: a failure or a kill mid-write leaves the old file untouched."""
+    temp = path.with_name(path.name + ".tmp")
+    try:
+        with open(temp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp, path)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
 
 
 def save_config(config: Config, path: Path | None = None) -> None:
-    """Write the current configuration back to TOML: to *path*, else to the file it was loaded from."""
+    """Write the current configuration back to TOML: to *path*, else to the file it was loaded from.
+
+    The whole text is built and encoded before the file is touched, and then swapped in atomically, so a value that
+    cannot be written (a TypeError) or a failed write leaves the existing file as it was.
+    """
     path = path or config.source_path or default_config_path()
     with _config_lock:
-        symbols_toml = "[{}]".format(", ".join(_toml_str(s) for s in config.voice_commands.symbols))
-        structural_toml = "[{}]".format(", ".join(_toml_str(s) for s in config.voice_commands.structural))
         lines = [
-            "[general]",
-            f"injection_delay_ms = {config.injection_delay_ms}",
-            f"log_level = {_toml_str(config.log_level)}",
-            f"log_full_text = {'true' if config.log_full_text else 'false'}",
-            "",
-            "[hotkey]",
-            "modifiers = [{}]".format(", ".join(_toml_str(m) for m in config.hotkey.modifiers)),
-            f"key = {_toml_str(config.hotkey.key)}",
-            f"mode = {_toml_str(config.hotkey.mode)}",
-            f"paste_key = {_toml_str(config.hotkey.paste_key)}",
-            f"polish_key = {_toml_str(config.hotkey.polish_key)}",
-            f"max_recording_s = {config.hotkey.max_recording_s}",
-            "",
-            "[meeting]",
-            "modifiers = [{}]".format(", ".join(_toml_str(m) for m in config.meeting.modifiers)),
-            f"key = {_toml_str(config.meeting.key)}",
-            f"mic_device = {_toml_str(config.meeting.mic_device)}",
-            f"output_device = {_toml_str(config.meeting.output_device)}",
-            f"consent_hint = {'true' if config.meeting.consent_hint else 'false'}",
-            f"leave_dictation_out = {'true' if config.meeting.leave_dictation_out else 'false'}",
-            f"own_voice_label = {_toml_str(config.meeting.own_voice_label)}",
-            f"live_transcript = {'true' if config.meeting.live_transcript else 'false'}",
-            f"store_audio = {'true' if config.meeting.store_audio else 'false'}",
-            "",
-            "[audio]",
-            f"sample_rate = {config.audio.sample_rate}",
-            f"chunk_size = {config.audio.chunk_size}",
-            "",
-            "[inference]",
-            f"server_url = {_toml_str(config.inference.server_url)}",
-            f"transcription_delay_ms = {config.inference.transcription_delay_ms}",
-            f"model = {_toml_str(config.inference.model)}",
-            f"device = {_toml_str(config.inference.device)}",
-            *([f"compute_type = {_toml_str(config.inference.compute_type)}"] if config.inference.compute_type else []),
-            "",
-            "[inference.custom]",
-            f"url = {_toml_str(config.inference.custom.url)}",
-            f"protocol = {_toml_str(config.inference.custom.protocol)}",
-            f"model_name = {_toml_str(config.inference.custom.model_name)}",
-            "",
-            "[database]",
-            f"path = {_toml_str(config.database.path)}",
-            f"audio_dir = {_toml_str(config.database.audio_dir)}",
-            f"store_audio = {'true' if config.database.store_audio else 'false'}",
-            "",
-            "[os_commands]",
-            f"enabled = {'true' if config.os_commands.enabled else 'false'}",
-            "",
-            "[os_commands.apps]",
-            *[f"{_toml_key(name)} = {_toml_str(exe)}" for name, exe in config.os_commands.apps.items()],
-            "",
-            "[experimental]",
-            f"os_commands = {'true' if config.experimental.os_commands else 'false'}",
-            f"flag_command = {'true' if config.experimental.flag_command else 'false'}",
-            f"dev_tab = {'true' if config.experimental.dev_tab else 'false'}",
-            "",
-            "[voice_commands]",
-            f"enabled = {'true' if config.voice_commands.enabled else 'false'}",
-            f"numbers_as_digits = {'true' if config.voice_commands.numbers_as_digits else 'false'}",
-            f"bypass_symbols = {'true' if config.voice_commands.bypass_symbols else 'false'}",
-            f"symbols = {symbols_toml}",
-            f"bypass_structural = {'true' if config.voice_commands.bypass_structural else 'false'}",
-            f"structural = {structural_toml}",
-            f"press_enter = {'true' if config.voice_commands.press_enter else 'false'}",
-            "",
-            "[assistant]",
-            f"enabled = {'true' if config.assistant.enabled else 'false'}",
-            f"host = {_toml_str(config.assistant.host)}",
-            f"port = {config.assistant.port}",
-            f"service = {_toml_str(config.assistant.service)}",
-            f"timeout_s = {config.assistant.timeout_s}",
-            "",
-            "[os_control]",
-            f"enabled = {'true' if config.os_control.enabled else 'false'}",
-            f"command_key = {_toml_str(config.os_control.command_key)}",
-            f"host = {_toml_str(config.os_control.host)}",
-            f"port = {config.os_control.port}",
-            f"service = {_toml_str(config.os_control.service)}",
-            f"timeout_s = {config.os_control.timeout_s}",
-            "",
-            "[translator]",
-            f"enabled = {'true' if config.translator.enabled else 'false'}",
-            f"url = {_toml_str(config.translator.url)}",
-            f"timeout_s = {config.translator.timeout_s}",
-            "",
-            "[mic_guard]",
-            f"enabled = {'true' if config.mic_guard.enabled else 'false'}",
-            f"watchdog_s = {config.mic_guard.watchdog_s}",
-            "",
-            "[feedback]",
-            f"mode = {_toml_str(config.feedback.mode)}",
-            "",
-            "[llm]",
-            f"url = {_toml_str(config.llm.url)}",
-            f"protocol = {_toml_str(config.llm.protocol)}",
-            # A model that is just the hardware default stays unset, so it keeps following the hardware.
-            *(
-                [f"model = {_toml_str(config.llm.model)}"]
-                if config.llm.model != auto_llm_model()
-                else ["# model = (unset: gemma4:e4b with a CUDA GPU of 12 GB or more, else gemma4:e2b)"]
+            *_section(
+                "general",
+                ("injection_delay_ms", config.injection_delay_ms),
+                ("log_level", config.log_level),
+                ("log_full_text", config.log_full_text),
             ),
-            # A free-form secret: escape it, a `"` or `\` would break the file.
-            f"api_key = {_toml_str(config.llm.api_key)}",
-            f"timeout_s = {config.llm.timeout_s}",
-            f"keep_alive = {_toml_str(config.llm.keep_alive)}",
-            "",
-            "[polish]",
-            f"in_terminals = {'true' if config.polish.in_terminals else 'false'}",
-            "",
-            "[cleanup]",
-            f"level = {_toml_str(config.cleanup.level)}",
-            *(
-                [f"timeout_s = {config.cleanup.timeout_s}"]
-                if config.cleanup.timeout_s != auto_cleanup_timeout()
-                else ["# timeout_s = (unset: 3 s with a CUDA GPU, 10 s without)"]
+            *_section(
+                "hotkey",
+                ("modifiers", config.hotkey.modifiers),
+                ("key", config.hotkey.key),
+                ("mode", config.hotkey.mode),
+                ("paste_key", config.hotkey.paste_key),
+                ("polish_key", config.hotkey.polish_key),
+                ("max_recording_s", config.hotkey.max_recording_s),
             ),
-            "",
-            "[learn_from_edits]",
-            f"enabled = {'true' if config.learn_from_edits.enabled else 'false'}",
-            f"window_s = {config.learn_from_edits.window_s}",
-            "",
-            "[remote_mic]",
-            f"enabled = {'true' if config.remote_mic.enabled else 'false'}",
-            f"host = {_toml_str(config.remote_mic.host)}",
-            f"port = {config.remote_mic.port}",
-            # A free-form secret: escape it, a `"` or `\` would break the file.
-            f"token = {_toml_str(config.remote_mic.token)}",
-            "",
-            "[support]",
-            f"feedback_form_url = {_toml_str(config.support.feedback_form_url)}",
-            "",
+            *_section(
+                "meeting",
+                ("modifiers", config.meeting.modifiers),
+                ("key", config.meeting.key),
+                ("mic_device", config.meeting.mic_device),
+                ("output_device", config.meeting.output_device),
+                ("consent_hint", config.meeting.consent_hint),
+                ("leave_dictation_out", config.meeting.leave_dictation_out),
+                ("own_voice_label", config.meeting.own_voice_label),
+                ("live_transcript", config.meeting.live_transcript),
+                ("store_audio", config.meeting.store_audio),
+            ),
+            *_section(
+                "audio",
+                ("sample_rate", config.audio.sample_rate),
+                ("chunk_size", config.audio.chunk_size),
+            ),
+            *_section(
+                "inference",
+                ("server_url", config.inference.server_url),
+                ("transcription_delay_ms", config.inference.transcription_delay_ms),
+                ("model", config.inference.model),
+                ("device", config.inference.device),
+                *([("compute_type", config.inference.compute_type)] if config.inference.compute_type else []),
+            ),
+            *_section(
+                "inference.custom",
+                ("url", config.inference.custom.url),
+                ("protocol", config.inference.custom.protocol),
+                ("model_name", config.inference.custom.model_name),
+            ),
+            *_section(
+                "database",
+                ("path", _configured_database_path(config)),
+                ("audio_dir", config.database.audio_dir),
+                ("store_audio", config.database.store_audio),
+            ),
+            *_section("os_commands", ("enabled", config.os_commands.enabled)),
+            *_section(
+                "os_commands.apps",
+                *_only_string_pairs(config.os_commands.apps, "[os_commands.apps]").items(),
+            ),
+            *_section(
+                "experimental",
+                ("os_commands", config.experimental.os_commands),
+                ("flag_command", config.experimental.flag_command),
+                ("dev_tab", config.experimental.dev_tab),
+            ),
+            *_section(
+                "voice_commands",
+                ("enabled", config.voice_commands.enabled),
+                ("numbers_as_digits", config.voice_commands.numbers_as_digits),
+                ("bypass_symbols", config.voice_commands.bypass_symbols),
+                ("symbols", _only_strings(config.voice_commands.symbols, "[voice_commands].symbols")),
+                ("bypass_structural", config.voice_commands.bypass_structural),
+                ("structural", _only_strings(config.voice_commands.structural, "[voice_commands].structural")),
+                ("press_enter", config.voice_commands.press_enter),
+            ),
+            *_section(
+                "assistant",
+                ("enabled", config.assistant.enabled),
+                ("host", config.assistant.host),
+                ("port", config.assistant.port),
+                ("service", config.assistant.service),
+                ("timeout_s", config.assistant.timeout_s),
+            ),
+            *_section(
+                "os_control",
+                ("enabled", config.os_control.enabled),
+                ("command_key", config.os_control.command_key),
+                ("host", config.os_control.host),
+                ("port", config.os_control.port),
+                ("service", config.os_control.service),
+                ("timeout_s", config.os_control.timeout_s),
+            ),
+            *_section(
+                "translator",
+                ("enabled", config.translator.enabled),
+                ("url", config.translator.url),
+                ("timeout_s", config.translator.timeout_s),
+            ),
+            *_section(
+                "mic_guard",
+                ("enabled", config.mic_guard.enabled),
+                ("watchdog_s", config.mic_guard.watchdog_s),
+            ),
+            *_section("feedback", ("mode", config.feedback.mode)),
+            *_section(
+                "llm",
+                ("url", config.llm.url),
+                ("protocol", config.llm.protocol),
+                # A model that is just the hardware default stays unset, so it keeps following the hardware.
+                *(
+                    [("model", config.llm.model)]
+                    if config.llm.model != auto_llm_model()
+                    else ["# model = (unset: gemma4:e4b with a CUDA GPU of 12 GB or more, else gemma4:e2b)"]
+                ),
+                ("api_key", config.llm.api_key),
+                ("timeout_s", config.llm.timeout_s),
+                ("keep_alive", config.llm.keep_alive),
+            ),
+            *_section("polish", ("in_terminals", config.polish.in_terminals)),
+            *_section(
+                "cleanup",
+                ("level", config.cleanup.level),
+                *(
+                    [("timeout_s", config.cleanup.timeout_s)]
+                    if config.cleanup.timeout_s != auto_cleanup_timeout()
+                    else ["# timeout_s = (unset: 3 s with a CUDA GPU, 10 s without)"]
+                ),
+            ),
+            *_section(
+                "learn_from_edits",
+                ("enabled", config.learn_from_edits.enabled),
+                ("window_s", config.learn_from_edits.window_s),
+            ),
+            *_section(
+                "remote_mic",
+                ("enabled", config.remote_mic.enabled),
+                ("host", config.remote_mic.host),
+                ("port", config.remote_mic.port),
+                ("token", config.remote_mic.token),
+            ),
+            *_section("support", ("feedback_form_url", config.support.feedback_form_url)),
         ]
-        path.write_text("\n".join(lines), encoding="utf-8")
+        # The platform's line ending, as `Path.write_text` wrote it before.
+        _write_atomic(path, os.linesep.join(lines).encode("utf-8"))

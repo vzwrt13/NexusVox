@@ -50,10 +50,12 @@ Layout (`index.html`, `style.css`): one `.settings-card` per group, in this orde
 
 ## API Endpoints
 
+A switch route reads `{enabled}` through `_switch` in `__init__.py`: anything but a boolean is a 400 (`"false"` would otherwise turn the feature on), and a request without the field keeps the route's default.
+
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/settings` | Translate, hotkey mode + modifiers + key (+ the allowed modifier/key options) |
-| POST | `/api/settings/hotkey` | Set the binding `{modifiers, key}` (400 on an unusable one) |
+| POST | `/api/settings/hotkey` | Set the binding `{modifiers, key}` (400 on an unusable one, or on a key the paste, polish or enabled os-control command key uses: the listener would drop that marker silently) |
 | POST | `/api/settings/hotkey-mode` | Set `hold` or `toggle` (400 on anything else) |
 | POST | `/api/settings/feedback-mode` | Set dictation feedback `{mode}`: `sound`, `visual`, `both` (400 otherwise) |
 | POST | `/api/settings/mic-guard` | Toggle muting other apps' microphone sessions while recording |

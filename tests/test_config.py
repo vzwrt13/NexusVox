@@ -890,3 +890,50 @@ def test_max_recording_s_defaults_to_ten_minutes_round_trips_and_ignores_junk(tm
         assert load_config(path).hotkey.max_recording_s == 600
     path.write_text("[hotkey]\nmax_recording_s = 0\n", encoding="utf-8")
     assert load_config(path).hotkey.max_recording_s == 0  # 0 turns the cap off
+
+
+def test_saved_windows_paths_and_free_text_can_be_read_back(tmp_path):
+    path = tmp_path / "config.toml"
+    config = Config()
+    config.os_commands.apps = {"editor": r"C:\Program Files\Notepad++\notepad++.exe", "my app": r"C:\Tools\a.exe"}
+    config.database.path = r"C:\data\nexusvox.db"
+    config.translator.url = 'http://host/"quoted"'
+    config.meeting.own_voice_label = "Host \U0001f3a4"
+
+    save_config(config, path)
+    loaded = load_config(path)
+
+    assert loaded.os_commands.apps == config.os_commands.apps
+    assert loaded.database.path == config.database.path
+    assert loaded.translator.url == config.translator.url
+    assert loaded.meeting.own_voice_label == config.meeting.own_voice_label
+
+
+def test_a_hand_written_windows_path_survives_a_save(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[os_commands.apps]\neditor = "C:\\\\Tools\\\\editor.exe"\n', encoding="utf-8")
+
+    save_config(load_config(path), path)
+
+    assert load_config(path).os_commands.apps == {"editor": r"C:\Tools\editor.exe"}
+
+
+def test_saved_voice_command_lists_stay_valid_toml(tmp_path):
+    path = tmp_path / "config.toml"
+    config = Config()
+    config.voice_commands.symbols = ["back\\slash", 'quo"te']
+
+    save_config(config, path)
+
+    assert tomllib.loads(path.read_text(encoding="utf-8"))["voice_commands"]["symbols"] == ["back\\slash", 'quo"te']
+
+
+def test_plain_values_are_saved_as_before(tmp_path):
+    path = tmp_path / "config.toml"
+    config = Config()
+    config.os_commands.apps = {"notepad": "notepad.exe"}
+
+    save_config(config, path)
+
+    text = path.read_text(encoding="utf-8")
+    assert 'notepad = "notepad.exe"\n' in text and 'key = ""\n' in text and 'mode = "hold"\n' in text

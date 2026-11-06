@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..config import numbered_speaker_label
 from ..file_transcribe import MAX_CHUNK_MS, NO_SPEAKER_LABELS
-from ..meeting_recorder import META_FILENAME
+from ..meeting_recorder import META_FILENAME, read_meeting_meta
 from ..meeting_transcribe import (
     MAX_DETECTION_S,
     MIX_FILENAME,
@@ -33,7 +33,7 @@ logger = logging.getLogger("nexusvox.dashboard.api")
 def _declared_track_files(folder: Path) -> list[str]:
     """The track file names `meeting.json` lists (also unreadable ones), `<name>.wav` where it names none."""
     try:
-        tracks = json.loads((folder / META_FILENAME).read_text(encoding="utf-8")).get("tracks") or {}
+        tracks = read_meeting_meta(folder).get("tracks") or {}
     except (OSError, ValueError):
         tracks = {}
     names = {f"{name}.wav" for name in TRACK_NAMES}
@@ -218,7 +218,7 @@ class MeetingTranscriptMixin:
         meta_path = folder / META_FILENAME
         meta: dict | None = None
         try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta = read_meeting_meta(folder)
             meta["discard"] = names
             meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
         except (OSError, ValueError) as exc:
@@ -252,7 +252,7 @@ class MeetingTranscriptMixin:
                 if folder is None:
                     continue
                 try:
-                    left = json.loads((folder / META_FILENAME).read_text(encoding="utf-8")).get("discard")
+                    left = read_meeting_meta(folder).get("discard")
                 except (OSError, ValueError):
                     continue
                 if isinstance(left, list) and left:

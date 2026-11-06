@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from pathlib import Path
@@ -16,7 +15,7 @@ from ..config import (
     validate_meeting_hotkey,
 )
 from ..meeting_live import LIVE_OTHERS_LABEL
-from ..meeting_recorder import META_FILENAME, list_devices
+from ..meeting_recorder import META_FILENAME, list_devices, read_meeting_meta
 from ..transcriber import BaseTranscriber, create_transcriber
 
 # All of DashboardAPI logs under one name, the one its log lines have always carried.
@@ -110,7 +109,7 @@ class MeetingsMixin:
             if folder.name in skip or self._meeting_folder(folder.name) is None:
                 continue
             try:
-                started = json.loads((folder / META_FILENAME).read_text(encoding="utf-8")).get("started_at")
+                started = read_meeting_meta(folder).get("started_at")
             except (OSError, ValueError):
                 started = None
             pending.append({"name": folder.name, "started_at": started})

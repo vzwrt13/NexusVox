@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
+from flask import Flask, Response, abort, jsonify, make_response, request, send_file, send_from_directory
 from werkzeug.serving import ThreadedWSGIServer
 
 from ..config import Config
@@ -44,6 +44,14 @@ def _attachment(filename: str) -> str:
     """A Content-Disposition value for a download; non-ASCII names go in the RFC 5987 form."""
     ascii_name = re.sub(r'[^\x20-\x7e]|["\\]', "_", filename)
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
+def _switch(data: dict, default: bool) -> bool:
+    """A switch's `enabled` from its request body, `default` when it is not sent; anything else is a 400."""
+    value = data.get("enabled", default)
+    if not isinstance(value, bool):  # bool("false") would be True
+        abort(make_response(jsonify({"error": "enabled must be true or false"}), 400))
+    return value
 
 
 def _listen_socket(port: int) -> socket.socket:
@@ -158,7 +166,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     @app.route("/api/settings/learn-from-edits", methods=["POST"])
     def set_learn_from_edits():
         data = request.get_json(force=True)
-        return jsonify(api.set_learn_from_edits(data.get("enabled", False)))
+        return jsonify(api.set_learn_from_edits(_switch(data, False)))
 
     @app.route("/api/settings/learn-from-edits-status")
     def get_learn_status():
@@ -191,7 +199,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     @app.route("/api/settings/polish-terminals", methods=["POST"])
     def set_polish_in_terminals():
         data = request.get_json(force=True)
-        return jsonify(api.set_polish_in_terminals(bool(data.get("enabled", False))))
+        return jsonify(api.set_polish_in_terminals(_switch(data, False)))
 
     @app.route("/api/settings/llm-model", methods=["POST"])
     def set_llm_model():
@@ -219,7 +227,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     @app.route("/api/settings/mic-guard", methods=["POST"])
     def set_mic_guard():
         data = request.get_json(force=True)
-        return jsonify(api.set_mic_guard_enabled(data.get("enabled", False)))
+        return jsonify(api.set_mic_guard_enabled(_switch(data, False)))
 
     @app.route("/api/settings/log-full-text", methods=["POST"])
     def set_log_full_text():
@@ -236,7 +244,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     @app.route("/api/settings/store-audio", methods=["POST"])
     def set_store_audio():
         data = request.get_json(force=True)
-        return jsonify(api.set_store_audio(bool(data.get("enabled", True))))
+        return jsonify(api.set_store_audio(_switch(data, True)))
 
     @app.route("/api/settings/meeting-hotkey", methods=["POST"])
     def set_meeting_hotkey():
@@ -255,7 +263,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     @app.route("/api/settings/meeting-consent-hint", methods=["POST"])
     def set_meeting_consent_hint():
         data = request.get_json(force=True)
-        return jsonify(api.set_meeting_consent_hint(bool(data.get("enabled", True))))
+        return jsonify(api.set_meeting_consent_hint(_switch(data, True)))
 
     @app.route("/api/settings/meeting-own-voice-label", methods=["POST"])
     def set_meeting_own_voice_label():
@@ -266,17 +274,17 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     @app.route("/api/settings/meeting-leave-dictation-out", methods=["POST"])
     def set_meeting_leave_dictation_out():
         data = request.get_json(force=True)
-        return jsonify(api.set_meeting_leave_dictation_out(bool(data.get("enabled", True))))
+        return jsonify(api.set_meeting_leave_dictation_out(_switch(data, True)))
 
     @app.route("/api/settings/meeting-store-audio", methods=["POST"])
     def set_meeting_store_audio():
         data = request.get_json(force=True)
-        return jsonify(api.set_meeting_store_audio(bool(data.get("enabled", True))))
+        return jsonify(api.set_meeting_store_audio(_switch(data, True)))
 
     @app.route("/api/settings/meeting-live-transcript", methods=["POST"])
     def set_meeting_live_transcript():
         data = request.get_json(force=True)
-        return jsonify(api.set_meeting_live_transcript(bool(data.get("enabled", False))))
+        return jsonify(api.set_meeting_live_transcript(_switch(data, False)))
 
     # ---- Meeting recording ---------------------------------------------------
 
@@ -325,7 +333,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     @app.route("/api/settings/translate", methods=["POST"])
     def set_translate():
         data = request.get_json(force=True)
-        return jsonify(api.set_translate_enabled(data.get("enabled", False)))
+        return jsonify(api.set_translate_enabled(_switch(data, False)))
 
     @app.route("/api/settings/translator-status")
     def get_translator_status():
@@ -340,17 +348,17 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     @app.route("/api/voice-commands/enabled", methods=["POST"])
     def set_voice_commands_enabled():
         data = request.get_json(force=True)
-        return jsonify(api.set_voice_commands_enabled(data.get("enabled", True)))
+        return jsonify(api.set_voice_commands_enabled(_switch(data, True)))
 
     @app.route("/api/voice-commands/numbers", methods=["POST"])
     def set_voice_commands_numbers():
         data = request.get_json(force=True)
-        return jsonify(api.set_voice_commands_numbers(data.get("enabled", False)))
+        return jsonify(api.set_voice_commands_numbers(_switch(data, False)))
 
     @app.route("/api/voice-commands/press-enter", methods=["POST"])
     def set_voice_commands_press_enter():
         data = request.get_json(force=True)
-        return jsonify(api.set_voice_commands_press_enter(data.get("enabled", False)))
+        return jsonify(api.set_voice_commands_press_enter(_switch(data, False)))
 
     @app.route("/api/voice-commands/symbols", methods=["POST"])
     def set_voice_commands_symbols():
@@ -360,7 +368,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     @app.route("/api/voice-commands/bypass-symbols", methods=["POST"])
     def set_voice_commands_bypass_symbols():
         data = request.get_json(force=True)
-        return jsonify(api.set_voice_commands_bypass_symbols(data.get("enabled", False)))
+        return jsonify(api.set_voice_commands_bypass_symbols(_switch(data, False)))
 
     @app.route("/api/voice-commands/structural", methods=["POST"])
     def set_voice_commands_structural():
@@ -370,7 +378,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     @app.route("/api/voice-commands/bypass-structural", methods=["POST"])
     def set_voice_commands_bypass_structural():
         data = request.get_json(force=True)
-        return jsonify(api.set_voice_commands_bypass_structural(data.get("enabled", False)))
+        return jsonify(api.set_voice_commands_bypass_structural(_switch(data, False)))
 
     # ---- OS Commands endpoints (experimental) ------------------------------
 
@@ -383,7 +391,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
         @app.route("/api/os-commands/enabled", methods=["POST"])
         def set_os_commands_enabled():
             data = request.get_json(force=True)
-            return jsonify(api.set_os_commands_enabled(data.get("enabled", False)))
+            return jsonify(api.set_os_commands_enabled(_switch(data, False)))
 
         @app.route("/api/os-commands/apps", methods=["POST"])
         def set_os_commands_apps():

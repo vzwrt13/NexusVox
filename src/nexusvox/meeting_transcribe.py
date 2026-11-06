@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import bisect
 import difflib
-import json
 import logging
 import math
 import os
@@ -31,7 +30,7 @@ import numpy as np
 from .config import DEFAULT_OWN_VOICE_LABEL
 from .diarization import format_transcript
 from .file_transcribe import MAX_CHUNK_MS
-from .meeting_recorder import META_FILENAME
+from .meeting_recorder import META_FILENAME, read_meeting_meta
 from .transcriber import Word
 
 logger = logging.getLogger(__name__)
@@ -191,9 +190,8 @@ def load_meeting(folder: str | Path) -> Meeting:
     missing or unreadable is left out with a note.
     """
     folder = Path(folder)
-    meta_path = folder / META_FILENAME
     try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta = read_meeting_meta(folder)
     except (OSError, ValueError) as exc:
         raise ValueError(f"{folder.name} has no readable {META_FILENAME}: {exc}") from exc
     meeting = Meeting(folder, meta.get("started_at"), interrupted=meta.get("ended_at") is None)

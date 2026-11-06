@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import shutil
 import subprocess
 import threading
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -933,34 +935,47 @@ def load_config(path: Path | None = None) -> Config:
 _config_lock = threading.Lock()
 
 
+def _toml_string(value: object) -> str:
+    """`value` as a TOML basic string. JSON's escapes are valid TOML, except that `ensure_ascii` writes an emoji as a
+    surrogate pair, which TOML refuses, and DEL is the one control character JSON leaves as it is."""
+    return json.dumps(str(value), ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
+def _toml_list(values: Iterable[object]) -> str:
+    return "[{}]".format(", ".join(_toml_string(value) for value in values))
+
+
+def _toml_key(name: str) -> str:
+    """A bare key where TOML allows one (`notepad`), a quoted one otherwise (`"my app"`)."""
+    return name if re.fullmatch(r"[A-Za-z0-9_-]+", name) else _toml_string(name)
+
+
 def save_config(config: Config, path: Path | None = None) -> None:
     """Write the current configuration back to TOML: to *path*, else to the file it was loaded from."""
     path = path or config.source_path or default_config_path()
     with _config_lock:
-        symbols_toml = "[{}]".format(", ".join(f'"{s}"' for s in config.voice_commands.symbols))
-        structural_toml = "[{}]".format(", ".join(f'"{s}"' for s in config.voice_commands.structural))
         lines = [
             "[general]",
             f"injection_delay_ms = {config.injection_delay_ms}",
-            f'log_level = "{config.log_level}"',
+            f"log_level = {_toml_string(config.log_level)}",
             f"log_full_text = {'true' if config.log_full_text else 'false'}",
             "",
             "[hotkey]",
-            "modifiers = [{}]".format(", ".join(f'"{m}"' for m in config.hotkey.modifiers)),
-            f'key = "{config.hotkey.key}"',
-            f'mode = "{config.hotkey.mode}"',
-            f'paste_key = "{config.hotkey.paste_key}"',
-            f'polish_key = "{config.hotkey.polish_key}"',
+            f"modifiers = {_toml_list(config.hotkey.modifiers)}",
+            f"key = {_toml_string(config.hotkey.key)}",
+            f"mode = {_toml_string(config.hotkey.mode)}",
+            f"paste_key = {_toml_string(config.hotkey.paste_key)}",
+            f"polish_key = {_toml_string(config.hotkey.polish_key)}",
             f"max_recording_s = {config.hotkey.max_recording_s}",
             "",
             "[meeting]",
-            "modifiers = [{}]".format(", ".join(f'"{m}"' for m in config.meeting.modifiers)),
-            f'key = "{config.meeting.key}"',
-            f"mic_device = {json.dumps(config.meeting.mic_device)}",
-            f"output_device = {json.dumps(config.meeting.output_device)}",
+            f"modifiers = {_toml_list(config.meeting.modifiers)}",
+            f"key = {_toml_string(config.meeting.key)}",
+            f"mic_device = {_toml_string(config.meeting.mic_device)}",
+            f"output_device = {_toml_string(config.meeting.output_device)}",
             f"consent_hint = {'true' if config.meeting.consent_hint else 'false'}",
             f"leave_dictation_out = {'true' if config.meeting.leave_dictation_out else 'false'}",
-            f"own_voice_label = {json.dumps(config.meeting.own_voice_label)}",
+            f"own_voice_label = {_toml_string(config.meeting.own_voice_label)}",
             f"live_transcript = {'true' if config.meeting.live_transcript else 'false'}",
             f"store_audio = {'true' if config.meeting.store_audio else 'false'}",
             "",
@@ -969,27 +984,31 @@ def save_config(config: Config, path: Path | None = None) -> None:
             f"chunk_size = {config.audio.chunk_size}",
             "",
             "[inference]",
-            f'server_url = "{config.inference.server_url}"',
+            f"server_url = {_toml_string(config.inference.server_url)}",
             f"transcription_delay_ms = {config.inference.transcription_delay_ms}",
-            f'model = "{config.inference.model}"',
-            f'device = "{config.inference.device}"',
-            *([f'compute_type = "{config.inference.compute_type}"'] if config.inference.compute_type else []),
+            f"model = {_toml_string(config.inference.model)}",
+            f"device = {_toml_string(config.inference.device)}",
+            *(
+                [f"compute_type = {_toml_string(config.inference.compute_type)}"]
+                if config.inference.compute_type
+                else []
+            ),
             "",
             "[inference.custom]",
-            f'url = "{config.inference.custom.url}"',
-            f'protocol = "{config.inference.custom.protocol}"',
-            f'model_name = "{config.inference.custom.model_name}"',
+            f"url = {_toml_string(config.inference.custom.url)}",
+            f"protocol = {_toml_string(config.inference.custom.protocol)}",
+            f"model_name = {_toml_string(config.inference.custom.model_name)}",
             "",
             "[database]",
-            f'path = "{config.database.path}"',
-            f'audio_dir = "{config.database.audio_dir}"',
+            f"path = {_toml_string(config.database.path)}",
+            f"audio_dir = {_toml_string(config.database.audio_dir)}",
             f"store_audio = {'true' if config.database.store_audio else 'false'}",
             "",
             "[os_commands]",
             f"enabled = {'true' if config.os_commands.enabled else 'false'}",
             "",
             "[os_commands.apps]",
-            *[f'{name} = "{exe}"' for name, exe in config.os_commands.apps.items()],
+            *[f"{_toml_key(name)} = {_toml_string(exe)}" for name, exe in config.os_commands.apps.items()],
             "",
             "[experimental]",
             f"os_commands = {'true' if config.experimental.os_commands else 'false'}",
@@ -1000,29 +1019,29 @@ def save_config(config: Config, path: Path | None = None) -> None:
             f"enabled = {'true' if config.voice_commands.enabled else 'false'}",
             f"numbers_as_digits = {'true' if config.voice_commands.numbers_as_digits else 'false'}",
             f"bypass_symbols = {'true' if config.voice_commands.bypass_symbols else 'false'}",
-            f"symbols = {symbols_toml}",
+            f"symbols = {_toml_list(config.voice_commands.symbols)}",
             f"bypass_structural = {'true' if config.voice_commands.bypass_structural else 'false'}",
-            f"structural = {structural_toml}",
+            f"structural = {_toml_list(config.voice_commands.structural)}",
             f"press_enter = {'true' if config.voice_commands.press_enter else 'false'}",
             "",
             "[assistant]",
             f"enabled = {'true' if config.assistant.enabled else 'false'}",
-            f'host = "{config.assistant.host}"',
+            f"host = {_toml_string(config.assistant.host)}",
             f"port = {config.assistant.port}",
-            f'service = "{config.assistant.service}"',
+            f"service = {_toml_string(config.assistant.service)}",
             f"timeout_s = {config.assistant.timeout_s}",
             "",
             "[os_control]",
             f"enabled = {'true' if config.os_control.enabled else 'false'}",
-            f'command_key = "{config.os_control.command_key}"',
-            f'host = "{config.os_control.host}"',
+            f"command_key = {_toml_string(config.os_control.command_key)}",
+            f"host = {_toml_string(config.os_control.host)}",
             f"port = {config.os_control.port}",
-            f'service = "{config.os_control.service}"',
+            f"service = {_toml_string(config.os_control.service)}",
             f"timeout_s = {config.os_control.timeout_s}",
             "",
             "[translator]",
             f"enabled = {'true' if config.translator.enabled else 'false'}",
-            f'url = "{config.translator.url}"',
+            f"url = {_toml_string(config.translator.url)}",
             f"timeout_s = {config.translator.timeout_s}",
             "",
             "[mic_guard]",
@@ -1030,27 +1049,26 @@ def save_config(config: Config, path: Path | None = None) -> None:
             f"watchdog_s = {config.mic_guard.watchdog_s}",
             "",
             "[feedback]",
-            f'mode = "{config.feedback.mode}"',
+            f"mode = {_toml_string(config.feedback.mode)}",
             "",
             "[llm]",
-            f"url = {json.dumps(config.llm.url)}",
-            f'protocol = "{config.llm.protocol}"',
+            f"url = {_toml_string(config.llm.url)}",
+            f"protocol = {_toml_string(config.llm.protocol)}",
             # A model that is just the hardware default stays unset, so it keeps following the hardware.
             *(
-                [f"model = {json.dumps(config.llm.model)}"]
+                [f"model = {_toml_string(config.llm.model)}"]
                 if config.llm.model != auto_llm_model()
                 else ["# model = (unset: gemma4:e4b with a CUDA GPU of 12 GB or more, else gemma4:e2b)"]
             ),
-            # A free-form secret: escape it, a `"` or `\` would break the file.
-            f"api_key = {json.dumps(config.llm.api_key)}",
+            f"api_key = {_toml_string(config.llm.api_key)}",
             f"timeout_s = {config.llm.timeout_s}",
-            f"keep_alive = {json.dumps(config.llm.keep_alive)}",
+            f"keep_alive = {_toml_string(config.llm.keep_alive)}",
             "",
             "[polish]",
             f"in_terminals = {'true' if config.polish.in_terminals else 'false'}",
             "",
             "[cleanup]",
-            f'level = "{config.cleanup.level}"',
+            f"level = {_toml_string(config.cleanup.level)}",
             *(
                 [f"timeout_s = {config.cleanup.timeout_s}"]
                 if config.cleanup.timeout_s != auto_cleanup_timeout()
@@ -1063,13 +1081,12 @@ def save_config(config: Config, path: Path | None = None) -> None:
             "",
             "[remote_mic]",
             f"enabled = {'true' if config.remote_mic.enabled else 'false'}",
-            f'host = "{config.remote_mic.host}"',
+            f"host = {_toml_string(config.remote_mic.host)}",
             f"port = {config.remote_mic.port}",
-            # A free-form secret: escape it, a `"` or `\` would break the file.
-            f"token = {json.dumps(config.remote_mic.token)}",
+            f"token = {_toml_string(config.remote_mic.token)}",
             "",
             "[support]",
-            f"feedback_form_url = {json.dumps(config.support.feedback_form_url)}",
+            f"feedback_form_url = {_toml_string(config.support.feedback_form_url)}",
             "",
         ]
         path.write_text("\n".join(lines), encoding="utf-8")

@@ -1261,3 +1261,80 @@ def test_llm_models_endpoint_reports_the_loaded_split(flask_client, monkeypatch)
     assert flask_client.get("/api/settings/llm-models").get_json()["loaded"] == {"vram_gb": 5.0, "ram_gb": 2.0}
     monkeypatch.setattr(api_module, "llm_loaded_model", lambda cfg, name, disk_gb=None: None)
     assert flask_client.get("/api/settings/llm-models").get_json()["loaded"] is None
+
+
+@pytest.mark.parametrize(
+    ("marker_route", "marker_key", "label"),
+    [(None, "V", "paste key"), ("/api/settings/polish-key", "P", "polish key")],
+)
+def test_hotkey_cannot_take_the_key_of_a_marker(flask_client, marker_route, marker_key, label):
+    if marker_route:
+        assert flask_client.post(marker_route, json={"key": marker_key}).status_code == 200
+
+    resp = flask_client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "win"], "key": marker_key})
+
+    assert resp.status_code == 400 and label in resp.get_json()["error"]
+    assert flask_client.get("/api/settings").get_json()["hotkey_key"] == ""
+
+
+def test_hotkey_cannot_take_the_os_control_command_key(session_factory, db, no_config_save):
+    from nexusvox.config import Config
+    from nexusvox.dashboard.api import DashboardAPI
+
+    config = Config()
+    config.os_control.enabled = True
+    config.os_control.command_key = "Y"
+    api = DashboardAPI(session_factory, config, db=db)
+
+    assert "os-control command key" in api.set_hotkey(["ctrl", "win"], "Y")["error"]
+    config.os_control.enabled = False
+    assert "error" not in api.set_hotkey(["ctrl", "win"], "Y")
+
+
+def test_hotkey_may_use_a_key_no_marker_has(flask_client):
+    resp = flask_client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "win"], "key": "F9"})
+
+    assert resp.status_code == 200 and resp.get_json()["hotkey_key"] == "F9"
+
+
+SWITCHES = [
+    "/api/settings/learn-from-edits",
+    "/api/settings/polish-terminals",
+    "/api/settings/mic-guard",
+    "/api/settings/store-audio",
+    "/api/settings/meeting-consent-hint",
+    "/api/settings/meeting-leave-dictation-out",
+    "/api/settings/meeting-store-audio",
+    "/api/settings/meeting-live-transcript",
+    "/api/settings/translate",
+    "/api/voice-commands/enabled",
+    "/api/voice-commands/numbers",
+    "/api/voice-commands/press-enter",
+    "/api/voice-commands/bypass-symbols",
+    "/api/voice-commands/bypass-structural",
+]
+
+
+@pytest.mark.parametrize("route", SWITCHES)
+@pytest.mark.parametrize("bad", ["false", 0, 1, None, []])
+def test_a_switch_refuses_anything_but_a_boolean(flask_client, route, bad):
+    before = flask_client.get("/api/settings").get_json()
+
+    resp = flask_client.post(route, json={"enabled": bad})
+
+    assert resp.status_code == 400 and resp.get_json()["error"] == "enabled must be true or false"
+    assert flask_client.get("/api/settings").get_json() == before
+
+
+@pytest.mark.parametrize("route", SWITCHES)
+def test_a_switch_takes_a_boolean_and_keeps_its_default_when_none_is_sent(flask_client, route):
+    assert flask_client.post(route, json={"enabled": True}).status_code == 200
+    assert flask_client.post(route, json={"enabled": False}).status_code == 200
+    assert flask_client.post(route, json={}).status_code == 200
+
+
+def test_the_os_commands_switch_refuses_anything_but_a_boolean(experimental_client):
+    resp = experimental_client.post("/api/os-commands/enabled", json={"enabled": "false"})
+
+    assert resp.status_code == 400
+    assert experimental_client.get("/api/os-commands").get_json()["enabled"] is False

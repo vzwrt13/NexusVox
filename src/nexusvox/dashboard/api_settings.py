@@ -108,6 +108,8 @@ class SettingsMixin:
             HotkeyConfig(modifiers=modifiers, key=normalize_hotkey_key(key) or ""),
         ):
             error = "The meeting hotkey would also start dictation with that; change the meeting hotkey first"
+        if error is None and key:
+            error = self._marker_clash(normalize_hotkey_key(key) or "")
         if error is not None:
             return {"error": error, **self.get_settings()}
         # Keep the canonical order so the config file and the hint read the same everywhere.
@@ -116,21 +118,28 @@ class SettingsMixin:
         save_config(self._config)
         return self.get_settings()
 
+    def _marker_clash(self, name: str, field: str = "") -> str | None:
+        """Why `name` cannot be taken: the listener would silently ignore or misread it, because the os-control
+        command key wins a clash and the binding's own key is never a marker. `field` is the marker being set.
+        """
+        if name and self._config.os_control.enabled and name == self._config.os_control.command_key:
+            return f"{name} is the os-control command key"
+        for other, label in _MARKER_KEY_FIELDS.items():
+            if name and other != field and name == getattr(self._config.hotkey, other):
+                return f"{name} is already the {label} key"
+        return None
+
     def _set_marker_key(self, field: str, key: str) -> dict:
         """Set one of `_MARKER_KEY_FIELDS`. Live: the listener reads the config on every key event."""
         name = normalize_hotkey_key(str(key or ""))
         if name is None:
             return {"error": f"Unknown key: {key}", **self.get_settings()}
-        # The listener would silently ignore or misread these: the binding's own key is never
-        # a marker, the os-control command key wins a clash, and two markers cannot share a key.
         hotkey = self._config.hotkey
         if name and name == hotkey.key:
             return {"error": f"{name} already completes the hotkey", **self.get_settings()}
-        if name and self._config.os_control.enabled and name == self._config.os_control.command_key:
-            return {"error": f"{name} is the os-control command key", **self.get_settings()}
-        for other, label in _MARKER_KEY_FIELDS.items():
-            if name and other != field and name == getattr(hotkey, other):
-                return {"error": f"{name} is already the {label} key", **self.get_settings()}
+        clash = self._marker_clash(name, field)
+        if clash:
+            return {"error": clash, **self.get_settings()}
         setattr(hotkey, field, name)
         save_config(self._config)
         return self.get_settings()

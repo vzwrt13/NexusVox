@@ -34,13 +34,15 @@ _RESERVED_FILENAMES = {
 _UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
+def _safe_stem(name: str) -> str:
+    """`name` as Windows accepts it for a file; empty when nothing of it is left."""
+    stem = _UNSAFE_FILENAME_CHARS.sub("_", name).strip(" .")
+    return "_" + stem if stem.split(".")[0].upper() in _RESERVED_FILENAMES else stem
+
+
 def _export_stem(record) -> str:
     """The download name (without extension) of an export: the title when set, else the file or folder name."""
-    if record.title:
-        stem = _UNSAFE_FILENAME_CHARS.sub("_", record.title).strip(" .")
-        if stem:
-            return "_" + stem if stem.split(".")[0].upper() in _RESERVED_FILENAMES else stem
-    return Path(record.original_filename).stem or "transcript"
+    return _safe_stem(record.title or "") or _safe_stem(Path(record.original_filename).stem) or "transcript"
 
 
 class FilesMixin:

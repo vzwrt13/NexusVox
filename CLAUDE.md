@@ -2,90 +2,44 @@
 
 ## Language Policy — English Only (non-negotiable)
 
-**Every artifact belonging to this project is written in English. No exceptions.**
+**Every artifact belonging to this project is written in English. No exceptions.** This covers source code (identifiers, comments, docstrings, log messages, exception text), user-facing strings (dashboard, tray menu, CLI output, errors), configuration (keys, values, the comments in `config.example.toml`), documentation (README, GettingStarted, CONTRIBUTING, `docs/`, every `CLAUDE.md`), product and marketing material (`product/`, `landing/`) and Git (commit messages, branch names, tags, release notes, PR and issue text).
 
-This covers, without limitation:
+**The conversation language is independent of the artifact language.** The maintainer frequently prompts in German. That never changes the output: a German prompt still produces English code, commits and documentation. Do not mirror the prompt language into the repository, and do not ask whether an exception applies — there is none. Rationale: this is a public source-available project; a mixed-language codebase excludes contributors and looks unmaintained. Call the licence "source-available", never "open source".
 
-- Source code — identifiers, comments, docstrings, log messages, exception text
-- User-facing strings — dashboard UI, tray menu, CLI output, error messages
-- Configuration — keys, values, and the comments in `config.example.toml`
-- Documentation — README, GettingStarted, CONTRIBUTING, `docs/`, every `CLAUDE.md`
-- Product and marketing material — `product/`, `landing/`
-- Git — commit messages, branch names, tags, release notes, PR and issue text
-
-**The conversation language is independent of the artifact language.** The maintainer
-frequently prompts in German. That never changes the output: a German prompt still
-produces English code, English commits, and English documentation. Do not mirror the
-prompt language into the repository, and do not ask whether an exception applies —
-there is none.
-
-Rationale: this is a public source-available project. A mixed-language codebase excludes
-contributors and makes the project look unmaintained.
-
-The single deliberate exception is `.open-source-docs/`, a git-ignored, one-off
-migration log that never ships and is retired once the repo migration is complete. It is
-the only place German may remain; no other file may follow its example.
+The single deliberate exception is `.open-source-docs/`, a git-ignored, one-off migration log that never ships. No other file may follow its example.
 
 ## Bilingual Speech — English and German (non-negotiable)
 
-Anything that matches spoken words (voice commands, number words, OS/assistant triggers, dictionary
-helpers) must handle **English and German from the first version**, with tests for both. Both
-languages are always recognised; the matcher never depends on a language setting (there is none: the language of a stored row is detected from its text by `lang_detect.stored_language`: `en`, `de`, or `und` when nothing can be told, which the language chart leaves out).
+Anything that matches spoken words (voice commands, number words, OS/assistant triggers, dictionary helpers) must handle **English and German from the first version**, with tests for both. Both languages are always recognised; the matcher never depends on a language setting (there is none: the language of a stored row is detected from its text by `lang_detect.stored_language`: `en`, `de`, or `und` when nothing can be told, which the language chart leaves out).
 
 ## Quick Reference
 
 ```bash
-# Start inference server (requires NVIDIA GPU + Docker)
-# Use --profile to select model: parakeet (default) or whisper
-cd docker && docker compose --profile parakeet up --build
-
-# Install app (Python 3.11+)
-pip install -e ".[dev]"
-
-# Run
-python -m nexusvox
-
-# Lint (before pushing)
-ruff check src/
-ruff format --check src/
-
-# Check CI status
-gh run list
+cd docker && docker compose --profile parakeet up --build   # inference server (NVIDIA GPU + Docker); or --profile whisper
+pip install -e ".[dev]"                                     # Python 3.11+
+python -m nexusvox                                          # run
+ruff check src/ && ruff format --check src/                 # lint before pushing
+gh run list                                                 # CI status
 ```
 
 ## Architecture
 
-Hotkey listener (pynput low-level hook; default Ctrl+Win, any modifiers optionally ending in one key under `[hotkey].key`, whose keystrokes are swallowed while held as part of the combo; `[hotkey].mode` = `hold` push-to-talk or `toggle` press-to-start/press-to-stop; `[hotkey].paste_key` (default `V`) tapped during a recording drops it and pastes the last pasted text again; `[hotkey].polish_key` (default off) makes the recording a spoken instruction for the selected text, rewritten by a local language model (`dictation/polish.py`, `llm.py`, `[llm]`: Ollama by default; a spoken preset name from `polish_presets` in SQLite stands for its stored instruction, `dictation/polish_presets.py`); binding and mode switchable live in the dashboard) triggers microphone capture (sounddevice, 16kHz PCM16 mono) and, when `[mic_guard]` is enabled, mutes every other app's WASAPI capture session for the duration of the hold (`audio/mic_guard.py`); the audio streams to a transcription backend (HTTP POST for Parakeet and Whisper, HTTP or WebSocket for a custom server). A recording marked as a command - `[os_control].command_key` (default `Y`, so Ctrl+Win+Y; `OEM_102` for the `<` key) pressed during a recording while every hotkey modifier is down, and swallowed (without the full chord it types normally) - is never typed: its transcript goes to the Controller as `send os-control <text>` (`::show` already goes out on the key press, from a thread so the hook never blocks; `::hide` instead of the text when the transcript is empty, and also when the cycle is skipped or fails), is saved as `[os-control] <text>`, and an unreachable port or an `error:` reply plays the error beep. Every other transcribed text passes through a nexus OS command check, then the assistant forward (`dictation/assistant.py`: "nexus assistant <text>" is sent to a local TCP port as `send <service> <text>` and not typed; unreachable port falls back to typing), then the correction dictionary (`dictation/dictionary.py`, entries in SQLite, edited in the dashboard), then optional voice command processing, then optional auto cleanup (`dictation/cleanup.py`, `[cleanup].level` `light`/`medium`: the [llm] model drops fillers and fixes punctuation; an implausible reply or any failure types the text unchanged), then optional translation into English (`dictation/translator.py`: a local HTTP translator server; unreachable server falls back to the original text), then is injected at the cursor (with `[feedback]` the cycle is signalled by chimes, a click-through waveform overlay at the bottom centre of the screen (`dictation/overlay.py`), or both) via clipboard + SendInput (Ctrl+V) with WM_PASTE fallback (`dictation/clipboard.py` keeps those clipboard writes out of the Win+V history), and saved to SQLite as spoken, before translation. Commands (an extension's `on_command`, nexus flag, assistant, nexus OS commands) are dispatched by `App._run_command`; everything from the dictionary to translation (cleanup included) is the pure function `pipeline.process_text`, which returns what to type, what to save and whether the paste can be learned from; an extension's `protect` hook shields parts of the text (also for phone dictations) before voice commands and its `restore` undoes that after translation. With `[learn_from_edits]` enabled, `dictation/edit_watch.py` then reads the focused field through UI Automation for a while and turns the words the user corrects there into pending dictionary suggestions (accepted in the dashboard). With `[remote_mic]` enabled (and a token set), `audio/remote_mic.py` serves a WebSocket on port 47393 (`/v1/remote-mic`, `Authorization: Bearer <token>`): a phone sends `start`, PCM16 frames and `stop`, and the cycle runs with `RemoteAudioSource` in place of `AudioCapture` (`_transcription_cycle(remote=True)`: never a command recording, no nexus/assistant actions, hotkey ignored meanwhile; the processed text is not injected but sent back in `done` for the phone to insert); contract in `docs/REMOTE_MIC.md`. A Flask dashboard on port 47392 provides analytics, settings, flagging/review, and file upload transcription (optional speaker detection with Parakeet: `transcription/diarization.py`, the container's `/v1/audio/diarization`). System tray (waveform mark, red while recording) opens the dashboard on left-click; the right-click menu has translate toggle, dashboard, and quit. The dashboard Settings tab is grouped into Dictation (hotkey with a Record button, mode, feedback, mic guard), Text & Polish (paste and polish keys, auto cleanup, translation, voice commands), Vocabulary (dictionary, polish presets), Models, Meetings, Privacy and a collapsed Advanced card (compute device, polish in terminals, polish model, OS commands).
-
-*Module paths in this file (`app/core.py`, `system/feedback_form.py`) are relative to `src/nexusvox/`; paths that start with a top-level folder, such as `docs/REMOTE_MIC.md`, are from the repository root. The package layout is in `src/nexusvox/CLAUDE.md`. Module-specific details auto-load from subdirectory CLAUDE.md files: `src/nexusvox/CLAUDE.md` (transcribers, protocols, SendInput, nexus), `src/nexusvox/dashboard/CLAUDE.md` (Flask routes, API endpoints, tabs), `.github/CLAUDE.md` (CI/CD, releases).*
+Hotkey (pynput hook) -> microphone capture -> transcription backend -> `pipeline.process_text` (dictionary, voice commands, cleanup, translation) -> text injected at the cursor and saved to SQLite. A Flask dashboard on port 47392, a system tray, meeting recording, a remote-mic WebSocket and an extension API sit around that path. The whole flow: `docs/internals/architecture.md`. Package layout and the rules for each package: `src/nexusvox/CLAUDE.md`, `src/nexusvox/dashboard/CLAUDE.md`, `.github/CLAUDE.md` (CI/CD, releases). Reference detail for every module is under `docs/internals/`.
 
 ## Key Constraints
 
-- **Windows-only** — uses Win32 SendInput + WM_PASTE for text injection and pynput win32 hooks
-- **NVIDIA GPU required only for server-backed models** (Parakeet/Whisper in their Docker builds). CPU-only mode runs faster-whisper or Parakeet (`onnx-asr`, ONNX int8, ~670 MB, no speaker detection) in-process — no Docker, no GPU. Set `[inference].device = "cpu"` in config.toml.
-- **ffmpeg required** — must be on system PATH for pydub to convert non-WAV audio uploads (WAV works without it). Documented for users in README Requirements and GettingStarted Prerequisites.
+- **Windows-only** — Win32 SendInput + WM_PASTE for text injection, pynput win32 hooks.
+- **NVIDIA GPU only for server-backed models** (Parakeet/Whisper in Docker). `[inference].device = "cpu"` runs faster-whisper or Parakeet (`onnx-asr`, ONNX int8) in-process: no Docker, no GPU.
+- **ffmpeg on PATH** — pydub needs it for non-WAV uploads (WAV works without it). Documented in README Requirements and GettingStarted Prerequisites.
 
 ## Configuration
 
-`config.toml` (git-ignored) is created in the working directory on first run, from the template at `src/nexusvox/config.example.toml`. The template ships inside the package so an installed wheel can find it; do not move it back to the repository root. Editable settings: file log (`[general].log_full_text`, bool, default false: dictated text is shortened in the file log), console log level (`[general].log_level`, `DEBUG`/`INFO`/`WARNING`/`ERROR`, default `INFO`, applied at start to the `nexusvox` loggers), injection delay (ms between modifier release and paste), hotkey modifiers, optional key, mode (`hold`/`toggle`) paste key and polish key, audio sample rate/chunk size, inference server URL, transcription model (3 entries in `MODEL_REGISTRY`: `parakeet-tdt-0.6b` (default; GPU via Docker or in-process CPU through ONNX), `whisper-large-v3-turbo` (for languages outside Parakeet's 25 European ones; Docker or in-process CPU); a config that names a removed model falls back to Parakeet on load with one log line; the dashboard model list marks each model as downloaded or not through `model_download_state`; `custom-server`, a user-run server under `[inference.custom]`: url, protocol `http`/`realtime`, model_name — no Docker, contract in `docs/CUSTOM_SERVER.md`), transcription delay, database path, audio storage directory (default `audio/`) and `store_audio` (bool, default true; off saves the transcript only), experimental features (`[experimental]`: `os_commands`, `flag_command`, `dev_tab`, all default false: hidden in v1, their dashboard endpoints not registered), OS commands enabled (bool, default false; needs `[experimental].os_commands`), OS commands apps (name→exe path mapping under `[os_commands.apps]`), assistant forward (`[assistant]` section: enabled bool, host, port, service, timeout_s), os-control command recordings (`[os_control]` section: enabled bool, command_key, host, port, service, timeout_s), voice commands (`[voice_commands]` section: enabled bool, numbers_as_digits bool (default true), structural list + bypass_structural bool, symbols list + bypass_symbols bool, press_enter bool), translate before inject (`[translator]` section: enabled bool, url, timeout_s), mic guard (`[mic_guard]` section: enabled bool, watchdog_s), dictation feedback (`[feedback].mode` `sound`/`visual`/`both`), learn from edits (`[learn_from_edits]` section: enabled bool, window_s), the language model for polish (`[llm]` section: url, protocol `ollama`/`openai`, model, api_key, timeout_s, keep_alive), polish in terminals (`[polish]` section: in_terminals bool, default false), auto cleanup (`[cleanup]` section: level `off`/`light`/`medium`, timeout_s), remote mic (`[remote_mic]` section: enabled bool, host, port, token), feedback form (`[support].feedback_form_url`: the dashboard's "Send feedback" button opens it in the browser with the app version, Windows version and hardware tier as URL parameters, `system/feedback_form.py`; empty (the default) hides the button; no network call by the app), meeting recording (`[meeting]` section: modifiers, key, mic_device, output_device, consent_hint bool, leave_dictation_out bool, live_transcript bool, store_audio bool).
+`config.toml` (git-ignored) is created in the working directory on first run from `src/nexusvox/config.example.toml`. The template ships inside the package so an installed wheel can find it; do not move it back to the repository root. All sections and keys: `docs/internals/configuration.md`.
 
-## Linting
+## Linting And Tests
 
-Ruff is configured in `pyproject.toml` under `[tool.ruff]`:
-
-- **Target**: Python 3.11
-- **Line length**: 120
-- **Rules**: E (pycodestyle errors), W (warnings), F (pyflakes), I (isort), UP (pyupgrade), B (bugbear)
-- Auto-fix safe issues: `ruff check --fix src/`
-- Auto-format: `ruff format src/`
-
-## Tests
-
-Tests covering config, database, analytics, Flask API, TranscriptionResult, transcriber factory/implementations, Docker orchestration, language detection, file upload transcription (conversion + endpoints), and nexus OS command parsing/dispatch/dashboard endpoints. Uses in-memory SQLite for isolation. See `docs/TESTING.md` for the full guide.
+Ruff, configured in `pyproject.toml`: Python 3.11, line length 120, rules E, W, F, I, UP, B. Fix with `ruff check --fix src/` and `ruff format src/`. Tests use in-memory SQLite; the guide is `docs/TESTING.md`.
 
 ## Backlog
 
-`BACKLOG.md` in the repository root tracks planned work, known issues, and priorities. It is a
-local, git-ignored working document and is deliberately not part of the published repository —
-do not add links to it from files that ship. After completing a feature or fix, update it: move
-the item to the Resolved section and strike it through in its original list.
+`BACKLOG.md` in the repository root tracks planned work, known issues and priorities. It is a local, git-ignored working document and not part of the published repository: do not add links to it from files that ship. After completing a feature or fix, move the item to the Resolved section and strike it through in its original list.

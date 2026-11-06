@@ -74,6 +74,7 @@ tests/
 ├── conftest.py                    # Shared fixtures (reusable setup code)
 ├── test_transcription_result.py   # TranscriptionResult: text + confidence math
 ├── test_config.py                 # Config loading, saving, defaults
+├── test_config_exports.py         # Every name nexusvox.config has to keep exporting
 ├── test_lang_detect.py            # Language detection (en/de/unknown)
 ├── test_db.py                     # Database CRUD operations
 ├── test_analytics.py              # Dashboard analytics queries
@@ -105,6 +106,7 @@ tests/
 |------|-------------|-----------------|
 | `test_transcription_result.py` | `transcriber.py` | Text accumulation from streaming deltas, confidence calculation from logprobs |
 | `test_config.py` | `config.py` | TOML loading with missing files/sections/keys, save/load roundtrip, default values |
+| `test_config_exports.py` | `config.py`, `config_sections/` | The names `nexusvox.config` must keep exporting, sections never importing it back, hardware patches reaching the defaults |
 | `test_lang_detect.py` | `lang_detect.py` | English detection, German detection, unknown for unsupported languages |
 | `test_db.py` | `db.py` | Save, retrieve, flag, correct transcriptions; empty database edge cases |
 | `test_analytics.py` | `dashboard/analytics.py` | Overview stats, word counting, time grouping, heatmap shape, date filtering |

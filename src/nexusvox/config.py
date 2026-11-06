@@ -1,4 +1,9 @@
-"""Configuration loading from TOML file."""
+"""Configuration loading from TOML file.
+
+The sections of the file are defined in `config_sections`; every name stays importable from here, the one public
+path. What reads the hardware or the template stays in this module, so a patch of `nexusvox.config.cuda_available`
+or `EXAMPLE_CONFIG_PATH` reaches the code that uses it.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +19,72 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .config_sections.features import (  # noqa: F401
+    FEEDBACK_MODES,
+    ExperimentalConfig,
+    FeedbackConfig,
+    LearnFromEditsConfig,
+    MicGuardConfig,
+    OSCommandsConfig,
+)
+from .config_sections.hotkey import (  # noqa: F401
+    DEFAULT_HOTKEY_MODIFIERS,
+    DEFAULT_MEETING_KEY,
+    DEFAULT_MEETING_MODIFIERS,
+    HOTKEY_KEY_VKS,
+    HOTKEY_MODES,
+    HOTKEY_MODIFIERS,
+    LEGACY_HOTKEY_MODIFIERS,
+    LEGACY_MEETING_KEY,
+    LEGACY_MEETING_MODIFIERS,
+    HotkeyConfig,
+    normalize_hotkey_key,
+    validate_hotkey,
+)
+from .config_sections.inference import (  # noqa: F401
+    CUSTOM_PROTOCOLS,
+    DEFAULT_MODEL,
+    MODEL_REGISTRY,
+    CustomServerConfig,
+    InferenceConfig,
+    model_download_state,
+    model_needs_docker,
+)
+from .config_sections.integrations import (  # noqa: F401
+    COMMAND_KEY_VKS,
+    AssistantConfig,
+    OsControlConfig,
+    RemoteMicConfig,
+    SupportConfig,
+    TranslatorConfig,
+)
+from .config_sections.llm import (  # noqa: F401
+    CLEANUP_LEVELS,
+    CLEANUP_TIMEOUT_CPU_S,
+    LLM_MODEL_CPU,
+    LLM_PROTOCOLS,
+    CleanupConfig,
+    LlmConfig,
+    PolishConfig,
+)
+from .config_sections.meeting import (  # noqa: F401
+    _MEETING_HOTKEY_FALLBACKS,
+    DEFAULT_OWN_VOICE_LABEL,
+    MAX_SPEAKER_LABEL_CHARS,
+    MeetingConfig,
+    default_meeting_hotkey,
+    meeting_hotkey_clash,
+    normalize_speaker_label,
+    numbered_speaker_label,
+    own_voice_label_problem,
+    validate_meeting_hotkey,
+)
+from .config_sections.storage import AudioConfig, DatabaseConfig  # noqa: F401
+from .config_sections.voice_commands import (  # noqa: F401
+    _DEFAULT_STRUCTURAL,
+    _DEFAULT_SYMBOLS,
+    VoiceCommandsConfig,
+)
 from .paths import default_config_path, resolve_data_path
 
 logger = logging.getLogger(__name__)
@@ -26,319 +97,13 @@ DEFAULT_CONFIG_PATH = Path("config.toml")
 # leaves wheel users without a config.toml at all.
 EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parent / "config.example.toml"
 
-MODEL_REGISTRY: dict[str, dict[str, object]] = {
-    "parakeet-tdt-0.6b": {
-        "hf_name": "nvidia/parakeet-tdt-0.6b-v3",
-        "default_url": "http://localhost:8002/v1/audio/transcriptions",
-        "protocol": "openai_http",
-        "display_name": "Parakeet TDT 0.6B",
-        "docker_profile": "parakeet",
-        "word_timestamps": True,
-        # Speaker detection for file uploads (the container's /v1/audio/diarization endpoint).
-        "diarization": True,
-        "health_url": "http://localhost:8002/health",
-        "description": "NVIDIA FastConformer-TDT — 25 European languages with auto language detection",
-        "parameters": "600M",
-        "architecture": "FastConformer-TDT",
-        "languages": "25 European languages with auto-detection",
-        "streaming": "false",
-        "vram_gb": "GPU ~2 GB · CPU ~670 MB download",
-        # GPU: the Docker NeMo container. CPU: in-process ONNX int8 through onnx-asr (no Docker).
-        "inprocess_supported": True,
-        "inprocess_engine": "parakeet-onnx",
-        "onnx_model": "nemo-parakeet-tdt-0.6b-v3",
-        "onnx_quantization": "int8",
-        # The in-process copy the dashboard marks as downloaded (Hugging Face repo, a file that proves it, size).
-        "download_repo": "istupakov/parakeet-tdt-0.6b-v3-onnx",
-        "download_probe": "encoder-model.int8.onnx",
-        "download_size": "~670 MB",
-    },
-    "whisper-large-v3-turbo": {
-        "hf_name": "deepdml/faster-whisper-large-v3-turbo-ct2",
-        "default_url": "http://localhost:8003/v1/audio/transcriptions",
-        "protocol": "openai_http",
-        "display_name": "Whisper Large V3 Turbo",
-        "docker_profile": "whisper",
-        "health_url": "http://localhost:8003/health",
-        "description": "OpenAI Whisper Large V3 Turbo via faster-whisper — CTranslate2 optimized, 99 languages",
-        "parameters": "809M",
-        "architecture": "Transformer encoder-decoder (CTranslate2)",
-        "languages": "99 languages",
-        "streaming": "false",
-        "vram_gb": "~4 GB",
-        "inprocess_supported": True,
-        "download_probe": "model.bin",
-        "download_size": "~1.6 GB",
-    },
-    "custom-server": {
-        # Not a model but a slot: any server the user runs, at [inference.custom].url,
-        # speaking one of the two wire protocols above. Never started through Docker.
-        "hf_name": "",
-        "default_url": "",
-        "protocol": "custom",
-        "display_name": "Custom server",
-        "docker_profile": "",
-        "health_url": "",
-        "description": "Your own server at [inference.custom] in config.toml — "
-        "audio leaves this machine if that URL is remote",
-        "parameters": "—",
-        "architecture": "OpenAI-compatible HTTP or realtime WebSocket",
-        "languages": "Depends on the server",
-        "streaming": "false",
-        "vram_gb": "None locally",
-        "inprocess_supported": False,
-        "custom": True,
-    },
-}
-
-# The model every config falls back to: one that names a model no longer in the registry, and a
-# model that cannot start on this machine.
-DEFAULT_MODEL = "parakeet-tdt-0.6b"
-
 # Default URLs of the removed Voxtral and Cohere containers.
 _REMOVED_MODEL_URLS = {"ws://localhost:8000/v1/realtime", "http://localhost:8001/v1/audio/transcriptions"}
 _WARNED_REMOVED_MODELS: set[str] = set()
 
-# Wire protocols a custom server can speak, mapped to the registry protocol they reuse.
-CUSTOM_PROTOCOLS = {"http": "openai_http", "realtime": "realtime_ws"}
 
-
-def model_download_state(model_id: str, cache_dir: str | Path | None = None) -> dict[str, object]:
-    """Whether the in-process copy of `model_id` is already on disk, and how big the download is.
-
-    `downloaded` is None for a model without an in-process copy (the custom server) and when the cache
-    cannot be read; `size` is empty then. `cache_dir` is the installed app's models folder (None from
-    source: the Hugging Face cache).
-    """
-    info = MODEL_REGISTRY.get(model_id, {})
-    # The repo defaults to the model's own Hugging Face name; only the ONNX Parakeet build lives elsewhere.
-    repo, probe = info.get("download_repo") or info.get("hf_name"), info.get("download_probe")
-    if not repo or not probe:
-        return {"downloaded": None, "size": ""}
-    try:
-        from huggingface_hub import try_to_load_from_cache
-
-        found = try_to_load_from_cache(str(repo), str(probe), cache_dir=cache_dir)
-        downloaded: bool | None = isinstance(found, str)
-    except Exception:
-        downloaded = None
-    return {"downloaded": downloaded, "size": str(info.get("download_size", ""))}
-
-
-def model_needs_docker(model_id: str, device: str) -> bool:
-    """Whether `model_id` runs in a Docker container on the resolved `device`."""
-    info = MODEL_REGISTRY.get(model_id, {})
-    if info.get("custom"):
-        return False
-    return not (info.get("inprocess_supported") and device == "cpu")
-
-
-# Default bindings, the single source for the dataclasses, the loader and the fallbacks. The legacy ones are what
-# a config file written before the current defaults meant by a section that leaves the modifiers out.
-DEFAULT_HOTKEY_MODIFIERS = ("ctrl", "win")
-LEGACY_HOTKEY_MODIFIERS = ("ctrl", "shift", "alt")
-DEFAULT_MEETING_MODIFIERS = ("ctrl", "shift")
-LEGACY_MEETING_MODIFIERS = ("ctrl", "alt")
-DEFAULT_MEETING_KEY = "F9"
-LEGACY_MEETING_KEY = "M"
-
-
-@dataclass
-class HotkeyConfig:
-    modifiers: list[str] = field(default_factory=lambda: list(DEFAULT_HOTKEY_MODIFIERS))
-    # Optional non-modifier key that completes the combo (e.g. "a", "f9", "space").
-    # Empty: the modifiers alone are the hotkey. Its keystrokes are swallowed while
-    # it is held as part of the combo, so the target app never sees the letter.
-    key: str = ""
-    # "hold": record while the modifiers are held (push-to-talk).
-    # "toggle": press once to start recording, press again to stop.
-    mode: str = "hold"
-    # Pressed during a recording with every modifier down: the recording is dropped and
-    # the last pasted text is pasted again (Ctrl+Win+V). Empty turns it off.
-    paste_key: str = "V"
-    # Pressed during a recording with every modifier down: the selected text is rewritten by
-    # the spoken instruction through the [llm] model (Ctrl+Win+P). Empty: off.
-    polish_key: str = ""
-    # Every recording ends by itself after this many seconds, as if the user had ended it
-    # normally (a forgotten toggle recording would otherwise mute other apps forever). 0: no cap.
-    max_recording_s: int = 600
-
-
-HOTKEY_MODES = ("hold", "toggle")
 # `[general].log_level`: names of the standard logging levels a user may pick.
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
-HOTKEY_MODIFIERS = ("ctrl", "shift", "alt", "win")
-
-# Non-modifier keys a hotkey may end with, name -> Win32 virtual-key code. Layout
-# independent keys only: letters, digits, function keys and a few that never type.
-HOTKEY_KEY_VKS: dict[str, int] = {
-    **{chr(c): c for c in range(ord("A"), ord("Z") + 1)},
-    **{chr(c): c for c in range(ord("0"), ord("9") + 1)},
-    **{f"F{n}": 0x6F + n for n in range(1, 25)},
-    "SPACE": 0x20,
-    "CAPS_LOCK": 0x14,
-    "SCROLL_LOCK": 0x91,
-    "PAUSE": 0x13,
-    "INSERT": 0x2D,
-    "HOME": 0x24,
-    "END": 0x23,
-    "PAGE_UP": 0x21,
-    "PAGE_DOWN": 0x22,
-}
-
-
-def normalize_hotkey_key(key: str) -> str | None:
-    """Canonical (upper-case) key name, "" for none, None if unknown."""
-    name = (key or "").strip().upper()
-    if name == "":
-        return ""
-    return name if name in HOTKEY_KEY_VKS else None
-
-
-def validate_hotkey(modifiers: list[str], key: str) -> str | None:
-    """Error message for an unusable binding, None if it is fine."""
-    if any(m not in HOTKEY_MODIFIERS for m in modifiers):
-        return "Unknown modifier; use ctrl, shift, alt, win"
-    if len(set(modifiers)) != len(modifiers):
-        return "Duplicate modifier"
-    if normalize_hotkey_key(key) is None:
-        return f"Unknown key: {key}"
-    if not modifiers and not key:
-        return "A hotkey needs at least one modifier or a key"
-    return None
-
-
-MAX_SPEAKER_LABEL_CHARS = 40
-
-
-def numbered_speaker_label(number: int) -> str:
-    """The label a speaker has when nobody named them: "Speaker 1", "Speaker 2", ..."""
-    return f"Speaker {number}"
-
-
-DEFAULT_OWN_VOICE_LABEL = numbered_speaker_label(1)
-
-
-def normalize_speaker_label(label: object) -> str:
-    """A speaker label on one line (whitespace collapsed, at most 40 characters); the default when nothing is left."""
-    text = " ".join(str(label or "").split())[:MAX_SPEAKER_LABEL_CHARS].strip()
-    return text or DEFAULT_OWN_VOICE_LABEL
-
-
-def own_voice_label_problem(label: str) -> str | None:
-    """Why `label` cannot name the microphone's speaker, None when it can.
-
-    "Speaker 2", "Speaker 3", ... are the labels the other participants get, so using one would write two
-    people under one name.
-    """
-    folded = label.casefold()
-    for number in range(2, 100):
-        if folded == numbered_speaker_label(number).casefold():
-            return f"{label!r} is the label of another speaker; pick a different name"
-    return None
-
-
-@dataclass
-class MeetingConfig:
-    """Meeting recording (microphone + system audio) started from the dashboard or its own hotkey.
-
-    The hotkey is a toggle and always needs a key, so it never collides with the dictation hotkey; the
-    default Ctrl+Shift+F9 leaves the default dictation chord (Ctrl+Win) untouched, has no Alt (no app menu) and
-    avoids Ctrl+Shift+M, the Teams mute shortcut. Empty device names mean the system default devices.
-    """
-
-    modifiers: list[str] = field(default_factory=lambda: list(DEFAULT_MEETING_MODIFIERS))
-    key: str = DEFAULT_MEETING_KEY
-    mic_device: str = ""
-    output_device: str = ""
-    # Show "Inform all participants before you record" before each recording; off after "don't show again".
-    consent_hint: bool = True
-    # Drop the Me words spoken inside a dictation take from the meeting transcript (the microphone records
-    # dictation too). Applied when the meeting is transcribed; the audio files stay as recorded.
-    leave_dictation_out: bool = True
-    # The label of the microphone's speaker in a meeting transcript; the other participants are numbered on from 2.
-    own_voice_label: str = DEFAULT_OWN_VOICE_LABEL
-    # Show a rough transcript of both tracks (your voice and "Others") in the dashboard while the meeting
-    # records. It sends the audio to the transcription model in 6 s windows all meeting long, and that load is not
-    # measured yet, so it is off until switched on (dashboard Meetings tab).
-    live_transcript: bool = False
-    # Keep `meeting.wav`, the playable mix, after a successful transcription. The per-track WAVs are always
-    # deleted then; off deletes the mix too. Meetings already stored keep their audio.
-    store_audio: bool = True
-
-
-def meeting_hotkey_clash(modifiers: list[str], key: str, dictation: HotkeyConfig) -> str | None:
-    """Why a meeting chord and the dictation hotkey cannot both exist, None when they can.
-
-    The dictation listener fires on any chord that holds at least its modifiers (and its key), so a meeting
-    chord that contains the dictation chord starts dictation as well.
-    """
-    chord, dictation_modifiers = set(modifiers), set(dictation.modifiers)
-    if not dictation_modifiers <= chord:
-        return None
-    if dictation.key and normalize_hotkey_key(key) != dictation.key:
-        return None
-    if chord == dictation_modifiers and normalize_hotkey_key(key) == dictation.key:
-        return "That is the dictation hotkey"
-    return "That chord would also start dictation; change its modifiers or its key"
-
-
-def validate_meeting_hotkey(modifiers: list[str], key: str, dictation: HotkeyConfig) -> str | None:
-    """Error message for a meeting binding that is unusable or would also trigger dictation."""
-    error = validate_hotkey(modifiers, key)
-    if error is not None:
-        return error
-    if not normalize_hotkey_key(key):
-        return "The meeting hotkey needs a key"
-    if not modifiers:
-        return "The meeting hotkey needs at least one modifier"
-    return meeting_hotkey_clash(modifiers, key, dictation)
-
-
-# Tried in order when a hand-edited file leaves no usable meeting hotkey.
-_MEETING_HOTKEY_FALLBACKS = (
-    (list(DEFAULT_MEETING_MODIFIERS), DEFAULT_MEETING_KEY),
-    (list(DEFAULT_MEETING_MODIFIERS), "F10"),
-    (list(LEGACY_MEETING_MODIFIERS), DEFAULT_MEETING_KEY),
-    (list(LEGACY_MEETING_MODIFIERS), LEGACY_MEETING_KEY),
-    (["ctrl", "alt", "win"], "M"),
-)
-
-
-def default_meeting_hotkey(dictation: HotkeyConfig) -> tuple[list[str], str]:
-    """The default meeting hotkey, or the first fallback that does not clash with the dictation hotkey."""
-    for modifiers, key in _MEETING_HOTKEY_FALLBACKS:
-        if validate_meeting_hotkey(modifiers, key, dictation) is None:
-            return list(modifiers), key
-    return ["ctrl", "alt", "win"], "F12"
-
-
-@dataclass
-class AudioConfig:
-    sample_rate: int = 16_000
-    chunk_size: int = 4096
-
-
-@dataclass
-class CustomServerConfig:
-    """A user-run transcription server, used when the model is "custom-server"."""
-
-    url: str = ""
-    # "http": WAV POSTed after recording stops (OpenAI /v1/audio/transcriptions).
-    # "realtime": audio streamed while recording (vLLM /v1/realtime WebSocket).
-    protocol: str = "http"
-    # Sent to the server as the model field, and stored with each transcript.
-    model_name: str = "custom-server"
-
-
-@dataclass
-class InferenceConfig:
-    server_url: str = "http://localhost:8002/v1/audio/transcriptions"
-    transcription_delay_ms: int = 480
-    model: str = "parakeet-tdt-0.6b"
-    device: str = "auto"
-    compute_type: str | None = None
-    custom: CustomServerConfig = field(default_factory=CustomServerConfig)
 
 
 def resolve_device(requested: str) -> str:
@@ -406,135 +171,6 @@ def resolve_compute_type(device: str, override: str | None) -> str:
     return "int8" if device == "cpu" else "float16"
 
 
-@dataclass
-class DatabaseConfig:
-    path: str = "nexusvox.db"
-    audio_dir: str = "audio"
-    # Keep a WAV of every recording next to the database (the Review tab needs it).
-    store_audio: bool = True
-
-
-@dataclass
-class OSCommandsConfig:
-    enabled: bool = False
-    apps: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class ExperimentalConfig:
-    """Features that are finished in code but not part of v1; each is off (hidden and unreachable) by default.
-
-    - ``os_commands``: Nexus OS commands (voice window management) and their Settings card.
-    - ``flag_command``: the "nexus flag" voice command and the Edit tab ("Flagged Transcriptions").
-    - ``dev_tab``: the developer benchmark page of the dashboard.
-    """
-
-    os_commands: bool = False
-    flag_command: bool = False
-    dev_tab: bool = False
-
-
-@dataclass
-class AssistantConfig:
-    """Where "nexus assistant <text>" is forwarded: a local TCP port that answers
-    `send <service> <text>` (the personal-tooling Controller's control port)."""
-
-    enabled: bool = False
-    host: str = "127.0.0.1"
-    port: int = 49730
-    service: str = "voice-assistant"
-    timeout_s: float = 5.0
-
-
-# Keys that can mark a recording as an os-control command, pressed as the last key of the
-# hotkey chord (Ctrl+Win+Y by default). OEM_102 is the "<" key left of Y/Z on a
-# German (ISO) keyboard.
-COMMAND_KEY_VKS: dict[str, int] = {"Y": 0x59, "OEM_102": 0xE2}
-
-
-@dataclass
-class OsControlConfig:
-    """Command recordings: pressing `command_key` while the voice hotkey is held sends
-    that recording's transcript to a local TCP port as `send <service> <text>` instead of
-    typing it (the personal-tooling Controller's os-control service)."""
-
-    enabled: bool = False
-    command_key: str = "Y"
-    host: str = "127.0.0.1"
-    port: int = 49730
-    service: str = "os-control"
-    timeout_s: float = 5.0
-
-
-@dataclass
-class TranslatorConfig:
-    """Translate the text into English before injecting it, via a local HTTP
-    translator (the personal-tooling `translator` tool). The stored transcript stays
-    in the spoken language; only the injected text is translated."""
-
-    enabled: bool = False
-    url: str = "http://127.0.0.1:8003/translate"
-    timeout_s: float = 8.0
-
-
-@dataclass
-class MicGuardConfig:
-    """Mute every other app's microphone session (Discord, Teams, browser calls) while
-    push-to-talk is held, and put each back the way it was on release. Per-session
-    WASAPI mute, never the device. `watchdog_s` restores the microphones if no key-up
-    is ever seen while the keys are no longer physically down."""
-
-    enabled: bool = False
-    watchdog_s: float = 30.0
-
-
-FEEDBACK_MODES = ("sound", "visual", "both")
-
-
-@dataclass
-class FeedbackConfig:
-    """How a dictation signals its state: the start/stop chimes (`sound`), a small waveform at the bottom
-    centre of the screen (`visual`), or `both`. Read on every cue, so a change applies without a restart."""
-
-    mode: str = "sound"
-
-
-LLM_PROTOCOLS = ("ollama", "openai")
-# Preselected when `[llm].model` is not set and there is no CUDA GPU (docs/llm-cpu-test.md).
-LLM_MODEL_CPU = "gemma4:e2b"
-
-
-@dataclass
-class LlmConfig:
-    """The language model server polish talks to. Not part of NexusVox: Ollama (default)
-    or any OpenAI-compatible server. `keep_alive` (Ollama only) is how long the model
-    stays loaded after a request; shorter frees the VRAM sooner, longer avoids reloads."""
-
-    url: str = "http://127.0.0.1:11434"
-    protocol: str = "ollama"
-    model: str = "gemma4:e4b"  # without a CUDA GPU and with no choice made: LLM_MODEL_CPU
-    api_key: str = ""
-    timeout_s: float = 60.0
-    keep_alive: str = "10m"
-
-
-CLEANUP_LEVELS = ("off", "light", "medium")
-
-
-@dataclass
-class CleanupConfig:
-    """Tidy every dictation through the [llm] model before it is typed: `light` drops
-    fillers and fixes punctuation, `medium` also grammar. `timeout_s` is short on purpose:
-    a model still loading must not hold the dictation up; it is typed unchanged instead."""
-
-    level: str = "off"
-    timeout_s: float = 3.0
-
-
-# `[cleanup].timeout_s` when unset and there is no CUDA GPU: the CPU needs 2-6 s (docs/llm-cpu-test.md).
-CLEANUP_TIMEOUT_CPU_S = 10.0
-
-
 def auto_llm_model() -> str:
     """The model for an unset `[llm].model`: gemma4:e4b with a CUDA GPU of 12 GB or more, else gemma4:e2b."""
     return LlmConfig.model if llm_runs_fast() else LLM_MODEL_CPU
@@ -567,47 +203,6 @@ def _cleanup_config(data: dict) -> CleanupConfig:
     )
 
 
-@dataclass
-class PolishConfig:
-    """How polish reads the selection. In a terminal it needs Ctrl+C (the terminal does
-    not report its selection), which interrupts the running program when nothing is
-    selected, so terminals are skipped unless `in_terminals` is set."""
-
-    in_terminals: bool = False
-
-
-@dataclass
-class LearnFromEditsConfig:
-    """After a paste, read the focused text field through UI Automation for `window_s`
-    seconds and turn the words the user corrects into dictionary suggestions, accepted
-    or dismissed in the dashboard. Off by default: it reads another app's text field
-    (never a password field)."""
-
-    enabled: bool = False
-    window_s: float = 20.0
-
-
-@dataclass
-class RemoteMicConfig:
-    """Let a phone use NexusVox as its speech recogniser over a WebSocket: it streams
-    audio, gets the processed text back and inserts it itself. Off by default; it needs a
-    token, and `host` should be a private address (a Tailscale IP). See docs/REMOTE_MIC.md."""
-
-    enabled: bool = False
-    host: str = "127.0.0.1"
-    port: int = 47393
-    token: str = ""
-
-
-@dataclass
-class SupportConfig:
-    """`feedback_form_url`: the page the dashboard's "Send feedback" button opens in the browser
-    (app version, Windows version and hardware tier are added as URL parameters). Empty (the
-    default, until the form exists) hides the button."""
-
-    feedback_form_url: str = ""
-
-
 def _feedback_form_url(value: object) -> str:
     """The configured form URL; a value that is not an http(s) URL is logged and treated as unset."""
     url = value.strip() if isinstance(value, str) else ""
@@ -617,39 +212,6 @@ def _feedback_form_url(value: object) -> str:
         )
         return ""
     return url
-
-
-_DEFAULT_SYMBOLS: list[str] = [
-    "slash",
-    "backslash",
-    "pipe",
-    "tilde",
-    "asterisk",
-    "open paren",
-    "close paren",
-    "open bracket",
-    "close bracket",
-    "open brace",
-    "close brace",
-    "less than",
-    "greater than",
-]
-
-
-_DEFAULT_STRUCTURAL = ["new paragraph", "new line", "tab", "all caps"]
-
-
-@dataclass
-class VoiceCommandsConfig:
-    enabled: bool = True
-    symbols: list[str] = field(default_factory=lambda: list(_DEFAULT_SYMBOLS))
-    numbers_as_digits: bool = True
-    bypass_symbols: bool = False
-    # Structural commands (new line, new paragraph, tab, all caps): own category, own list, own bypass.
-    structural: list[str] = field(default_factory=lambda: list(_DEFAULT_STRUCTURAL))
-    bypass_structural: bool = False
-    # Trailing "press enter" / "Enter drücken" presses Enter after the paste. Opt-in.
-    press_enter: bool = False
 
 
 @dataclass

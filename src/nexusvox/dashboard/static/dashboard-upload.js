@@ -28,7 +28,7 @@ function formatFileSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-function formatClock(seconds) {
+function formatUploadClock(seconds) {
   const s = Math.round(seconds);
   return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
 }
@@ -53,7 +53,7 @@ function showUploadDuration(file, sizeText) {
   probe.preload = "metadata";
   probe.addEventListener("loadedmetadata", () => {
     if (selectedUploadFile === file && Number.isFinite(probe.duration)) {
-      uploadSelectedMeta.textContent = sizeText + " · " + formatClock(probe.duration);
+      uploadSelectedMeta.textContent = sizeText + " · " + formatUploadClock(probe.duration);
     }
     done();
   });

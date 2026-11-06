@@ -931,8 +931,7 @@
 
   <script src="chart.min.js"></script>
   <!-- Fixed order: every script shares one global scope and runs its top-level code as it loads, so a file may
-       only use what an earlier file defines at that moment. Upload stays before Meetings (the later formatClock
-       wins) and init stays last. -->
+       only use what an earlier file defines at that moment. Init stays last: it makes the tabs live. -->
   <script src="dashboard-core.js"></script>
   <script src="dashboard-settings.js"></script>
   <script src="dashboard-settings-models.js"></script>

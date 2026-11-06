@@ -22,7 +22,6 @@ have the source tree importable, from a working directory outside the repository
 from __future__ import annotations
 
 import pathlib
-import re
 import sys
 import tempfile
 
@@ -30,6 +29,7 @@ import tempfile
 def main() -> int:
     import nexusvox
     from nexusvox.config import EXAMPLE_CONFIG_PATH, load_config
+    from nexusvox.dashboard.scripts import page_scripts
 
     package_dir = pathlib.Path(nexusvox.__file__).resolve().parent
     checks: list[tuple[str, bool, str]] = []
@@ -63,15 +63,16 @@ def main() -> int:
     for asset in (
         "index.html",
         "style.css",
-        "chart.min.js",
         "Geist-Variable.woff2",
         "GeistMono-Variable.woff2",
         "Geist-OFL.txt",
     ):
         check(f"dashboard asset present: {asset}", (static / asset).is_file())
-    # The dashboard's own scripts: whatever index.html loads has to be in the package.
-    scripts = re.findall(r'<script src="([^"]+)"></script>', (static / "index.html").read_text(encoding="utf-8"))
-    check("index.html loads the dashboard scripts", "dashboard-core.js" in scripts, str(scripts))
+    # The scripts: whatever index.html loads has to be in the package. A missing page is already a failed check
+    # above and must not end the run before the report.
+    index = static / "index.html"
+    scripts = page_scripts(index.read_text(encoding="utf-8")) if index.is_file() else []
+    check("index.html loads the scripts", {"chart.min.js", "dashboard-core.js"} <= set(scripts), str(scripts))
     for script in scripts:
         check(f"dashboard script present: {script}", (static / script).is_file())
 

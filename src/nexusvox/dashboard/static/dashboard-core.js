@@ -95,6 +95,12 @@ let charts = {};
 let currentPeriod = "day";
 let modelSpecs = {};
 
+// What `[experimental]` turns on, filled by loadFeatures in dashboard-init.js.
+let FEATURES = {};
+
+// Resolves when the flags are known; started at page load next to the other loaders, awaited where one is needed.
+let featuresReady = Promise.resolve();
+
 // ── API Helper ───────────────────────────────────────────────────────
 function dateParams() {
   const start = document.getElementById("filter-start").value;
@@ -157,8 +163,6 @@ function bindTab(btn) {
     activateTab(name);
   });
 }
-
-document.querySelectorAll(".tab").forEach(bindTab);
 
 // ── Extensions ───────────────────────────────────────────────────────
 // An installed extension package may add tabs and export links (docs/EXTENSIONS.md). With none
@@ -252,14 +256,13 @@ function restoreTabFromHash() {
   if (!activateTab(name)) history.replaceState(null, "", window.location.pathname + window.location.search);
 }
 
-window.addEventListener("hashchange", restoreTabFromHash);
-
 
 // ── Shared helpers ───────────────────────────────────────────────────
 function escapeHtml(s) {
   const div = document.createElement("div");
   div.textContent = s;
-  return div.innerHTML;
+  // innerHTML leaves quotes alone, and callers put the result in quoted attributes too.
+  return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function formatDuration(ms) {

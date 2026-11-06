@@ -22,6 +22,7 @@ have the source tree importable, from a working directory outside the repository
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -61,7 +62,6 @@ def main() -> int:
     # without them the dashboard silently falls back to system fonts.
     for asset in (
         "index.html",
-        "dashboard.js",
         "style.css",
         "chart.min.js",
         "Geist-Variable.woff2",
@@ -69,6 +69,11 @@ def main() -> int:
         "Geist-OFL.txt",
     ):
         check(f"dashboard asset present: {asset}", (static / asset).is_file())
+    # The dashboard's own scripts: whatever index.html loads has to be in the package.
+    scripts = re.findall(r'<script src="([^"]+)"></script>', (static / "index.html").read_text(encoding="utf-8"))
+    check("index.html loads the dashboard scripts", "dashboard-core.js" in scripts, str(scripts))
+    for script in scripts:
+        check(f"dashboard script present: {script}", (static / script).is_file())
 
     # The first run, as a new user experiences it: an empty directory.
     with tempfile.TemporaryDirectory() as tmp:

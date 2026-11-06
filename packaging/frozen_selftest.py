@@ -17,6 +17,7 @@ import asyncio
 import faulthandler
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -175,7 +176,6 @@ def run(work: Path, download: bool) -> NoReturn:
         bodies: dict[str, bytes] = {}
         for path in (
             "/",
-            "/dashboard.js",
             "/style.css",
             "/chart.min.js",
             "/Geist-Variable.woff2",
@@ -185,6 +185,12 @@ def run(work: Path, download: bool) -> NoReturn:
             status, body = get(path)
             bodies[path] = body
             record(f"dashboard GET {path}", status == 200 and len(body) > 0, f"{status}, {len(body)} bytes")
+        # The dashboard's own scripts: whatever index.html loads has to be in the build.
+        scripts = re.findall(r'<script src="([^"]+)"></script>', bodies["/"].decode())
+        record("index.html loads the dashboard scripts", "dashboard-core.js" in scripts, str(scripts))
+        for script in scripts:
+            status, body = get(f"/{script}")
+            record(f"dashboard GET /{script}", status == 200 and len(body) > 0, f"{status}, {len(body)} bytes")
         body = bodies["/api/extensions"]
         record("extension found next to the exe", "fake-pro" in body.decode(), body.decode()[:120])
         status, body = get("/ext/fake-pro/panel.js")

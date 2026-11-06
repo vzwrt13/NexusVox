@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from app_parts import patch_app
+from dashboard_js import dashboard_source
 
 from nexusvox.config import (
     Config,
@@ -464,7 +465,7 @@ def test_deleting_an_unknown_entry_is_a_404(env):
 def test_the_page_has_a_meetings_tab_and_in_page_delete_confirmation():
     static = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static"
     html = (static / "index.html").read_text(encoding="utf-8")
-    js = (static / "dashboard.js").read_text(encoding="utf-8")
+    js = dashboard_source()
     assert 'data-tab="meetings"' in html and 'id="meeting-consent"' in html
     assert "Inform all participants before you record" in html
     section = js[js.index("function askDeleteFileTranscription") : js.index("// ── Meetings")]
@@ -474,7 +475,7 @@ def test_the_page_has_a_meetings_tab_and_in_page_delete_confirmation():
 def test_the_upload_tab_shows_the_selected_file_and_lets_it_be_removed():
     static = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static"
     html = (static / "index.html").read_text(encoding="utf-8")
-    js = (static / "dashboard.js").read_text(encoding="utf-8")
+    js = dashboard_source()
     css = (static / "style.css").read_text(encoding="utf-8")
     for element_id in ("upload-selected-name", "upload-selected-meta", "upload-remove", "upload-zone-ready"):
         assert f'id="{element_id}"' in html

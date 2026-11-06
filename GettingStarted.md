@@ -333,6 +333,6 @@ NexusVox/
         └── static/
             ├── index.html      # Dashboard UI
             ├── style.css       # Styles
-            ├── dashboard.js    # Frontend logic
+            ├── dashboard-*.js  # Frontend logic, one file per tab plus shared helpers
             └── chart.min.js    # Bundled Chart.js
 ```

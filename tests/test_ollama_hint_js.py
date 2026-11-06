@@ -1,4 +1,4 @@
-"""The Ollama install hints of dashboard.js (unreachable, no model, recovery, who sees what), run under Node."""
+"""The dashboard's Ollama install hints (unreachable, no model, recovery, who sees what), run under Node."""
 
 import json
 import re
@@ -7,9 +7,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from dashboard_js import dashboard_source
 
 _STATIC = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static"
-JS = _STATIC / "dashboard.js"
 HTML = (_STATIC / "index.html").read_text(encoding="utf-8")
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
@@ -40,7 +40,7 @@ UNKNOWN = f"{{reachable: true, protocol: 'ollama', url: '{URL}', model: 'm', mod
 
 
 def run_js(body: str):
-    source = JS.read_text(encoding="utf-8")
+    source = dashboard_source()
     status = re.search(r"const STATUS_STATES.*?\n\}\n", source, re.S).group(0)
     start = source.index("// ── Ollama install hint")
     helpers = source[start : source.index("// ── end of Ollama install hint")]
@@ -141,7 +141,7 @@ def test_every_area_has_its_element(hint_id):
 
 
 def test_wiring_covers_the_triggers_that_make_a_hint_recover():
-    source = JS.read_text(encoding="utf-8")
+    source = dashboard_source()
     assert (
         "loadLlmStatus().catch(() => {}); // the cleanup hint must reflect Ollama as it is now" in source
     )  # Upload tab

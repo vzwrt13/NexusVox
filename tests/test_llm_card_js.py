@@ -1,13 +1,12 @@
-"""The Language Model card's refresh and overview helpers of dashboard.js, run under Node."""
+"""The Language Model card's refresh and overview helpers of the dashboard scripts, run under Node."""
 
 import json
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
+from dashboard_js import dashboard_source
 
-JS = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static" / "dashboard.js"
 START = "// ── LLM card refresh"
 END = "// ── end of LLM card refresh"
 
@@ -15,7 +14,7 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is
 
 
 def run_js(body: str):
-    source = JS.read_text(encoding="utf-8")
+    source = dashboard_source()
     helpers = source[source.index(START) : source.index(END)]
     out = subprocess.run(
         ["node", "-e", f"{helpers}\n(async () => {{ {body} }})()"],

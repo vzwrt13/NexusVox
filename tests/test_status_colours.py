@@ -3,9 +3,11 @@
 import re
 from pathlib import Path
 
+from dashboard_js import dashboard_source
+
 _STATIC = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static"
 _CSS = (_STATIC / "style.css").read_text(encoding="utf-8")
-_JS = (_STATIC / "dashboard.js").read_text(encoding="utf-8")
+_JS = dashboard_source()
 _HTML = (_STATIC / "index.html").read_text(encoding="utf-8")
 
 

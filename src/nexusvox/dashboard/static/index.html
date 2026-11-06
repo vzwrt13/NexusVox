@@ -930,6 +930,18 @@
   </main>
 
   <script src="chart.min.js"></script>
-  <script src="dashboard.js"></script>
+  <!-- Fixed order: every script shares one global scope and runs its top-level code as it loads, so a file may
+       only use what an earlier file defines at that moment. Init stays last: it makes the tabs live. -->
+  <script src="dashboard-core.js"></script>
+  <script src="dashboard-settings.js"></script>
+  <script src="dashboard-settings-models.js"></script>
+  <script src="dashboard-settings-vocabulary.js"></script>
+  <script src="dashboard-analytics.js"></script>
+  <script src="dashboard-edit.js"></script>
+  <script src="dashboard-review.js"></script>
+  <script src="dashboard-upload.js"></script>
+  <script src="dashboard-meetings.js"></script>
+  <script src="dashboard-dev.js"></script>
+  <script src="dashboard-init.js"></script>
 </body>
 </html>

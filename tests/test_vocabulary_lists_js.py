@@ -1,4 +1,4 @@
-"""The Vocabulary list helpers of dashboard.js (count, filter, collapse state), run under Node."""
+"""The Vocabulary list helpers of the dashboard scripts (count, filter, collapse state), run under Node."""
 
 import json
 import re
@@ -7,9 +7,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from dashboard_js import dashboard_source
 
 _STATIC = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static"
-JS = _STATIC / "dashboard.js"
 HTML = (_STATIC / "index.html").read_text(encoding="utf-8")
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
@@ -35,7 +35,7 @@ function entries(n) {
 
 
 def run_js(body: str):
-    source = JS.read_text(encoding="utf-8")
+    source = dashboard_source()
     start = source.index("// ── Vocabulary lists")
     helpers = source[start : source.index("// ── end of Vocabulary lists")]
     helpers += source[source.index("function renderDictionary") : source.index("async function addDictionaryEntry")]
@@ -172,5 +172,5 @@ def test_markup_has_a_box_per_list_and_scripts_wire_them():
     for key in ("dict", "preset"):
         for suffix in ("toggle", "body", "filter", "list"):
             assert f'id="{key}-{suffix}"' in HTML
-    assert re.search(r'wireVocabBox\("dict"', JS.read_text(encoding="utf-8"))
-    assert re.search(r'wireVocabBox\("preset"', JS.read_text(encoding="utf-8"))
+    assert re.search(r'wireVocabBox\("dict"', dashboard_source())
+    assert re.search(r'wireVocabBox\("preset"', dashboard_source())

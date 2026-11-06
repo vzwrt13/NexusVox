@@ -1,14 +1,12 @@
-"""An upload action's error lands in the tab of the list it was started from (dashboard.js, run under Node)."""
+"""An upload action's error lands in the tab of the list it was started from (run under Node)."""
 
 import json
 import re
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
-
-JS = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static" / "dashboard.js"
+from dashboard_js import dashboard_source
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
 
@@ -21,7 +19,7 @@ def _fn(source: str, name: str, is_async: bool = False) -> str:
 
 
 def run_js(body: str):
-    source = JS.read_text(encoding="utf-8")
+    source = dashboard_source()
     parts = "\n".join(
         [_fn(source, "feedbackEls"), _fn(source, "showUploadError"), _fn(source, "runUploadAction", True)]
     )

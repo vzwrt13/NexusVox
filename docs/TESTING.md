@@ -118,6 +118,7 @@ tests/
 | `test_file_transcribe.py` | `file_transcribe.py` | Extension detection, WAV passthrough, audio conversion, chunking |
 | `test_file_cleanup.py` | `file_cleanup.py` | Chunking at paragraphs and sentences (English and German), speaker labels kept, per-passage fallback, giving up on a dead model, progress |
 | `test_file_jobs.py` | `dashboard/file_jobs.py` | Upload job stages and progress, done/error mapping, one running job at a time, pruning, unread finished job |
+| `test_dashboard_scripts.py` | `dashboard/static/dashboard-*.js` | The fixed load order in `index.html`, no script left out, no function declared twice, and all scripts running together under Node against a stand-in page, `DOMContentLoaded` included: a name used before a later file defines it, or an id missing from `index.html` and used at load, fails. Code that runs only after a reply or a user action is not exercised |
 | `test_extensions.py` | `extensions.py` | Entry-point loading, a failing / mis-versioned / badly named extension skipped, the upload hook with a dummy extension, the dictation hook (order, chaining, failure and timeout fallback) and the selected-text command hook, panel static files and blueprint, export download |
 | `test_os_commands.py` | `os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
 | `test_experimental.py` | `config.py`, `dashboard/__init__.py` | `[experimental]` flags: strict bool parsing, endpoints not registered and page elements hidden by default, each flag bringing back only its feature |

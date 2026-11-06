@@ -698,6 +698,7 @@ def test_validate_hotkey():
     assert validate_hotkey([], "F9") is None
     assert validate_hotkey(["ctrl", "shift", "alt"], "") is None
     assert validate_hotkey([], "") is not None
+    assert validate_hotkey([], "   ") is not None
     assert validate_hotkey(["ctrl", "ctrl"], "") is not None
     assert validate_hotkey(["ctrl"], "enter") is not None
     assert validate_hotkey(["meta"], "a") is not None
@@ -1091,6 +1092,16 @@ def test_meeting_fallback_list_starts_with_the_default_and_stays_alt_free_first(
     assert first == (list(MeetingConfig().modifiers), MeetingConfig().key) and first[1] == "F9"
     clash = HotkeyConfig(modifiers=["ctrl", "shift"], key="F9")
     assert config_module.default_meeting_hotkey(clash) == (["ctrl", "shift"], "F10")
+
+
+def test_meeting_fallback_last_resort_never_clashes_with_dictation():
+    from nexusvox.config_sections.meeting import validate_meeting_hotkey
+
+    # Every listed fallback contains this dictation chord, so only the extended search can find a valid one.
+    dictation = HotkeyConfig(modifiers=["ctrl", "alt", "win"], key="")
+    modifiers, key = config_module.default_meeting_hotkey(dictation)
+    assert validate_meeting_hotkey(modifiers, key, dictation) is None
+    assert (set(modifiers), key) != (set(dictation.modifiers), dictation.key)
 
 
 def test_max_recording_s_defaults_to_ten_minutes_round_trips_and_ignores_junk(tmp_path):

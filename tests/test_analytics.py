@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+import time
+from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from nexusvox.dashboard.analytics import (
     _command_kind,
@@ -412,6 +415,36 @@ def test_peak_usage_hours_24_entries(session_factory):
     assert result["labels"][23] == "23"
 
 
+@pytest.fixture
+def berlin(monkeypatch):
+    """The process in Europe/Berlin, which SQLite's `localtime` follows; Windows has no `tzset`."""
+    if not hasattr(time, "tzset"):
+        pytest.skip("needs time.tzset")
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def _at(created_at):
+    return {"text": "test", "language": "en", "duration_ms": 1000, "created_at": created_at}
+
+
+def test_peak_usage_hours_are_local_in_winter_and_in_summer(session_factory, berlin):
+    _seed(session_factory, [_at(datetime(2026, 1, 15, 8, 0)), _at(datetime(2026, 7, 15, 7, 0))])
+
+    assert get_peak_usage_hours(session_factory)["values"][9] == 2  # 09:00 on the clock both times
+
+
+def test_peak_usage_hours_follow_the_clock_of_this_machine(session_factory):
+    utc = datetime(2026, 1, 15, 8, 0)
+    _seed(session_factory, [_at(utc)])
+
+    local = utc.replace(tzinfo=UTC).astimezone()
+    assert get_peak_usage_hours(session_factory)["values"][local.hour] == 1
+
+
 # ---- get_activity_heatmap --------------------------------------------------
 
 
@@ -427,6 +460,22 @@ def test_activity_heatmap_7x24(session_factory):
     assert len(result["hours"]) == 24
     assert len(result["grid"]) == 7
     assert all(len(row) == 24 for row in result["grid"])
+
+
+def test_activity_heatmap_moves_a_dictation_after_local_midnight_to_the_next_day(session_factory, berlin):
+    _seed(session_factory, [_at(datetime(2026, 1, 4, 23, 30))])  # Sunday in UTC, Monday 00:30 in Berlin
+
+    grid = get_activity_heatmap(session_factory)["grid"]
+
+    assert grid[1][0] == 1 and grid[0][23] == 0
+
+
+def test_activity_heatmap_follows_the_clock_of_this_machine(session_factory):
+    utc = datetime(2026, 1, 4, 23, 30)
+    _seed(session_factory, [_at(utc)])
+
+    local = utc.replace(tzinfo=UTC).astimezone()
+    assert get_activity_heatmap(session_factory)["grid"][local.isoweekday() % 7][local.hour] == 1
 
 
 # ---- get_flagged_transcriptions -------------------------------------------

@@ -64,10 +64,13 @@ def get_top_words(
 
 
 def get_peak_usage_hours(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> dict:
-    """Transcription count by hour of day (0-23)."""
+    """Transcription count by local hour of day (0-23).
+
+    `created_at` is naive UTC; SQLite's `localtime` converts each row with the offset of its own date.
+    """
     with session_factory() as session:
         query = session.query(
-            func.strftime("%H", Transcription.created_at).label("hour"),
+            func.strftime("%H", Transcription.created_at, "localtime").label("hour"),
             func.count().label("count"),
         )
         rows = _apply_date_filter(query, start, end).group_by("hour").order_by("hour").all()
@@ -81,11 +84,11 @@ def get_peak_usage_hours(session_factory: sessionmaker, *, start: str | None = N
 
 
 def get_activity_heatmap(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> dict:
-    """Day-of-week (0=Sun) x hour-of-day grid of transcription counts."""
+    """Day-of-week (0=Sun) x hour-of-day grid of transcription counts, in local time."""
     with session_factory() as session:
         query = session.query(
-            func.strftime("%w", Transcription.created_at).label("dow"),
-            func.strftime("%H", Transcription.created_at).label("hour"),
+            func.strftime("%w", Transcription.created_at, "localtime").label("dow"),
+            func.strftime("%H", Transcription.created_at, "localtime").label("hour"),
             func.count().label("count"),
         )
         rows = _apply_date_filter(query, start, end).group_by("dow", "hour").all()

@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlsplit
 from nexusvox.config import Config, SupportConfig, load_config, save_config
 from nexusvox.system.feedback_form import build_feedback_url, hardware_tier, windows_version
 
+DEFAULT_URL = "https://nexusvox.app/feedback"
 FACTS = {"app_version": "1.2.3", "windows": "Windows 11 (10.0.26200)", "hardware": "CPU-only"}
 
 
@@ -77,18 +78,30 @@ def test_settings_expose_the_url(db, session_factory):
     assert url.startswith("https://example.org/f?") and "app_version=" in url
 
 
-def test_settings_hide_the_button_by_default(flask_client):
-    assert flask_client.get("/api/settings").get_json()["feedback_url"] == ""
+def test_settings_show_the_live_form_by_default(flask_client):
+    url = flask_client.get("/api/settings").get_json()["feedback_url"]
+    assert url.startswith(f"{DEFAULT_URL}?") and "app_version=" in url
 
 
-def test_config_defaults_to_no_form_and_round_trips(tmp_path):
+def test_settings_hide_the_button_for_an_empty_url(db, session_factory):
+    from nexusvox.dashboard.api import DashboardAPI
+
+    config = Config(support=SupportConfig(feedback_form_url=""))
+    assert DashboardAPI(session_factory, config, db=db).get_settings()["feedback_url"] == ""
+
+
+def test_config_defaults_to_the_live_form_and_round_trips(tmp_path):
     path = tmp_path / "config.toml"
     path.write_text("", encoding="utf-8")
+    assert load_config(path).support.feedback_form_url == DEFAULT_URL
+    path.write_text('[support]\nfeedback_form_url = ""\n', encoding="utf-8")
     assert load_config(path).support.feedback_form_url == ""
     save_config(Config(support=SupportConfig(feedback_form_url="https://example.org/f?x=1")), path)
     assert load_config(path).support.feedback_form_url == "https://example.org/f?x=1"
-    save_config(Config(), path)
+    save_config(Config(support=SupportConfig(feedback_form_url="")), path)
     assert load_config(path).support.feedback_form_url == ""
+    save_config(Config(), path)
+    assert load_config(path).support.feedback_form_url == DEFAULT_URL
 
 
 def test_malformed_form_url_is_logged_and_unset(tmp_path, caplog):

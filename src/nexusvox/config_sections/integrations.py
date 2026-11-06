@@ -63,7 +63,7 @@ class RemoteMicConfig:
 @dataclass
 class SupportConfig:
     """`feedback_form_url`: the page the dashboard's "Send feedback" button opens in the browser
-    (app version, Windows version and hardware tier are added as URL parameters). Empty (the
-    default, until the form exists) hides the button."""
+    (app version, Windows version and hardware tier are added as URL parameters). Defaults to
+    the live form; an empty value hides the button."""
 
-    feedback_form_url: str = ""
+    feedback_form_url: str = "https://nexusvox.app/feedback"

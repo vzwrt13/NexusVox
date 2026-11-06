@@ -320,11 +320,12 @@ class Database:
     # ---- Dictionary statistics ----------------------------------------------
 
     def record_dictionary_hits(self, hits: dict[DictionaryEntry, int]) -> None:
-        """Add today's applications of dictionary entries to the per-entry, per-day counters."""
+        """Add today's applications of dictionary entries to the per-entry, per-day counters (local day)."""
         if not hits:
             return
-        day = utc_now().strftime("%Y-%m-%d")
         with self._session_factory() as session:
+            # SQLite's `localtime` converts the naive UTC clock with the offset of that date.
+            day = session.query(func.strftime("%Y-%m-%d", utc_now(), "localtime")).scalar()
             for entry, count in hits.items():
                 key = usage_key(entry.wrong)
                 row = session.query(DictionaryUsageRow).filter_by(wrong=key, day=day).first()

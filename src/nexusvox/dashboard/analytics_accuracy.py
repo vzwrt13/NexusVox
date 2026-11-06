@@ -38,13 +38,13 @@ def get_accuracy_over_time(
     accepted in the dashboard. Periods without a dictation are left out.
     """
     fmt = {"day": "%Y-%m-%d", "week": "%Y-W%W", "month": "%Y-%m"}.get(period, "%Y-%m-%d")
-    period_col = func.strftime(fmt, Transcription.created_at)
+    period_col = func.strftime(fmt, Transcription.created_at, "localtime")
 
     with session_factory() as session:
         query = session.query(period_col, Transcription.text, Transcription.corrected_text)
         query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
         rows = _apply_date_filter(query, start, end).all()
-        event_period = func.strftime(fmt, LearnEventRow.created_at)
+        event_period = func.strftime(fmt, LearnEventRow.created_at, "localtime")
         event_query = session.query(event_period, func.count()).filter(LearnEventRow.outcome == ACCEPTED_EVENT)
         accepted = dict(_apply_date_filter(event_query, start, end, LearnEventRow).group_by(event_period).all())
 

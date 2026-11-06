@@ -175,5 +175,5 @@ class DictionaryUsageRow(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     wrong: Mapped[str] = mapped_column(String(500), nullable=False)
     right: Mapped[str] = mapped_column(String(500), nullable=False)
-    day: Mapped[str] = mapped_column(String(10), nullable=False)  # UTC date, YYYY-MM-DD
+    day: Mapped[str] = mapped_column(String(10), nullable=False)  # local date, YYYY-MM-DD; older rows: UTC
     hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

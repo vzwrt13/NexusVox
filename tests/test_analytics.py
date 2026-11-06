@@ -524,6 +524,47 @@ def test_date_filter_narrows_results(session_factory):
     assert result["total_transcriptions"] == 2
 
 
+_NEAR_MIDNIGHT = datetime(2026, 1, 4, 23, 30)  # Sunday 23:30 in UTC, Monday 00:30 in Berlin
+
+
+def _local_day(utc: datetime) -> str:
+    return utc.replace(tzinfo=UTC).astimezone().strftime("%Y-%m-%d")
+
+
+def test_charts_put_a_dictation_after_local_midnight_on_the_next_day(session_factory, berlin):
+    _seed(
+        session_factory,
+        [{**_at(_NEAR_MIDNIGHT), "transcribe_ms": 100, "latency_ms": 200, "corrected_text": "tesx"}],
+    )
+
+    assert get_transcriptions_over_time(session_factory)["labels"] == ["2026-01-05"]
+    assert get_latency_over_time(session_factory)["labels"] == ["2026-01-05"]
+    assert get_accuracy_over_time(session_factory)["labels"] == ["2026-01-05"]
+
+
+def test_date_filter_selects_by_local_day(session_factory, berlin):
+    _seed(session_factory, [_at(_NEAR_MIDNIGHT)])
+
+    assert get_overview(session_factory, start="2026-01-05", end="2026-01-05")["total_transcriptions"] == 1
+    assert get_overview(session_factory, start="2026-01-04", end="2026-01-04")["total_transcriptions"] == 0
+
+
+def test_charts_follow_the_clock_of_this_machine(session_factory):
+    _seed(session_factory, [{**_at(_NEAR_MIDNIGHT), "transcribe_ms": 100, "latency_ms": 200}])
+    day = _local_day(_NEAR_MIDNIGHT)
+
+    assert get_transcriptions_over_time(session_factory)["labels"] == [day]
+    assert get_latency_over_time(session_factory)["labels"] == [day]
+    assert get_accuracy_over_time(session_factory)["labels"] == [day]
+
+
+def test_date_filter_follows_the_clock_of_this_machine(session_factory):
+    _seed(session_factory, [_at(_NEAR_MIDNIGHT)])
+    day = _local_day(_NEAR_MIDNIGHT)
+
+    assert get_overview(session_factory, start=day, end=day)["total_transcriptions"] == 1
+
+
 # ---- get_unreviewed_transcriptions ----------------------------------------
 
 
@@ -1096,6 +1137,20 @@ def test_learn_outcomes_survive_in_the_database(db, session_factory):
     assert result["accepted"] == 0
 
 
+def test_dictionary_usage_counts_a_hit_after_local_midnight_on_the_next_day(db, session_factory, berlin, monkeypatch):
+    monkeypatch.setattr("nexusvox.storage.db.utc_now", lambda: _NEAR_MIDNIGHT)
+    db.record_dictionary_hits({DictionaryEntry("nexus fox", "NexusVox"): 1})
+
+    assert get_dictionary_usage(session_factory)["items"][0]["last_used"] == "2026-01-05"
+
+
+def test_dictionary_usage_follows_the_clock_of_this_machine(db, session_factory, monkeypatch):
+    monkeypatch.setattr("nexusvox.storage.db.utc_now", lambda: _NEAR_MIDNIGHT)
+    db.record_dictionary_hits({DictionaryEntry("nexus fox", "NexusVox"): 1})
+
+    assert get_dictionary_usage(session_factory)["items"][0]["last_used"] == _local_day(_NEAR_MIDNIGHT)
+
+
 def test_dictionary_usage_counts_per_entry_and_day(db, session_factory):
     db.add_dictionary_entry("nexus fox", "NexusVox")
     db.add_dictionary_entry("never used", "Unused")
@@ -1108,7 +1163,7 @@ def test_dictionary_usage_counts_per_entry_and_day(db, session_factory):
     assert result["total_hits"] == 5
     assert result["entries"] == 2
     assert [(i["wrong"], i["hits"]) for i in result["items"]] == [("nexus fox", 5), ("never used", 0)]
-    assert result["items"][0]["last_used"] == utc_now().strftime("%Y-%m-%d")
+    assert result["items"][0]["last_used"] == _local_day(utc_now())
     assert result["items"][1]["last_used"] is None
 
 
@@ -1124,7 +1179,7 @@ def test_dictionary_usage_keeps_history_of_deleted_entries(db, session_factory):
             "wrong": "nexus fox",
             "right": "NexusVox",
             "hits": 1,
-            "last_used": utc_now().strftime("%Y-%m-%d"),
+            "last_used": _local_day(utc_now()),
             "removed": True,
         }
     ]

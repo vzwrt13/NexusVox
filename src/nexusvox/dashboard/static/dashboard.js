@@ -2423,6 +2423,15 @@ const uploadProgressEl = document.getElementById("upload-progress");
 const uploadProgressBar = document.getElementById("upload-progress-bar");
 const uploadErrorEl = document.getElementById("upload-error");
 const uploadNoteEl = document.getElementById("upload-note");
+const meetingErrorEl = document.getElementById("meeting-error");
+const meetingNoteEl = document.getElementById("meeting-note");
+
+// The error and note boxes of the tab that holds `el`: a card in the Meetings tab reports there, never in the
+// hidden Upload tab. Both tabs draw their cards with the same actions and exports.
+function feedbackEls(el) {
+  const inMeetings = !!(el && el.closest && el.closest("#tab-meetings"));
+  return inMeetings ? { error: meetingErrorEl, note: meetingNoteEl } : { error: uploadErrorEl, note: uploadNoteEl };
+}
 
 function showUploadProgress(job) {
   uploadStatusEl.style.display = "flex";
@@ -2436,9 +2445,9 @@ function hideUploadProgress() {
   uploadProgressEl.style.display = "none";
 }
 
-function showUploadError(message) {
-  uploadErrorEl.textContent = message;
-  uploadErrorEl.style.display = "block";
+function showUploadError(message, box = uploadErrorEl) {
+  box.textContent = message;
+  box.style.display = "block";
 }
 
 async function handleFileUpload(file) {
@@ -2581,13 +2590,14 @@ setInterval(() => {
 
 // An export is fetched, not followed as a link, so a failing one shows its message instead of
 // saving the error reply as a file.
-async function downloadExport(url) {
-  uploadErrorEl.style.display = "none";
+async function downloadExport(url, source) {
+  const { error: errorBox } = feedbackEls(source);
+  errorBox.style.display = "none";
   try {
     const res = await fetch(url);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      showUploadError(body.error || `Export failed (${res.status})`);
+      showUploadError(body.error || `Export failed (${res.status})`, errorBox);
       return;
     }
     const disposition = res.headers.get("Content-Disposition") || "";
@@ -2601,7 +2611,7 @@ async function downloadExport(url) {
     a.click();
     URL.revokeObjectURL(blobUrl);
   } catch (err) {
-    showUploadError(`Export failed: ${err.message}`);
+    showUploadError(`Export failed: ${err.message}`, errorBox);
   }
 }
 
@@ -2615,8 +2625,9 @@ async function runUploadAction(button, item) {
   const key = `${action.id}:${item.id}`;
   if (runningUploadActions.has(key)) return;
   runningUploadActions.add(key);
-  uploadErrorEl.style.display = "none";
-  uploadNoteEl.style.display = "none";
+  const { error: errorBox, note: noteBox } = feedbackEls(button);
+  errorBox.style.display = "none";
+  noteBox.style.display = "none";
   // The row's main button and its Retry run the same action: both go quiet meanwhile.
   const card = button.closest(".flagged-card");
   const siblings = (card ? [...card.querySelectorAll(".upload-action, .upload-retry")] : [button])
@@ -2627,10 +2638,10 @@ async function runUploadAction(button, item) {
       const res = await fetch(action.endpoint.replaceAll("{id}", item.id), { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.ok === false) {
-        showUploadError(body.error || `${action.label} failed (${res.status})`);
+        showUploadError(body.error || `${action.label} failed (${res.status})`, errorBox);
       } else if (body.note || body.message) {
-        uploadNoteEl.textContent = body.note || body.message;
-        uploadNoteEl.style.display = "block";
+        noteBox.textContent = body.note || body.message;
+        noteBox.style.display = "block";
       }
     } else {
       if (!uploadActionHandlers[action.id]) {
@@ -2644,7 +2655,7 @@ async function runUploadAction(button, item) {
       await handler(item, button);
     }
   } catch (err) {
-    showUploadError(`${action.label} failed: ${err.message}`);
+    showUploadError(`${action.label} failed: ${err.message}`, errorBox);
   } finally {
     runningUploadActions.delete(key);
     siblings.forEach((b) => { b.disabled = false; });
@@ -2805,7 +2816,7 @@ function buildFileCard(item, signature) {
     link.addEventListener("click", (event) => {
       event.preventDefault();
       if (link.classList.contains("disabled")) return;
-      downloadExport(link.href);
+      downloadExport(link.href, link);
     });
   });
 

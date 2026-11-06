@@ -34,6 +34,14 @@ QUEUE_CHUNKS = 4096
 META_FILENAME = "meeting.json"
 
 
+def read_meeting_meta(folder: Path) -> dict:
+    """The `meeting.json` of a folder. Raises OSError or ValueError when it is missing, broken or no JSON object."""
+    meta = json.loads((folder / META_FILENAME).read_text(encoding="utf-8"))
+    if not isinstance(meta, dict):
+        raise ValueError(f"{META_FILENAME} is not a JSON object")
+    return meta
+
+
 @dataclass(frozen=True)
 class AudioFormat:
     sample_rate: int

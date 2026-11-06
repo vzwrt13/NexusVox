@@ -8,7 +8,9 @@ The page's JavaScript is one file per tab plus shared helpers, flat in `static/`
 
 - `guard.py` — access control, one `before_request` hook installed first in `_create_app`, so every route (extension blueprints included) is covered: the Host header must be `127.0.0.1`/`localhost` with the dashboard port (DNS rebinding), an `Origin` header must be one of those origins, `Sec-Fetch-Site` must be `same-origin` or `none`, and every request needs the `HttpOnly`, `SameSite=Strict` session cookie (random per run) or gets 403 (JSON with an `X-NexusVox-Denied` header for `/api/*`, which a `fetch` wrapper at the top of `dashboard-core.js` turns into a reopen-from-tray banner). The cookie comes from `GET /?launch=<secret>`: `open_dashboard` builds that URL with a single-use secret (60 s TTL) held in memory; the server is bound before `_server_started` is set, and a busy port opens no browser, so a program that only requests `/` gets nothing. After a restart an old tab is refused until it is reopened from the tray. Tests: `test_dashboard_guard.py`; `tests/conftest.py` makes every `app.test_client()` signed in.
 - `analytics.py` — all SQLAlchemy query functions
-- `api.py` — Flask route wrappers around analytics queries
+- `api.py` — `DashboardAPI`: joins the topic mixins below and owns the state they share (`__init__`). The Flask routes that call it are in `_create_app` in `__init__.py`
+- `api_base.py` — the shared `logger` (every topic module imports it, so all log as `nexusvox.dashboard.api`) and `DashboardState`, the base of every mixin: it declares the state and the methods of other mixins a mixin may use, and holds `_db_dir`. A mixin that uses something new of another one declares it there; `tests/test_dashboard_api_contract.py` fails otherwise, and on a declared name that is gone or unused, since no type checker runs here. `MeetingsMixin` and `MeetingTranscriptMixin` use each other: they are two halves of one topic
+- `api_*.py` — the mixins, one per topic: `api_models` (models, device), `api_settings` (settings page, language model), `api_commands` (voice and OS commands), `api_analytics` (statistics, benchmarks), `api_review` (flagged, review), `api_vocabulary` (dictionary, polish presets), `api_files` (uploads and the rows uploads and meetings share), `api_meetings` (recording, pending meetings, meeting settings), `api_meeting_transcript` (the transcription job). A test patches a name in the module that uses it. A name several modules import has a copy in each, and a patch on one does not reach the others: `save_config` (use the `no_config_save` fixture), `cuda_available` and `convert_to_wav` (use `patch_api(name, value)`, which replaces every copy)
 - `benchmarks.py` — benchmark JSON file I/O and cross-model comparison (Dev tab, experimental)
 - `file_jobs.py` — in-memory registry of file transcription jobs (Upload tab progress)
 
@@ -51,10 +53,12 @@ Layout (`index.html`, `style.css`): one `.settings-card` per group, in this orde
 
 ## API Endpoints
 
+A switch route reads `{enabled}` through `_switch` in `__init__.py`: anything but a boolean is a 400 (`"false"` would otherwise turn the feature on), and a request without the field keeps the route's default.
+
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/settings` | Translate, hotkey mode + modifiers + key (+ the allowed modifier/key options) |
-| POST | `/api/settings/hotkey` | Set the binding `{modifiers, key}` (400 on an unusable one) |
+| POST | `/api/settings/hotkey` | Set the binding `{modifiers, key}` (400 on an unusable one, or on a key the paste, polish or enabled os-control command key uses: the listener would drop that marker silently) |
 | POST | `/api/settings/hotkey-mode` | Set `hold` or `toggle` (400 on anything else) |
 | POST | `/api/settings/feedback-mode` | Set dictation feedback `{mode}`: `sound`, `visual`, `both` (400 otherwise) |
 | POST | `/api/settings/mic-guard` | Toggle muting other apps' microphone sessions while recording |

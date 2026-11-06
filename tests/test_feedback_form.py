@@ -101,7 +101,7 @@ def test_malformed_form_url_is_logged_and_unset(tmp_path, caplog):
 
 def test_feedback_tab_opens_the_log_folder_through_the_existing_endpoint(flask_client, monkeypatch, tmp_path):
     opened = []
-    monkeypatch.setattr("nexusvox.dashboard.api.log_dir", lambda: tmp_path)
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.log_dir", lambda: tmp_path)
     monkeypatch.setattr("os.startfile", opened.append, raising=False)
     assert flask_client.post("/api/log-folder/open").get_json()["ok"] is True
     assert opened == [tmp_path]

@@ -672,7 +672,9 @@ def test_failed_mix_is_a_note_and_the_meeting_is_still_stored(meeting_api, db, t
     api, _ = meeting_api
     folder = tmp_path / "m"
     write_meeting(folder, tone(2, 3000), tone(2, 3000))
-    monkeypatch.setattr("nexusvox.dashboard.api.mix_tracks", lambda *args: (_ for _ in ()).throw(OSError("full")))
+    monkeypatch.setattr(
+        "nexusvox.dashboard.api_meeting_transcript.mix_tracks", lambda *args: (_ for _ in ()).throw(OSError("full"))
+    )
 
     result = api.transcribe_meeting(folder)
 
@@ -731,7 +733,9 @@ def test_store_audio_off_writes_no_mix_at_all(meeting_api, tmp_path, monkeypatch
     api._config.meeting.store_audio = False
     folder = tmp_path / "m"
     write_meeting(folder, tone(2, 3000), tone(2, 3000))
-    monkeypatch.setattr("nexusvox.dashboard.api.mix_tracks", lambda *a: pytest.fail("no mix without storing"))
+    monkeypatch.setattr(
+        "nexusvox.dashboard.api_meeting_transcript.mix_tracks", lambda *a: pytest.fail("no mix without storing")
+    )
 
     result = api.transcribe_meeting(folder)
 
@@ -743,7 +747,9 @@ def test_the_tracks_are_kept_when_the_mix_fails_and_audio_is_stored(meeting_api,
     api, _ = meeting_api
     folder = tmp_path / "m"
     write_meeting(folder, tone(2, 3000), tone(2, 3000))
-    monkeypatch.setattr("nexusvox.dashboard.api.mix_tracks", lambda *args: (_ for _ in ()).throw(OSError("full")))
+    monkeypatch.setattr(
+        "nexusvox.dashboard.api_meeting_transcript.mix_tracks", lambda *args: (_ for _ in ()).throw(OSError("full"))
+    )
 
     result = api.transcribe_meeting(folder)
 
@@ -1176,7 +1182,7 @@ def test_a_very_long_system_track_skips_speaker_detection(meeting_api, tmp_path,
         return fake(chunks, **kwargs)
 
     api._transcribe_wav_chunks = spy
-    monkeypatch.setattr("nexusvox.dashboard.api.MAX_DETECTION_S", 1.0)
+    monkeypatch.setattr("nexusvox.dashboard.api_meeting_transcript.MAX_DETECTION_S", 1.0)
     folder = tmp_path / "m"
     write_meeting(folder, tone(2, 3000), tone(2, 3000))
 

@@ -839,7 +839,7 @@ def _dashboard_client(db, session_factory, monkeypatch, device, *, running=None)
 
     config = Config()
     config.inference.device = device
-    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: d if d in ("cuda", "cpu") else "cpu")
+    monkeypatch.setattr("nexusvox.dashboard.api_models.resolve_device", lambda d: d if d in ("cuda", "cpu") else "cpu")
     transcriber = running or create_transcriber(config.inference, device=device)
     api = DashboardAPI(session_factory, config, db=db, get_transcriber=lambda: transcriber)
     app = _create_app(api)
@@ -878,7 +878,9 @@ def test_speaker_detection_follows_the_running_engine_not_the_device_setting(db,
 
 def test_the_current_model_does_not_probe_for_a_gpu(db, session_factory, monkeypatch):
     with _dashboard_client(db, session_factory, monkeypatch, "cuda") as client:
-        monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: pytest.fail("the device was probed"))
+        monkeypatch.setattr(
+            "nexusvox.dashboard.api_models.resolve_device", lambda d: pytest.fail("the device was probed")
+        )
         assert client.get("/api/models/current").status_code == 200
 
 

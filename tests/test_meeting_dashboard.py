@@ -240,11 +240,10 @@ def test_session_builds_the_recorder_from_the_devices_chosen_at_that_moment(tmp_
 
 
 @pytest.fixture
-def env(db, session_factory, tmp_path, monkeypatch):
+def env(db, session_factory, tmp_path, monkeypatch, no_config_save):
     config = Config()
     config.database.path = str(tmp_path / "test.db")
     api = DashboardAPI(session_factory, config, db=db, meeting=_session(tmp_path / "audio"))
-    monkeypatch.setattr("nexusvox.dashboard.api.save_config", lambda cfg, path=None: None)
     started: list[Path] = []
     monkeypatch.setattr(
         api, "start_meeting_transcription", lambda folder: started.append(folder) or {"ok": True, "job_id": "j1"}
@@ -351,7 +350,7 @@ def test_meeting_settings_endpoints(env):
 
 def test_devices_endpoint_lists_devices_and_the_chosen_ones(env, monkeypatch):
     client, *_ = env
-    monkeypatch.setattr("nexusvox.dashboard.api.list_devices", lambda: {"inputs": ["Mic"], "outputs": ["Out"]})
+    monkeypatch.setattr("nexusvox.dashboard.api_meetings.list_devices", lambda: {"inputs": ["Mic"], "outputs": ["Out"]})
     client.post("/api/settings/meeting-devices", json={"mic": "Mic", "output": ""})
     assert client.get("/api/meetings/devices").get_json() == {
         "inputs": ["Mic"],
@@ -835,3 +834,46 @@ def test_reset_to_default_is_refused_while_the_meeting_hotkey_contains_the_defau
     )
     resp = client.post("/api/settings/hotkey", json={"modifiers": ["ctrl", "win"], "key": ""})
     assert resp.status_code == 400 and "change the meeting hotkey first" in resp.get_json()["error"]
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [("aux.wav", "_aux.txt"), ("com1.mp3", "_com1.txt"), ("a|b.wav", "a_b.txt"), ("call.wav", "call.txt")],
+)
+def test_an_untitled_upload_gets_a_safe_export_name(env, filename, expected):
+    client, api, db, *_ = env
+    api.extensions.add_builtin_exports()
+    row = db.save_file_transcription("hello", "en", 1000, filename)
+
+    resp = client.get(f"/api/file-transcriptions/{row.id}/export/txt")
+
+    assert f'filename="{expected}"' in resp.headers["Content-Disposition"]
+
+
+@pytest.mark.parametrize("content", ["[]", "null", "5", '"text"'])
+def test_a_meeting_json_that_is_no_object_does_not_break_the_pending_list(env, content):
+    client, _, _, tmp_path, _ = env
+    good = _meeting_folder(tmp_path, "meeting-20261026-100000")
+    (good / META_FILENAME).write_text('{"started_at": "2026-10-26T10:00:00Z"}', encoding="utf-8")
+    bad = _meeting_folder(tmp_path, "meeting-20261026-110000")
+    (bad / META_FILENAME).write_text(content, encoding="utf-8")
+
+    assert client.get("/api/meetings/pending").get_json() == [
+        {"name": bad.name, "started_at": None},
+        {"name": good.name, "started_at": "2026-10-26T10:00:00Z"},
+    ]
+    assert client.delete(f"/api/meetings/pending/{bad.name}").status_code == 200
+    assert not bad.exists() and good.exists()
+
+
+def test_a_meeting_json_that_is_no_object_does_not_stop_the_leftover_sweep(env, monkeypatch):
+    _, api, db, tmp_path, _ = env
+    bad = _meeting_folder(tmp_path, "meeting-20261026-100000")
+    (bad / META_FILENAME).write_text("[]", encoding="utf-8")
+    later = _meeting_folder(tmp_path, "meeting-20261026-110000")
+    (later / META_FILENAME).write_text('{"discard": ["mic.wav"]}', encoding="utf-8")
+    monkeypatch.setattr(db, "meeting_folder_names", lambda: [bad.name, later.name])  # the bad one comes first
+
+    api.sweep_meeting_leftovers()
+
+    assert not (later / "mic.wav").exists() and (bad / "mic.wav").exists()

@@ -1116,3 +1116,14 @@ def test_max_recording_s_defaults_to_ten_minutes_round_trips_and_ignores_junk(tm
         assert load_config(path).hotkey.max_recording_s == 600
     path.write_text("[hotkey]\nmax_recording_s = 0\n", encoding="utf-8")
     assert load_config(path).hotkey.max_recording_s == 0  # 0 turns the cap off
+
+
+def test_plain_values_are_saved_as_before(tmp_path):
+    path = tmp_path / "config.toml"
+    config = Config()
+    config.os_commands.apps = {"notepad": "notepad.exe"}
+
+    save_config(config, path)
+
+    text = path.read_text(encoding="utf-8")
+    assert 'notepad = "notepad.exe"\n' in text and 'key = ""\n' in text and 'mode = "hold"\n' in text

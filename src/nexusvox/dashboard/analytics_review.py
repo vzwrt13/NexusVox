@@ -38,13 +38,14 @@ def get_unreviewed_transcriptions(
 
     ``before_id`` is a cursor: only rows with a smaller id are returned, so the
     client can page through the backlog by passing the last id it has seen.
-    ``remaining`` counts the unreviewed rows older than the returned page.
+    ``remaining`` counts the unreviewed rows older than the returned page. The page is sorted by id, like the
+    cursor: sorted by ``created_at``, a corrected system clock would make pages skip rows.
     """
     with session_factory() as session:
         base = session.query(Transcription).filter(Transcription.reviewed == 0, Transcription.audio_path.isnot(None))
         if before_id is not None:
             base = base.filter(Transcription.id < before_id)
-        rows = base.order_by(Transcription.created_at.desc(), Transcription.id.desc()).limit(limit).all()
+        rows = base.order_by(Transcription.id.desc()).limit(limit).all()
         remaining = base.filter(Transcription.id < rows[-1].id).count() if rows else 0
         return {
             "items": [

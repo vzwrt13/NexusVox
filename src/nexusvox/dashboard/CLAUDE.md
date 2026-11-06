@@ -111,7 +111,7 @@ A route reads its JSON body through `_json_object` in `routes_base.py`: valid JS
 | GET | `/ext/<panel_id>/<path>` | Static file of an extension's dashboard panel (404 for an unknown panel or file) |
 | GET | `/api/file-transcriptions/<id>/audio` | Playable audio kept for a row (a meeting's `meeting.wav` mix; 404 for an upload). `GET /api/file-transcriptions` adds `kind` (`upload`/`meeting`) and `has_audio`; the history card shows an `<audio>` player when there is audio |
 | GET | `/api/file-transcriptions/<id>/export/<target_id>` | Download a stored upload through an export target (built-in `txt`, `srt`, `vtt`, or an extension's) (404 unknown id or target, 500 with `error` when the export raises) |
-| GET | `/api/review` | Page of unreviewed recordings, newest first (`?before_id=` cursor; returns `items` + `remaining`) |
+| GET | `/api/review` | Page of unreviewed recordings, newest id first (`?before_id=` cursor; returns `items` + `remaining`) |
 | POST | `/api/review/<tid>/retry` | Transcribe the stored audio again with the current model (`ok`, `text`, `model`; nothing saved) |
 | POST | `/api/settings/polish-key` | Set the polish-selected-text key `{key}` (`""` = off; 400 on a clash) |
 | POST | `/api/settings/cleanup-level` | Set auto cleanup `{level}`: `off`, `light`, `medium` (400 otherwise) |

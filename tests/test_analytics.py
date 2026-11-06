@@ -647,6 +647,33 @@ def test_unreviewed_pages_with_before_id(session_factory):
     assert page3["remaining"] == 0
 
 
+def test_unreviewed_pages_list_every_row_when_the_clock_went_back(session_factory):
+    # Row 4 was stamped before row 3, so created_at order differs from id order.
+    minutes = [0, 1, 3, 2, 4]
+    _seed(
+        session_factory,
+        [
+            {
+                "text": f"rec {i + 1}",
+                "language": "en",
+                "duration_ms": 1000,
+                "audio_path": f"audio/{i}.wav",
+                "created_at": datetime(2026, 3, 1) + timedelta(minutes=minute),
+            }
+            for i, minute in enumerate(minutes)
+        ],
+    )
+
+    page = get_unreviewed_transcriptions(session_factory, limit=2)
+    assert page["remaining"] == 3
+    seen = [r["text"] for r in page["items"]]
+    while page["remaining"]:
+        page = get_unreviewed_transcriptions(session_factory, limit=2, before_id=page["items"][-1]["id"])
+        seen += [r["text"] for r in page["items"]]
+
+    assert seen == ["rec 5", "rec 4", "rec 3", "rec 2", "rec 1"]
+
+
 def test_unreviewed_empty_page(session_factory):
     result = get_unreviewed_transcriptions(session_factory)
     assert result == {"items": [], "remaining": 0}

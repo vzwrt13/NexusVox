@@ -173,16 +173,16 @@ def main() -> None:
         ap.error("--gap-s must be 0 or more")
 
     from nexusvox.config import load_config
-    from nexusvox.pipeline import process_text
+    from nexusvox.dictation.pipeline import process_text
 
     config = load_config(args.config)
     backend = GpuBackend(args.gpu_url) if args.gpu_url else CpuBackend()
 
     # The text pipeline of the app with the user's settings, minus the two steps that rewrite the words
     # (cleanup LLM, translator): they would measure the LLM, not the speech recognition.
-    from nexusvox.cleanup import CleanupResult
-    from nexusvox.db import Database
-    from nexusvox.translator import TranslateResult
+    from nexusvox.dictation.cleanup import CleanupResult
+    from nexusvox.dictation.translator import TranslateResult
+    from nexusvox.storage.db import Database
 
     db = Database(config.database)
     dictionary = db.get_dictionary_entries()

@@ -6,7 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from nexusvox.config import TranslatorConfig
-from nexusvox.translator import is_reachable, translate
+from nexusvox.dictation.translator import is_reachable, translate
 
 
 def _serve_once(status: int, body: bytes) -> tuple[HTTPServer, list[dict]]:

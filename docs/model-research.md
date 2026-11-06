@@ -153,19 +153,19 @@ Read from the code on this branch.
 | Step | Where | Bound to | What breaks in, say, Spanish |
 |---|---|---|---|
 | Spoken-language setting (removed) | No language setting any more: Parakeet and CPU Whisper are called without a language and auto-detect | any | Nothing is bound to en/de here. The detected language only labels stored rows (see the next row) |
-| Language detection | `lang_detect.py`: lingua built from English and German only; used for the post-transcription language, analytics, and `edit_watch.py` confidence | en, de | Spanish text is labelled en or de (whichever is closer) or "unknown". Wrong language tags in stats; learn-from-edits may misjudge a correction |
-| Voice commands | `voice_commands.py`: structural and symbol lists, number words, `press_enter`; "Every vocabulary covers English and German" | en, de | "nueva línea" is typed as words; "veinticinco" is not converted to 25. Nothing crashes |
-| nexus OS commands | `os_commands.py`: `open`/`öffne` verbs, the `nexus` trigger | en, de | "abre Chrome" is typed instead of opening it |
-| Assistant forward and os-control | `assistant.py` trigger phrase "nexus assistant" | en, de wording | Trigger works if the word "nexus" is recognised; command text is passed through as spoken |
-| Auto cleanup prompt | `cleanup.py`: filler list "um, uh, er, äh, ähm, hm"; "German stays German, English stays English" | en, de | Spanish fillers ("eh", "este", "o sea") are not named, so the model removes fewer. The language-keeping rule is worded for two languages; a capable model generalises, a small one may translate |
-| Polish prompt | `polish.py`: "keep the meaning, the language and the author's tone", "keep the text's language" | language-neutral | Works as written; quality depends on the LLM's own language skill. Spoken preset names are the user's own words, so they work |
-| Translator (translate before inject) | `translator.py`, local TranslateGemma server | source de/en/mixed, target English | `source` field only models de/en/mixed; other source languages should still translate if the server supports them, but this was not tested and the field mislabels them |
-| Dictionary, learn-from-edits | `dictionary.py`, `edit_watch.py` | language-agnostic, except the lingua gate in `edit_watch.py` | The dictionary works in any language. Learn-from-edits uses lingua confidence (en/de) to decide which side of a correction is in a clear language |
+| Language detection | `dictation/lang_detect.py`: lingua built from English and German only; used for the post-transcription language, analytics, and `dictation/edit_watch.py` confidence | en, de | Spanish text is labelled en or de (whichever is closer) or "unknown". Wrong language tags in stats; learn-from-edits may misjudge a correction |
+| Voice commands | `dictation/voice_commands.py`: structural and symbol lists, number words, `press_enter`; "Every vocabulary covers English and German" | en, de | "nueva línea" is typed as words; "veinticinco" is not converted to 25. Nothing crashes |
+| nexus OS commands | `dictation/os_commands.py`: `open`/`öffne` verbs, the `nexus` trigger | en, de | "abre Chrome" is typed instead of opening it |
+| Assistant forward and os-control | `dictation/assistant.py` trigger phrase "nexus assistant" | en, de wording | Trigger works if the word "nexus" is recognised; command text is passed through as spoken |
+| Auto cleanup prompt | `dictation/cleanup.py`: filler list "um, uh, er, äh, ähm, hm"; "German stays German, English stays English" | en, de | Spanish fillers ("eh", "este", "o sea") are not named, so the model removes fewer. The language-keeping rule is worded for two languages; a capable model generalises, a small one may translate |
+| Polish prompt | `dictation/polish.py`: "keep the meaning, the language and the author's tone", "keep the text's language" | language-neutral | Works as written; quality depends on the LLM's own language skill. Spoken preset names are the user's own words, so they work |
+| Translator (translate before inject) | `dictation/translator.py`, local TranslateGemma server | source de/en/mixed, target English | `source` field only models de/en/mixed; other source languages should still translate if the server supports them, but this was not tested and the field mislabels them |
+| Dictionary, learn-from-edits | `dictation/dictionary.py`, `dictation/edit_watch.py` | language-agnostic, except the lingua gate in `dictation/edit_watch.py` | The dictionary works in any language. Learn-from-edits uses lingua confidence (en/de) to decide which side of a correction is in a clear language |
 | UI strings, docs | dashboard, README | English | Not a speech problem |
 
 The bilingual-speech rule in `CLAUDE.md` is deliberately two languages. Adding a third means: a
 language entry in the voice-command, number-word and OS-command vocabularies *with tests*, a lingua
-language added to `lang_detect.py` and `edit_watch.py`, the cleanup filler list extended, and the
+language added to `dictation/lang_detect.py` and `dictation/edit_watch.py`, the cleanup filler list extended, and the
 language selector in the tray and dashboard opened beyond en/de.
 
 ### What 1.0 can advertise

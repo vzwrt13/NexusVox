@@ -9,10 +9,9 @@ import urllib.error
 import pytest
 
 from nexusvox import llm
-from nexusvox import polish as polish_module
 from nexusvox.config import LlmConfig
-from nexusvox.llm import LlmError, complete
-from nexusvox.polish import (
+from nexusvox.dictation import polish as polish_module
+from nexusvox.dictation.polish import (
     DEFAULT_INSTRUCTION,
     SYSTEM_PROMPT,
     build_user_message,
@@ -20,6 +19,7 @@ from nexusvox.polish import (
     polish,
     read_selection,
 )
+from nexusvox.llm import LlmError, complete
 
 
 class FakeServer:
@@ -175,13 +175,13 @@ def _focus(monkeypatch, focus, clipboard="from Ctrl+C"):
     import sys
     import types
 
-    import nexusvox.polish as polish_module
-    from nexusvox.uia import Focus
+    import nexusvox.dictation.polish as polish_module
+    from nexusvox.system.uia import Focus
 
     copies = []
-    fake_injector = types.ModuleType("nexusvox.injector")
+    fake_injector = types.ModuleType("nexusvox.dictation.injector")
     fake_injector.copy_selection = lambda delay: copies.append(delay) or clipboard
-    monkeypatch.setitem(sys.modules, "nexusvox.injector", fake_injector)
+    monkeypatch.setitem(sys.modules, "nexusvox.dictation.injector", fake_injector)
     monkeypatch.setattr(polish_module, "_ensure_com", lambda: None)
     monkeypatch.setattr(polish_module, "read_focus", lambda: Focus(**focus))
     return copies

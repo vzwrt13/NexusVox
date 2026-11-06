@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from nexusvox.dictionary import DictionaryEntry
+from nexusvox.dictation.dictionary import DictionaryEntry
 
 
 @pytest.mark.parametrize("body", ["[]", "null", "1", '"text"'])
@@ -518,7 +518,7 @@ def test_file_transcribe_no_file(flask_client):
 
 
 def test_file_transcribe_success(flask_client, sample_wav_bytes, monkeypatch):
-    from nexusvox.transcriber import TranscriptionResult
+    from nexusvox.transcription.transcriber import TranscriptionResult
 
     mock_result = TranscriptionResult()
     mock_result.finalize(text="transcribed text")
@@ -555,7 +555,7 @@ def test_file_job_moves_through_its_stages_to_done(flask_client, sample_wav_byte
     import threading
     import time
 
-    from nexusvox.transcriber import TranscriptionResult
+    from nexusvox.transcription.transcriber import TranscriptionResult
 
     reached = threading.Event()
     release = threading.Event()
@@ -618,7 +618,7 @@ def test_file_job_reports_a_conversion_error(flask_client):
 
 
 def test_file_job_ends_as_an_error_when_saving_crashes(flask_client, db, sample_wav_bytes, monkeypatch):
-    from nexusvox.transcriber import TranscriptionResult
+    from nexusvox.transcription.transcriber import TranscriptionResult
 
     result = TranscriptionResult()
     result.finalize(text="x")
@@ -642,7 +642,7 @@ def test_second_upload_is_refused_while_one_runs(flask_client, sample_wav_bytes,
     import io
     import threading
 
-    from nexusvox.transcriber import TranscriptionResult
+    from nexusvox.transcription.transcriber import TranscriptionResult
 
     release = threading.Event()
     result = TranscriptionResult()
@@ -926,7 +926,7 @@ def test_learn_from_edits_status_from_the_watcher(db, session_factory):
     from nexusvox.config import Config
     from nexusvox.dashboard import _create_app
     from nexusvox.dashboard.api import DashboardAPI
-    from nexusvox.edit_watch import EditWatcher
+    from nexusvox.dictation.edit_watch import EditWatcher
 
     watcher = EditWatcher(lambda s: None, lambda: [])
     watcher.skip("terminal")
@@ -1026,7 +1026,7 @@ def test_accept_missing_dictionary_suggestion(flask_client):
 
 def test_retry_transcribes_the_stored_audio_again(flask_client, db, sample_wav_bytes, tmp_path, monkeypatch):
     from nexusvox.dashboard.api import DashboardAPI
-    from nexusvox.transcriber import TranscriptionResult
+    from nexusvox.transcription.transcriber import TranscriptionResult
 
     wav = tmp_path / "1.wav"
     wav.write_bytes(sample_wav_bytes)
@@ -1047,7 +1047,7 @@ def test_retry_does_not_ask_for_words_and_reports_an_incomplete_run(
     flask_client, db, sample_wav_bytes, tmp_path, monkeypatch
 ):
     from nexusvox.dashboard.api import DashboardAPI
-    from nexusvox.transcriber import TranscriptionResult
+    from nexusvox.transcription.transcriber import TranscriptionResult
 
     wav = tmp_path / "1.wav"
     wav.write_bytes(sample_wav_bytes)
@@ -1074,7 +1074,7 @@ def test_retry_does_not_ask_for_words_and_reports_an_incomplete_run(
 def test_upload_asks_for_words_stores_them_and_returns_notes(flask_client, db, sample_wav_bytes, monkeypatch):
     import json
 
-    from nexusvox.transcriber import TranscriptionResult, Word
+    from nexusvox.transcription.transcriber import TranscriptionResult, Word
 
     result = TranscriptionResult()
     result.finalize(text="hello world")
@@ -1161,7 +1161,7 @@ def test_polish_key_and_model_settings(flask_client, monkeypatch):
 def test_upload_with_diarize_passes_the_flag_and_stores_speakers(flask_client, db, sample_wav_bytes, monkeypatch):
     import json
 
-    from nexusvox.transcriber import TranscriptionResult, Word
+    from nexusvox.transcription.transcriber import TranscriptionResult, Word
 
     result = TranscriptionResult()
     result.finalize(text="Speaker 1: hello\n\nSpeaker 2: world")
@@ -1185,7 +1185,7 @@ def test_upload_with_diarize_passes_the_flag_and_stores_speakers(flask_client, d
 
 
 def _fake_transcription(monkeypatch, text):
-    from nexusvox.transcriber import TranscriptionResult, Word
+    from nexusvox.transcription.transcriber import TranscriptionResult, Word
 
     result = TranscriptionResult()
     result.finalize(text=text)
@@ -1204,7 +1204,7 @@ def test_upload_with_cleanup_stores_the_cleaned_text_beside_the_original(
 
     _fake_transcription(monkeypatch, "Speaker 1: well um hello there.\n\nSpeaker 2: um hi.")
     monkeypatch.setattr(
-        "nexusvox.cleanup.complete",
+        "nexusvox.dictation.cleanup.complete",
         lambda config, system, user: "Well, hello there." if "hello" in user else "Hi.",
     )
 
@@ -1230,7 +1230,7 @@ def test_upload_with_failing_cleanup_still_completes_with_a_note(flask_client, d
     def down(config, system, user):
         raise LlmError("connection refused")
 
-    monkeypatch.setattr("nexusvox.cleanup.complete", down)
+    monkeypatch.setattr("nexusvox.dictation.cleanup.complete", down)
 
     job = upload_file(flask_client, sample_wav_bytes, cleanup="medium")
 
@@ -1248,7 +1248,7 @@ def test_upload_without_a_valid_cleanup_level_asks_no_model(flask_client, db, sa
     def fail(*args):
         raise AssertionError("the model must not be called")
 
-    monkeypatch.setattr("nexusvox.cleanup.complete", fail)
+    monkeypatch.setattr("nexusvox.dictation.cleanup.complete", fail)
 
     job = upload_file(flask_client, sample_wav_bytes, cleanup=value)
 

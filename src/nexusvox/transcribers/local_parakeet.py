@@ -20,8 +20,8 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 
 from ..config import MODEL_REGISTRY, InferenceConfig, model_download_state
-from ..logsetup import Text
-from ..transcriber import SPEAKERS_NEED_GPU, BaseTranscriber, TranscriptionResult, Word
+from ..system.logsetup import Text
+from ..transcription.transcriber import SPEAKERS_NEED_GPU, BaseTranscriber, TranscriptionResult, Word
 
 logger = logging.getLogger(__name__)
 

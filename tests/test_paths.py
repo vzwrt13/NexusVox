@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from nexusvox import config as config_module
-from nexusvox import docker_ctl, paths
 from nexusvox.config import load_config
+from nexusvox.system import docker_ctl, paths
 from nexusvox.transcribers import local_whisper
 
 

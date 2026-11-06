@@ -5,11 +5,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .app import NexusVoxApp
+from .app.core import NexusVoxApp
 from .config import load_config
-from .logsetup import setup_file_logging
-from .paths import apply_models_dir, default_config_path, ensure_dirs
-from .single_instance import SingleInstance, show_message
+from .system.logsetup import setup_file_logging
+from .system.paths import apply_models_dir, default_config_path, ensure_dirs
+from .system.single_instance import SingleInstance, show_message
 
 
 def _git_revision() -> str:

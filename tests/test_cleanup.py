@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from nexusvox import cleanup as cleanup_module
-from nexusvox.cleanup import PROMPTS, cleanup, plausible
 from nexusvox.config import CLEANUP_LEVELS, CleanupConfig, LlmConfig
+from nexusvox.dictation import cleanup as cleanup_module
+from nexusvox.dictation.cleanup import PROMPTS, cleanup, plausible
 from nexusvox.llm import LlmError
 
 LIGHT = CleanupConfig(level="light", timeout_s=3.0)

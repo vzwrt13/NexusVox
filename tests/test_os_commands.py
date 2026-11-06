@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from nexusvox.config import OSCommandsConfig
-from nexusvox.os_commands import (
+from nexusvox.dictation.os_commands import (
     NexusCommand,
     execute_nexus_command,
     parse_nexus_command,
@@ -125,16 +125,16 @@ def test_parse_empty_string_returns_none():
 def mock_wm():
     """Inject a mock window_manager so the lazy import works on all platforms.
 
-    `from . import window_manager` returns the package attribute once the real module was imported
+    `from ..system import window_manager` returns the package attribute once the real module was imported
     anywhere earlier in the run, so the attribute is replaced too; otherwise these tests would
     close, snap and focus the user's real windows.
     """
-    import nexusvox
+    import nexusvox.system
 
     mock = MagicMock()
     with (
-        patch.dict(sys.modules, {"nexusvox.window_manager": mock}),
-        patch.object(nexusvox, "window_manager", mock, create=True),
+        patch.dict(sys.modules, {"nexusvox.system.window_manager": mock}),
+        patch.object(nexusvox.system, "window_manager", mock, create=True),
     ):
         yield mock
 

@@ -24,7 +24,7 @@ from nexusvox.extensions import (
     FileTranscript,
     UploadAction,
 )
-from nexusvox.transcriber import TranscriptionResult, Word
+from nexusvox.transcription.transcriber import TranscriptionResult, Word
 
 
 class V1Extension(Extension):

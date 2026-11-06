@@ -13,8 +13,8 @@ from ..config import (
     resolve_device,
     save_config,
 )
-from ..diarization import speaker_detection_models
-from ..paths import models_dir
+from ..system.paths import models_dir
+from ..transcription.diarization import speaker_detection_models
 from .api_base import DashboardState
 
 # How long a model's downloaded-or-not answer is reused (seconds).

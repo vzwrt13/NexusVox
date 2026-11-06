@@ -15,9 +15,8 @@ import pytest
 
 from nexusvox.config import Config
 from nexusvox.dashboard.api import DashboardAPI
-from nexusvox.diarization import format_transcript
 from nexusvox.extensions import Extension, ExtensionRegistry
-from nexusvox.meeting_transcribe import (
+from nexusvox.meetings.transcribe import (
     ECHO_MIN_RUN,
     MAX_GAIN,
     PEAK_LIMIT,
@@ -40,7 +39,8 @@ from nexusvox.meeting_transcribe import (
     track_offset,
     track_shifts,
 )
-from nexusvox.transcriber import TranscriptionResult, Word
+from nexusvox.transcription.diarization import format_transcript
+from nexusvox.transcription.transcriber import TranscriptionResult, Word
 
 
 def write_wav(path: Path, samples: np.ndarray, rate: int = 16_000, channels: int = 1) -> None:
@@ -427,7 +427,7 @@ def test_interleave_starts_with_the_earlier_word():
 
 
 def load_meeting_stub(latency: dict[str, float]):
-    from nexusvox.meeting_transcribe import Meeting
+    from nexusvox.meetings.transcribe import Meeting
 
     return Meeting(Path("m"), None, False, latency=latency)
 
@@ -600,7 +600,7 @@ def test_failed_mix_leaves_no_partial_file(tmp_path, monkeypatch):
             raise OSError("disk full")
         return real(*args, **kwargs)
 
-    monkeypatch.setattr("nexusvox.meeting_transcribe.np.zeros", failing_zeros)
+    monkeypatch.setattr("nexusvox.meetings.transcribe.np.zeros", failing_zeros)
 
     with pytest.raises(OSError):
         mix_tracks(paths, out)
@@ -866,7 +866,7 @@ def test_a_failed_alignment_is_a_note_and_the_meeting_is_still_stored(meeting_ap
     def out_of_memory(*args):
         raise MemoryError("envelope")
 
-    monkeypatch.setattr("nexusvox.meeting_transcribe.echo_lag", out_of_memory)
+    monkeypatch.setattr("nexusvox.meetings.transcribe.echo_lag", out_of_memory)
 
     result = api.transcribe_meeting(folder)
 

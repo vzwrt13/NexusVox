@@ -13,7 +13,7 @@ from nexusvox.config import Config, DatabaseConfig, ExperimentalConfig
 from nexusvox.dashboard import _PORT, _create_app
 from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.dashboard.guard import COOKIE_NAME
-from nexusvox.db import Database
+from nexusvox.storage.db import Database
 
 
 @pytest.fixture(autouse=True)

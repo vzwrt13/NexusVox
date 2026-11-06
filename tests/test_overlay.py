@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from app_parts import patch_app
 
-from nexusvox.overlay import (
+from nexusvox.dictation.overlay import (
     CONFIRMED,
     CONFIRMED_S,
     ERROR,
@@ -19,11 +19,11 @@ from nexusvox.overlay import (
 )
 
 try:
-    from nexusvox.app import NexusVoxApp
+    from nexusvox.app.core import NexusVoxApp
 except Exception:  # Windows-only imports (PortAudio, pynput hook, tray) on other platforms
     NexusVoxApp = None
 
-needs_app = pytest.mark.skipif(NexusVoxApp is None, reason="nexusvox.app needs the Windows runtime")
+needs_app = pytest.mark.skipif(NexusVoxApp is None, reason="nexusvox.app.core needs the Windows runtime")
 
 
 class Clock:

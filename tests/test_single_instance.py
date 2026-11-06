@@ -6,8 +6,8 @@ import uuid
 
 import pytest
 
-from nexusvox import single_instance
-from nexusvox.single_instance import SingleInstance
+from nexusvox.system import single_instance
+from nexusvox.system.single_instance import SingleInstance
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="named kernel objects are Windows-only")
 
@@ -50,7 +50,7 @@ def test_main_exits_on_a_second_start_before_building_the_app(monkeypatch):
     built = []
     messages = []
     monkeypatch.setitem(
-        sys.modules, "nexusvox.app", types.SimpleNamespace(NexusVoxApp=lambda config: built.append(config))
+        sys.modules, "nexusvox.app.core", types.SimpleNamespace(NexusVoxApp=lambda config: built.append(config))
     )
     monkeypatch.delitem(sys.modules, "nexusvox.__main__", raising=False)
     entry = importlib.import_module("nexusvox.__main__")

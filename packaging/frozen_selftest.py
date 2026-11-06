@@ -115,7 +115,7 @@ def run(work: Path, download: bool) -> NoReturn:
             encoding="utf-8",
         )
         from nexusvox.config import load_config
-        from nexusvox.db import Database
+        from nexusvox.storage.db import Database
 
         state["config"] = load_config(work / "config.toml")
         state["config"].database.path = str(work / "nexusvox.db")
@@ -138,7 +138,7 @@ def run(work: Path, download: bool) -> NoReturn:
             return handle.readframes(handle.getnframes())
 
     def tray() -> None:
-        from nexusvox.tray import SystemTray
+        from nexusvox.system.tray import SystemTray
 
         icon = SystemTray(
             on_quit=lambda: None,
@@ -231,7 +231,7 @@ def run(work: Path, download: bool) -> NoReturn:
 
     # One guarded step per native library: a machine without an output device must not hide the others.
     def lingua() -> None:
-        from nexusvox.lang_detect import detect_language
+        from nexusvox.dictation.lang_detect import detect_language
 
         record("lingua detects German", detect_language("Das ist ein kurzer deutscher Satz zum Testen.") == "de")
 
@@ -241,7 +241,7 @@ def run(work: Path, download: bool) -> NoReturn:
         record("sounddevice sees PortAudio", len(sounddevice.query_devices()) > 0, sounddevice.__version__)
 
     def wasapi_sessions() -> None:
-        from nexusvox.mic_guard import enumerate_capture_sessions
+        from nexusvox.audio.mic_guard import enumerate_capture_sessions
 
         record("mic guard enumerates WASAPI sessions", isinstance(enumerate_capture_sessions(), list))
 

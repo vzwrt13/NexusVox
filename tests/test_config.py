@@ -449,8 +449,8 @@ def test_save_config_drops_entries_that_are_not_text(tmp_path):
 
 def test_save_config_keeps_a_relative_database_path_relative_when_frozen(tmp_path, monkeypatch):
     """The installed app resolves a relative path into its data folder; saving must not pin that folder."""
-    monkeypatch.setattr("nexusvox.paths.is_frozen", lambda: True)
-    monkeypatch.setattr("nexusvox.paths.data_dir", lambda: tmp_path / "data")
+    monkeypatch.setattr("nexusvox.system.paths.is_frozen", lambda: True)
+    monkeypatch.setattr("nexusvox.system.paths.data_dir", lambda: tmp_path / "data")
     config_path = tmp_path / "config.toml"
     config_path.write_text('[database]\npath = "nexusvox.db"\n', encoding="utf-8")
 
@@ -615,7 +615,7 @@ def test_main_applies_the_configured_log_level(monkeypatch):
             pass
 
     # The real app module binds PortAudio at import, which CI runners on Linux do not have.
-    monkeypatch.setitem(sys.modules, "nexusvox.app", types.SimpleNamespace(NexusVoxApp=App))
+    monkeypatch.setitem(sys.modules, "nexusvox.app.core", types.SimpleNamespace(NexusVoxApp=App))
     monkeypatch.delitem(sys.modules, "nexusvox.__main__", raising=False)
     entry = importlib.import_module("nexusvox.__main__")
     seen = {}

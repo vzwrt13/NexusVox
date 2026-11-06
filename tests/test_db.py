@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from nexusvox.dictionary import DictionaryEntry
-from nexusvox.models import utc_now
+from nexusvox.dictation.dictionary import DictionaryEntry
+from nexusvox.storage.models import utc_now
 
 
 def test_utc_now_is_naive_utc():
@@ -215,7 +215,7 @@ def test_migration_adds_the_cleanup_columns_to_an_old_database(tmp_path):
     import sqlite3
 
     from nexusvox.config import DatabaseConfig
-    from nexusvox.db import Database
+    from nexusvox.storage.db import Database
 
     path = tmp_path / "old.db"
     with sqlite3.connect(path) as conn:
@@ -239,7 +239,7 @@ def test_migration_adds_the_title_column_to_an_old_database(tmp_path):
     import sqlite3
 
     from nexusvox.config import DatabaseConfig
-    from nexusvox.db import Database
+    from nexusvox.storage.db import Database
 
     path = tmp_path / "old.db"
     with sqlite3.connect(path) as conn:
@@ -281,7 +281,7 @@ def test_ordering_is_stable_when_timestamps_collide(db, session_factory):
     alone is non-deterministic. The queries break the tie on the autoincrement
     id; this forces the collision so the guarantee holds on every platform.
     """
-    from nexusvox.models import FileTranscription, Transcription
+    from nexusvox.storage.models import FileTranscription, Transcription
 
     db.save_transcription("first", "en", 1000)
     db.save_transcription("second", "en", 1000)
@@ -449,7 +449,7 @@ def test_an_existing_snippets_table_is_left_as_it_is(tmp_path):
     import sqlite3
 
     from nexusvox.config import DatabaseConfig
-    from nexusvox.db import Database
+    from nexusvox.storage.db import Database
 
     path = tmp_path / "old.db"
     with sqlite3.connect(path) as connection:

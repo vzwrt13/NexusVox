@@ -45,12 +45,12 @@ Read from the code on this branch.
 | `config.toml` is read from the **working directory** (`DEFAULT_CONFIG_PATH = Path("config.toml")`) | `config.py:12` | Installed app has no meaningful working directory. Needs a fixed config folder, `%APPDATA%\NexusVox`. |
 | Database path and `audio/` are relative paths by default | `config.example.toml` | Same: they must resolve under the data folder when frozen. |
 | The config template is found through `__file__` | `config.py:18` | Works in PyInstaller if the file is listed as data. |
-| `DOCKER_DIR` is `parent.parent.parent / "docker"` | `docker_ctl.py:14` | Points outside the package in a frozen build. The Docker path needs either the compose files as data or a "not available in the installed app" message. |
-| Logging already writes a rotating file to `%LOCALAPPDATA%\NexusVox\logs`, keeps 7 days, level from `[general].log_level` | `logsetup.py` | Done. |
+| `DOCKER_DIR` is `parent.parent.parent / "docker"` | `system/docker_ctl.py:14` | Points outside the package in a frozen build. The Docker path needs either the compose files as data or a "not available in the installed app" message. |
+| Logging already writes a rotating file to `%LOCALAPPDATA%\NexusVox\logs`, keeps 7 days, level from `[general].log_level` | `system/logsetup.py` | Done. |
 | "Open log folder" already exists | `dashboard/api.py:462` | Done. "Copy diagnostics" does not exist. |
 | Parakeet CPU downloads its model on first use and reports `idle`/`downloading`/`loading`/`ready`/`error` to the dashboard, with a background preload at start | `transcribers/local_parakeet.py` | The mechanism exists. What is missing is a first-run screen that shows it as a progress bar and explains the 640 MB. |
 | Whisper models download through `faster-whisper` on first use | `transcribers/local_whisper.py` | Same, no progress reporting found. |
-| Tray via `pystray`, entry point `python -m nexusvox` | `tray.py`, `__main__.py` | Windowed build needs `console=False`. All `print` and stderr use has to survive having no console. |
+| Tray via `pystray`, entry point `python -m nexusvox` | `system/tray.py`, `__main__.py` | Windowed build needs `console=False`. All `print` and stderr use has to survive having no console. |
 | No autostart, no update check | grep found none | New work. |
 
 ## Sizes
@@ -59,7 +59,7 @@ Read from the code on this branch.
 
 | Package | MB | Note |
 |---|---|---|
-| `lingua` (language detector) | 291 | One `.pyd` with every language model. `lang_detect.py` builds the detector for **English and German only**. |
+| `lingua` (language detector) | 291 | One `.pyd` with every language model. `dictation/lang_detect.py` builds the detector for **English and German only**. |
 | `ctranslate2` | 60 | CPU build, for Whisper |
 | `onnxruntime` | 45 | CPU build, for Parakeet |
 | `numpy` | 34 | |
@@ -287,7 +287,7 @@ Order matters. Tickets 1 to 4 are the critical path to 2026-11-13.
 | # | Ticket | Size | Notes |
 |---|---|---|---|
 | 1 | **Spike: PyInstaller onedir build of the current app.** Build on `windows-latest` or locally, measure real size, run the tray, dictation, dashboard and Parakeet download from the frozen app, list missing hooks and data files | M | Confirms every estimate in this document. Include the VirusTotal result |
-| 2 | **Frozen-app paths.** When frozen: config in `%APPDATA%\NexusVox`, database, audio and models under the data folder, `DOCKER_DIR` handled, no console and no `print` crashes. Keep source runs unchanged | M | Needed by 1; touches `config.py`, `docker_ctl.py`, `__main__.py` |
+| 2 | **Frozen-app paths.** When frozen: config in `%APPDATA%\NexusVox`, database, audio and models under the data folder, `DOCKER_DIR` handled, no console and no `print` crashes. Keep source runs unchanged | M | Needed by 1; touches `config.py`, `system/docker_ctl.py`, `__main__.py` |
 | 3 | **Inno Setup script and CI release job.** Per-user install, Start Menu entry, optional autostart task, uninstaller with "delete my data" page (default keep), attach the installer to the GitHub release | M | Extends `release.yml` with a Windows job |
 | 4 | **Code signing in CI.** Open Azure Artifact Signing validation, add the signing step, document the unsigned fallback | S | **Start the validation today**, it is the longest wait. Bootloader rebuild belongs here too |
 | 5 | **First-run setup screen.** Hardware detection, model name and size, download progress from `load_status`, retry, offline message | M | Mostly dashboard work on existing states |

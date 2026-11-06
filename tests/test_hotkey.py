@@ -11,7 +11,13 @@ import pytest
 pytest.importorskip("pynput.keyboard", reason="pynput needs a display backend", exc_type=ImportError)
 
 from nexusvox.config import HotkeyConfig, OsControlConfig  # noqa: E402
-from nexusvox.hotkey import FOREIGN_KEY_WINDOW_S, PASTE_LAST, POLISH, HotkeyListener, describe_hotkey  # noqa: E402
+from nexusvox.dictation.hotkey import (  # noqa: E402
+    FOREIGN_KEY_WINDOW_S,
+    PASTE_LAST,
+    POLISH,
+    HotkeyListener,
+    describe_hotkey,
+)
 
 LCTRL, RCTRL, LSHIFT, LALT = 0xA2, 0xA3, 0xA0, 0xA4
 VK_A, VK_B, VK_F9 = ord("A"), ord("B"), 0x78
@@ -539,7 +545,7 @@ def test_auto_repeat_of_a_held_modifier_sends_no_extra_mask():
 def test_right_win_counts_as_a_held_win_modifier(monkeypatch):
     import ctypes
 
-    from nexusvox import hotkey
+    from nexusvox.dictation import hotkey
 
     class FakeUser32:
         @staticmethod

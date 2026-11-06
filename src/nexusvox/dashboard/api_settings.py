@@ -20,15 +20,15 @@ from ..config import (
     save_config,
     validate_hotkey,
 )
-from ..edit_watch import WATCHED_KEYS
-from ..feedback_form import build_feedback_url
+from ..dictation.edit_watch import WATCHED_KEYS
+from ..dictation.translator import is_reachable
 from ..llm import build_model_list as llm_build_model_list
 from ..llm import loaded_model as llm_loaded_model
 from ..llm import model_pull as llm_pull
 from ..llm import model_status as llm_model_status
 from ..llm import warm_up as llm_warm_up
-from ..logsetup import log_dir
-from ..translator import is_reachable
+from ..system.feedback_form import build_feedback_url
+from ..system.logsetup import log_dir
 from .api_base import DashboardState, logger
 
 # `[hotkey]` fields that hold a marker key, and how an error message names each.

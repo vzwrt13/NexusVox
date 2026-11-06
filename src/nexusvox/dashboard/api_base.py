@@ -12,10 +12,10 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import sessionmaker
 
     from ..config import Config
-    from ..db import Database
     from ..extensions import ExtensionRegistry
-    from ..meeting_session import MeetingSession
-    from ..transcriber import BaseTranscriber
+    from ..meetings.session import MeetingSession
+    from ..storage.db import Database
+    from ..transcription.transcriber import BaseTranscriber
     from .file_jobs import FileJobs
 
 # All of DashboardAPI logs under one name, the one its log lines have always carried.

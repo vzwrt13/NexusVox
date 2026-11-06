@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from nexusvox.cleanup import CleanupResult
 from nexusvox.config import CleanupConfig, Config, VoiceCommandsConfig
-from nexusvox.dictionary import DictionaryEntry
-from nexusvox.pipeline import process_text
-from nexusvox.translator import TranslateResult
+from nexusvox.dictation.cleanup import CleanupResult
+from nexusvox.dictation.dictionary import DictionaryEntry
+from nexusvox.dictation.pipeline import process_text
+from nexusvox.dictation.translator import TranslateResult
 
 
 def _config(**voice) -> Config:
@@ -116,7 +116,7 @@ def test_english_passed_through_by_the_translator_stays_learnable():
 
 
 def test_extend_fn_changes_what_is_typed_but_not_what_is_saved():
-    from nexusvox.pipeline import process_text
+    from nexusvox.dictation.pipeline import process_text
 
     result = process_text(
         "hello world",

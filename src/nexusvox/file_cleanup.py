@@ -17,8 +17,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from . import llm as llm_module
-from .cleanup import PROMPTS, cleanup
 from .config import CleanupConfig, LlmConfig
+from .dictation.cleanup import PROMPTS, cleanup
 
 logger = logging.getLogger(__name__)
 

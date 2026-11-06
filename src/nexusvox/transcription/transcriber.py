@@ -1,0 +1,507 @@
+"""Transcriber abstraction with implementations for different model protocols."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import io
+import json
+import logging
+import math
+import wave
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, replace
+from typing import BinaryIO
+from urllib.parse import urlsplit, urlunsplit
+
+import websockets
+from websockets.connection import State
+
+from ..config import CUSTOM_PROTOCOLS, MODEL_REGISTRY, InferenceConfig, resolve_compute_type, resolve_device
+from ..system.logsetup import Text
+
+logger = logging.getLogger("nexusvox.transcriber")
+
+# Why Parakeet has no speaker detection in-process on CPU: it is part of the Parakeet container.
+SPEAKERS_NEED_GPU = "Speaker detection needs the GPU container"
+
+
+@dataclass(frozen=True)
+class Word:
+    """One transcribed word with its position in the audio, in seconds."""
+
+    word: str
+    start: float
+    end: float
+    # Display number of the speaker (1, 2, ...) once diarization labelled the word; None otherwise.
+    speaker: int | None = None
+
+
+@dataclass(frozen=True)
+class SpeakerTurn:
+    """A stretch of audio in which one speaker talks, in seconds; `speaker` is the model's index."""
+
+    speaker: int
+    start: float
+    end: float
+
+
+def parse_words(raw: object) -> list[Word]:
+    """Words from an OpenAI-style ``words`` list; anything malformed is skipped."""
+    if not isinstance(raw, list):
+        return []
+    words: list[Word] = []
+    for item in raw:
+        try:
+            words.append(Word(str(item["word"]), float(item["start"]), float(item["end"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return words
+
+
+def parse_turns(raw: object) -> list[SpeakerTurn]:
+    """Turns from a diarization server's ``segments`` list; anything malformed is skipped."""
+    if not isinstance(raw, list):
+        return []
+    turns: list[SpeakerTurn] = []
+    for item in raw:
+        try:
+            turn = SpeakerTurn(int(item["speaker"]), float(item["start"]), float(item["end"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if turn.end >= turn.start:
+            turns.append(turn)
+    return turns
+
+
+def diarization_url(server_url: str) -> str:
+    """The diarization endpoint next to an OpenAI-style ``.../audio/transcriptions`` URL.
+
+    A URL without that path (a bare host, a proxy route) gets the container's own route,
+    ``/v1/audio/diarization``, on the same scheme, host and port.
+    """
+    trimmed = server_url.rstrip("/")
+    if trimmed.endswith("/transcriptions"):
+        return trimmed[: -len("/transcriptions")] + "/diarization"
+    parts = urlsplit(trimmed)
+    return urlunsplit((parts.scheme, parts.netloc, "/v1/audio/diarization", "", ""))
+
+
+class TranscriptionResult:
+    """Accumulates streaming transcription tokens."""
+
+    def __init__(self) -> None:
+        self.text = ""
+        # `text` without speaker labels, when speaker detection turned it into "Speaker N: ..." paragraphs.
+        self.plain_text = ""
+        self.done = False
+        self.usage: dict | None = None
+        self.confidence: float | None = None
+        # Per-word timing; empty for engines that do not report it.
+        self.words: list[Word] = []
+        # Human-readable problems (a chunk that timed out, ...) to show next to the result.
+        self.notes: list[str] = []
+        self._logprobs: list[float] = []
+
+    def append(self, delta: str, logprob: float | None = None) -> None:
+        self.text += delta
+        if logprob is not None:
+            self._logprobs.append(logprob)
+
+    def finalize(
+        self,
+        text: str,
+        usage: dict | None = None,
+        logprobs: list[float] | None = None,
+    ) -> None:
+        self.text = text
+        self.done = True
+        self.usage = usage
+
+        # Merge any logprobs from the done message
+        if logprobs:
+            self._logprobs.extend(logprobs)
+
+        # Compute average confidence from accumulated logprobs
+        if self._logprobs:
+            avg_logprob = sum(self._logprobs) / len(self._logprobs)
+            self.confidence = math.exp(avg_logprob)
+            logger.debug(
+                "Confidence: %.4f (from %d tokens, avg logprob %.4f)",
+                self.confidence,
+                len(self._logprobs),
+                avg_logprob,
+            )
+
+
+def pcm16_to_wav_bytes(pcm16: bytes, sample_rate: int = 16_000) -> bytes:
+    """Wrap raw PCM16 mono bytes in a minimal in-memory WAV container."""
+    wav_buffer = io.BytesIO()
+    with wave.open(wav_buffer, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm16)
+    return wav_buffer.getvalue()
+
+
+class BaseTranscriber(ABC):
+    """Common interface for all transcription backends."""
+
+    model: str
+    needs_docker: bool = True
+    # True when the app should call `warm_up()` in the background at start and after a switch to this engine.
+    warms_up_at_start: bool = False
+    # True when the engine can report per-word timing; `word_timestamps` then asks for it.
+    supports_word_timestamps: bool = False
+    word_timestamps: bool = False
+    # True when the client can ask a server for speaker turns (`diarize`).
+    supports_diarization: bool = False
+    # For an engine whose model can detect speakers elsewhere (the Docker build) but not here: why not.
+    no_diarization_reason: str = ""
+
+    async def prepare(self) -> None:  # noqa: B027
+        """Settle which engine the next cycle uses, so the flags above describe it. Most engines have one."""
+
+    async def warm_up(self) -> None:
+        """Load whatever the first cycle needs; the start-up preload of an in-process engine."""
+        await self.connect()
+        await self.disconnect()
+
+    @abstractmethod
+    async def connect(self) -> None: ...
+
+    @abstractmethod
+    async def send_audio_chunk(self, pcm16_bytes: bytes) -> None: ...
+
+    @abstractmethod
+    async def finish(self, timeout: float = 30.0) -> TranscriptionResult: ...
+
+    @abstractmethod
+    async def disconnect(self) -> None: ...
+
+    @property
+    @abstractmethod
+    def connected(self) -> bool: ...
+
+    def load_status(self) -> dict[str, str | None] | None:
+        """Model download/load progress (`state`, `error`) for engines that load a model in-process, else None."""
+        return None
+
+    async def diarize(self, wav: bytes | BinaryIO, timeout: float) -> list[SpeakerTurn]:
+        """Speaker turns for a whole WAV file (bytes or a file object); only engines with `supports_diarization`."""
+        raise NotImplementedError(f"{type(self).__name__} cannot detect speakers")
+
+
+class VoxtralRealtimeTranscriber(BaseTranscriber):
+    """Streams audio to vLLM's /v1/realtime WebSocket and receives transcription tokens.
+
+    Usage per transcription cycle:
+        await connect()
+        for chunk in audio_chunks:
+            await send_audio_chunk(chunk)
+        result = await finish()
+        # connection is closed, call connect() again for next cycle
+    """
+
+    def __init__(self, config: InferenceConfig) -> None:
+        self._server_url = config.server_url
+        self._ws: websockets.ClientConnection | None = None
+        self.model = "realtime"  # a custom server sets its own model_name
+
+    async def connect(self) -> None:
+        """Connect to the vLLM realtime endpoint and initialize session."""
+        # Close any existing connection
+        if self._ws is not None:
+            await self.disconnect()
+
+        self._ws = await websockets.connect(self._server_url)
+
+        # Receive session.created
+        msg = json.loads(await self._ws.recv())
+        if msg.get("type") != "session.created":
+            raise RuntimeError(f"Expected session.created, got: {msg}")
+        logger.info("Session created: %s", msg.get("id"))
+
+        # Send session configuration
+        # NOTE: logprobs are not supported in vLLM's realtime WebSocket
+        # protocol as of 2026-04. If support is added, include
+        # "logprobs": True here and the extraction code in
+        # TranscriptionResult will compute confidence automatically.
+        await self._ws.send(
+            json.dumps(
+                {
+                    "type": "session.update",
+                    "model": self.model,
+                }
+            )
+        )
+
+        # Start the generation engine (non-final commit)
+        await self._ws.send(
+            json.dumps(
+                {
+                    "type": "input_audio_buffer.commit",
+                }
+            )
+        )
+
+    async def send_audio_chunk(self, pcm16_bytes: bytes) -> None:
+        """Send a PCM16 audio chunk to the server."""
+        if self._ws is None:
+            raise RuntimeError("Not connected")
+
+        audio_b64 = base64.b64encode(pcm16_bytes).decode("ascii")
+        await self._ws.send(
+            json.dumps(
+                {
+                    "type": "input_audio_buffer.append",
+                    "audio": audio_b64,
+                }
+            )
+        )
+
+    async def finish(self, timeout: float = 30.0) -> TranscriptionResult:
+        """Commit audio buffer and receive the full transcription.
+
+        Closes the connection afterward so a fresh one is used per cycle.
+        """
+        if self._ws is None:
+            raise RuntimeError("Not connected")
+
+        # Signal end of audio
+        logger.info("Committing audio buffer to server")
+        await self._ws.send(
+            json.dumps(
+                {
+                    "type": "input_audio_buffer.commit",
+                    "final": True,
+                }
+            )
+        )
+
+        # Collect transcription tokens
+        result = TranscriptionResult()
+        try:
+            while not result.done:
+                raw = await asyncio.wait_for(self._ws.recv(), timeout=timeout)
+                msg = json.loads(raw)
+                msg_type = msg.get("type", "")
+
+                if msg_type == "transcription.delta":
+                    delta = msg.get("delta", "")
+                    logprob = msg.get("logprob")
+                    result.append(delta, logprob=logprob)
+                    logger.debug("Delta: %s (logprob=%s)", Text(delta), logprob)
+
+                elif msg_type == "transcription.done":
+                    logger.debug(
+                        "transcription.done payload: %s, text: %s",
+                        json.dumps({k: v for k, v in msg.items() if k != "text"}),
+                        Text(msg.get("text", "")),
+                    )
+                    result.finalize(
+                        text=msg.get("text", result.text),
+                        usage=msg.get("usage"),
+                        logprobs=msg.get("logprobs"),
+                    )
+                    logger.info("Transcription done: %s", Text(result.text))
+
+                elif msg_type == "error":
+                    error = msg.get("error", "Unknown error")
+                    logger.error("Server error: %s", error)
+                    raise RuntimeError(f"Transcription error: {error}")
+
+                else:
+                    logger.info("Server message: %s", msg_type)
+        except TimeoutError:
+            logger.warning("Transcription timed out after %.0fs", timeout)
+
+        await self.disconnect()
+        return result
+
+    async def disconnect(self) -> None:
+        """Close the WebSocket connection."""
+        if self._ws is not None:
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+
+    @property
+    def connected(self) -> bool:
+        return self._ws is not None and self._ws.state == State.OPEN
+
+
+class OpenAIHttpTranscriber(BaseTranscriber):
+    """Buffers audio chunks, then POSTs complete WAV to an OpenAI-compatible endpoint.
+
+    Used for models served via /v1/audio/transcriptions HTTP endpoint
+    (Parakeet TDT, Whisper, a custom server).
+
+    Usage per transcription cycle (same as VoxtralRealtimeTranscriber):
+        await connect()
+        for chunk in audio_chunks:
+            await send_audio_chunk(chunk)
+        result = await finish()
+    """
+
+    supports_word_timestamps = True
+    supports_diarization = True
+
+    def __init__(self, config: InferenceConfig) -> None:
+        self._server_url = config.server_url
+        self._audio_buffer = bytearray()
+        self._sample_rate = 16_000
+        self.model = MODEL_REGISTRY[config.model]["hf_name"]
+        self._connected = False
+
+    async def connect(self) -> None:
+        """Reset audio buffer for a new transcription cycle."""
+        self._audio_buffer = bytearray()
+        self._connected = True
+
+    async def send_audio_chunk(self, pcm16_bytes: bytes) -> None:
+        """Buffer audio chunk in memory (sent as a batch in finish())."""
+        if not self._connected:
+            raise RuntimeError("Not connected")
+        self._audio_buffer.extend(pcm16_bytes)
+
+    async def finish(self, timeout: float = 30.0) -> TranscriptionResult:
+        """Convert buffered PCM16 to WAV, POST to server, return transcription."""
+        if not self._connected:
+            raise RuntimeError("Not connected")
+
+        import httpx
+
+        wav_bytes = pcm16_to_wav_bytes(bytes(self._audio_buffer), sample_rate=self._sample_rate)
+
+        logger.info("Sending %d bytes of WAV audio to %s", len(wav_bytes), self._server_url)
+
+        form = {"model": self.model}
+        if self.word_timestamps:
+            form.update({"response_format": "verbose_json", "timestamp_granularities[]": "word"})
+
+        result = TranscriptionResult()
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    self._server_url,
+                    files={"file": ("audio.wav", wav_bytes, "audio/wav")},
+                    data=form,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            text = data.get("text", "")
+            result.finalize(text=text)
+            if self.word_timestamps:
+                result.words = parse_words(data.get("words"))
+            logger.info("Transcription done: %s", Text(result.text))
+        except httpx.TimeoutException:
+            logger.warning("Transcription timed out after %.0fs", timeout)
+        except httpx.HTTPStatusError as exc:
+            logger.error("Server error: %s %s", exc.response.status_code, Text(exc.response.text))
+            raise RuntimeError(f"Transcription error: {exc.response.status_code}") from exc
+
+        self._connected = False
+        self._audio_buffer = bytearray()
+        return result
+
+    async def disconnect(self) -> None:
+        """Clear buffer state."""
+        self._audio_buffer = bytearray()
+        self._connected = False
+
+    async def diarize(self, wav: bytes | BinaryIO, timeout: float) -> list[SpeakerTurn]:
+        """POST the whole file to the server's diarization endpoint; raises on any failure."""
+        import httpx
+
+        url = diarization_url(self._server_url)
+        logger.info("Sending WAV audio to %s for speaker detection (timeout %.0f s)", url, timeout)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(url, files={"file": ("audio.wav", wav, "audio/wav")})
+            response.raise_for_status()
+            return parse_turns(response.json().get("segments"))
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+
+def create_transcriber(
+    config: InferenceConfig,
+    *,
+    device: str | None = None,
+    auto_fallback: bool = False,
+) -> BaseTranscriber:
+    """Factory: create the right transcriber based on the configured model and device.
+
+    Resolution precedence for device: explicit `device` kwarg > `config.device` > "auto".
+    On CPU, whisper entries run in-process via LocalWhisperTranscriber and Parakeet via
+    LocalParakeetTranscriber (ONNX int8); neither needs Docker.
+    With `auto_fallback` (callers pass it when `[inference].device` is "auto") Parakeet on a GPU machine
+    becomes `AutoParakeetTranscriber`: the Docker server while it answers, CPU Parakeet when it does not.
+    """
+    registry = MODEL_REGISTRY.get(config.model)
+    if registry is None:
+        raise ValueError(f"Unknown model: {config.model}")
+
+    if registry.get("custom"):
+        return _create_custom_transcriber(config)
+
+    resolved_device = resolve_device(device if device is not None else config.device)
+    compute_type = resolve_compute_type(resolved_device, config.compute_type)
+
+    if (
+        auto_fallback
+        and resolved_device == "cuda"
+        and registry.get("inprocess_supported")
+        and registry.get("inprocess_engine") == "parakeet-onnx"
+    ):
+        from ..transcribers.auto_parakeet import AutoParakeetTranscriber
+
+        return AutoParakeetTranscriber(config)
+
+    if registry.get("inprocess_supported") and resolved_device == "cpu":
+        if registry.get("inprocess_engine") == "parakeet-onnx":
+            from ..transcribers.local_parakeet import LocalParakeetTranscriber
+
+            return LocalParakeetTranscriber(config)
+
+        from ..transcribers.local_whisper import LocalWhisperTranscriber
+
+        return LocalWhisperTranscriber(
+            config,
+            device=resolved_device,
+            compute_type=compute_type,
+        )
+
+    protocol = registry["protocol"]
+    if protocol == "realtime_ws":
+        return VoxtralRealtimeTranscriber(config)
+    elif protocol == "openai_http":
+        return OpenAIHttpTranscriber(config)
+    else:
+        raise ValueError(f"Unknown protocol: {protocol}")
+
+
+def _create_custom_transcriber(config: InferenceConfig) -> BaseTranscriber:
+    """Build the client for a user-run server from `[inference.custom]`."""
+    custom = config.custom
+    if not custom.url:
+        raise RuntimeError("Model 'custom-server' needs [inference.custom].url in config.toml.")
+    protocol = CUSTOM_PROTOCOLS.get(custom.protocol)
+    if protocol is None:
+        raise ValueError(f"Unknown custom server protocol: {custom.protocol!r} (use 'http' or 'realtime')")
+
+    server_config = replace(config, server_url=custom.url)
+    transcriber: BaseTranscriber
+    if protocol == "realtime_ws":
+        transcriber = VoxtralRealtimeTranscriber(server_config)
+    else:
+        transcriber = OpenAIHttpTranscriber(server_config)
+    transcriber.model = custom.model_name
+    transcriber.needs_docker = False
+    return transcriber

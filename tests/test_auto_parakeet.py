@@ -9,14 +9,14 @@ import threading
 import pytest
 
 from nexusvox.config import InferenceConfig
-from nexusvox.transcriber import (
+from nexusvox.transcribers import auto_parakeet
+from nexusvox.transcribers.auto_parakeet import CPU, GPU, AutoParakeetTranscriber
+from nexusvox.transcription.transcriber import (
     BaseTranscriber,
     OpenAIHttpTranscriber,
     TranscriptionResult,
     create_transcriber,
 )
-from nexusvox.transcribers import auto_parakeet
-from nexusvox.transcribers.auto_parakeet import CPU, GPU, AutoParakeetTranscriber
 
 
 class FakeCpu(BaseTranscriber):

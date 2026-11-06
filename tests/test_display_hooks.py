@@ -9,7 +9,7 @@ from nexusvox.config import Config
 from nexusvox.dashboard import _create_app
 from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.extensions import Extension, ExtensionRegistry, FileTranscript, UploadAction
-from nexusvox.transcriber import Word
+from nexusvox.transcription.transcriber import Word
 
 
 class Namer(Extension):

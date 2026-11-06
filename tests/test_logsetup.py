@@ -9,11 +9,11 @@ from logging.handlers import TimedRotatingFileHandler
 
 import pytest
 
-from nexusvox import logsetup
 from nexusvox.config import Config, load_config, save_config
 from nexusvox.dashboard import _create_app
 from nexusvox.dashboard.api import DashboardAPI
-from nexusvox.logsetup import Text, setup_file_logging, shorten
+from nexusvox.system import logsetup
+from nexusvox.system.logsetup import Text, setup_file_logging, shorten
 
 
 @pytest.fixture
@@ -195,8 +195,10 @@ def _unwrapped_spoken_log_arguments():
     import ast
     from pathlib import Path
 
+    import nexusvox
+
     found = []
-    for source in sorted(Path(logsetup.__file__).parent.rglob("*.py")):
+    for source in sorted(Path(nexusvox.__file__).parent.rglob("*.py")):
         for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
             if not (
                 isinstance(node, ast.Call)

@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 
 from nexusvox.config import InferenceConfig, model_needs_docker
-from nexusvox.transcriber import create_transcriber
 from nexusvox.transcribers import local_parakeet
 from nexusvox.transcribers.local_parakeet import FRAME_S, LocalParakeetTranscriber, words_from_tokens
+from nexusvox.transcription.transcriber import create_transcriber
 
 SAMPLE_RATE = 16_000
 
@@ -95,7 +95,7 @@ def test_factory_returns_local_parakeet_on_cpu():
 
 
 def test_factory_keeps_the_docker_client_on_gpu():
-    from nexusvox.transcriber import OpenAIHttpTranscriber
+    from nexusvox.transcription.transcriber import OpenAIHttpTranscriber
 
     t = create_transcriber(InferenceConfig(model="parakeet-tdt-0.6b"), device="cuda")
 
@@ -465,7 +465,7 @@ async def test_transcribe_file_cuts_a_long_chunk_at_pauses(monkeypatch):
     import io
     import wave
 
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
 
     model = _FakeModel(result=_Result("spoken", [" spoken"], [0.0]))
     _install(monkeypatch, model)
@@ -493,7 +493,7 @@ async def test_speaker_detection_on_cpu_returns_the_plain_transcript_with_the_gp
     import io
     import wave
 
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
 
     _install(monkeypatch, _FakeModel(result=_Result("hi there", [" hi", " there"], [0.0, 0.3])))
     buf = io.BytesIO()
@@ -750,7 +750,7 @@ async def test_a_job_that_timed_out_stops_and_does_not_hold_up_the_next_dictatio
 
 
 def test_other_engines_report_no_load_status():
-    from nexusvox.transcriber import OpenAIHttpTranscriber
+    from nexusvox.transcription.transcriber import OpenAIHttpTranscriber
 
     assert OpenAIHttpTranscriber(InferenceConfig(model="whisper-large-v3-turbo")).load_status() is None
 
@@ -760,9 +760,9 @@ def test_other_engines_report_no_load_status():
 
 def _bare_app(transcriber):
     try:
-        from nexusvox.app import NexusVoxApp
+        from nexusvox.app.core import NexusVoxApp
     except Exception:  # Windows-only imports on other platforms
-        pytest.skip("nexusvox.app needs the Windows runtime")
+        pytest.skip("nexusvox.app.core needs the Windows runtime")
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._switch_status = "idle"
     app._switch_error = None
@@ -772,9 +772,9 @@ def _bare_app(transcriber):
 
 def test_parakeet_stays_the_model_on_cpu_and_an_unusable_custom_slot_falls_back():
     try:
-        from nexusvox.app import apply_startup_fallback
+        from nexusvox.app.core import apply_startup_fallback
     except Exception:
-        pytest.skip("nexusvox.app needs the Windows runtime")
+        pytest.skip("nexusvox.app.core needs the Windows runtime")
 
     parakeet = InferenceConfig(model="parakeet-tdt-0.6b")
     apply_startup_fallback(parakeet, "cpu")
@@ -824,7 +824,7 @@ def test_a_running_switch_wins_over_the_model_load():
 
 
 def test_engines_without_a_load_status_never_change_the_switch_status():
-    from nexusvox.transcriber import OpenAIHttpTranscriber
+    from nexusvox.transcription.transcriber import OpenAIHttpTranscriber
 
     app = _bare_app(OpenAIHttpTranscriber(InferenceConfig(model="whisper-large-v3-turbo")))
 
@@ -866,7 +866,7 @@ def test_speaker_detection_stays_on_for_parakeet_on_gpu(db, session_factory, mon
 
 def test_speaker_detection_follows_the_running_engine_not_the_device_setting(db, session_factory, monkeypatch):
     """The setting says CPU but needs a restart: the container is still what runs, so it can still detect speakers."""
-    from nexusvox.transcriber import OpenAIHttpTranscriber
+    from nexusvox.transcription.transcriber import OpenAIHttpTranscriber
 
     container = OpenAIHttpTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"))
     with _dashboard_client(db, session_factory, monkeypatch, "cpu", running=container) as client:

@@ -14,7 +14,7 @@ import pytest
 
 import nexusvox
 
-CLIPBOARD_SOURCE = Path(nexusvox.__file__).with_name("clipboard.py")
+CLIPBOARD_SOURCE = Path(nexusvox.__file__).parent / "dictation" / "clipboard.py"
 
 
 class _Function:
@@ -170,7 +170,7 @@ def test_the_real_clipboard_round_trip():
     """The only test that exercises the module's real ctypes bindings (argtypes/restype)."""
     import pyperclip
 
-    from nexusvox.clipboard import set_text
+    from nexusvox.dictation.clipboard import set_text
 
     original = pyperclip.paste()
     try:

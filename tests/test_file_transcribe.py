@@ -8,8 +8,8 @@ import wave
 import pytest
 from pydub.exceptions import CouldntDecodeError
 
-from nexusvox.file_transcribe import ALLOWED_EXTENSIONS, _get_extension, convert_to_wav
-from nexusvox.transcriber import Word
+from nexusvox.transcription.file_transcribe import ALLOWED_EXTENSIONS, _get_extension, convert_to_wav
+from nexusvox.transcription.transcriber import Word
 
 
 def test_get_extension():
@@ -107,7 +107,7 @@ class _RecordingTranscriber:
         self.chunks.append(bytes(pcm16))
 
     async def finish(self, timeout=120.0):
-        from nexusvox.transcriber import TranscriptionResult
+        from nexusvox.transcription.transcriber import TranscriptionResult
 
         r = TranscriptionResult()
         r.finalize(text=self._text)
@@ -126,7 +126,7 @@ class _RecordingTranscriber:
 @pytest.mark.asyncio
 async def test_transcribe_file_dispatches_through_factory(monkeypatch, sample_wav_bytes):
     """CPU path: transcribe_file feeds PCM16 through the factory-returned transcriber."""
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     recorder = _RecordingTranscriber(text="hello from cpu")
@@ -148,7 +148,7 @@ async def test_transcribe_file_dispatches_through_factory(monkeypatch, sample_wa
 
 @pytest.mark.asyncio
 async def test_transcribe_file_passes_device_to_factory(monkeypatch, sample_wav_bytes):
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     captured: dict = {}
@@ -180,7 +180,7 @@ class _ScriptedTranscriber(_RecordingTranscriber):
         self.word_timestamps = False
 
     async def finish(self, timeout=120.0):
-        from nexusvox.transcriber import TranscriptionResult
+        from nexusvox.transcription.transcriber import TranscriptionResult
 
         text, words, done = self._script.pop(0)
         r = TranscriptionResult()
@@ -191,7 +191,7 @@ class _ScriptedTranscriber(_RecordingTranscriber):
 
 
 def _silent_wav(seconds=1.0):
-    from nexusvox.transcriber import pcm16_to_wav_bytes
+    from nexusvox.transcription.transcriber import pcm16_to_wav_bytes
 
     return pcm16_to_wav_bytes(bytes(2) * int(16_000 * seconds), sample_rate=16_000)
 
@@ -199,9 +199,9 @@ def _silent_wav(seconds=1.0):
 @pytest.mark.asyncio
 async def test_word_times_are_shifted_by_the_audio_before_each_chunk(monkeypatch):
     """The offset is the real length of the earlier chunks, whatever size the chunks are."""
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.transcriber import Word
+    from nexusvox.transcription.transcriber import Word
 
     script = [
         ("one two", [Word("one", 0.5, 0.9), Word("two", 0.95, 1.0)], True),
@@ -231,7 +231,7 @@ async def test_word_times_are_shifted_by_the_audio_before_each_chunk(monkeypatch
 @pytest.mark.asyncio
 async def test_engine_without_timestamps_leaves_words_empty(monkeypatch):
     """Whisper and the others never get the flag, return no words, and that is not a problem."""
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     transcriber = _ScriptedTranscriber([("hello", [], True), ("again", [], True)])
@@ -253,7 +253,7 @@ async def test_engine_without_timestamps_leaves_words_empty(monkeypatch):
 @pytest.mark.asyncio
 async def test_words_are_not_requested_unless_the_caller_asks(monkeypatch):
     """Review-tab retry calls transcribe_file without the flag: no extra server work, no word notes."""
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     transcriber = _ScriptedTranscriber([("hello", [], True)])
@@ -268,7 +268,7 @@ async def test_words_are_not_requested_unless_the_caller_asks(monkeypatch):
 @pytest.mark.asyncio
 async def test_client_that_cannot_report_words_is_not_asked(monkeypatch):
     """A registry flag on a model whose client has no word support must not set the flag or add notes."""
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     transcriber = _ScriptedTranscriber([("hello", [], True)])
@@ -285,9 +285,9 @@ async def test_client_that_cannot_report_words_is_not_asked(monkeypatch):
 async def test_timed_out_or_wordless_chunk_is_reported(monkeypatch, caplog):
     import logging
 
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.transcriber import Word
+    from nexusvox.transcription.transcriber import Word
 
     script = [
         ("", [], False),  # timed out
@@ -313,7 +313,7 @@ async def test_timed_out_or_wordless_chunk_is_reported(monkeypatch, caplog):
 
 @pytest.mark.asyncio
 async def test_timeout_note_does_not_mention_words_for_engines_without_them(monkeypatch):
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     transcriber = _ScriptedTranscriber([("", [], False)])
@@ -352,10 +352,10 @@ def _wav_seconds(wav_bytes):
 
 @pytest.mark.asyncio
 async def test_diarize_labels_the_transcript_with_one_call_over_the_whole_file(monkeypatch):
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.diarization import diarization_timeout
-    from nexusvox.transcriber import SpeakerTurn, Word
+    from nexusvox.transcription.diarization import diarization_timeout
+    from nexusvox.transcription.transcriber import SpeakerTurn, Word
 
     script = [
         ("Hello there. Hi!", [Word("Hello", 0.1, 0.3), Word("there.", 0.35, 0.6), Word("Hi!", 0.8, 0.95)], True),
@@ -383,9 +383,9 @@ async def test_diarize_labels_the_transcript_with_one_call_over_the_whole_file(m
 
 @pytest.mark.asyncio
 async def test_without_diarize_the_server_is_not_asked_for_speakers(monkeypatch):
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.transcriber import SpeakerTurn, Word
+    from nexusvox.transcription.transcriber import SpeakerTurn, Word
 
     transcriber = _DiarizingTranscriber([("hi", [Word("hi", 0.1, 0.2)], True)], [SpeakerTurn(0, 0.0, 1.0)])
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
@@ -405,9 +405,9 @@ async def test_without_diarize_the_server_is_not_asked_for_speakers(monkeypatch)
 async def test_failed_speaker_detection_keeps_the_plain_transcript_with_a_note(monkeypatch, error_name, expected):
     import httpx
 
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.transcriber import Word
+    from nexusvox.transcription.transcriber import Word
 
     error = getattr(httpx, error_name)("connection refused")
     script = [("hi there", [Word("hi", 0.1, 0.2), Word("there", 0.3, 0.5)], True)]
@@ -425,9 +425,9 @@ async def test_failed_speaker_detection_keeps_the_plain_transcript_with_a_note(m
 
 @pytest.mark.asyncio
 async def test_no_turns_found_keeps_the_plain_transcript_with_a_note(monkeypatch):
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.transcriber import Word
+    from nexusvox.transcription.transcriber import Word
 
     transcriber = _DiarizingTranscriber([("hi", [Word("hi", 0.1, 0.2)], True)], [])
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
@@ -450,9 +450,9 @@ async def test_no_turns_found_keeps_the_plain_transcript_with_a_note(monkeypatch
 )
 async def test_speaker_detection_is_skipped_when_a_word_has_no_timing(monkeypatch, script):
     """Labelled paragraphs come from the words, so an untimed word would vanish: keep the full plain text."""
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.transcriber import SpeakerTurn
+    from nexusvox.transcription.transcriber import SpeakerTurn
 
     transcriber = _DiarizingTranscriber(script, [SpeakerTurn(0, 0.0, 2.0)])
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
@@ -469,9 +469,9 @@ async def test_speaker_detection_is_skipped_when_a_word_has_no_timing(monkeypatc
 @pytest.mark.asyncio
 async def test_a_timed_out_chunk_does_not_block_speaker_labels(monkeypatch):
     """Nothing of a timed-out chunk is in the plain text either, so the labelled text loses nothing."""
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.transcriber import SpeakerTurn
+    from nexusvox.transcription.transcriber import SpeakerTurn
 
     script = [("", [], False), ("hello", [Word("hello", 0.1, 0.4)], True)]
     transcriber = _DiarizingTranscriber(script, [SpeakerTurn(1, 0.0, 2.0)])
@@ -490,9 +490,9 @@ async def test_speaker_requests_wait_for_each_other_and_the_timeout_starts_after
     """A second upload queued behind another's speaker detection does not spend its timeout waiting."""
     import asyncio
 
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.transcriber import SpeakerTurn
+    from nexusvox.transcription.transcriber import SpeakerTurn
 
     transcriber = _DiarizingTranscriber([("hi", [Word("hi", 0.1, 0.2)], True)], [SpeakerTurn(0, 0.0, 1.0)])
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
@@ -517,9 +517,9 @@ async def test_speaker_requests_wait_for_each_other_and_the_timeout_starts_after
 async def test_failed_transcription_cancels_speaker_detection_and_frees_the_lock(monkeypatch):
     import asyncio
 
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
-    from nexusvox.transcriber import SpeakerTurn
+    from nexusvox.transcription.transcriber import SpeakerTurn
 
     class Failing(_DiarizingTranscriber):
         async def finish(self, timeout=120.0):
@@ -542,7 +542,7 @@ async def test_failed_transcription_cancels_speaker_detection_and_frees_the_lock
 
 @pytest.mark.asyncio
 async def test_diarize_with_a_model_without_speaker_detection_says_so(monkeypatch):
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     transcriber = _DiarizingTranscriber([("hello", [], True)], [])
@@ -560,7 +560,7 @@ async def test_diarize_with_a_model_without_speaker_detection_says_so(monkeypatc
 
 @pytest.mark.asyncio
 async def test_model_with_speaker_detection_but_a_client_without_it_is_not_told_to_switch(monkeypatch):
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     transcriber = _DiarizingTranscriber([("hello", [Word("hello", 0.1, 0.4)], True)], [])
@@ -576,7 +576,7 @@ async def test_model_with_speaker_detection_but_a_client_without_it_is_not_told_
 
 @pytest.mark.asyncio
 async def test_progress_is_reported_per_chunk(monkeypatch):
-    import nexusvox.file_transcribe as ft
+    import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
 
     transcriber = _ScriptedTranscriber([("a", [], True), ("b", [], True), ("c", [], True)])

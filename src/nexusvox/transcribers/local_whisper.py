@@ -14,9 +14,9 @@ import logging
 import threading
 
 from ..config import MODEL_REGISTRY, InferenceConfig
-from ..logsetup import Text
-from ..paths import models_dir
-from ..transcriber import BaseTranscriber, TranscriptionResult, pcm16_to_wav_bytes
+from ..system.logsetup import Text
+from ..system.paths import models_dir
+from ..transcription.transcriber import BaseTranscriber, TranscriptionResult, pcm16_to_wav_bytes
 
 logger = logging.getLogger(__name__)
 

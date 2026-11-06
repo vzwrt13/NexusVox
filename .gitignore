@@ -20,8 +20,9 @@ venv/
 *.db-wal
 *.db-shm
 
-# Audio recordings
+# Audio recordings (not the package of the same name)
 audio/
+!src/nexusvox/audio/
 
 # Benchmark results
 benchmarks/

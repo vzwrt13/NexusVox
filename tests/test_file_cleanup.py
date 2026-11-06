@@ -28,7 +28,7 @@ def _fake_model(monkeypatch, reply):
         calls.append((config.timeout_s, text))
         return reply(text)
 
-    monkeypatch.setattr("nexusvox.cleanup.complete", complete)
+    monkeypatch.setattr("nexusvox.dictation.cleanup.complete", complete)
     return calls
 
 

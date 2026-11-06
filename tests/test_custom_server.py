@@ -18,7 +18,7 @@ from nexusvox.config import (
     model_needs_docker,
     save_config,
 )
-from nexusvox.transcriber import OpenAIHttpTranscriber, VoxtralRealtimeTranscriber, create_transcriber
+from nexusvox.transcription.transcriber import OpenAIHttpTranscriber, VoxtralRealtimeTranscriber, create_transcriber
 
 
 def _custom(url: str = "http://bridge:8765/v1/audio/transcriptions", protocol: str = "http", **kw) -> InferenceConfig:
@@ -130,9 +130,9 @@ def test_dashboard_lists_custom_server_with_configured_protocol(flask_client):
 
 def _switch(model_id: str, inference: InferenceConfig, monkeypatch):
     try:
-        from nexusvox.app import NexusVoxApp
+        from nexusvox.app.core import NexusVoxApp
     except Exception:  # Windows-only imports on other platforms
-        pytest.skip("nexusvox.app needs the Windows runtime")
+        pytest.skip("nexusvox.app.core needs the Windows runtime")
 
     docker = MagicMock()
     patch_app(monkeypatch, "docker_ctl", docker)
@@ -182,9 +182,9 @@ def test_failed_switch_to_custom_server_keeps_the_old_model(monkeypatch):
 
 def _fallback(inference: InferenceConfig, device: str) -> InferenceConfig:
     try:
-        from nexusvox.app import apply_startup_fallback
+        from nexusvox.app.core import apply_startup_fallback
     except Exception:  # Windows-only imports on other platforms
-        pytest.skip("nexusvox.app needs the Windows runtime")
+        pytest.skip("nexusvox.app.core needs the Windows runtime")
     apply_startup_fallback(inference, device)
     return inference
 

@@ -13,11 +13,11 @@ from pathlib import Path
 from sqlalchemy.orm import sessionmaker
 
 from ..config import Config
-from ..db import Database
 from ..extensions import ExtensionRegistry
-from ..meeting_live import LiveTranscriber, WindowTranscriber
-from ..meeting_session import MeetingSession
-from ..transcriber import BaseTranscriber
+from ..meetings.live import LiveTranscriber, WindowTranscriber
+from ..meetings.session import MeetingSession
+from ..storage.db import Database
+from ..transcription.transcriber import BaseTranscriber
 from .api_analytics import AnalyticsMixin
 from .api_commands import CommandsMixin
 from .api_files import FilesMixin

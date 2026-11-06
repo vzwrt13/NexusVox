@@ -5,9 +5,9 @@ import pytest
 from nexusvox.config import Config
 from nexusvox.dashboard import _create_app
 from nexusvox.dashboard.api import DashboardAPI
-from nexusvox.exports import MAX_CUE_S, MAX_LINE_CHARS, MAX_LINES, build_cues, to_srt, to_txt, to_vtt
 from nexusvox.extensions import ExtensionRegistry, FileTranscript
-from nexusvox.transcriber import Word
+from nexusvox.transcription.exports import MAX_CUE_S, MAX_LINE_CHARS, MAX_LINES, build_cues, to_srt, to_txt, to_vtt
+from nexusvox.transcription.transcriber import Word
 
 
 def transcript(words, text="", kind="upload", **kwargs):
@@ -246,7 +246,7 @@ def test_the_error_names_the_kind_of_item():
 
 
 def test_a_failing_builtin_registration_does_not_break_loading(monkeypatch):
-    monkeypatch.setattr("nexusvox.exports.builtin_export_targets", lambda: 1 / 0)
+    monkeypatch.setattr("nexusvox.transcription.exports.builtin_export_targets", lambda: 1 / 0)
     registry = ExtensionRegistry()
 
     registry.add_builtin_exports()  # logs, does not raise

@@ -8,11 +8,11 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from ..exports import NO_TIMING_HINT, SUBTITLE_TARGET_IDS
+from ..dictation.lang_detect import stored_language
 from ..extensions import HOOK_TIMEOUT_S, file_transcript_from_record
 from ..file_cleanup import clean_transcript
-from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
-from ..lang_detect import stored_language
+from ..transcription.exports import NO_TIMING_HINT, SUBTITLE_TARGET_IDS
+from ..transcription.file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from .api_base import DashboardState, logger
 from .file_jobs import FileJob
 
@@ -78,7 +78,7 @@ class FilesMixin(DashboardState):
         """Why an uploaded file cannot be transcribed, or an empty string."""
         if self._db is None:
             return "DB not available"
-        from ..file_transcribe import _get_extension
+        from ..transcription.file_transcribe import _get_extension
 
         ext = _get_extension(filename)
         if ext not in ALLOWED_EXTENSIONS:

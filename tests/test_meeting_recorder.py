@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nexusvox.meeting_recorder import GAP_TOLERANCE_S, AudioFormat, MeetingRecorder, TrackWriter
+from nexusvox.meetings.recorder import GAP_TOLERANCE_S, AudioFormat, MeetingRecorder, TrackWriter
 
 
 class FakeClock:

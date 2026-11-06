@@ -12,8 +12,8 @@ from app_parts import patch_app
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
+from nexusvox.audio.remote_mic import PATH, RemoteAudioSource, RemoteMicServer
 from nexusvox.config import Config, RemoteMicConfig, load_config, save_config
-from nexusvox.remote_mic import PATH, RemoteAudioSource, RemoteMicServer
 
 TOKEN = "s3cret"
 
@@ -241,11 +241,11 @@ def test_remote_mic_survives_a_save(tmp_path: Path):
 # --- app -------------------------------------------------------------------------------
 
 try:
-    from nexusvox.app import NexusVoxApp
+    from nexusvox.app.core import NexusVoxApp
 except Exception:  # Windows-only imports (pynput hook, tray, SendInput) on other platforms
     NexusVoxApp = None
 
-needs_app = pytest.mark.skipif(NexusVoxApp is None, reason="nexusvox.app needs the Windows runtime")
+needs_app = pytest.mark.skipif(NexusVoxApp is None, reason="nexusvox.app.core needs the Windows runtime")
 
 
 def _app(*, hotkey_active: bool = False) -> "NexusVoxApp":

@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from nexusvox.transcriber import TranscriptionResult
+from nexusvox.transcription.transcriber import TranscriptionResult
 
 
 def test_initial_state():

@@ -18,8 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from nexusvox.cleanup import PROMPTS, cleanup  # noqa: E402
 from nexusvox.config import CleanupConfig, LlmConfig, load_config  # noqa: E402
+from nexusvox.dictation.cleanup import PROMPTS, cleanup  # noqa: E402
 
 # (dictation, words that must stay, words that must go)
 SAMPLES: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [

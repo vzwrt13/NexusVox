@@ -40,10 +40,10 @@ from types import SimpleNamespace  # noqa: E402
 
 from cleanup_eval import SAMPLES, _check  # noqa: E402
 
-from nexusvox.cleanup import _TAG_RE, IMPLAUSIBLE, PROMPTS, plausible  # noqa: E402
+from nexusvox.dictation.cleanup import _TAG_RE, IMPLAUSIBLE, PROMPTS, plausible  # noqa: E402
+from nexusvox.dictation.polish import SYSTEM_PROMPT as POLISH_PROMPT  # noqa: E402
+from nexusvox.dictation.polish import build_user_message  # noqa: E402
 from nexusvox.llm import clean_reply  # noqa: E402
-from nexusvox.polish import SYSTEM_PROMPT as POLISH_PROMPT  # noqa: E402
-from nexusvox.polish import build_user_message  # noqa: E402
 
 URL = "http://127.0.0.1:11434"
 SHORT = "Ähm also ich wollte dir kurz sagen dass das Meeting äh morgen um 10 Uhr ist"

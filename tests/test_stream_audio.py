@@ -10,10 +10,10 @@ import pytest
 from nexusvox.config import AudioConfig
 
 try:
-    import nexusvox.audio as audio_module
-    from nexusvox.app import NexusVoxApp
+    import nexusvox.audio.capture as audio_module
+    from nexusvox.app.core import NexusVoxApp
 except Exception:  # Windows-only imports (pynput hook, PortAudio) on other platforms
-    pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
+    pytest.skip("nexusvox.app.core needs the Windows runtime", allow_module_level=True)
 
 
 class QueueAudio:

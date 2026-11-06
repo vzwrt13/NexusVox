@@ -502,7 +502,9 @@ def load_config(path: Path | None = None) -> Config:
             token=str(remote_mic_data.get("token", "")),
         ),
         support=SupportConfig(
-            feedback_form_url=_feedback_form_url(support_data.get("feedback_form_url", "")),
+            feedback_form_url=_feedback_form_url(
+                support_data.get("feedback_form_url", SupportConfig.feedback_form_url)
+            ),
         ),
     )
     config.source_path = path.resolve()

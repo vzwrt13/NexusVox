@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import tomllib
 from pathlib import Path
 
@@ -266,6 +267,220 @@ def test_save_config_roundtrip_with_os_commands(tmp_path):
 
     assert loaded.os_commands.enabled is True
     assert loaded.os_commands.apps == original.os_commands.apps
+
+
+# ── Escaping of the strings save_config writes ───────────────────────
+
+# An absolute Windows path with a non-ASCII user name, as a frozen build resolves `[database].path`.
+FROZEN_DB_PATH = r"C:\Users\Jürgen Müller\AppData\Local\NexusVox\data\nexusvox.db"
+ABSOLUTE_AUDIO_DIR = r"D:\Aufnahmen\Müller\audio"
+AWKWARD = r'a"b\c\\d ä ß 日本語 😀 \u0041 \n'
+
+
+def _flatten_strings(node, found: set[str]) -> set[str]:
+    """Every string in a parsed TOML document: values, list items and table keys."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found.add(key)
+            _flatten_strings(value, found)
+    elif isinstance(node, list):
+        for item in node:
+            _flatten_strings(item, found)
+    elif isinstance(node, str):
+        found.add(node)
+    return found
+
+
+def _fill_strings(obj, prefix: str, expected: list[str]) -> None:
+    """Give every string, string list and string table of a config dataclass tree its own awkward value."""
+    for f in dataclasses.fields(obj):
+        value = getattr(obj, f.name)
+        name = f"{prefix}.{f.name}"
+        awkward = f'{name} "q" \\ \\\\ ä 日本 😀\t\n'
+        if dataclasses.is_dataclass(value):
+            _fill_strings(value, name, expected)
+        elif isinstance(value, str):
+            setattr(obj, f.name, awkward)
+            expected.append(awkward)
+        elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+            setattr(obj, f.name, [awkward])
+            expected.append(awkward)
+        elif isinstance(value, dict):
+            setattr(obj, f.name, {awkward: awkward})
+            expected.append(awkward)
+
+
+def test_save_config_writes_every_string_field_as_valid_toml(tmp_path):
+    """Walk the whole Config: no string field, present or added later, may break the file when it holds
+    quotes, backslashes, non-ASCII, an astral character or control characters."""
+    cfg = Config()
+    cfg.inference.compute_type = "int8"  # only written when set
+    expected: list[str] = []
+    _fill_strings(cfg, "config", expected)
+    assert len(expected) > 25  # the walk really reached the sections
+
+    config_path = tmp_path / "config.toml"
+    save_config(cfg, config_path)
+    written = _flatten_strings(tomllib.loads(config_path.read_text(encoding="utf-8")), set())
+
+    assert [value for value in expected if value not in written] == []
+
+
+def test_save_config_roundtrips_frozen_build_absolute_database_path(tmp_path):
+    original = Config(database=DatabaseConfig(path=FROZEN_DB_PATH, audio_dir=ABSOLUTE_AUDIO_DIR))
+
+    config_path = tmp_path / "config.toml"
+    save_config(original, config_path)
+    loaded = load_config(config_path)
+
+    assert loaded.database.path == FROZEN_DB_PATH
+    assert loaded.database.audio_dir == ABSOLUTE_AUDIO_DIR
+
+
+def test_save_config_roundtrips_awkward_strings(tmp_path):
+    """Free-form fields come back unchanged, including both secrets and the os_commands names."""
+    original = Config(
+        database=DatabaseConfig(path=AWKWARD, audio_dir=AWKWARD),
+        inference=InferenceConfig(server_url=AWKWARD),
+        llm=LlmConfig(api_key=AWKWARD, keep_alive=AWKWARD, model=AWKWARD),
+        meeting=MeetingConfig(mic_device=AWKWARD, output_device=AWKWARD, own_voice_label=AWKWARD),
+        os_commands=OSCommandsConfig(
+            enabled=True,
+            apps={
+                "chrome": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                'my "app" ä': AWKWARD,
+                "with space": "x.exe",
+            },
+        ),
+    )
+    original.remote_mic.token = AWKWARD
+
+    config_path = tmp_path / "config.toml"
+    save_config(original, config_path)
+    loaded = load_config(config_path)
+
+    assert loaded.database.path == AWKWARD
+    assert loaded.database.audio_dir == AWKWARD
+    assert loaded.inference.server_url == AWKWARD
+    assert loaded.llm.api_key == AWKWARD
+    assert loaded.llm.keep_alive == AWKWARD
+    assert loaded.llm.model == AWKWARD
+    assert loaded.meeting.mic_device == AWKWARD
+    assert loaded.meeting.output_device == AWKWARD
+    assert loaded.remote_mic.token == AWKWARD
+    assert loaded.os_commands.apps == original.os_commands.apps
+
+
+def test_save_config_escapes_control_characters(tmp_path):
+    original = Config(database=DatabaseConfig(path="line1\nline2\ttab\x01\x7f"))
+
+    config_path = tmp_path / "config.toml"
+    save_config(original, config_path)
+
+    assert load_config(config_path).database.path == "line1\nline2\ttab\x01\x7f"
+
+
+def test_save_config_second_save_is_stable(tmp_path):
+    """Saving a loaded config again writes the same file, so nothing is escaped twice."""
+    config_path = tmp_path / "config.toml"
+    save_config(Config(database=DatabaseConfig(path=FROZEN_DB_PATH, audio_dir=ABSOLUTE_AUDIO_DIR)), config_path)
+    first = config_path.read_text(encoding="utf-8")
+
+    save_config(load_config(config_path), config_path)
+
+    assert config_path.read_text(encoding="utf-8") == first
+
+
+def test_save_config_replaces_a_lone_surrogate_instead_of_failing(tmp_path):
+    """JSON such as "a\\ud83d" yields a lone surrogate; it must not truncate the file by failing to encode."""
+    config_path = tmp_path / "config.toml"
+    save_config(Config(), config_path)
+    cfg = load_config(config_path)
+    cfg.meeting.own_voice_label = "a\ud83d"
+
+    save_config(cfg)
+
+    assert load_config(config_path).meeting.own_voice_label == "a\ufffd"
+
+
+def test_save_config_leaves_the_file_alone_when_a_value_cannot_be_written(tmp_path):
+    config_path = tmp_path / "config.toml"
+    save_config(Config(), config_path)
+    before = config_path.read_bytes()
+    cfg = Config()
+    cfg.hotkey.key = None  # type: ignore[assignment]
+
+    with pytest.raises(TypeError):
+        save_config(cfg, config_path)
+
+    assert config_path.read_bytes() == before
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_save_config_is_atomic_when_the_swap_fails(tmp_path, monkeypatch):
+    """A write that dies before the swap leaves the old file complete and no temporary file behind."""
+    config_path = tmp_path / "config.toml"
+    save_config(Config(), config_path)
+    before = config_path.read_bytes()
+
+    def broken_replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(config_module.os, "replace", broken_replace)
+    with pytest.raises(OSError):
+        save_config(Config(injection_delay_ms=1), config_path)
+
+    assert config_path.read_bytes() == before
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_save_config_drops_entries_that_are_not_text(tmp_path):
+    """Setters fed from JSON can hold None or numbers; they are skipped rather than written as "None"."""
+    cfg = Config(os_commands=OSCommandsConfig(enabled=True, apps={"chrome": None, "n": 3, "ok": "ok.exe"}))
+    cfg.voice_commands.symbols = ["slash", None, 4]
+
+    config_path = tmp_path / "config.toml"
+    save_config(cfg, config_path)
+    loaded = load_config(config_path)
+
+    assert loaded.os_commands.apps == {"ok": "ok.exe"}
+    assert loaded.voice_commands.symbols == ["slash"]
+
+
+def test_save_config_keeps_a_relative_database_path_relative_when_frozen(tmp_path, monkeypatch):
+    """The installed app resolves a relative path into its data folder; saving must not pin that folder."""
+    monkeypatch.setattr("nexusvox.paths.is_frozen", lambda: True)
+    monkeypatch.setattr("nexusvox.paths.data_dir", lambda: tmp_path / "data")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[database]\npath = "nexusvox.db"\n', encoding="utf-8")
+
+    cfg = load_config(config_path)
+    assert cfg.database.path == str(tmp_path / "data" / "nexusvox.db")
+    save_config(cfg)
+
+    assert tomllib.loads(config_path.read_text(encoding="utf-8"))["database"]["path"] == "nexusvox.db"
+
+    cfg.database.path = FROZEN_DB_PATH  # a path set at run time is written as it is
+    save_config(cfg)
+
+    assert tomllib.loads(config_path.read_text(encoding="utf-8"))["database"]["path"] == FROZEN_DB_PATH
+
+
+def test_load_config_sets_aside_a_file_the_old_writer_broke(tmp_path, caplog):
+    """An unescaped Windows path made config.toml invalid; the app starts from the template and keeps the file."""
+    config_path = tmp_path / "config.toml"
+    broken = '[database]\npath = "C:\\Users\\x\\data\\nexusvox.db"\n'
+    config_path.write_text(broken, encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="nexusvox.config"):
+        cfg = load_config(config_path)
+
+    backups = list(tmp_path.glob("config.toml.broken-*"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == broken
+    assert any("not valid TOML" in record.message for record in caplog.records)
+    tomllib.loads(config_path.read_text(encoding="utf-8"))  # the file in place is valid again
+    assert cfg.source_path == config_path.resolve()
 
 
 # ── Device / compute_type ────────────────────────────────────────────

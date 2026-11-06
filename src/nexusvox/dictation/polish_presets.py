@@ -4,24 +4,13 @@ Saying a preset's name as the polish instruction ("prompt engineer") uses its st
 instruction; words after the name are added to it ("prompt engineer, and keep it
 short"). The default preset applies when the polish key is tapped without a word.
 Names are the user's own, in their own language, so the bilingual rule is met by the
-user, as with snippets. Pure, so the database and the dashboard can import it anywhere.
+user, as with snippets.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from ..snippets import MAX_NAME_WORDS, SnippetOption, best_option
-
-# A spoken name is matched on its first words only (`snippets.best_option`); a longer name never matches in full.
-MAX_PRESET_NAME_WORDS = MAX_NAME_WORDS
-
-
-@dataclass(frozen=True)
-class PolishPreset:
-    name: str
-    instruction: str
-    is_default: bool = False
+from ..snippets import SnippetOption, best_option
+from ..storage.vocabulary import PolishPreset
 
 
 def resolve_instruction(spoken: str, presets: list[PolishPreset]) -> tuple[str, str | None]:

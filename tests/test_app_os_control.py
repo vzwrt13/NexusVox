@@ -165,7 +165,7 @@ def test_polish_pastes_the_rewritten_selection(monkeypatch):
 
 
 def test_polish_uses_a_spoken_preset_and_saves_its_name(monkeypatch):
-    from nexusvox.dictation.polish_presets import PolishPreset
+    from nexusvox.storage.vocabulary import PolishPreset
 
     preset = PolishPreset("formelle Mail", "Schreib das als formelle E-Mail.")
     app, calls = _polish_app(monkeypatch, "hi leute", "Sehr geehrte Damen und Herren", presets=[preset])
@@ -175,7 +175,7 @@ def test_polish_uses_a_spoken_preset_and_saves_its_name(monkeypatch):
 
 
 def test_polish_without_an_instruction_uses_the_default_preset(monkeypatch):
-    from nexusvox.dictation.polish_presets import PolishPreset
+    from nexusvox.storage.vocabulary import PolishPreset
 
     preset = PolishPreset("kürzer", "Mach den Text kürzer.", is_default=True)
     app, calls = _polish_app(monkeypatch, "hi leute", "hi", presets=[preset])

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from nexusvox.config import CleanupConfig, Config, VoiceCommandsConfig
 from nexusvox.dictation.cleanup import CleanupResult
-from nexusvox.dictation.dictionary import DictionaryEntry
 from nexusvox.dictation.pipeline import process_text
 from nexusvox.dictation.translator import TranslateResult
+from nexusvox.storage.vocabulary import DictionaryEntry
 
 
 def _config(**voice) -> Config:

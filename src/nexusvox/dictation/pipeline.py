@@ -25,9 +25,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ..config import CleanupConfig, Config, LlmConfig, TranslatorConfig, VoiceCommandsConfig
+from ..storage.vocabulary import DictionaryEntry
 from ..system.logsetup import Text
 from .cleanup import MIN_WORDS, CleanupResult, cleanup
-from .dictionary import DictionaryEntry, apply_dictionary_counted
+from .dictionary import apply_dictionary_counted
 from .translator import TranslateResult, translate
 from .voice_commands import process_voice_commands, split_press_enter
 

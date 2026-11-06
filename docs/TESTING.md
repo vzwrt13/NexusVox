@@ -100,6 +100,7 @@ tests/
 ├── test_clipboard.py              # Clipboard writes excluded from the Windows clipboard history (Windows only)
 ├── test_polish_presets.py         # Spoken preset names, default preset, preset storage
 ├── test_polish.py                 # Language model client (Ollama/OpenAI protocols, failures) and polish prompts
+├── test_package_layout.py         # Logger names, layers, package inits, the paths Pro imports
 ├── test_pipeline.py               # Text pipeline: typed vs saved text, press enter, translation, learnable
 └── test_voice_commands.py         # Voice command text formatting substitutions
 ```
@@ -136,6 +137,7 @@ tests/
 | `test_clipboard.py` | `dictation/clipboard.py` | Text round-trips through the real clipboard with the history-exclusion formats set; empty text (skipped off Windows) |
 | `test_polish_presets.py` | `dictation/polish_presets.py`, `storage/db.py` | Default preset, name matching (case, hyphens, German names), words after the name, storage with one default and unique names |
 | `test_polish.py` | `llm.py`, `dictation/polish.py` | Request shape for both protocols, every failure as `LlmError`, default instruction, code-fence stripping (no server needed) |
+| `test_package_layout.py` | the whole package | Fixed logger names, `storage/` and `system/` import nothing built on them, every package `__init__.py` is a docstring only, the paths Pro imports stay real modules |
 | `test_pipeline.py` | `dictation/pipeline.py` | Order of dictionary, press enter, voice commands and translation; typed vs saved text; when an edit can be learned |
 | `test_voice_commands.py` | `dictation/voice_commands.py` | New line/paragraph/tab/all-caps substitutions (English and German), structural category toggles, German number words, comma interactions, passthrough |
 

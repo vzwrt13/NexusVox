@@ -11,8 +11,6 @@ from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import sessionmaker
 
 from ..config import DatabaseConfig
-from ..dictation.dictionary import DictionaryEntry, usage_key
-from ..dictation.polish_presets import MAX_PRESET_NAME_WORDS, PolishPreset
 from .models import (
     ACCEPTED_EVENT,
     Base,
@@ -25,6 +23,7 @@ from .models import (
     Transcription,
     utc_now,
 )
+from .vocabulary import MAX_PRESET_NAME_WORDS, DictionaryEntry, PolishPreset, usage_key
 
 if TYPE_CHECKING:
     from ..transcription.transcriber import Word

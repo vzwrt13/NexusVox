@@ -7,7 +7,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nexusvox.system.docker_ctl import start_profile, stop_profile, wait_for_healthy
+from nexusvox.system.docker_ctl import DOCKER_DIR, start_profile, stop_profile, wait_for_healthy
+
+
+def test_docker_dir_finds_the_compose_file():
+    """The path is counted up from the module's own folder, so moving the module breaks it without an error."""
+    assert (DOCKER_DIR / "docker-compose.yml").is_file()
 
 
 @patch("nexusvox.system.docker_ctl.subprocess.run")

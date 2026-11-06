@@ -33,9 +33,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, TypeVar
 
+from ..storage.vocabulary import DictionaryEntry
 from ..system.uia import automation as uia_automation
 from ..system.uia import foreground_is_terminal, is_terminal_element
-from .dictionary import DictionaryEntry, apply_dictionary, suggest_entries
+from .dictionary import apply_dictionary, suggest_entries
 from .lang_detect import language_guess
 
 logger = logging.getLogger("nexusvox.edit_watch")
@@ -474,9 +475,9 @@ class EditWatcher:
 
     def _run(self) -> None:
         try:
-            from ..audio.mic_guard import _ensure_com
+            from ..system.com import ensure_com
 
-            _ensure_com()
+            ensure_com()
         except Exception:
             logger.debug("Learn from edits: COM init skipped", exc_info=True)
         item = self._queue.get()

@@ -15,9 +15,9 @@ import logging
 
 from lingua import Language, LanguageDetector, LanguageDetectorBuilder
 
-from ..audio.mic_guard import _ensure_com
 from ..config import LlmConfig
 from ..llm import LlmError, clean_reply, complete
+from ..system.com import ensure_com
 from ..system.uia import read_focus
 
 # Never "polish" in a prompt: small models read it as the language and translate to Polish.
@@ -105,7 +105,7 @@ def read_selection(injection_delay_ms: int, in_terminals: bool = False) -> str:
     """
     from .injector import copy_selection  # Win32 at import; polish itself stays importable anywhere
 
-    _ensure_com()
+    ensure_com()
     focus = read_focus()
     if focus.terminal and not in_terminals:
         logger.info("Polish: the focus is a terminal, not sending Ctrl+C ([polish].in_terminals is off)")

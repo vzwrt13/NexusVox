@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from nexusvox.dictation.dictionary import DictionaryEntry
 from nexusvox.storage.models import utc_now
+from nexusvox.storage.vocabulary import DictionaryEntry
 
 
 def test_utc_now_is_naive_utc():

@@ -333,12 +333,13 @@ NexusVox/
     ├── meetings/               # Meeting recording and its transcription
     ├── storage/
     │   ├── db.py               # Database session management
-    │   └── models.py           # SQLAlchemy models
+    │   ├── models.py           # SQLAlchemy models
+    │   └── vocabulary.py       # Plain dictionary and preset records
     ├── system/
     │   ├── docker_ctl.py       # Docker Compose profile control (start/stop/health-check)
     │   ├── tray.py             # System tray icon & menu
     │   ├── window_manager.py   # Win32 window management functions
-    │   └── ...                 # feedback_form, logsetup, paths, single_instance, uia
+    │   └── ...                 # com, feedback_form, keyboard, logsetup, paths, single_instance, uia
     ├── transcription/
     │   ├── file_transcribe.py  # Audio file upload conversion and transcription
     │   ├── transcriber.py      # Transcriber ABC, factory, and model implementations

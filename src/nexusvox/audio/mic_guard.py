@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ..system.com import ensure_com
+
 logger = logging.getLogger("nexusvox.mic_guard")
 
 STATE_FILENAME = "mic_guard_state.json"
@@ -310,17 +312,6 @@ class WasapiCaptureSession:
         self._volume.SetMute(1 if muted else 0, None)
 
 
-def _ensure_com() -> None:
-    """COM must be initialised on every thread that touches WASAPI. Safe to repeat."""
-    import comtypes
-
-    try:
-        comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
-    except OSError:
-        # RPC_E_CHANGED_MODE: the thread is already in an apartment, which is fine too.
-        pass
-
-
 def enumerate_capture_sessions() -> list[CaptureSession]:
     """All non-expired audio sessions on the default microphone (eCapture / eConsole).
 
@@ -331,7 +322,7 @@ def enumerate_capture_sessions() -> list[CaptureSession]:
     from pycaw.constants import EDataFlow, ERole
     from pycaw.pycaw import AudioUtilities, IAudioSessionManager2
 
-    _ensure_com()
+    ensure_com()
     enumerator = AudioUtilities.GetDeviceEnumerator()
     device = enumerator.GetDefaultAudioEndpoint(EDataFlow.eCapture.value, ERole.eConsole.value)
     manager = device.Activate(IAudioSessionManager2._iid_, CLSCTX_ALL, None).QueryInterface(IAudioSessionManager2)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..dictation.polish_presets import PolishPreset
+from ..storage.vocabulary import PolishPreset
 from .api_base import DashboardState
 
 

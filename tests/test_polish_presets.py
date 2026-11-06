@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from nexusvox.dictation.polish_presets import PolishPreset, resolve_instruction
+from nexusvox.dictation.polish_presets import resolve_instruction
+from nexusvox.storage.vocabulary import PolishPreset
 
 PROMPT = PolishPreset("prompt engineer", "Rewrite this as a precise prompt for an AI assistant.")
 FORMAL = PolishPreset("formelle Mail", "Schreib das als formelle E-Mail.", is_default=True)

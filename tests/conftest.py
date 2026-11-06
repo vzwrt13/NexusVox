@@ -66,6 +66,28 @@ def _tests_never_play_sound(monkeypatch):
     monkeypatch.setattr(sounddevice, "wait", lambda *args, **kwargs: None)
 
 
+WINDOW_ACTIONS = ("open_app", "close_app", "focus_app", "fullscreen_app", "minimize_app", "snap_app")
+
+
+@pytest.fixture(autouse=True)
+def _tests_never_touch_real_windows(monkeypatch):
+    """A test that reaches a real window action fails instead of acting: `close_app` ends in `taskkill /f`.
+
+    A mock aimed at a stale path raises nothing by itself, so this is what stops the call. `setattr` fails for an
+    action that was renamed, which keeps the list honest.
+    """
+    try:
+        from nexusvox.system import window_manager
+    except (ImportError, AttributeError):  # `ctypes.windll` exists on Windows only: no windows to touch here
+        return
+
+    def blocked(*args, **kwargs):
+        raise AssertionError(f"a test reached a real window action: {args}")
+
+    for action in WINDOW_ACTIONS:
+        monkeypatch.setattr(window_manager, action, blocked)
+
+
 @pytest.fixture(autouse=True)
 def _dashboard_test_clients_are_signed_in(monkeypatch):
     """``app.test_client()`` talks to the dashboard like the real page: right Host, session cookie set.

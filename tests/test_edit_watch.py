@@ -8,8 +8,8 @@ import time
 import pytest
 
 from nexusvox.dictation import edit_watch
-from nexusvox.dictation.dictionary import DictionaryEntry
 from nexusvox.dictation.edit_watch import OUTCOMES, EditWatcher, FieldSkipped, extract_edit, learn
+from nexusvox.storage.vocabulary import DictionaryEntry
 
 # --- extract_edit ---
 

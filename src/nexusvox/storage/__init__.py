@@ -1,1 +1,1 @@
-"""The SQLite database and its tables."""
+"""The SQLite database, its tables and their plain records."""

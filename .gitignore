@@ -20,9 +20,11 @@ venv/
 *.db-wal
 *.db-shm
 
-# Audio recordings (not the package of the same name)
-audio/
-!src/nexusvox/audio/
+# Audio recordings: audio/ in the working directory, normally the repository root. Started from
+# src/nexusvox/ they land in the package of that name, whose source files stay tracked.
+/audio/
+/src/nexusvox/audio/*.wav
+/src/nexusvox/audio/meetings/
 
 # Benchmark results
 benchmarks/

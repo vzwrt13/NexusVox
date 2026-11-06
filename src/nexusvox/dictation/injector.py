@@ -9,6 +9,7 @@ from ctypes import wintypes
 
 import pyperclip
 
+from ..system.keyboard import wait_for_physical_release
 from .clipboard import ClipboardError, set_text
 
 logger = logging.getLogger("nexusvox.injector")
@@ -39,7 +40,6 @@ SCAN_LWIN = 0x5B
 VK_RWIN = 0x5C
 
 # Modifiers that may still be physically held when the transcription arrives
-_MODIFIER_VKS = (VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN)
 
 # Pause between the paste and putting the user's clipboard back (about 300 ms after Ctrl+V)
 _RESTORE_DELAY_S = 0.25
@@ -168,28 +168,11 @@ def _release_inputs(held: set[int]) -> list[INPUT]:
 def _release_all_modifiers() -> None:
     """Release the modifier keys that are still down, to clear stale state from the push-to-talk hotkey.
 
-    Does nothing when none is down, which is the normal case after `_wait_for_physical_release`.
+    Does nothing when none is down, which is the normal case after `wait_for_physical_release`.
     """
     held = _held_modifiers()
     if held:
         _send_inputs(_release_inputs(held), "modifier release")
-
-
-def _wait_for_physical_release(timeout_s: float = 1.5) -> bool:
-    """Block until the user has physically released every modifier key.
-
-    The hotkey deactivates as soon as the *first* modifier goes up, so with a
-    fast backend the transcription can be ready while Ctrl or Shift is still
-    held. Pasting at that moment would send Ctrl+Shift+V (or worse). Returns
-    True if all modifiers are up, False on timeout.
-    """
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        if not any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in _MODIFIER_VKS):
-            return True
-        time.sleep(0.01)
-    logger.warning("Modifier keys still held after %.1fs, forcing synthetic release", timeout_s)
-    return False
 
 
 def _send_ctrl_chord(vk: int, scan: int, name: str) -> bool:
@@ -279,7 +262,7 @@ def _prepare_keyboard(injection_delay_ms: int) -> None:
     keystroke would be combined with the still-held modifiers (Ctrl+V turning
     into Ctrl+Win+V, Enter into Ctrl+Enter).
     """
-    _wait_for_physical_release()
+    wait_for_physical_release()
     _release_all_modifiers()
     time.sleep(injection_delay_ms / 1000)
 

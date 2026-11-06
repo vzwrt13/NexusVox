@@ -1,7 +1,7 @@
 """Main application orchestrator — wires hotkey, audio, transcriber, and injector.
 
-`NexusVoxApp` builds the components and runs the main loop. Its behaviour lives in the `app_*` modules, one
-mixin each; they all work on the state set up here.
+`NexusVoxApp` builds the components and runs the main loop. Its behaviour lives in the other modules of this
+package, one mixin each; they all work on the state set up here.
 """
 
 from __future__ import annotations

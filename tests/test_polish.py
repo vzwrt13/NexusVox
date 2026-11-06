@@ -182,7 +182,7 @@ def _focus(monkeypatch, focus, clipboard="from Ctrl+C"):
     fake_injector = types.ModuleType("nexusvox.dictation.injector")
     fake_injector.copy_selection = lambda delay: copies.append(delay) or clipboard
     monkeypatch.setitem(sys.modules, "nexusvox.dictation.injector", fake_injector)
-    monkeypatch.setattr(polish_module, "_ensure_com", lambda: None)
+    monkeypatch.setattr(polish_module, "ensure_com", lambda: None)
     monkeypatch.setattr(polish_module, "read_focus", lambda: Focus(**focus))
     return copies
 

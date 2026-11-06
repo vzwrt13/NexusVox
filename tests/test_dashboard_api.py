@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from nexusvox.dictation.dictionary import DictionaryEntry
+from nexusvox.storage.vocabulary import DictionaryEntry
 
 
 @pytest.mark.parametrize("body", ["[]", "null", "1", '"text"'])

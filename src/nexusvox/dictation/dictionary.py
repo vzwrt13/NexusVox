@@ -9,22 +9,8 @@ from __future__ import annotations
 
 import difflib
 import re
-from dataclasses import dataclass
 
-
-@dataclass(frozen=True)
-class DictionaryEntry:
-    wrong: str
-    right: str
-
-
-def _normalize(phrase: str) -> str:
-    return " ".join(phrase.split())
-
-
-def usage_key(wrong: str) -> str:
-    """The key under which an entry's applications are counted: its ``wrong`` phrase, whitespace and case folded."""
-    return _normalize(wrong).lower()
+from ..storage.vocabulary import DictionaryEntry, normalize_phrase
 
 
 def apply_dictionary_counted(text: str, entries: list[DictionaryEntry]) -> tuple[str, dict[DictionaryEntry, int]]:
@@ -34,7 +20,7 @@ def apply_dictionary_counted(text: str, entries: list[DictionaryEntry]) -> tuple
         return text, hits
     # Longest phrases first so "cloud code editor" wins over "cloud code".
     for entry in sorted(entries, key=lambda e: len(e.wrong), reverse=True):
-        wrong = _normalize(entry.wrong)
+        wrong = normalize_phrase(entry.wrong)
         if not wrong:
             continue
         pattern = r"(?<!\w)" + r"\s+".join(re.escape(w) for w in wrong.split()) + r"(?!\w)"

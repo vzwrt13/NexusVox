@@ -61,7 +61,7 @@ def _capture_inputs(monkeypatch, held):
     sent = []
     monkeypatch.setattr(injector, "_send_inputs", lambda inputs, name: sent.extend(inputs) or True)
     monkeypatch.setattr(injector, "_send_ctrl_chord", lambda vk, scan, name: True)
-    monkeypatch.setattr(injector, "_wait_for_physical_release", lambda timeout_s=1.5: True)
+    monkeypatch.setattr(injector, "wait_for_physical_release", lambda timeout_s=1.5: True)
     monkeypatch.setattr(injector, "_held_modifiers", lambda: set(held))
     monkeypatch.setattr(injector.time, "sleep", lambda s: None)
     monkeypatch.setattr(injector.pyperclip, "paste", lambda: "selected")

@@ -8,7 +8,7 @@ from collections import Counter
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
-from ..dictation.dictionary import suggest_entries, usage_key
+from ..dictation.dictionary import suggest_entries
 from ..dictation.edit_watch import OUTCOMES, WATCHED_KEYS
 from ..storage.models import (
     ACCEPTED_EVENT,
@@ -18,6 +18,7 @@ from ..storage.models import (
     LearnEventRow,
     Transcription,
 )
+from ..storage.vocabulary import usage_key
 from .analytics_common import _apply_date_filter
 
 

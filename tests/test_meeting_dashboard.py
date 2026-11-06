@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from app_parts import patch_app
 
 from nexusvox.config import (
     Config,
@@ -563,9 +564,9 @@ def _app(monkeypatch, result, beeps, opened):
                 raise result
             return result
 
-    monkeypatch.setattr(app_module, "ensure_dashboard_api", lambda db, config, a: Api())
-    monkeypatch.setattr(app_module, "open_dashboard", lambda db, config, app=None, tab="": opened.append(tab))
-    monkeypatch.setattr(app_module, "_play", lambda beep: beeps.append(beep.__name__))
+    patch_app(monkeypatch, "ensure_dashboard_api", lambda db, config, a: Api())
+    patch_app(monkeypatch, "open_dashboard", lambda db, config, app=None, tab="": opened.append(tab))
+    patch_app(monkeypatch, "_play", lambda beep: beeps.append(beep.__name__))
     return app
 
 

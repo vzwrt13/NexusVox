@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from app_parts import patch_app
 from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
@@ -357,9 +358,9 @@ def test_remote_text_goes_back_to_the_phone_and_is_not_typed(monkeypatch):
     app._transcriber.finish = AsyncMock(return_value=MagicMock(text="nexus assistant hallo welt", confidence=None))
     app._tray = MagicMock()
     inject = MagicMock()
-    monkeypatch.setattr("nexusvox.app.inject_text", inject)
+    patch_app(monkeypatch, "inject_text", inject)
     assistant = MagicMock()
-    monkeypatch.setattr("nexusvox.app.send_to_assistant", assistant)
+    patch_app(monkeypatch, "send_to_assistant", assistant)
 
     async def cycle():
         app._record_stop_event = asyncio.Event()
@@ -390,7 +391,7 @@ def test_a_phone_dictation_runs_the_extensions_protect_and_restore(monkeypatch):
 
     registry = ExtensionRegistry()
     assert registry.add(Shield())
-    monkeypatch.setattr("nexusvox.app.loaded_extensions", lambda: registry)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
     app = _app()
     app._config.database.store_audio = False
     app._remote_text = ""
@@ -402,7 +403,7 @@ def test_a_phone_dictation_runs_the_extensions_protect_and_restore(monkeypatch):
     app._transcriber.send_audio_chunk = AsyncMock()
     app._transcriber.finish = AsyncMock(return_value=MagicMock(text="write to my address", confidence=None))
     app._tray = MagicMock()
-    monkeypatch.setattr("nexusvox.app.inject_text", MagicMock())
+    patch_app(monkeypatch, "inject_text", MagicMock())
 
     async def cycle():
         app._record_stop_event = asyncio.Event()

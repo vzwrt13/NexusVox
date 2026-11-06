@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
 
-from .routes_base import _switch
+from .routes_base import _json_object, _switch
 
 if TYPE_CHECKING:
     from .api import DashboardAPI
@@ -22,37 +22,37 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/voice-commands/enabled", methods=["POST"])
     def set_voice_commands_enabled():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_voice_commands_enabled(_switch(data, True)))
 
     @app.route("/api/voice-commands/numbers", methods=["POST"])
     def set_voice_commands_numbers():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_voice_commands_numbers(_switch(data, False)))
 
     @app.route("/api/voice-commands/press-enter", methods=["POST"])
     def set_voice_commands_press_enter():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_voice_commands_press_enter(_switch(data, False)))
 
     @app.route("/api/voice-commands/symbols", methods=["POST"])
     def set_voice_commands_symbols():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_voice_commands_symbols(data.get("symbols", [])))
 
     @app.route("/api/voice-commands/bypass-symbols", methods=["POST"])
     def set_voice_commands_bypass_symbols():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_voice_commands_bypass_symbols(_switch(data, False)))
 
     @app.route("/api/voice-commands/structural", methods=["POST"])
     def set_voice_commands_structural():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_voice_commands_structural(data.get("structural", [])))
 
     @app.route("/api/voice-commands/bypass-structural", methods=["POST"])
     def set_voice_commands_bypass_structural():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_voice_commands_bypass_structural(_switch(data, False)))
 
     # ---- OS Commands endpoints (experimental) ------------------------------
@@ -65,10 +65,10 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
         @app.route("/api/os-commands/enabled", methods=["POST"])
         def set_os_commands_enabled():
-            data = request.get_json(force=True)
+            data = _json_object()
             return jsonify(api.set_os_commands_enabled(_switch(data, False)))
 
         @app.route("/api/os-commands/apps", methods=["POST"])
         def set_os_commands_apps():
-            data = request.get_json(force=True)
+            data = _json_object()
             return jsonify(api.set_os_commands_apps(data.get("apps", {})))

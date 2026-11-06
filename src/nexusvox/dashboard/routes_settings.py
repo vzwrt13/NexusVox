@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify, request
 
-from .routes_base import _switch
+from .routes_base import _json_object, _switch
 
 if TYPE_CHECKING:
     from .api import DashboardAPI
@@ -21,13 +21,13 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/settings/hotkey-mode", methods=["POST"])
     def set_hotkey_mode():
-        data = request.get_json(force=True)
+        data = _json_object()
         result = api.set_hotkey_mode(data.get("mode", ""))
         return jsonify(result), (400 if "error" in result else 200)
 
     @app.route("/api/settings/hotkey", methods=["POST"])
     def set_hotkey():
-        data = request.get_json(force=True)
+        data = _json_object()
         modifiers = data.get("modifiers", [])
         if not isinstance(modifiers, list):
             return jsonify({"error": "modifiers must be a list", **api.get_settings()}), 400
@@ -36,7 +36,7 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/settings/learn-from-edits", methods=["POST"])
     def set_learn_from_edits():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_learn_from_edits(_switch(data, False)))
 
     @app.route("/api/settings/learn-from-edits-status")
@@ -45,36 +45,36 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/settings/paste-key", methods=["POST"])
     def set_paste_key():
-        data = request.get_json(force=True)
+        data = _json_object()
         resp = api.set_paste_key(data.get("key", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
     @app.route("/api/settings/polish-key", methods=["POST"])
     def set_polish_key():
-        data = request.get_json(force=True)
+        data = _json_object()
         resp = api.set_polish_key(data.get("key", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
     @app.route("/api/settings/feedback-mode", methods=["POST"])
     def set_feedback_mode():
-        data = request.get_json(force=True)
+        data = _json_object()
         resp = api.set_feedback_mode(data.get("mode", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
     @app.route("/api/settings/cleanup-level", methods=["POST"])
     def set_cleanup_level():
-        data = request.get_json(force=True)
+        data = _json_object()
         resp = api.set_cleanup_level(data.get("level", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
     @app.route("/api/settings/polish-terminals", methods=["POST"])
     def set_polish_in_terminals():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_polish_in_terminals(_switch(data, False)))
 
     @app.route("/api/settings/llm-model", methods=["POST"])
     def set_llm_model():
-        data = request.get_json(force=True)
+        data = _json_object()
         resp = api.set_llm_model(data.get("model", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
@@ -85,7 +85,7 @@ def register(app: Flask, api: DashboardAPI) -> None:
     @app.route("/api/settings/llm-pull", methods=["GET", "POST", "DELETE"])
     def llm_pull():
         if request.method == "POST":
-            resp = api.start_llm_pull(request.get_json(force=True).get("model", ""))
+            resp = api.start_llm_pull(_json_object().get("model", ""))
             return jsonify(resp), (400 if "error" in resp and resp.get("status") != "pulling" else 200)
         if request.method == "DELETE":
             return jsonify(api.cancel_llm_pull())
@@ -97,12 +97,12 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/settings/mic-guard", methods=["POST"])
     def set_mic_guard():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_mic_guard_enabled(_switch(data, False)))
 
     @app.route("/api/settings/log-full-text", methods=["POST"])
     def set_log_full_text():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_log_full_text(_switch(data, None)))
 
     @app.route("/api/log-folder/open", methods=["POST"])
@@ -112,12 +112,12 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/settings/store-audio", methods=["POST"])
     def set_store_audio():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_store_audio(_switch(data, True)))
 
     @app.route("/api/settings/translate", methods=["POST"])
     def set_translate():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_translate_enabled(_switch(data, False)))
 
     @app.route("/api/settings/translator-status")

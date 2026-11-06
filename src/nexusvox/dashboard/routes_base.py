@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from flask import abort, jsonify, make_response
+from flask import abort, jsonify, make_response, request
+
+
+def _json_object() -> dict:
+    """The request's JSON body; valid JSON that is no object (`[]`, `null`, `1`) is a 400."""
+    data = request.get_json(force=True)
+    if not isinstance(data, dict):
+        abort(make_response(jsonify({"error": "Expected a JSON object"}), 400))
+    return data
 
 
 def _switch(data: dict, default: bool | None) -> bool:

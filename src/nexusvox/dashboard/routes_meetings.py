@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify, request
 
-from .routes_base import _switch
+from .routes_base import _json_object, _switch
 
 if TYPE_CHECKING:
     from .api import DashboardAPI
@@ -17,7 +17,7 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/settings/meeting-hotkey", methods=["POST"])
     def set_meeting_hotkey():
-        data = request.get_json(force=True)
+        data = _json_object()
         modifiers = data.get("modifiers", [])
         if not isinstance(modifiers, list):
             return jsonify({"error": "modifiers must be a list", **api.get_settings()}), 400
@@ -26,33 +26,33 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/settings/meeting-devices", methods=["POST"])
     def set_meeting_devices():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_meeting_devices(data.get("mic", ""), data.get("output", "")))
 
     @app.route("/api/settings/meeting-consent-hint", methods=["POST"])
     def set_meeting_consent_hint():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_meeting_consent_hint(_switch(data, True)))
 
     @app.route("/api/settings/meeting-own-voice-label", methods=["POST"])
     def set_meeting_own_voice_label():
-        data = request.get_json(force=True)
+        data = _json_object()
         resp = api.set_meeting_own_voice_label(data.get("label", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
     @app.route("/api/settings/meeting-leave-dictation-out", methods=["POST"])
     def set_meeting_leave_dictation_out():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_meeting_leave_dictation_out(_switch(data, True)))
 
     @app.route("/api/settings/meeting-store-audio", methods=["POST"])
     def set_meeting_store_audio():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_meeting_store_audio(_switch(data, True)))
 
     @app.route("/api/settings/meeting-live-transcript", methods=["POST"])
     def set_meeting_live_transcript():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_meeting_live_transcript(_switch(data, False)))
 
     # ---- Meeting recording ---------------------------------------------------

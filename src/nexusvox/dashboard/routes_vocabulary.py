@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
+
+from .routes_base import _json_object
 
 if TYPE_CHECKING:
     from .api import DashboardAPI
@@ -19,7 +21,7 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/dictionary", methods=["POST"])
     def add_dictionary_entry():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.add_dictionary_entry(data.get("wrong", ""), data.get("right", "")))
 
     @app.route("/api/dictionary/<int:entry_id>", methods=["DELETE"])
@@ -32,7 +34,7 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/polish-presets", methods=["POST"])
     def save_polish_preset():
-        data = request.get_json(force=True)
+        data = _json_object()
         resp = api.save_polish_preset(
             data.get("name", ""), data.get("instruction", ""), data.get("is_default", False), data.get("id")
         )

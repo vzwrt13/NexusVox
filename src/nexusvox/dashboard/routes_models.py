@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify
+
+from .routes_base import _json_object
 
 if TYPE_CHECKING:
     from .api import DashboardAPI
@@ -23,7 +25,7 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/models/switch", methods=["POST"])
     def switch_model():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_model(data.get("model", "")))
 
     @app.route("/api/models/status")
@@ -38,5 +40,5 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/device", methods=["POST"])
     def set_device():
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.set_device(data.get("device", "auto")))

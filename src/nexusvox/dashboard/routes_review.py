@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify, request, send_file
 
+from .routes_base import _json_object
+
 if TYPE_CHECKING:
     from .api import DashboardAPI
 
@@ -24,7 +26,7 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
         @app.route("/api/flagged/<int:tid>/correct", methods=["POST"])
         def correct_transcription(tid):
-            data = request.get_json(force=True)
+            data = _json_object()
             return jsonify(api.update_correction(tid, data.get("corrected_text", "")))
 
     @app.route("/api/audio/<int:tid>")
@@ -47,5 +49,5 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/review/<int:tid>", methods=["POST"])
     def submit_review(tid):
-        data = request.get_json(force=True)
+        data = _json_object()
         return jsonify(api.submit_review(tid, data.get("is_correct", True), data.get("corrected_text")))

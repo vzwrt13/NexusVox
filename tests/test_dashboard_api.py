@@ -9,6 +9,25 @@ import pytest
 from nexusvox.dictionary import DictionaryEntry
 
 
+@pytest.mark.parametrize("body", ["[]", "null", "1", '"text"'])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/api/voice-commands/enabled",  # through _switch
+        "/api/settings/log-full-text",
+        "/api/settings/llm-pull",  # reads the body inline
+        "/api/models/switch",
+        "/api/dictionary",
+        "/api/review/1",
+    ],
+)
+def test_a_json_body_that_is_no_object_is_a_400(flask_client, url, body):
+    resp = flask_client.post(url, data=body, content_type="application/json")
+
+    assert resp.status_code == 400
+    assert resp.get_json() == {"error": "Expected a JSON object"}
+
+
 def upload_file(client, wav_bytes, name="test.wav", **form):
     """POST a file to /api/file-transcribe, wait for its job to end and return the job's final status."""
     import io

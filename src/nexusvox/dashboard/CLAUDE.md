@@ -54,7 +54,7 @@ Layout (`index.html`, `style.css`): one `.settings-card` per group, in this orde
 
 ## API Endpoints
 
-A switch route reads `{enabled}` through `_switch` in `routes_base.py`: anything but a boolean is a 400 (`"false"` would otherwise turn the feature on), and a request without the field keeps the route's default.
+A route reads its JSON body through `_json_object` in `routes_base.py`: valid JSON that is no object is a 400 (`tests/test_dashboard_routes.py` fails on a route that reads it directly). A switch route reads `{enabled}` through `_switch`, in the same module: anything but a boolean is a 400 (`"false"` would otherwise turn the feature on), and a request without the field keeps the route's default.
 
 | Method | Path | Purpose |
 |--------|------|---------|

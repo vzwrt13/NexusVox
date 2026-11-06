@@ -268,6 +268,72 @@ def test_save_config_roundtrip_with_os_commands(tmp_path):
     assert loaded.os_commands.apps == original.os_commands.apps
 
 
+# ── Escaping of the strings save_config writes ───────────────────────
+
+# What a frozen build writes: absolute Windows paths (backslashes, a user name that may be non-ASCII).
+FROZEN_DB_PATH = r"C:\Users\Jürgen Müller\AppData\Local\NexusVox\data\nexusvox.db"
+FROZEN_AUDIO_DIR = r"C:\Users\Jürgen Müller\AppData\Local\NexusVox\data\audio"
+
+
+def test_save_config_roundtrips_frozen_build_absolute_paths(tmp_path):
+    """Absolute default paths of the installed app must survive save then load (the old code wrote them raw)."""
+    original = Config(database=DatabaseConfig(path=FROZEN_DB_PATH, audio_dir=FROZEN_AUDIO_DIR))
+
+    config_path = tmp_path / "config.toml"
+    save_config(original, config_path)
+    loaded = load_config(config_path)
+
+    assert loaded.database.path == FROZEN_DB_PATH
+    assert loaded.database.audio_dir == FROZEN_AUDIO_DIR
+
+
+def test_save_config_roundtrips_awkward_strings_everywhere(tmp_path):
+    """Quotes, backslashes, non-ASCII and an astral character in every string field come back unchanged."""
+    awkward = r'a"b\c\\d ä ß 日本語 😀 \u0041 \n'
+    original = Config(
+        database=DatabaseConfig(path=awkward, audio_dir=awkward),
+        inference=InferenceConfig(server_url=awkward),
+        os_commands=OSCommandsConfig(
+            enabled=True,
+            apps={
+                "chrome": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                'my "app" ä': awkward,
+                "with space": "x.exe",
+            },
+        ),
+    )
+
+    config_path = tmp_path / "config.toml"
+    save_config(original, config_path)
+    loaded = load_config(config_path)
+
+    assert loaded.database.path == awkward
+    assert loaded.database.audio_dir == awkward
+    assert loaded.inference.server_url == awkward
+    assert loaded.os_commands.apps == original.os_commands.apps
+
+
+def test_save_config_escapes_control_characters(tmp_path):
+    """A newline or tab inside a value cannot end the line early or break the file."""
+    original = Config(database=DatabaseConfig(path="line1\nline2\ttab\x01"))
+
+    config_path = tmp_path / "config.toml"
+    save_config(original, config_path)
+
+    assert load_config(config_path).database.path == "line1\nline2\ttab\x01"
+
+
+def test_save_config_second_save_is_stable(tmp_path):
+    """Saving a loaded config again writes the same file, so nothing is escaped twice."""
+    config_path = tmp_path / "config.toml"
+    save_config(Config(database=DatabaseConfig(path=FROZEN_DB_PATH, audio_dir=FROZEN_AUDIO_DIR)), config_path)
+    first = config_path.read_text(encoding="utf-8")
+
+    save_config(load_config(config_path), config_path)
+
+    assert config_path.read_text(encoding="utf-8") == first
+
+
 # ── Device / compute_type ────────────────────────────────────────────
 
 

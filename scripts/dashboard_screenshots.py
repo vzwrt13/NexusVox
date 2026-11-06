@@ -18,8 +18,12 @@ What stays out of the picture and out of reach:
 * The network. The browser runs with a throwaway profile, no sync or update traffic, and every host
   except 127.0.0.1 unresolvable.
 
-Run twice, the images differ only where the clock shows: the demo data is generated from a fixed seed,
-relative to today's date.
+The images are written to a staging folder first and copied into --out only when all four succeeded, so a
+failed run never leaves a mix of old and new images.
+
+Run twice, the images differ only where the clock shows. The demo data is the same on every day (one fixed
+seed per day of the window, the window ends today); the time zone and the browser language are pinned, so
+the images do not depend on the machine either.
 """
 
 from __future__ import annotations
@@ -35,9 +39,17 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from datetime import timedelta
 from pathlib import Path
 from unittest import mock
+
+# Pin the time zone of this process (the dashboard groups dictations by local day and hour, in SQLite) and of
+# the browser, before anything reads the clock: the same images on every machine, in every season.
+os.environ["TZ"] = "UTC0"
+if hasattr(time, "tzset"):
+    time.tzset()
+BROWSER_LANGUAGE = "en-US"
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
@@ -46,20 +58,22 @@ DEFAULT_OUT = _PROJECT_ROOT / "docs" / "images"
 SEED = 20260101
 VIEWPORT_WIDTH = 1280
 
-# (dashboard tab, file name, viewport height in CSS pixels, crop). A tab with `crop` is photographed in a
-# viewport taller than the tab and the empty strip below its last card is cut off, so the image ends at the
-# content. Analytics, Upload and Settings are far too long for that (their lists and charts run on): each is
-# cut at a fixed height, right below a card.
+# (dashboard tab, file name, CSS selector of the elements to hide, or None). Every tab is photographed in a
+# viewport taller than the tab, and the empty strip below the last card is cut off, so an image ends at the
+# content. Analytics, Upload and Settings run on for a long way (charts, history, more settings), so the page
+# is served with the elements after the last card to show hidden: the cut sits at an element, not at a guess.
+VIEWPORT_HEIGHT = 4000
 SHOTS = (
-    ("analytics", "dashboard-analytics.png", 1650, False),
-    ("meetings", "dashboard-meetings.png", 4000, True),
-    ("upload", "dashboard-upload.png", 1510, False),
-    ("settings", "dashboard-settings.png", 1745, False),
+    ("analytics", "dashboard-analytics.png", ".chart-card:has(#chart-latency) ~ *"),  # up to the latency chart
+    ("meetings", "dashboard-meetings.png", None),
+    ("upload", "dashboard-upload.png", "#upload-list > :nth-child(n+5)"),  # the four uploads, not the meetings
+    ("settings", "dashboard-settings.png", "#settings-card-vocabulary ~ *"),  # Dictation and Vocabulary
 )
 CROP_PADDING = 32  # CSS pixels of page background kept below the last card
 
 # ── Demo data ─────────────────────────────────────────────────────────────────────────────────────
-# Invented text only: no real people, companies, products or places. The names are placeholders.
+# Invented text only: no real people, companies, products or places, and English only like the rest of the
+# repository. The names are placeholders.
 
 EN_SENTENCES = (
     "Thanks for the update, I will review the draft this afternoon and send my comments before the end of the day.",
@@ -89,20 +103,6 @@ EN_SENTENCES = (
     "Please remind me to call the printer tomorrow at nine.",
     "The weather is nice today, so I am working from the terrace and will be online as usual.",
 )
-DE_SENTENCES = (
-    "Vielen Dank für die Rückmeldung, ich schaue mir den Entwurf heute Nachmittag an und melde mich noch heute.",
-    "Lass uns das Planungsgespräch auf Donnerstag verschieben, damit alle den Vorschlag vorher lesen können.",
-    "Bitte ergänze die neuen Schritte in der Checkliste und markiere die alten als veraltet.",
-    "Der Quartalsbericht ist fast fertig, mir fehlen nur noch die endgültigen Zahlen aus der Buchhaltung.",
-    "Kannst du kurz prüfen, ob der Export mit der neuen Version noch funktioniert, bevor wir veröffentlichen?",
-    "Ich denke, wir sollten bei der ersten Variante bleiben, sie ist einfacher zu pflegen und leichter zu erklären.",
-    "Guten Morgen zusammen, hier ist die Tagesordnung: Stand der Dinge, offene Fragen und nächste Schritte.",
-    "Den Fehler bei der Anmeldung haben wir gestern behoben, die Ursache war ein abgelaufenes Zertifikat.",
-    "Schick mir die Folien bitte bis Freitag, ich möchte den Vortrag am Wochenende einmal durchgehen.",
-    "Das klingt gut, lass uns nächste Woche kurz telefonieren und alles in Ruhe besprechen.",
-    "Ja, gerne.",
-    "Bin gleich da.",
-)
 
 APPS = (
     ("outlook.exe", 30),
@@ -114,13 +114,13 @@ APPS = (
     ("teams.exe", 3),
 )
 MODELS = (("parakeet-tdt-0.6b", 88), ("whisper-large-v3-turbo", 12))
-# Hour of the day (local), weighted towards office hours.
+# Hour of the day (the time zone is pinned to UTC above), weighted towards office hours.
 HOUR_WEIGHTS = (0, 0, 0, 0, 0, 0, 1, 3, 8, 12, 12, 10, 6, 8, 11, 11, 9, 6, 3, 2, 1, 1, 0, 0)
 DAYS = 75
 
 MEETINGS = (
     {
-        "folder": "meeting-20260105-100000",
+        "folder": "meeting-demo-planning",
         "title": "Weekly planning",
         "days_ago": 9,
         "minutes": 34,
@@ -136,7 +136,7 @@ MEETINGS = (
         ),
     },
     {
-        "folder": "meeting-20260102-143000",
+        "folder": "meeting-demo-customer-call",
         "title": "Customer call: onboarding",
         "days_ago": 12,
         "minutes": 21,
@@ -149,7 +149,7 @@ MEETINGS = (
         ),
     },
     {
-        "folder": "meeting-20251229-090000",
+        "folder": "meeting-demo-retrospective",
         "title": "Retrospective",
         "days_ago": 16,
         "minutes": 47,
@@ -171,7 +171,7 @@ SPEAKER_NAMES = {1: OWN_VOICE_LABEL, 2: "Alex Example", 3: "Sam Sample"}
 UPLOADS = (
     ("podcast-episode-12.mp3", 1, 2_340_000, "en", "light", "turns"),
     ("voice-memo-ideas.wav", 2, 192_000, "en", None, "memo"),
-    ("sprachnotiz-besprechung.wav", 4, 305_000, "de", None, "memo_de"),
+    ("meeting-notes-voice.wav", 4, 305_000, "en", None, "notes"),
     ("interview-recording.mp3", 6, 1_485_000, "en", "medium", "interview"),
 )
 UPLOAD_TURNS = (
@@ -190,9 +190,9 @@ UPLOAD_TEXT_PLAIN = (
     "Ideas for the next workshop: start with a short demo, collect questions on a whiteboard, and finish with a "
     "list of three things everyone can try on their own the next day."
 )
-UPLOAD_TEXT_DE = (
-    "Notiz zur Besprechung: Der Zeitplan bleibt bestehen, die Unterlagen gehen bis Mittwoch raus, und die "
-    "offenen Punkte klären wir im Anschluss kurz per Telefon."
+UPLOAD_TEXT_NOTES = (
+    "Notes on the meeting: the schedule stays as planned, the documents go out by Wednesday, and we settle the "
+    "open points afterwards with a short phone call."
 )
 
 DICTIONARY = (
@@ -213,35 +213,46 @@ def _weighted(rng: random.Random, pairs: tuple[tuple[str, int], ...]) -> str:
     return rng.choices([p[0] for p in pairs], weights=[p[1] for p in pairs])[0]
 
 
-def _paragraphs(turns: tuple[tuple[int, str], ...]) -> str:
-    return "\n\n".join(f"{SPEAKER_NAMES.get(s, f'Speaker {s}')}: {text}" for s, text in turns)
+def _paragraphs(turns: tuple[tuple[int, str], ...], names: dict[int, str] | None = None) -> str:
+    """The stored transcript text: "Speaker 1: ..." paragraphs, or the speakers' names where `names` has them."""
+    names = names or {}
+    return "\n\n".join(f"{names.get(speaker, f'Speaker {speaker}')}: {text}" for speaker, text in turns)
 
 
-def seed_database(db, audio_dir: Path) -> None:
-    """Fill the temporary database. Same seed, same rows; only the dates move with the clock."""
+def _speaker_words(turns: tuple[tuple[int, str], ...]) -> str:
+    """The `words` JSON of a transcript with speaker detection (what "Speakers per Upload" counts)."""
+    words, clock = [], 0.0
+    for speaker, text in turns:
+        for word in text.split():
+            words.append({"word": word, "start": round(clock, 2), "end": round(clock + 0.35, 2), "speaker": speaker})
+            clock += 0.4
+    return json.dumps(words)
+
+
+def seed_database(db) -> None:
+    """Fill the temporary database. Every day of the window has its own random stream, seeded by its position in
+    the window, so the rows are the same on every day of the year and only their dates move."""
     from nexusvox.storage.models import FileTranscription, Transcription, utc_now
 
-    rng = random.Random(SEED)
-    # Noon of today, not the current time: a run later the same day gives the same rows, so the images change
-    # with the date and nothing else. Dictations "after noon" today are left out (see `created > now` below).
+    # Noon of today (the time zone is UTC, see the top of this file). Dictations after noon today are left out:
+    # a run later the same day gives the same rows.
     now = utc_now().replace(hour=12, minute=0, second=0, microsecond=0)
     rows = []
-    for day in range(DAYS, -1, -1):
-        date = now - timedelta(days=day)
-        weekend = date.weekday() >= 5
-        # A gentle upward trend, quiet weekends, a quiet stretch around the turn of the year.
-        base = 4 if weekend else 11
-        count = max(0, round(base * (0.55 + 0.45 * (DAYS - day) / DAYS) + rng.randint(-3, 3)))
+    for index in range(DAYS + 1):
+        rng = random.Random(f"{SEED}-{index}")
+        date = now - timedelta(days=DAYS - index)
+        quiet = index % 7 in (5, 6)  # two quiet days a week, whichever weekday they fall on
+        # A gentle upward trend over the window.
+        base = 4 if quiet else 11
+        count = max(0, round(base * (0.55 + 0.45 * index / DAYS) + rng.randint(-3, 3)))
         for _ in range(count):
-            german = rng.random() < 0.28
-            text = rng.choice(DE_SENTENCES if german else EN_SENTENCES)
+            text = rng.choice(EN_SENTENCES)
             words = len(text.split())
             speaking_rate = rng.uniform(125, 185)  # words per minute while speaking
             duration_ms = int(words / speaking_rate * 60_000 + rng.randint(900, 2200))
             hour = rng.choices(range(24), weights=HOUR_WEIGHTS)[0]
             created = date.replace(hour=hour, minute=rng.randint(0, 59), second=rng.randint(0, 59), microsecond=0)
-            if created > now:
-                continue
+            confidence = round(rng.uniform(0.88, 0.995), 3)
             transcribe_ms = rng.randint(140, 420)
             model = _weighted(rng, MODELS)
             if model.startswith("whisper"):
@@ -249,41 +260,45 @@ def seed_database(db, audio_dir: Path) -> None:
             cleaned = rng.random() < 0.35 and words > 6
             polished = rng.random() < 0.06 and words > 6
             reviewed = rng.random() < 0.10
+            correct_a_word = rng.random() < 0.25 and words > 6
+            word_to_replace = rng.randrange(words)
+            latency_extra = rng.randint(60, 240)
+            cleanup_ms = rng.randint(250, 700)
+            polish_ms = rng.randint(600, 1800)
+            app = _weighted(rng, APPS)
+            if created > now:
+                continue
             corrected = None
-            if reviewed and rng.random() < 0.25 and words > 6:
+            if reviewed and correct_a_word:
                 parts = text.split()
-                parts[rng.randrange(len(parts))] = "the" if not german else "die"
+                parts[word_to_replace] = "the"
                 corrected = " ".join(parts)
             rows.append(
                 Transcription(
                     text=text,
-                    language="de" if german else "en",
+                    language="en",
                     duration_ms=duration_ms,
                     created_at=created,
-                    confidence=round(rng.uniform(0.88, 0.995), 3),
+                    confidence=confidence,
                     model=model,
                     flagged=0,
                     corrected_text=corrected,
                     reviewed=int(reviewed),
                     transcribe_ms=transcribe_ms,
-                    latency_ms=transcribe_ms + rng.randint(60, 240) + (rng.randint(250, 700) if cleaned else 0),
+                    latency_ms=transcribe_ms + latency_extra + (cleanup_ms if cleaned else 0),
                     cleanup_status="applied" if cleaned else None,
-                    cleanup_ms=rng.randint(250, 700) if cleaned else None,
-                    app=_weighted(rng, APPS),
+                    cleanup_ms=cleanup_ms if cleaned else None,
+                    app=app,
                     polish_status="applied" if polished else None,
-                    polish_ms=rng.randint(600, 1800) if polished else None,
+                    polish_ms=polish_ms if polished else None,
                 )
             )
 
     meeting_rows = []
     for index, meeting in enumerate(MEETINGS):
-        folder = audio_dir / "meetings" / meeting["folder"]
-        folder.mkdir(parents=True)
-        (folder / "meeting.json").write_text(json.dumps({"started_at": "demo"}), encoding="utf-8")
-        turns = meeting["turns"]
         meeting_rows.append(
             FileTranscription(
-                text=_paragraphs(turns),
+                text=_paragraphs(meeting["turns"], SPEAKER_NAMES),
                 language="en",
                 duration_ms=meeting["minutes"] * 60_000,
                 created_at=now - timedelta(days=meeting["days_ago"], hours=index),
@@ -299,12 +314,8 @@ def seed_database(db, audio_dir: Path) -> None:
 
     upload_rows = []
     for name, days_ago, duration_ms, language, cleanup, content in UPLOADS:
-        text = {
-            "turns": _paragraphs(UPLOAD_TURNS),
-            "interview": _paragraphs(INTERVIEW_TURNS),
-            "memo": UPLOAD_TEXT_PLAIN,
-            "memo_de": UPLOAD_TEXT_DE,
-        }[content]
+        turns = {"turns": UPLOAD_TURNS, "interview": INTERVIEW_TURNS}.get(content)
+        text = _paragraphs(turns) if turns else {"memo": UPLOAD_TEXT_PLAIN, "notes": UPLOAD_TEXT_NOTES}[content]
         upload_rows.append(
             FileTranscription(
                 text=text,
@@ -314,6 +325,7 @@ def seed_database(db, audio_dir: Path) -> None:
                 model="parakeet-tdt-0.6b",
                 original_filename=name,
                 confidence=0.95,
+                words=_speaker_words(turns) if turns else None,
                 cleaned_text=text if cleanup else None,
                 cleanup_level=cleanup,
                 kind="upload",
@@ -336,27 +348,29 @@ def seed_database(db, audio_dir: Path) -> None:
 
 
 def _demo_patches() -> list[mock._patch]:
-    """Fixed answers for everything the dashboard would otherwise ask the machine or the network."""
+    """Fixed answers for everything the dashboard would otherwise ask the machine or the network.
+
+    The config module's own `resolve_device` and `gpu_vram_gb` are replaced, which also decides what the
+    functions that call them see (`cuda_available`, `llm_runs_fast`). A name that a dashboard module imported
+    by itself (`from ..config import gpu_vram_gb`) is a separate binding and is replaced in that module too.
+    """
     llm_models = [{"name": "gemma4:e4b", "size_gb": 9.6}]
     devices = {
         "inputs": ["Studio Microphone (Demo)", "Headset Microphone (Demo)"],
         "outputs": ["Speakers (Demo)", "Headset Earphones (Demo)"],
     }
-    gpu = {"return_value": 16.0}
 
     def pick_device(requested: str) -> str:
         return "cpu" if requested == "cpu" else "cuda"
 
-    patches = [
-        # A CUDA machine: the Settings tab then shows a GPU and the language-model card as usable.
+    return [
+        # A CUDA machine with 16 GB: the Settings tab then shows a GPU and the language-model card as usable.
         mock.patch("nexusvox.config.resolve_device", side_effect=pick_device),
-        mock.patch("nexusvox.config.gpu_vram_gb", **gpu),
+        mock.patch("nexusvox.config.gpu_vram_gb", return_value=16.0),
         mock.patch("nexusvox.dashboard.api_models.resolve_device", side_effect=pick_device),
-        mock.patch("nexusvox.dashboard.api_models.cuda_available", return_value=True),
+        mock.patch("nexusvox.dashboard.api_settings.gpu_vram_gb", return_value=16.0),
+        # The model list never reads the model cache of this machine, whatever the device says.
         mock.patch("nexusvox.dashboard.api_models.model_download_state", return_value={"downloaded": None, "size": ""}),
-        mock.patch("nexusvox.dashboard.api_settings.cuda_available", return_value=True),
-        mock.patch("nexusvox.dashboard.api_settings.gpu_vram_gb", **gpu),
-        mock.patch("nexusvox.dashboard.api_settings.llm_runs_fast", return_value=True),
         mock.patch("nexusvox.dashboard.api_settings.is_reachable", return_value=True),
         mock.patch("nexusvox.dashboard.api_settings.log_dir", return_value=Path("C:/Users/demo/NexusVox/logs")),
         mock.patch("nexusvox.dashboard.api_settings.llm_model_status", return_value={"state": "ok"}),
@@ -364,26 +378,41 @@ def _demo_patches() -> list[mock._patch]:
         mock.patch("nexusvox.llm.installed_models", return_value=llm_models),
         mock.patch("nexusvox.dashboard.api_meetings.list_devices", return_value=devices),
     ]
-    return patches
 
 
 STILL_CSS = "<style>*, *::before, *::after { transition: none !important; animation: none !important; }</style>"
+CHART_SCRIPT = '<script src="chart.min.js"></script>'
+STILL_CHARTS = "<script>Chart.defaults.animation = false;</script>"
+_hide_css = ""  # the rule for the tab being photographed; set by `run` before each shot
 
 
-def _still_charts(response):
+def _tab_style(selector: str | None) -> str:
+    return f"<style>{selector} {{ display: none !important; }}</style>" if selector else ""
+
+
+def _serve_still(response):
     """Serve the page with chart animation and CSS transitions off, so a screenshot never catches the page
-    mid-motion (two runs would then differ in a few pixels). Only this script's served copy of the page changes."""
+    mid-motion (two runs would then differ in a few pixels), and with the current tab's trailing elements hidden.
+    Only this script's served copy of the page changes; the dashboard files do not."""
     if response.mimetype == "text/html" and response.status_code == 200:
         response.direct_passthrough = False  # a static file streams; read it into the response first
-        marker = '<script src="chart.min.js"></script>'
         html = response.get_data(as_text=True)
-        if marker in html:
-            still = "<script>Chart.defaults.animation = false;</script>"
-            html = html.replace(marker, marker + still)
-            html = html.replace("</head>", STILL_CSS + "</head>", 1)
-            response.set_data(html)
-            response.headers.pop("ETag", None)
+        html = html.replace(CHART_SCRIPT, CHART_SCRIPT + STILL_CHARTS, 1)
+        html = html.replace("</head>", STILL_CSS + _hide_css + "</head>", 1)
+        response.set_data(html)
+        response.headers.pop("ETag", None)
     return response
+
+
+def _check_page_markers() -> None:
+    """Stop before any screenshot when the page no longer has the tag the animation switch hangs on: without it
+    two runs would silently stop being identical."""
+    index = Path(_PROJECT_ROOT / "src" / "nexusvox" / "dashboard" / "static" / "index.html")
+    if CHART_SCRIPT not in index.read_text(encoding="utf-8"):
+        raise SystemExit(
+            f"index.html no longer contains {CHART_SCRIPT}: update CHART_SCRIPT in {Path(__file__).name} so that "
+            "chart animation can still be switched off."
+        )
 
 
 def _free_port() -> int:
@@ -392,23 +421,32 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
-def _find_browser(explicit: str | None) -> str:
-    candidates = [explicit, os.environ.get("NEXUSVOX_SCREENSHOT_BROWSER")]
-    roots = [os.environ.get(v) for v in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA")]
-    for root in filter(None, roots):
-        candidates.append(str(Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe"))
-        candidates.append(str(Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe"))
-    candidates += [shutil.which(n) for n in ("msedge", "chrome", "google-chrome", "chromium")]
+def _find_browser(explicit: str | None) -> Path:
+    """The browser to use. A path or name that was asked for (--browser, NEXUSVOX_SCREENSHOT_BROWSER) must work:
+    it is never swapped for another browser. Otherwise Edge, then Chrome, in their usual places."""
+    asked = explicit or os.environ.get("NEXUSVOX_SCREENSHOT_BROWSER")
+    if asked:
+        found = Path(asked) if Path(asked).is_file() else shutil.which(asked)
+        if not found:
+            raise SystemExit(f"The browser {asked!r} is not a file and not on the PATH.")
+        return Path(found).resolve()  # absolute: the working directory moves later
+    candidates = []
+    for root in filter(None, (os.environ.get(v) for v in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"))):
+        candidates.append(Path(root) / "Microsoft" / "Edge" / "Application" / "msedge.exe")
+        candidates.append(Path(root) / "Google" / "Chrome" / "Application" / "chrome.exe")
+    candidates += [
+        Path(found) for name in ("msedge", "chrome", "google-chrome", "chromium") if (found := shutil.which(name))
+    ]
     for candidate in candidates:
-        if candidate and Path(candidate).is_file():
-            return candidate
+        if candidate.is_file():
+            return candidate.resolve()
     raise SystemExit("No Chromium browser found. Install Microsoft Edge or Google Chrome, or pass --browser PATH.")
 
 
-def _photograph(browser: str, url: str, target: Path, profile: Path, height: int, scale: float) -> None:
+def _photograph(browser: Path, url: str, target: Path, profile: Path, scale: float) -> None:
     """One headless screenshot of `url`. The launch URL redirects to the tab and sets the session cookie."""
     command = [
-        browser,
+        str(browser),
         "--headless=new",
         "--disable-gpu",
         "--hide-scrollbars",
@@ -420,19 +458,25 @@ def _photograph(browser: str, url: str, target: Path, profile: Path, height: int
         "--disable-component-update",
         "--disable-default-apps",
         "--disable-features=OptimizationHints,MediaRouter,Translate",
+        f"--lang={BROWSER_LANGUAGE}",
+        f"--accept-lang={BROWSER_LANGUAGE}",
         # Only the dashboard on 127.0.0.1 may be reached.
         "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
         f"--user-data-dir={profile}",
-        f"--window-size={VIEWPORT_WIDTH},{height}",
+        f"--window-size={VIEWPORT_WIDTH},{VIEWPORT_HEIGHT}",
         f"--force-device-scale-factor={scale}",
         "--virtual-time-budget=10000",
         f"--screenshot={target}",
         url,
     ]
-    target.unlink(missing_ok=True)
-    subprocess.run(command, check=True, timeout=120, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if not target.is_file():
-        raise SystemExit(f"The browser did not write {target}")
+    env = {**os.environ, "TZ": "UTC"}
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=120, env=env)
+    except subprocess.TimeoutExpired as exc:
+        raise SystemExit(f"The browser did not finish within {exc.timeout:.0f} s for {target.name}.") from exc
+    if result.returncode != 0 or not target.is_file():
+        tail = "\n".join((result.stderr or "").strip().splitlines()[-15:])
+        raise SystemExit(f"The browser failed for {target.name} (exit code {result.returncode}):\n{tail}")
 
 
 def _crop_to_content(target: Path, scale: float) -> None:
@@ -447,75 +491,91 @@ def _crop_to_content(target: Path, scale: float) -> None:
         strip = image.crop((left, 0, width, height))
         background = Image.new("RGB", strip.size, strip.getpixel((strip.width // 2, strip.height - 1)))
         box = ImageChops.difference(strip, background).point(lambda v: 255 if v > 6 else 0).getbbox()
-        bottom = min(height, (box[3] if box else height) + int(CROP_PADDING * scale))
+        if box is None or box[3] >= height - 2:
+            raise SystemExit(f"{target.name}: the content is longer than the {VIEWPORT_HEIGHT} px viewport.")
+        bottom = min(height, box[3] + int(CROP_PADDING * scale))
         image.crop((0, 0, width, bottom)).save(target, optimize=True)
 
 
 def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
+    global _hide_css
     browser_path = _find_browser(browser)
+    _check_page_markers()
     out_dir = out_dir.resolve()  # before the working directory moves
     out_dir.mkdir(parents=True, exist_ok=True)
-    written: list[Path] = []
 
-    with tempfile.TemporaryDirectory(prefix="nexusvox-demo-") as tmp, contextlib.ExitStack() as stack:
+    # The browser's child processes can keep the profile folder locked for a moment after they exit (Windows).
+    # That must not turn a run that wrote all its images into a failure.
+    with tempfile.TemporaryDirectory(prefix="nexusvox-demo-", ignore_cleanup_errors=True) as tmp:
         data_dir = Path(tmp)
-        stack.callback(os.chdir, os.getcwd())
-        os.chdir(data_dir)  # every relative path the app knows now lands in the throwaway folder
-        for patch in _demo_patches():
-            stack.enter_context(patch)
+        staging = data_dir / "shots"  # the images go to --out only when every one of them succeeded
+        staging.mkdir()
+        with contextlib.ExitStack() as stack:
+            stack.callback(os.chdir, os.getcwd())
+            os.chdir(data_dir)  # every relative path the app knows now lands in the throwaway folder
+            for patch in _demo_patches():
+                stack.enter_context(patch)
 
-        from werkzeug.serving import make_server
+            from werkzeug.serving import make_server
 
-        from nexusvox.config import Config
-        from nexusvox.dashboard import _create_app
-        from nexusvox.dashboard.api import DashboardAPI
-        from nexusvox.extensions import ExtensionRegistry
-        from nexusvox.storage.db import Database
+            from nexusvox.config import Config
+            from nexusvox.dashboard import _create_app
+            from nexusvox.dashboard.api import DashboardAPI
+            from nexusvox.extensions import ExtensionRegistry
+            from nexusvox.storage.db import Database
 
-        config = Config()
-        config.source_path = data_dir / "config.toml"  # a save from the page goes here, nowhere else
-        config.database.path = str(data_dir / "demo.db")
-        config.database.audio_dir = "audio"
-        config.hotkey.mode = "hold"
-        config.llm.model = "gemma4:e4b"
-        config.cleanup.level = "light"
-        config.meeting.own_voice_label = OWN_VOICE_LABEL
+            config = Config()
+            config.source_path = data_dir / "config.toml"  # a save from the page goes here, nowhere else
+            config.database.path = str(data_dir / "demo.db")
+            config.database.audio_dir = "audio"
+            config.hotkey.mode = "hold"
+            config.llm.model = "gemma4:e4b"
+            config.cleanup.level = "light"
+            config.meeting.own_voice_label = OWN_VOICE_LABEL
 
-        db = Database(config.database)
-        seed_database(db, data_dir / "audio")
-        api = DashboardAPI(
-            db._session_factory, config, db=db, benchmarks_dir=data_dir / "benchmarks", extensions=ExtensionRegistry()
-        )
+            db = Database(config.database)
+            stack.callback(db._engine.dispose)  # the open SQLite file would keep the folder from being deleted
+            seed_database(db)
+            api = DashboardAPI(
+                db._session_factory,
+                config,
+                db=db,
+                benchmarks_dir=data_dir / "benchmarks",
+                extensions=ExtensionRegistry(),
+            )
 
-        port = _free_port()
-        flask_app = _create_app(api, port)
-        guard = flask_app.extensions["nexusvox_guard"]
-        flask_app.after_request(_still_charts)
-        server = make_server("127.0.0.1", port, flask_app, threaded=True)
-        thread = threading.Thread(target=server.serve_forever, daemon=True, name="demo-dashboard")
-        thread.start()
-        try:
-            for tab, filename, height, crop in SHOTS:
+            port = _free_port()
+            flask_app = _create_app(api, port)
+            guard = flask_app.extensions["nexusvox_guard"]
+            flask_app.after_request(_serve_still)
+            server = make_server("127.0.0.1", port, flask_app, threaded=True)
+            thread = threading.Thread(target=server.serve_forever, daemon=True, name="demo-dashboard")
+            thread.start()
+            stack.callback(server.server_close)
+            stack.callback(thread.join, 5)
+            stack.callback(server.shutdown)
+
+            for tab, filename, hide in SHOTS:
+                _hide_css = _tab_style(hide)
                 url = f"http://127.0.0.1:{port}/?launch={guard.new_launch_secret()}&tab={tab}"
                 profile = data_dir / "browser-profile" / tab  # a fresh profile each time: no cookie carries over
-                target = out_dir / filename
-                _photograph(browser_path, url, target, profile, height, scale)
-                if crop:
-                    _crop_to_content(target, scale)
-                written.append(target)
-                print(f"wrote {target}")
-        finally:
-            server.shutdown()
-            thread.join(timeout=5)
-            server.server_close()
-            db._engine.dispose()
+                target = staging / filename
+                _photograph(browser_path, url, target, profile, scale)
+                _crop_to_content(target, scale)
+
+        written = []
+        for _tab, filename, _hide in SHOTS:
+            destination = out_dir / filename
+            shutil.copyfile(staging / filename, destination)
+            written.append(destination)
+            print(f"wrote {destination}")
     return written
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help=f"output folder (default: {DEFAULT_OUT})")
-    parser.add_argument("--browser", help="path to msedge.exe or chrome.exe (default: found automatically)")
+    parser.add_argument("--browser", help="path or name of msedge or chrome (default: found automatically)")
     parser.add_argument("--scale", type=float, default=1.5, help="device pixel ratio of the images (default: 1.5)")
     args = parser.parse_args(argv)
     run(args.out, args.browser, args.scale)

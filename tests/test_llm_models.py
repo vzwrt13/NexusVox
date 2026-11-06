@@ -124,10 +124,8 @@ def test_pull_cancel(monkeypatch):
     _wait(pull, "cancelled")
 
 
-def test_dashboard_endpoints(flask_client, monkeypatch):
-    import nexusvox.dashboard.api_settings as api_module
-
-    monkeypatch.setattr(api_module, "cuda_available", lambda: False)
+def test_dashboard_endpoints(flask_client, monkeypatch, patch_api):
+    patch_api("cuda_available", lambda: False)
     _serve(monkeypatch, TAGS)
     models = flask_client.get("/api/settings/llm-models").get_json()
     assert models["selected"] and models["recommended"][0]["recommended_here"]

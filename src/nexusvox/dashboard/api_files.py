@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
 import time
 from collections.abc import Callable
@@ -14,11 +13,8 @@ from ..extensions import HOOK_TIMEOUT_S, file_transcript_from_record
 from ..file_cleanup import clean_transcript
 from ..file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from ..lang_detect import stored_language
+from .api_base import DashboardState, logger
 from .file_jobs import FileJob
-
-# All of DashboardAPI logs under one name, the one its log lines have always carried.
-logger = logging.getLogger("nexusvox.dashboard.api")
-
 
 # The longest title a file transcription can carry (the column is VARCHAR(255)).
 MAX_TITLE_LENGTH = 255
@@ -45,7 +41,7 @@ def _export_stem(record) -> str:
     return _safe_stem(record.title or "") or _safe_stem(Path(record.original_filename).stem) or "transcript"
 
 
-class FilesMixin:
+class FilesMixin(DashboardState):
     """Uploads, the jobs that transcribe them, and the rows uploads and meetings share."""
 
     def start_file_transcription(
@@ -221,10 +217,6 @@ class FilesMixin:
             return None
         path = self._db_dir() / record.audio_path
         return str(path) if path.is_file() else None
-
-    def _db_dir(self) -> Path:
-        """The folder of the database file, which recordings' relative `audio_path`s are relative to."""
-        return Path(self._config.database.path).resolve().parent
 
     def _transcribe_wav_chunks(
         self,

@@ -441,8 +441,8 @@ def test_switch_to_a_removed_model_is_rejected(flask_client):
     assert resp.get_json()["ok"] is False
 
 
-def test_get_device(flask_client, monkeypatch):
-    monkeypatch.setattr("nexusvox.dashboard.api_models.cuda_available", lambda: True)
+def test_get_device(flask_client, monkeypatch, patch_api):
+    patch_api("cuda_available", lambda: True)
     monkeypatch.setattr(
         "nexusvox.dashboard.api_models.resolve_device", lambda d: "cuda" if d in ("auto", "cuda") else "cpu"
     )

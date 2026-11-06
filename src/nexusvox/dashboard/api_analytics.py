@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from . import analytics
 from . import benchmarks as bench
+from .api_base import DashboardState
 
 
-class AnalyticsMixin:
+class AnalyticsMixin(DashboardState):
     """The Analytics tab's queries and the Dev tab's benchmark files."""
 
     # ---- Analytics ---------------------------------------------------------

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import tempfile
 from pathlib import Path
 
@@ -24,10 +23,8 @@ from ..meeting_transcribe import (
     track_offset,
     track_shifts,
 )
+from .api_base import DashboardState, logger
 from .file_jobs import FileJob
-
-# All of DashboardAPI logs under one name, the one its log lines have always carried.
-logger = logging.getLogger("nexusvox.dashboard.api")
 
 
 def _declared_track_files(folder: Path) -> list[str]:
@@ -41,7 +38,7 @@ def _declared_track_files(folder: Path) -> list[str]:
     return sorted(names)
 
 
-class MeetingTranscriptMixin:
+class MeetingTranscriptMixin(DashboardState):
     """The transcription job of a meeting and the clean-up of its audio files afterwards."""
 
     def start_meeting_transcription(self, folder: str | Path) -> dict:

@@ -15,12 +15,13 @@ from ..config import (
 )
 from ..diarization import speaker_detection_models
 from ..paths import models_dir
+from .api_base import DashboardState
 
 # How long a model's downloaded-or-not answer is reused (seconds).
 DOWNLOAD_STATE_TTL_S = 10.0
 
 
-class ModelsMixin:
+class ModelsMixin(DashboardState):
     """The model list, model switching and the compute device."""
 
     # ---- Models -------------------------------------------------------------

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 
 from ..config import (
@@ -30,16 +29,13 @@ from ..llm import model_status as llm_model_status
 from ..llm import warm_up as llm_warm_up
 from ..logsetup import log_dir
 from ..translator import is_reachable
-
-# All of DashboardAPI logs under one name, the one its log lines have always carried.
-logger = logging.getLogger("nexusvox.dashboard.api")
-
+from .api_base import DashboardState, logger
 
 # `[hotkey]` fields that hold a marker key, and how an error message names each.
 _MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
 
 
-class SettingsMixin:
+class SettingsMixin(DashboardState):
     """`GET /api/settings` and the switches that write the shared config."""
 
     def get_settings(self) -> dict:

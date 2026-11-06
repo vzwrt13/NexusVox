@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from ..polish_presets import PolishPreset
+from .api_base import DashboardState
 
 
-class VocabularyMixin:
+class VocabularyMixin(DashboardState):
     """Dictionary entries, polish presets and the suggestions learned from edits."""
 
     # ---- Correction dictionary ---------------------------------------------

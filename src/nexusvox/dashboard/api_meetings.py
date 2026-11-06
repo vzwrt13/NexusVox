@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from pathlib import Path
 
@@ -17,9 +16,7 @@ from ..config import (
 from ..meeting_live import LIVE_OTHERS_LABEL
 from ..meeting_recorder import META_FILENAME, list_devices, read_meeting_meta
 from ..transcriber import BaseTranscriber, create_transcriber
-
-# All of DashboardAPI logs under one name, the one its log lines have always carried.
-logger = logging.getLogger("nexusvox.dashboard.api")
+from .api_base import DashboardState, logger
 
 
 def _remove_folder(folder: Path) -> None:
@@ -41,7 +38,7 @@ def _remove_folder(folder: Path) -> None:
     folder.rmdir()
 
 
-class MeetingsMixin:
+class MeetingsMixin(DashboardState):
     """Start, stop and the Meetings tab's lists and settings; the transcript is `MeetingTranscriptMixin`."""
 
     def _meetings_dir(self) -> Path:

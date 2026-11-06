@@ -1,6 +1,7 @@
-"""Dashboard API exposed to JavaScript via the pywebview JS bridge.
+"""The object behind the dashboard: the Flask routes in `__init__.py` call its methods.
 
-Each topic is a mixin in its own `api_*` module; `DashboardAPI` joins them and owns the state they all use.
+Each topic is a mixin in its own `api_*` module; `DashboardAPI` joins them and owns the state they all use,
+and `api_base.DashboardState` declares what they use of each other.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ class DashboardAPI(
     MeetingsMixin,
     MeetingTranscriptMixin,
 ):
-    """Methods callable from JavaScript as ``pywebview.api.<method>(...)``."""
+    """Everything the dashboard's routes call, joined from the topic mixins."""
 
     def __init__(
         self,

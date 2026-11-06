@@ -142,12 +142,23 @@ def sample_transcriptions(db):
     return records
 
 
+def _patch_api(monkeypatch, name, value):
+    """Replace `name` in every topic module of `DashboardAPI` that imported it, not just in one of them."""
+    modules = [sys.modules[cls.__module__] for cls in DashboardAPI.__mro__]
+    holders = [module for module in modules if hasattr(module, name)]
+    assert holders, f"no module of DashboardAPI has {name}"
+    for module in holders:
+        monkeypatch.setattr(module, name, value)
+
+
+@pytest.fixture
+def patch_api(monkeypatch):
+    """`patch_api(name, value)`: for a name several topic modules import, such as `cuda_available`."""
+    return lambda name, value: _patch_api(monkeypatch, name, value)
+
+
 def _stub_save_config(monkeypatch):
-    """Every topic module of `DashboardAPI` imports its own `save_config`, so each one is replaced."""
-    for cls in DashboardAPI.__mro__:
-        module = sys.modules[cls.__module__]
-        if hasattr(module, "save_config"):
-            monkeypatch.setattr(module, "save_config", lambda cfg, path=None: None)
+    _patch_api(monkeypatch, "save_config", lambda cfg, path=None: None)
 
 
 @pytest.fixture

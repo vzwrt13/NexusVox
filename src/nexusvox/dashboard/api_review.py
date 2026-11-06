@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 from ..dictionary import suggest_entries
 from ..file_transcribe import convert_to_wav
 from . import analytics
-
-# All of DashboardAPI logs under one name, the one its log lines have always carried.
-logger = logging.getLogger("nexusvox.dashboard.api")
+from .api_base import DashboardState, logger
 
 
-class ReviewMixin:
+class ReviewMixin(DashboardState):
     """Flagged transcriptions, corrections and the review queue."""
 
     # ---- Flagged / Corrections ---------------------------------------------

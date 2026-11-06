@@ -361,6 +361,23 @@ def test_top_words(session_factory):
     assert result["values"][0] == 3
 
 
+def test_top_words_leaves_out_the_labels_of_command_rows(session_factory):
+    def row(text, **fields):
+        return {"text": text, "language": "en", "duration_ms": 1, "created_at": datetime(2026, 3, 15), **fields}
+
+    _seed(
+        session_factory,
+        [
+            row("hello hello world"),
+            row("guten tag", app="notepad.exe"),
+            row("[nexus] open github", app=COMMAND_APP),
+            row("[os-control] volume up", app=COMMAND_APP),
+        ],
+    )
+
+    assert get_top_words(session_factory)["labels"] == ["hello", "world", "guten", "tag"]
+
+
 def test_top_words_skips_single_char(session_factory):
     """Single-character words (after punctuation stripping) should be excluded."""
     _seed(

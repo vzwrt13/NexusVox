@@ -46,9 +46,10 @@ def get_language_distribution(
 def get_top_words(
     session_factory: sessionmaker, n: int = 20, *, start: str | None = None, end: str | None = None
 ) -> dict:
-    """Most frequent words across all transcriptions."""
+    """Most frequent words across all dictations; the text of a command row is a label, not spoken words."""
     with session_factory() as session:
         query = session.query(Transcription.text)
+        query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
         texts = _apply_date_filter(query, start, end).all()
 
     counter: Counter[str] = Counter()

@@ -327,9 +327,10 @@ NexusVox/
     ├── voice_commands.py       # Voice command text formatting substitutions
     ├── window_manager.py       # Win32 window management functions
     └── dashboard/
-        ├── __init__.py         # Flask app and route definitions
-        ├── analytics.py        # Database queries for dashboard stats
-        ├── api.py              # Flask API endpoints
+        ├── __init__.py         # Flask app and dashboard server
+        ├── analytics*.py       # Database queries for dashboard stats, one file per topic
+        ├── api*.py             # The object behind the routes, one mixin per topic
+        ├── routes_*.py         # Flask routes, one file per topic
         └── static/
             ├── index.html      # Dashboard UI
             ├── style.css       # Styles

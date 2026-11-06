@@ -1,4 +1,4 @@
-"""The object behind the dashboard: the Flask routes in `__init__.py` call its methods.
+"""The object behind the dashboard: the Flask routes in `routes_*` call its methods.
 
 Each topic is a mixin in its own `api_*` module; `DashboardAPI` joins them and owns the state they all use,
 and `api_base.DashboardState` declares what they use of each other.

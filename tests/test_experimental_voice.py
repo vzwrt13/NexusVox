@@ -5,13 +5,17 @@ import sys
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from app_parts import patch_app
 
 from nexusvox.config import Config, ExperimentalConfig
+from nexusvox.extensions import HOOK_TIMEOUT_S, ActiveApp
 
 if sys.platform != "win32":  # pynput hook, tray, SendInput and PortAudio imports; on Windows a failure must show
     pytest.skip("nexusvox.app needs the Windows runtime", allow_module_level=True)
 
 import nexusvox.app as app_module  # noqa: E402
+from nexusvox.os_commands import parse_nexus_command  # noqa: E402
+from nexusvox.overlay import ERROR  # noqa: E402
 
 
 def _app(flags: ExperimentalConfig):
@@ -25,8 +29,8 @@ def _app(flags: ExperimentalConfig):
 
 def _run(app, text, monkeypatch):
     calls = []
-    monkeypatch.setattr(app_module, "execute_nexus_command", lambda cmd, cfg: calls.append(cmd.action) or True)
-    cmd = app_module.parse_nexus_command(text)
+    patch_app(monkeypatch, "execute_nexus_command", lambda cmd, cfg: calls.append(cmd.action) or True)
+    cmd = parse_nexus_command(text)
     label = asyncio.run(app._run_command(text, cmd))
     return label, calls
 
@@ -96,10 +100,8 @@ def _registry_with(answer):
 
 def _command_app(registry, monkeypatch, flags=None):
     app = _app(flags or ExperimentalConfig())
-    monkeypatch.setattr(app_module, "loaded_extensions", lambda: registry)
-    monkeypatch.setattr(
-        app_module.NexusVoxApp, "_active_app", classmethod(lambda cls: app_module.ActiveApp("Code.exe", "title"))
-    )
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
+    monkeypatch.setattr(app_module.NexusVoxApp, "_active_app", classmethod(lambda cls: ActiveApp("Code.exe", "title")))
     return app
 
 
@@ -108,7 +110,7 @@ def test_an_extension_command_is_saved_under_its_label_and_not_typed(monkeypatch
     app = _command_app(registry, monkeypatch)
     label = asyncio.run(app._run_command("nexus open my site", None))
     assert label == "[nexus] open https://a"
-    assert extension.seen == [("nexus open my site", app_module.ActiveApp("Code.exe", "title"))]
+    assert extension.seen == [("nexus open my site", ActiveApp("Code.exe", "title"))]
     app._cue.assert_not_called()
 
 
@@ -117,15 +119,15 @@ def test_an_extension_command_that_did_not_open_plays_the_error_cue(monkeypatch)
     app = _command_app(registry, monkeypatch)
     assert asyncio.run(app._run_command("nexus öffne nowhere", None)) == "[nexus] open nowhere"
     app._cue.assert_called_once()
-    assert app._cue.call_args.args[1] == app_module.ERROR
+    assert app._cue.call_args.args[1] == ERROR
 
 
 def test_an_extension_runs_before_the_core_commands(monkeypatch):
     registry, _ = _registry_with(lambda text: ("[ext] minimize", True))
     app = _command_app(registry, monkeypatch, ExperimentalConfig(os_commands=True))
     calls = []
-    monkeypatch.setattr(app_module, "execute_nexus_command", lambda cmd, cfg: calls.append(cmd.action) or True)
-    cmd = app_module.parse_nexus_command("nexus minimize chrome")
+    patch_app(monkeypatch, "execute_nexus_command", lambda cmd, cfg: calls.append(cmd.action) or True)
+    cmd = parse_nexus_command("nexus minimize chrome")
     assert asyncio.run(app._run_command("nexus minimize chrome", cmd)) == "[ext] minimize"
     assert calls == []
 
@@ -134,8 +136,8 @@ def test_a_command_no_extension_takes_falls_through_to_the_core(monkeypatch):
     registry, extension = _registry_with(lambda text: None)
     app = _command_app(registry, monkeypatch, ExperimentalConfig(os_commands=True))
     calls = []
-    monkeypatch.setattr(app_module, "execute_nexus_command", lambda cmd, cfg: calls.append(cmd.action) or True)
-    cmd = app_module.parse_nexus_command("nexus minimize chrome")
+    patch_app(monkeypatch, "execute_nexus_command", lambda cmd, cfg: calls.append(cmd.action) or True)
+    cmd = parse_nexus_command("nexus minimize chrome")
     assert asyncio.run(app._run_command("nexus minimize chrome", cmd)) == "[nexus] minimize chrome"
     assert calls == ["minimize"] and len(extension.seen) == 1
 
@@ -144,7 +146,7 @@ def test_nexus_open_is_typed_when_no_extension_takes_it(monkeypatch):
     registry, _ = _registry_with(lambda text: None)
     app = _command_app(registry, monkeypatch)
     assert asyncio.run(app._run_command("nexus open my website", None)) is None
-    monkeypatch.setattr(app_module, "loaded_extensions", lambda: None)  # extensions still loading
+    patch_app(monkeypatch, "loaded_extensions", lambda: None)  # extensions still loading
     assert asyncio.run(app._run_command("nexus öffne meine Webseite", None)) is None
     app._cue.assert_not_called()
 
@@ -171,11 +173,9 @@ def test_no_command_hook_means_no_window_lookup_and_the_budget_stays_whole(monke
     assert registry.add(Plain())
     app = _command_app(registry, monkeypatch)
     looked = []
-    monkeypatch.setattr(
-        app_module.NexusVoxApp, "_active_app", classmethod(lambda cls: looked.append(1) or app_module.ActiveApp())
-    )
+    monkeypatch.setattr(app_module.NexusVoxApp, "_active_app", classmethod(lambda cls: looked.append(1) or ActiveApp()))
     assert asyncio.run(app._run_command("hello there", None)) is None
-    assert looked == [] and app._hook_budget_s == app_module.HOOK_TIMEOUT_S
+    assert looked == [] and app._hook_budget_s == HOOK_TIMEOUT_S
 
 
 def test_on_command_time_is_taken_from_the_on_dictation_budget(monkeypatch):
@@ -187,9 +187,9 @@ def test_on_command_time_is_taken_from_the_on_dictation_budget(monkeypatch):
 
     registry, _ = _registry_with(slow)
     app = _command_app(registry, monkeypatch)
-    app._hook_budget_s = app_module.HOOK_TIMEOUT_S
+    app._hook_budget_s = HOOK_TIMEOUT_S
     asyncio.run(app._run_command("hello there", None))
-    assert app._hook_budget_s < app_module.HOOK_TIMEOUT_S - 0.15
+    assert app._hook_budget_s < HOOK_TIMEOUT_S - 0.15
 
 
 # -- the protect hook on the app side ------------------------------------------------------------------------
@@ -222,24 +222,22 @@ def test_protect_gets_the_active_app_for_a_pc_dictation_and_an_empty_one_for_the
     assert protected == "send ⟦1⟧" and restore("send ⟦1⟧") == "send Hauptstrasse 1"
     protected, restore = app._protect_dictation("send my address", remote=True)
     assert restore("send ⟦1⟧") == "send Hauptstrasse 1"
-    assert extension.apps == [app_module.ActiveApp("Code.exe", "title"), app_module.ActiveApp()]
+    assert extension.apps == [ActiveApp("Code.exe", "title"), ActiveApp()]
 
 
 def test_without_a_protect_hook_there_is_no_window_lookup_and_the_budget_stays_whole(monkeypatch):
     registry, _ = _registry_with(lambda text: None)  # only on_command
     app = _command_app(registry, monkeypatch)
     looked = []
-    monkeypatch.setattr(
-        app_module.NexusVoxApp, "_active_app", classmethod(lambda cls: looked.append(1) or app_module.ActiveApp())
-    )
+    monkeypatch.setattr(app_module.NexusVoxApp, "_active_app", classmethod(lambda cls: looked.append(1) or ActiveApp()))
     assert app._protect_dictation("hello there") is None
     assert app._protect_dictation("hello there", remote=True) is None
-    assert looked == [] and app._hook_budget_s == app_module.HOOK_TIMEOUT_S
+    assert looked == [] and app._hook_budget_s == HOOK_TIMEOUT_S
 
 
 def test_no_registry_yet_means_no_protection(monkeypatch):
     app = _app(ExperimentalConfig())
-    monkeypatch.setattr(app_module, "loaded_extensions", lambda: None)
+    patch_app(monkeypatch, "loaded_extensions", lambda: None)
     assert app._protect_dictation("send my address") is None
 
 
@@ -263,10 +261,10 @@ def test_protect_and_restore_time_come_out_of_the_shared_budget_but_not_the_pipe
     registry = ExtensionRegistry()
     assert registry.add(Pause())
     app = _command_app(registry, monkeypatch)
-    app._hook_budget_s = app_module.HOOK_TIMEOUT_S
+    app._hook_budget_s = HOOK_TIMEOUT_S
     _, restore = app._protect_dictation("hello there")
     after_protect = app._hook_budget_s
-    assert after_protect < app_module.HOOK_TIMEOUT_S - 0.15
+    assert after_protect < HOOK_TIMEOUT_S - 0.15
     time.sleep(0.3)  # cleanup and translation: not charged
     assert app._hook_budget_s == after_protect
     assert restore("hello there") == "hello there"

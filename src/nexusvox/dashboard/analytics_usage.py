@@ -20,7 +20,7 @@ def get_transcriptions_over_time(
 
     with session_factory() as session:
         query = session.query(
-            func.strftime(fmt, Transcription.created_at).label("period"),
+            func.strftime(fmt, Transcription.created_at, "localtime").label("period"),
             func.count().label("count"),
         )
         rows = _apply_date_filter(query, start, end).group_by("period").order_by("period").all()
@@ -113,7 +113,7 @@ def get_latency_over_time(
 
     with session_factory() as session:
         query = session.query(
-            func.strftime(fmt, Transcription.created_at).label("period"),
+            func.strftime(fmt, Transcription.created_at, "localtime").label("period"),
             func.avg(Transcription.transcribe_ms).label("transcribe_ms"),
             func.avg(Transcription.latency_ms).label("latency_ms"),
         ).filter(Transcription.transcribe_ms.isnot(None))

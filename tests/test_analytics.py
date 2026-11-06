@@ -524,6 +524,47 @@ def test_date_filter_narrows_results(session_factory):
     assert result["total_transcriptions"] == 2
 
 
+_NEAR_MIDNIGHT = datetime(2026, 1, 4, 23, 30)  # Sunday 23:30 in UTC, Monday 00:30 in Berlin
+
+
+def _local_day(utc: datetime) -> str:
+    return utc.replace(tzinfo=UTC).astimezone().strftime("%Y-%m-%d")
+
+
+def test_charts_put_a_dictation_after_local_midnight_on_the_next_day(session_factory, berlin):
+    _seed(
+        session_factory,
+        [{**_at(_NEAR_MIDNIGHT), "transcribe_ms": 100, "latency_ms": 200, "corrected_text": "tesx"}],
+    )
+
+    assert get_transcriptions_over_time(session_factory)["labels"] == ["2026-01-05"]
+    assert get_latency_over_time(session_factory)["labels"] == ["2026-01-05"]
+    assert get_accuracy_over_time(session_factory)["labels"] == ["2026-01-05"]
+
+
+def test_date_filter_selects_by_local_day(session_factory, berlin):
+    _seed(session_factory, [_at(_NEAR_MIDNIGHT)])
+
+    assert get_overview(session_factory, start="2026-01-05", end="2026-01-05")["total_transcriptions"] == 1
+    assert get_overview(session_factory, start="2026-01-04", end="2026-01-04")["total_transcriptions"] == 0
+
+
+def test_charts_follow_the_clock_of_this_machine(session_factory):
+    _seed(session_factory, [{**_at(_NEAR_MIDNIGHT), "transcribe_ms": 100, "latency_ms": 200}])
+    day = _local_day(_NEAR_MIDNIGHT)
+
+    assert get_transcriptions_over_time(session_factory)["labels"] == [day]
+    assert get_latency_over_time(session_factory)["labels"] == [day]
+    assert get_accuracy_over_time(session_factory)["labels"] == [day]
+
+
+def test_date_filter_follows_the_clock_of_this_machine(session_factory):
+    _seed(session_factory, [_at(_NEAR_MIDNIGHT)])
+    day = _local_day(_NEAR_MIDNIGHT)
+
+    assert get_overview(session_factory, start=day, end=day)["total_transcriptions"] == 1
+
+
 # ---- get_unreviewed_transcriptions ----------------------------------------
 
 

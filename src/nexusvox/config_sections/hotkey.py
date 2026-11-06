@@ -75,6 +75,6 @@ def validate_hotkey(modifiers: list[str], key: str) -> str | None:
         return "Duplicate modifier"
     if normalize_hotkey_key(key) is None:
         return f"Unknown key: {key}"
-    if not modifiers and not key:
+    if not modifiers and not normalize_hotkey_key(key):
         return "A hotkey needs at least one modifier or a key"
     return None

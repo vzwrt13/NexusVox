@@ -298,7 +298,15 @@ NexusVox/
 └── src/nexusvox/
     ├── config.example.toml     # Configuration template, shipped inside the package
     ├── __main__.py             # Entry point
-    ├── app.py                  # Main application orchestrator
+    ├── app.py                  # Main application orchestrator: start, main loop, shutdown
+    ├── app_commands.py         # Extension hooks, assistant and nexus commands
+    ├── app_common.py           # Logger and constant the app_* modules share
+    ├── app_cycle.py            # One transcription cycle: record, transcribe, type
+    ├── app_events.py           # Hotkey, phone and os-control callbacks
+    ├── app_feedback.py         # Chimes and overlay cues of a dictation
+    ├── app_models.py           # Model switching and warm-up
+    ├── app_polish.py           # Paste key and Polish on the selected text
+    ├── app_records.py          # Saved rows, audio files and statistics
     ├── audio.py                # Microphone capture (16kHz PCM16)
     ├── config.py               # Configuration loader
     ├── db.py                   # Database session management

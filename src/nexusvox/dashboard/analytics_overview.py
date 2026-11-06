@@ -16,11 +16,18 @@ from .analytics_common import _apply_date_filter
 _TYPING_WPM = 40
 
 
+def _dictations(query, start: str | None, end: str | None):
+    """The date-filtered query without command rows: a command is no dictation, so no total counts it."""
+    return _apply_date_filter(query, start, end).filter(
+        Transcription.app.is_(None) | (Transcription.app != COMMAND_APP)
+    )
+
+
 def get_overview(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> dict:
     """Totals, WPM, duration, latency, and estimated time saved."""
     with session_factory() as session:
         query = session.query(Transcription.text, Transcription.duration_ms)
-        rows = _apply_date_filter(query, start, end).all()
+        rows = _dictations(query, start, end).all()
 
     command_rows = _command_row_stats(session_factory, start, end)
     if not rows:
@@ -70,7 +77,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
             func.sum(Transcription.transcribe_ms),
             func.sum(Transcription.duration_ms).filter(Transcription.transcribe_ms.isnot(None)),
         )
-        avg_transcribe_ms, avg_latency_ms, timed_transcribe_ms, timed_duration_ms = _apply_date_filter(
+        avg_transcribe_ms, avg_latency_ms, timed_transcribe_ms, timed_duration_ms = _dictations(
             timing_query, start, end
         ).one()
     avg_rtf = timed_transcribe_ms / timed_duration_ms if timed_transcribe_ms and timed_duration_ms else None
@@ -82,12 +89,12 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
             func.avg(Transcription.translate_ms),
             func.count(Transcription.translate_error),
         )
-        translated_count, avg_translate_ms, translate_failures = _apply_date_filter(tr_query, start, end).one()
+        translated_count, avg_translate_ms, translate_failures = _dictations(tr_query, start, end).one()
 
     # Auto cleanup: how often the model's pass was used, and how it ended when it was not.
     with session_factory() as session:
         cl_query = session.query(Transcription.cleanup_status, func.count(), func.avg(Transcription.cleanup_ms))
-        cleanup_rows = _apply_date_filter(cl_query, start, end).filter(Transcription.cleanup_status.isnot(None))
+        cleanup_rows = _dictations(cl_query, start, end).filter(Transcription.cleanup_status.isnot(None))
         cleanup_rows = cleanup_rows.group_by(Transcription.cleanup_status).all()
     cleanup_counts = {status: count for status, count, _ in cleanup_rows}
     timed = [(count, avg) for _, count, avg in cleanup_rows if avg is not None]

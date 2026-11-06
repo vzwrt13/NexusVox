@@ -739,6 +739,8 @@ def test_overview_polish_stats(session_factory):
             row("[extension] sort", polish_status="extension"),
             row("[polish] formal"),  # saved before the status existed: a polish that went through
             row("[extension] sort"),  # likewise
+            # The oldest polish rows were saved as plain dictations (no command app): they still count as such.
+            {"text": "[polish] old", "language": "en", "duration_ms": 1, "created_at": now, "app": None},
         ],
     )
 
@@ -749,8 +751,28 @@ def test_overview_polish_stats(session_factory):
     assert result["polish_timeouts"] == 1
     assert result["polish_failed"] == 1
     assert result["avg_polish_ms"] == 400  # (300 + 500) / 2: a timeout or failure is no model speed
-    # polish attempts are no dictations: only the first row counts in the dictation totals
-    assert result["total_transcriptions"] == 3  # the dictation and the two rows from before the status existed
+    # Polish attempts and command rows are no dictations. Legacy polish rows without `polish_status` count as
+    # dictations only when they carry no command app (the oldest ones); the ones marked COMMAND_APP do not.
+    assert result["total_transcriptions"] == 2
+
+
+def test_overview_ignores_command_rows(session_factory):
+    now = datetime.now()
+    dictation = {"text": "one two three", "language": "en", "duration_ms": 1000, "created_at": now}
+    command = {"text": "[nexus] open github", "language": "en", "duration_ms": 500, "created_at": now}
+    _seed(session_factory, [dictation])
+    before = get_overview(session_factory)
+
+    _seed(
+        session_factory,
+        [{**command, "app": COMMAND_APP, "translated": 1, "transcribe_ms": 50, "cleanup_status": "applied"}],
+    )
+    after = get_overview(session_factory)
+
+    for key in ("total_transcriptions", "total_words", "avg_duration_ms", "translated_count", "cleanup_applied"):
+        assert after[key] == before[key]
+    assert after["total_transcriptions"] == 1
+    assert after["command_count"] == 1
 
 
 def test_overview_polish_stats_empty(session_factory):

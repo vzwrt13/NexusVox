@@ -126,11 +126,10 @@ def test_the_setting_defaults_off_and_round_trips(tmp_path):
     assert load_config(path).log_full_text is True
 
 
-def test_dashboard_toggles_the_setting_and_opens_the_folder(db, session_factory, monkeypatch, tmp_path):
+def test_dashboard_toggles_the_setting_and_opens_the_folder(db, session_factory, monkeypatch, tmp_path, no_config_save):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     opened = []
-    monkeypatch.setattr("nexusvox.dashboard.api.save_config", lambda cfg, path=None: None)
-    monkeypatch.setattr("nexusvox.dashboard.api.os.startfile", opened.append, raising=False)
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.os.startfile", opened.append, raising=False)
     config = Config()
     app = _create_app(DashboardAPI(session_factory, config, db=db))
     with app.test_client() as client:
@@ -168,8 +167,7 @@ def test_rollover_deletes_files_past_the_retention(file_log):
     assert not old.exists()
 
 
-def test_the_dashboard_refuses_a_non_boolean_switch(db, session_factory, monkeypatch):
-    monkeypatch.setattr("nexusvox.dashboard.api.save_config", lambda cfg, path=None: None)
+def test_the_dashboard_refuses_a_non_boolean_switch(db, session_factory, no_config_save):
     config = Config()
     with _create_app(DashboardAPI(session_factory, config, db=db)).test_client() as client:
         for bad in ("false", 0, None):
@@ -179,7 +177,7 @@ def test_the_dashboard_refuses_a_non_boolean_switch(db, session_factory, monkeyp
 
 
 def test_open_log_folder_says_so_where_startfile_does_not_exist(db, session_factory, monkeypatch):
-    monkeypatch.delattr("nexusvox.dashboard.api.os.startfile", raising=False)
+    monkeypatch.delattr("nexusvox.dashboard.api_settings.os.startfile", raising=False)
     with _create_app(DashboardAPI(session_factory, Config(), db=db)).test_client() as client:
         resp = client.post("/api/log-folder/open")
     assert resp.status_code == 500 and "only supported on Windows" in resp.get_json()["error"]

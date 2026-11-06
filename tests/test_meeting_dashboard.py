@@ -238,11 +238,10 @@ def test_session_builds_the_recorder_from_the_devices_chosen_at_that_moment(tmp_
 
 
 @pytest.fixture
-def env(db, session_factory, tmp_path, monkeypatch):
+def env(db, session_factory, tmp_path, monkeypatch, no_config_save):
     config = Config()
     config.database.path = str(tmp_path / "test.db")
     api = DashboardAPI(session_factory, config, db=db, meeting=_session(tmp_path / "audio"))
-    monkeypatch.setattr("nexusvox.dashboard.api.save_config", lambda cfg, path=None: None)
     started: list[Path] = []
     monkeypatch.setattr(
         api, "start_meeting_transcription", lambda folder: started.append(folder) or {"ok": True, "job_id": "j1"}
@@ -349,7 +348,7 @@ def test_meeting_settings_endpoints(env):
 
 def test_devices_endpoint_lists_devices_and_the_chosen_ones(env, monkeypatch):
     client, *_ = env
-    monkeypatch.setattr("nexusvox.dashboard.api.list_devices", lambda: {"inputs": ["Mic"], "outputs": ["Out"]})
+    monkeypatch.setattr("nexusvox.dashboard.api_meetings.list_devices", lambda: {"inputs": ["Mic"], "outputs": ["Out"]})
     client.post("/api/settings/meeting-devices", json={"mic": "Mic", "output": ""})
     assert client.get("/api/meetings/devices").get_json() == {
         "inputs": ["Mic"],

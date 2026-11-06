@@ -76,11 +76,10 @@ def registry(dummy):
 
 
 @pytest.fixture
-def ext_client(db, session_factory, registry, monkeypatch):
+def ext_client(db, session_factory, registry, no_config_save):
     api = DashboardAPI(session_factory, Config(), db=db, extensions=registry)
     app = _create_app(api)
     app.config["TESTING"] = True
-    monkeypatch.setattr("nexusvox.dashboard.api.save_config", lambda cfg, path=None: None)
     with app.test_client() as client:
         yield client
 
@@ -102,7 +101,7 @@ def stub_transcription(monkeypatch, text="hello from the file"):
     async def fake_transcribe(wav, cfg, **kwargs):
         return result
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
 
 
 def upload(client, wav_bytes, name="meeting.wav"):
@@ -685,7 +684,7 @@ def test_a_failure_after_the_save_does_not_fail_the_upload(db, session_factory, 
     def broken(record):
         raise ValueError("odd row")
 
-    monkeypatch.setattr("nexusvox.dashboard.api.file_transcript_from_record", broken)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.file_transcript_from_record", broken)
 
     with app.test_client() as client:
         job = upload(client, sample_wav_bytes)

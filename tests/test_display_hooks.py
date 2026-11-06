@@ -265,7 +265,7 @@ def test_one_failing_text_does_not_spoil_the_others():
 
 def test_a_slow_extension_costs_the_list_one_budget_not_one_per_row(db, session_factory, monkeypatch):
     monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.2)
-    monkeypatch.setattr("nexusvox.dashboard.api.HOOK_TIMEOUT_S", 0.2)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.HOOK_TIMEOUT_S", 0.2)
 
     class Slow(Extension):
         name = "slow"
@@ -326,7 +326,7 @@ def test_changed_cues_are_rewrapped_and_a_cue_that_would_break_the_file_stays(db
 
 def test_a_hanging_availability_check_does_not_hang_the_list(db, session_factory, monkeypatch):
     monkeypatch.setattr(ext, "HOOK_TIMEOUT_S", 0.1)
-    monkeypatch.setattr("nexusvox.dashboard.api.HOOK_TIMEOUT_S", 0.1)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.HOOK_TIMEOUT_S", 0.1)
     release = []
 
     def hang(tid):

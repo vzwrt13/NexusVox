@@ -125,7 +125,7 @@ def test_pull_cancel(monkeypatch):
 
 
 def test_dashboard_endpoints(flask_client, monkeypatch):
-    import nexusvox.dashboard.api as api_module
+    import nexusvox.dashboard.api_settings as api_module
 
     monkeypatch.setattr(api_module, "cuda_available", lambda: False)
     _serve(monkeypatch, TAGS)

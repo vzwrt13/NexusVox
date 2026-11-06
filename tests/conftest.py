@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import sys
 import wave
 
 import pytest
@@ -141,16 +142,30 @@ def sample_transcriptions(db):
     return records
 
 
+def _stub_save_config(monkeypatch):
+    """Every topic module of `DashboardAPI` imports its own `save_config`, so each one is replaced."""
+    for cls in DashboardAPI.__mro__:
+        module = sys.modules[cls.__module__]
+        if hasattr(module, "save_config"):
+            monkeypatch.setattr(module, "save_config", lambda cfg, path=None: None)
+
+
+@pytest.fixture
+def no_config_save(monkeypatch):
+    """The dashboard saves settings without touching the real config file."""
+    _stub_save_config(monkeypatch)
+
+
 def _dashboard_client(db, session_factory, monkeypatch, config):
     api = DashboardAPI(session_factory, config, db=db)
     app = _create_app(api)
     app.config["TESTING"] = True
 
     # Prevent save_config from writing to real config file
-    monkeypatch.setattr("nexusvox.dashboard.api.save_config", lambda cfg, path=None: None)
+    _stub_save_config(monkeypatch)
     # Make model-listing / switching tests deterministic across GPU-less CI.
     monkeypatch.setattr(
-        "nexusvox.dashboard.api.resolve_device",
+        "nexusvox.dashboard.api_models.resolve_device",
         lambda d: "cuda" if d in ("auto", "cuda") else "cpu",
     )
 

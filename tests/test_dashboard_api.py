@@ -95,7 +95,7 @@ def test_set_translate_enabled(flask_client):
 
 
 def test_translator_status_reports_unreachable_server(flask_client, monkeypatch):
-    monkeypatch.setattr("nexusvox.dashboard.api.is_reachable", lambda cfg: False)
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.is_reachable", lambda cfg: False)
 
     resp = flask_client.get("/api/settings/translator-status")
 
@@ -360,9 +360,9 @@ def test_get_models_includes_device_metadata(flask_client):
 
 
 def test_get_models_marks_what_is_downloaded(flask_client, monkeypatch):
-    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cpu")
+    monkeypatch.setattr("nexusvox.dashboard.api_models.resolve_device", lambda d: "cpu")
     monkeypatch.setattr(
-        "nexusvox.dashboard.api.model_download_state",
+        "nexusvox.dashboard.api_models.model_download_state",
         lambda model_id, cache_dir=None: {"downloaded": model_id == "parakeet-tdt-0.6b", "size": "~1 GB"},
     )
 
@@ -375,9 +375,9 @@ def test_get_models_marks_what_is_downloaded(flask_client, monkeypatch):
 
 def test_get_models_gives_no_mark_for_models_that_run_in_a_container(flask_client, monkeypatch):
     """On a GPU the model lives in the container's own volume, which the local cache says nothing about."""
-    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cuda")
+    monkeypatch.setattr("nexusvox.dashboard.api_models.resolve_device", lambda d: "cuda")
     monkeypatch.setattr(
-        "nexusvox.dashboard.api.model_download_state", lambda *a, **k: pytest.fail("the local cache was probed")
+        "nexusvox.dashboard.api_models.model_download_state", lambda *a, **k: pytest.fail("the local cache was probed")
     )
 
     models = {m["id"]: m for m in flask_client.get("/api/models").get_json()}
@@ -396,8 +396,8 @@ def test_the_download_probe_is_reused_until_a_model_finishes_loading(db, session
         calls.append(model_id)
         return {"downloaded": False, "size": ""}
 
-    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cpu")
-    monkeypatch.setattr("nexusvox.dashboard.api.model_download_state", probe)
+    monkeypatch.setattr("nexusvox.dashboard.api_models.resolve_device", lambda d: "cpu")
+    monkeypatch.setattr("nexusvox.dashboard.api_models.model_download_state", probe)
     status = {"status": "loading"}
     api = DashboardAPI(session_factory, Config(), db=db, get_switch_status=lambda: status)
 
@@ -422,7 +422,7 @@ def test_get_models_lists_the_same_models_on_cpu(db, session_factory, monkeypatc
 
     config = Config()
     config.inference.device = "cpu"
-    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cpu")
+    monkeypatch.setattr("nexusvox.dashboard.api_models.resolve_device", lambda d: "cpu")
 
     app = _create_app(DashboardAPI(session_factory, config, db=db))
     app.config["TESTING"] = True
@@ -442,8 +442,10 @@ def test_switch_to_a_removed_model_is_rejected(flask_client):
 
 
 def test_get_device(flask_client, monkeypatch):
-    monkeypatch.setattr("nexusvox.dashboard.api.cuda_available", lambda: True)
-    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: "cuda" if d in ("auto", "cuda") else "cpu")
+    monkeypatch.setattr("nexusvox.dashboard.api_models.cuda_available", lambda: True)
+    monkeypatch.setattr(
+        "nexusvox.dashboard.api_models.resolve_device", lambda d: "cuda" if d in ("auto", "cuda") else "cpu"
+    )
 
     resp = flask_client.get("/api/device")
 
@@ -455,7 +457,7 @@ def test_get_device(flask_client, monkeypatch):
 
 
 def test_set_device_persists(flask_client, monkeypatch):
-    monkeypatch.setattr("nexusvox.dashboard.api.resolve_device", lambda d: d if d in ("cuda", "cpu") else "cpu")
+    monkeypatch.setattr("nexusvox.dashboard.api_models.resolve_device", lambda d: d if d in ("cuda", "cpu") else "cpu")
 
     resp = flask_client.post(
         "/api/device",
@@ -505,7 +507,7 @@ def test_file_transcribe_success(flask_client, sample_wav_bytes, monkeypatch):
     async def fake_transcribe(wav, cfg, **kwargs):
         return mock_result
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
 
     job = upload_file(flask_client, sample_wav_bytes)
 
@@ -548,7 +550,7 @@ def test_file_job_moves_through_its_stages_to_done(flask_client, sample_wav_byte
         on_progress("diarizing")
         return result
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
 
     resp = flask_client.post(
         "/api/file-transcribe",
@@ -580,7 +582,7 @@ def test_file_job_reports_a_transcription_error(flask_client, db, sample_wav_byt
     async def broken(wav_chunks, cfg, **kwargs):
         raise RuntimeError("server went away")
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", broken)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", broken)
 
     job = upload_file(flask_client, sample_wav_bytes)
 
@@ -605,7 +607,7 @@ def test_file_job_ends_as_an_error_when_saving_crashes(flask_client, db, sample_
     async def fake_transcribe(wav, cfg, **kwargs):
         return result
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
 
     def crash(*args, **kwargs):
         raise OSError("disk full")
@@ -631,7 +633,7 @@ def test_second_upload_is_refused_while_one_runs(flask_client, sample_wav_bytes,
         assert release.wait(5)
         return result
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", slow)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", slow)
 
     def post():
         return flask_client.post(
@@ -659,7 +661,7 @@ def test_a_job_that_ended_while_away_is_reported_once(flask_client, sample_wav_b
     async def broken(wav_chunks, cfg, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", broken)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", broken)
 
     flask_client.post(
         "/api/file-transcribe",
@@ -934,7 +936,7 @@ def test_polish_presets_add_edit_default_and_delete(flask_client):
 
 
 def test_cleanup_level_setting(flask_client, monkeypatch):
-    import nexusvox.dashboard.api as api_module
+    import nexusvox.dashboard.api_settings as api_module
 
     warmed = []
     monkeypatch.setattr(api_module, "llm_warm_up", warmed.append)
@@ -959,7 +961,7 @@ def test_cleanup_level_setting(flask_client, monkeypatch):
 
 
 def test_cleanup_level_can_be_switched_on_without_cuda_and_shows_the_hint(flask_client, monkeypatch):
-    import nexusvox.dashboard.api as api_module
+    import nexusvox.dashboard.api_settings as api_module
 
     monkeypatch.setattr(api_module, "llm_warm_up", lambda llm: None)
     monkeypatch.setattr(api_module, "llm_runs_fast", lambda: False)
@@ -1013,8 +1015,8 @@ def test_retry_transcribes_the_stored_audio_again(flask_client, db, sample_wav_b
     monkeypatch.setattr(DashboardAPI, "get_audio_file_path", lambda self, tid: str(wav))
     result = TranscriptionResult()
     result.finalize(text="NexusVox")
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", lambda wav, cfg, **kwargs: result)
-    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", lambda wav, cfg, **kwargs: result)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.asyncio.run", lambda coro: coro)
 
     data = flask_client.post(f"/api/review/{record.id}/retry").get_json()
 
@@ -1041,8 +1043,8 @@ def test_retry_does_not_ask_for_words_and_reports_an_incomplete_run(
         seen.update(kwargs)
         return result
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
-    monkeypatch.setattr("nexusvox.dashboard.api.asyncio.run", lambda coro: coro)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.asyncio.run", lambda coro: coro)
 
     data = flask_client.post(f"/api/review/{record.id}/retry").get_json()
 
@@ -1065,7 +1067,7 @@ def test_upload_asks_for_words_stores_them_and_returns_notes(flask_client, db, s
         seen.update(kwargs)
         return result
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
 
     data = upload_file(flask_client, sample_wav_bytes)["result"]
 
@@ -1111,7 +1113,7 @@ def test_paste_key_rejects_keys_the_listener_would_ignore(flask_client):
 
 
 def test_polish_key_and_model_settings(flask_client, monkeypatch):
-    import nexusvox.dashboard.api as api_module
+    import nexusvox.dashboard.api_settings as api_module
 
     def post(path, payload):
         return flask_client.post(path, data=json.dumps(payload), content_type="application/json")
@@ -1151,7 +1153,7 @@ def test_upload_with_diarize_passes_the_flag_and_stores_speakers(flask_client, d
         seen.update(kwargs)
         return result
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
 
     data = upload_file(flask_client, sample_wav_bytes, "meeting.wav", diarize="1")["result"]
 
@@ -1173,7 +1175,7 @@ def _fake_transcription(monkeypatch, text):
     async def fake_transcribe(wav_chunks, cfg, **kwargs):
         return result
 
-    monkeypatch.setattr("nexusvox.dashboard.api.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
 
 
 def test_upload_with_cleanup_stores_the_cleaned_text_beside_the_original(
@@ -1250,7 +1252,7 @@ def test_feedback_mode_setting(flask_client):
 
 
 def test_llm_models_endpoint_reports_the_loaded_split(flask_client, monkeypatch):
-    from nexusvox.dashboard import api as api_module
+    from nexusvox.dashboard import api_settings as api_module
 
     monkeypatch.setattr(
         api_module, "llm_build_model_list", lambda cfg, cuda, vram: {"reachable": True, "recommended": [], "other": []}

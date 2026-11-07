@@ -493,21 +493,38 @@
         <h4 class="nexus-section-title">Feedback &amp; bug reports</h4>
         <p class="settings-hint" style="margin-top: 6px;">Tell us what works, what you wish for, or what broke.</p>
 
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Send feedback or report a bug</h3>
-            <p>Opens the feedback form in your browser. Only the NexusVox version, the Windows version and whether this PC runs CPU-only or with an NVIDIA GPU are filled in. Your dictated text, audio and logs are never sent.</p>
+        <form id="feedback-form" class="feedback-form" novalidate>
+          <label class="feedback-field" for="feedback-kind">
+            <span>What is it about?</span>
+            <select id="feedback-kind" class="select-input">
+              <option value="bug">A bug</option>
+              <option value="wish">A wish</option>
+              <option value="other">Something else</option>
+            </select>
+          </label>
+          <label class="feedback-field" for="feedback-message">
+            <span>Message</span>
+            <textarea id="feedback-message" class="flagged-textarea" rows="6" maxlength="5000" placeholder="What happened, or what would you like?"></textarea>
+          </label>
+          <label class="feedback-check" for="feedback-include-log">
+            <input type="checkbox" id="feedback-include-log">
+            <span>Include log: the last 300 lines of today's log. Dictated text is removed before it is sent.</span>
+          </label>
+          <p class="settings-hint" style="margin-top: 0;">Also sent: the NexusVox version, the Windows version and whether this PC runs CPU-only or with an NVIDIA GPU. Nothing is sent until you click Send. Your audio and dictated text never leave this PC.</p>
+          <div class="feedback-actions">
+            <button type="submit" class="btn" id="send-feedback">Send</button>
+            <button type="button" class="link-btn" id="feedback-preview-toggle">Show what will be sent</button>
           </div>
-          <button type="button" class="btn" id="send-feedback">Send feedback or report a bug</button>
-        </div>
+          <pre id="feedback-preview" class="feedback-preview" hidden></pre>
+          <p id="feedback-status" class="settings-hint status-line" role="status" hidden></p>
+        </form>
 
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
-            <h3>Reporting a bug?</h3>
-            <p>Attach the log file: it is in <code id="feedback-log-dir">%LOCALAPPDATA%\NexusVox\logs</code> (one file per day). Dictated text is shortened there to its first 20 characters unless you turned on full-text logging.</p>
-            <p id="feedback-log-error" class="settings-hint" hidden></p>
+            <h3>Prefer the web form?</h3>
+            <p>Opens the feedback form in your browser, with the same three facts filled in. No log is attached there.</p>
           </div>
-          <button type="button" class="btn" id="open-log-folder-feedback">Open log folder</button>
+          <button type="button" class="btn" id="open-feedback-form">Open the web form</button>
         </div>
 
         <div class="setting-row" style="margin-top: 16px;">
@@ -934,6 +951,7 @@
        only use what an earlier file defines at that moment. Init stays last: it makes the tabs live. -->
   <script src="dashboard-core.js"></script>
   <script src="dashboard-settings.js"></script>
+  <script src="dashboard-feedback.js"></script>
   <script src="dashboard-settings-models.js"></script>
   <script src="dashboard-settings-vocabulary.js"></script>
   <script src="dashboard-analytics.js"></script>

@@ -86,11 +86,16 @@ def test_feedback_entry_and_tab_start_hidden_at_the_sidebar_bottom():
 def test_feedback_tab_content():
     tab = _feedback_tab()
     assert "Feedback &amp; bug reports" in tab
-    assert "Send feedback or report a bug" in tab
     assert "nexusvox@nightshift-ai.de" in tab
     assert re.search(r'<button[^>]*id="send-feedback"', tab)
-    assert re.search(r'<button[^>]*id="open-log-folder-feedback"', tab)
-    assert 'id="feedback-log-dir"' in tab
+    assert re.search(r'<button[^>]*id="open-feedback-form"', tab)  # the web form stays as the fallback
+    assert re.search(r'<input[^>]*id="feedback-include-log"', tab)
+    assert " checked" not in re.search(r'<input[^>]*id="feedback-include-log"[^>]*>', tab).group(0)  # off by default
+    assert (
+        "Attach the log file" not in tab
+        and "open-log-folder-feedback" not in tab
+        and "file" not in re.findall(r'type="(\w+)"', tab)
+    )
 
 
 def test_sidebar_is_pinned_to_the_viewport_and_its_nav_scrolls():

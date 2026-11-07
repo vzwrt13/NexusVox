@@ -28,6 +28,7 @@ from ..llm import model_pull as llm_pull
 from ..llm import model_status as llm_model_status
 from ..llm import warm_up as llm_warm_up
 from ..system.feedback_form import build_feedback_url
+from ..system.feedback_send import FeedbackError, app_feedback_url, build_report, render_preview, send_report
 from ..system.logsetup import log_dir
 from .api_base import DashboardState, logger
 
@@ -250,6 +251,29 @@ class SettingsMixin(DashboardState):
         self._config.log_full_text = enabled
         save_config(self._config)
         return self.get_settings()
+
+    def preview_feedback(self, kind: object, message: object, include_log: bool) -> dict:
+        """What a report would send, as text; sends nothing."""
+        try:
+            url, report = self._feedback_report(kind, message, include_log)
+        except FeedbackError as exc:
+            return exc.as_dict()
+        return {"ok": True, "preview": render_preview(url, report), "log_included": "log" in report}
+
+    def send_feedback(self, kind: object, message: object, include_log: bool) -> dict:
+        """Posts the report to the Worker. Only the Send click calls this; nothing is sent at any other time."""
+        try:
+            url, report = self._feedback_report(kind, message, include_log)
+            send_report(url, report)
+        except FeedbackError as exc:
+            return exc.as_dict()
+        return {"ok": True, "log_included": "log" in report}
+
+    def _feedback_report(self, kind: object, message: object, include_log: bool) -> tuple[str, dict[str, str]]:
+        url = app_feedback_url(self._config.support.feedback_form_url)
+        if not url:
+            raise FeedbackError("disabled", "Sending feedback from the app is switched off.")
+        return url, build_report(kind, message, include_log, device=self._config.inference.device)
 
     def open_log_folder(self) -> dict:
         """Opens the log folder in Explorer, creating it first when nothing has been logged yet."""

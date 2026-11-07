@@ -12,6 +12,14 @@ if TYPE_CHECKING:
     from .api import DashboardAPI
 
 
+_FEEDBACK_STATUS = {"invalid": 400, "too_large": 413, "disabled": 404, "rate": 429, "daily_cap": 429, "offline": 503}
+
+
+def _feedback_status(resp: dict) -> int:
+    """200 for success; a refusal keeps a status the page can tell apart (an unknown cause is a bad gateway)."""
+    return 200 if "error" not in resp else _FEEDBACK_STATUS.get(resp["error"], 502)
+
+
 def register(app: Flask, api: DashboardAPI) -> None:
     """The settings page's switches, keys and language model."""
 
@@ -104,6 +112,18 @@ def register(app: Flask, api: DashboardAPI) -> None:
     def set_log_full_text():
         data = _json_object()
         return jsonify(api.set_log_full_text(_switch(data, None)))
+
+    @app.route("/api/feedback/preview", methods=["POST"])
+    def preview_feedback():
+        data = _json_object()
+        resp = api.preview_feedback(data.get("kind"), data.get("message"), data.get("include_log") is True)
+        return jsonify(resp), _feedback_status(resp)
+
+    @app.route("/api/feedback/send", methods=["POST"])
+    def send_feedback():
+        data = _json_object()
+        resp = api.send_feedback(data.get("kind"), data.get("message"), data.get("include_log") is True)
+        return jsonify(resp), _feedback_status(resp)
 
     @app.route("/api/log-folder/open", methods=["POST"])
     def open_log_folder():

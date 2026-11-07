@@ -338,6 +338,29 @@ body::before {
 }
 .settings-hint.model-caution { margin-top: 12px; }
 
+/* Feedback tab */
+.feedback-form { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.feedback-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
+.feedback-field .select-input { align-self: flex-start; max-width: 100%; }
+.feedback-field .flagged-textarea { margin-bottom: 0; font-weight: 400; }
+.feedback-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+.feedback-check input { accent-color: var(--accent); margin-top: 3px; flex-shrink: 0; }
+.feedback-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.link-btn { background: none; border: none; padding: 0; color: var(--accent-light); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
+.feedback-preview {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 10px 14px;
+}
+
 /* Stats row */
 .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; margin-bottom: 20px; }
 

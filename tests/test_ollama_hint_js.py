@@ -123,14 +123,14 @@ def test_models_card_does_not_claim_ollama_is_down_when_only_the_list_fails():
     assert out[1]["hidden"] is True
 
 
-def test_other_servers_get_no_ollama_link_and_the_models_card_keeps_its_note():
+def test_other_servers_get_no_ollama_link_and_the_models_card_names_the_server():
     out = run_js(
         "const s = {reachable: false, protocol: 'openai', url: 'http://x'};"
         "const u = ui({modelsData: {reachable: false, protocol: 'openai'}});"
         "renderLlmHints(s, u); console.log(JSON.stringify([view(u.cleanup), view(u.models)]));"
     )
     assert "ollama" not in out[0]["text"].lower() and out[0]["links"] == 0
-    assert "no model list" in out[1]["text"]
+    assert "No model server at http://x" in out[1]["text"] and out[1]["links"] == 0
 
 
 @pytest.mark.parametrize(
@@ -147,3 +147,30 @@ def test_wiring_covers_the_triggers_that_make_a_hint_recover():
     )  # upload dialog
     assert "setInterval(() => {" in source and '"tab-recordings"' in source  # own poll, not the model list's
     assert source.count("refreshLlmHints();") >= 5  # cleanup (before and after save), polish, upload toggle, models
+
+
+def test_default_ollama_that_does_not_answer_reads_not_installed_yet_and_is_not_red():
+    out = run_js(
+        f"const s = {DOWN};"
+        "const u = ui({modelsData: {reachable: false, protocol: 'ollama'}});"
+        "renderLlmHints(s, u); console.log(JSON.stringify(view(u.models)));"
+    )
+    assert out["hidden"] is False and out["down"] is False and out["ok"] is False
+    assert out["text"].startswith("Not installed yet. Ollama is a free app") and out["links"] == 1
+
+
+def test_a_remote_ollama_that_does_not_answer_is_still_red():
+    out = run_js(
+        "const s = {reachable: false, protocol: 'ollama', url: 'http://10.0.0.5:11434', model: 'm'};"
+        "const u = ui({modelsData: {reachable: false, protocol: 'ollama'}});"
+        "renderLlmHints(s, u); console.log(JSON.stringify(view(u.models)));"
+    )
+    assert out["down"] is True and "Not installed yet" not in out["text"]
+
+
+def test_the_not_installed_line_links_the_ollama_site():
+    out = run_js(
+        "const e = el(); renderOllamaNotInstalled(e);"
+        "console.log(JSON.stringify([e.children[0].href, e.children[0].textContent, e.hidden]));"
+    )
+    assert out == ["https://ollama.com", "Install Ollama", False]

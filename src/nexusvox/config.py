@@ -64,9 +64,12 @@ from .config_sections.llm import (  # noqa: F401
     CLEANUP_TIMEOUT_CPU_S,
     LLM_MODEL_CPU,
     LLM_PROTOCOLS,
+    OLLAMA_URL,
     CleanupConfig,
     LlmConfig,
+    LlmServer,
     PolishConfig,
+    is_builtin_ollama,
 )
 from .config_sections.meeting import (  # noqa: F401
     _MEETING_HOTKEY_FALLBACKS,
@@ -187,6 +190,26 @@ def with_hardware_defaults(config: Config) -> Config:
     config.llm.model = auto_llm_model()
     config.cleanup.timeout_s = auto_cleanup_timeout()
     return config
+
+
+def _llm_servers(raw: object) -> list[LlmServer]:
+    """The saved servers of `[[llm.servers]]`. An entry without a URL, with an unknown protocol or the address of an
+    earlier one is dropped, so a hand-edited file cannot break the dropdown. Ollama at its default address is a
+    fixed entry of the dashboard, so a copy of it that an earlier version saved here is dropped as well."""
+    servers: list[LlmServer] = []
+    for entry in raw if isinstance(raw, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        url = str(entry.get("url", "")).strip().rstrip("/")
+        protocol = entry.get("protocol")
+        if protocol in LLM_PROTOCOLS and is_builtin_ollama(url, protocol):
+            logger.info("Dropped Ollama at %s from [[llm.servers]]: it is a built-in entry", OLLAMA_URL)
+            continue
+        if not url or protocol not in LLM_PROTOCOLS or any(url == s.url for s in servers):
+            logger.warning("Ignored an unusable entry of [[llm.servers]] in the config")
+            continue
+        servers.append(LlmServer(url, protocol, str(entry.get("name", "")), str(entry.get("api_key", ""))))
+    return servers
 
 
 def _llm_model(data: dict) -> str:
@@ -488,6 +511,7 @@ def load_config(path: Path | None = None) -> Config:
             api_key=str(llm_data.get("api_key", "")),
             timeout_s=float(llm_data.get("timeout_s", LlmConfig.timeout_s)),
             keep_alive=str(llm_data.get("keep_alive", LlmConfig.keep_alive)),
+            servers=_llm_servers(llm_data.get("servers")),
         ),
         polish=PolishConfig(in_terminals=bool(polish_data.get("in_terminals", False))),
         cleanup=_cleanup_config(cleanup_data),
@@ -554,10 +578,11 @@ def _toml_value(value: object) -> str:
     raise TypeError(f"cannot write a {type(value).__name__} to the config")
 
 
-def _section(name: str, *items: tuple[str, object] | str) -> list[str]:
-    """The lines of one ``[name]`` table: ``(key, value)`` pairs, and plain strings which are written as they are
-    (comments). Every value goes through `_toml_value`, so no field can be written unescaped."""
-    lines = [f"[{name}]"]
+def _section(name: str, *items: tuple[str, object] | str, array: bool = False) -> list[str]:
+    """The lines of one ``[name]`` table (``[[name]]``, one entry of an array of tables, with *array*): ``(key,
+    value)`` pairs, and plain strings which are written as they are (comments). Every value goes through
+    `_toml_value`, so no field can be written unescaped."""
+    lines = [f"[[{name}]]" if array else f"[{name}]"]
     for item in items:
         if isinstance(item, str):
             lines.append(item)
@@ -736,6 +761,18 @@ def save_config(config: Config, path: Path | None = None) -> None:
                 ("api_key", config.llm.api_key),
                 ("timeout_s", config.llm.timeout_s),
                 ("keep_alive", config.llm.keep_alive),
+            ),
+            *(
+                line
+                for server in config.llm.servers
+                for line in _section(
+                    "llm.servers",
+                    ("name", server.name),
+                    ("url", server.url),
+                    ("protocol", server.protocol),
+                    ("api_key", server.api_key),
+                    array=True,
+                )
             ),
             *_section("polish", ("in_terminals", config.polish.in_terminals)),
             *_section(

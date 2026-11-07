@@ -19,6 +19,7 @@ from nexusvox.config import (
     InferenceConfig,
     LearnFromEditsConfig,
     LlmConfig,
+    LlmServer,
     MeetingConfig,
     OSCommandsConfig,
     PolishConfig,
@@ -299,6 +300,12 @@ def _fill_strings(obj, prefix: str, expected: list[str]) -> None:
         awkward = f'{name} "q" \\ \\\\ ä 日本 😀\t\n'
         if dataclasses.is_dataclass(value):
             _fill_strings(value, name, expected)
+        elif isinstance(value, list) and not value and "LlmServer" in str(f.type):
+            entry = LlmServer(url="")  # a list of saved servers: one entry, every string awkward
+            _fill_strings(entry, name, expected)
+            expected.remove(entry.protocol)  # the protocol is a fixed word, not free text
+            entry.protocol = "openai"
+            setattr(obj, f.name, [entry])
         elif isinstance(value, str):
             setattr(obj, f.name, awkward)
             expected.append(awkward)

@@ -4,6 +4,37 @@
 // Free 1.0 bundles no language model runtime: dictation works without one, Cleanup, Polish and upload cleanup
 // need Ollama. `ollamaHint` turns /api/settings/llm-status into the hint every area shows; null = nothing to say.
 const OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
+// Ollama at its default address is a fixed entry. When nothing answers there the page does not call it broken (red):
+// a first-time user has probably never heard of it, so it says what Ollama is and links the install page.
+const OLLAMA_SITE_URL = "https://ollama.com";
+const OLLAMA_DEFAULT_URL = "http://127.0.0.1:11434";
+const OLLAMA_NOT_INSTALLED =
+  "Not installed yet. Ollama is a free app that runs AI language models on your own PC. Cleanup and Polish stay off until it is installed and running; everything else works without it.";
+// Installed but stopped: neutral too, with a button that starts it (`onStart(button)` does the work).
+function renderOllamaNotRunning(el, onStart) {
+  setStatus(el, undefined, "Ollama is installed but not running. ");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn";
+  button.textContent = "Start Ollama";
+  button.onclick = () => onStart(button);
+  el.append(button);
+  el.hidden = false;
+}
+function isDefaultOllamaUrl(url) {
+  return String(url || "").replace(/\/+$/, "") === OLLAMA_DEFAULT_URL;
+}
+// Writes the neutral "not installed yet" line (no colour state) plus the install link into `el`.
+function renderOllamaNotInstalled(el) {
+  setStatus(el, undefined, `${OLLAMA_NOT_INSTALLED} `);
+  const a = document.createElement("a");
+  a.href = OLLAMA_SITE_URL;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.textContent = "Install Ollama";
+  el.append(a);
+  el.hidden = false;
+}
 function isLocalLlmUrl(url) {
   try {
     return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(url).hostname);
@@ -65,11 +96,14 @@ function renderOllamaHint(el, s, visible = true, opts = {}) {
 function renderModelsHint(el, s, data) {
   if (!data) return hideHint(el);
   if (data.reachable) return renderOllamaHint(el, s, true, { here: true });
-  if (data.protocol !== "ollama") {
-    setStatus(el, "warn", "This server type has no model list. Set [llm].model in config.toml.");
-  } else if (s.reachable) {
+  if (!s.reachable && s.protocol === "ollama" && isDefaultOllamaUrl(s.url)) {
+    if (data.ollama && data.ollama.state === "stopped") return renderOllamaNotRunning(el, startOllama);
+    return renderOllamaNotInstalled(el);
+  }
+  if (s.reachable) {
     // The server answers but the model list does not come back: not a missing install.
-    setStatus(el, "down", `○ Ollama answers at ${s.url}, but the installed models cannot be listed. The saved model is kept.`);
+    const what = data.protocol === "ollama" ? "Ollama" : "The server";
+    setStatus(el, "down", `○ ${what} answers at ${s.url}, but its models cannot be listed. The saved model is kept.`);
   } else {
     return renderOllamaHint(el, s, true, { here: true });
   }
@@ -161,9 +195,99 @@ function llmMemory(data, m) {
   return `~${m.size_gb} GB ${data.device === "gpu" ? "VRAM" : "RAM"} (estimate)`;
 }
 
+function llmOptionLabel(m) {
+  let label = m.name;
+  if (m.recommended_here) label += " — recommended for this PC";
+  if (m.installed === false && m.size_gb) label += ` — not installed, ${m.size_gb} GB`;
+  else if (m.installed === false) label += " — not installed";
+  return label;
+}
+
 // What the dropdown's options depend on: a change here (and only here) rebuilds the <select>.
 function llmOptionsKey(data) {
-  return JSON.stringify([data.reachable, data.protocol, data.selected, data.recommended, data.other]);
+  return JSON.stringify([data.reachable, data.protocol, data.selected, data.recommended, data.other, data.servers, data.ollama]);
+}
+
+// A model of a saved server other than the one in use: its option value carries the server, `@@["url","model"]`.
+const LLM_SERVER_PREFIX = "@@";
+function llmServerValue(url, model) {
+  return LLM_SERVER_PREFIX + JSON.stringify([url, model]);
+}
+// The reverse: [url, model], or null for the value of a model on the server in use.
+function llmServerChoice(value) {
+  if (!value.startsWith(LLM_SERVER_PREFIX)) return null;
+  try {
+    const [url, model] = JSON.parse(value.slice(LLM_SERVER_PREFIX.length));
+    return [url, model];
+  } catch {
+    return null;
+  }
+}
+
+// The dropdown as plain data: groups of options. `label: null` = options without a group, `down` = a server that does
+// not answer (shown red, its entry cannot be picked). Every saved server except the one in use gets a group of its own;
+// the one in use is the main list (recommended and installed models).
+function llmOptionGroups(data) {
+  const groups = [];
+  if (!data.reachable) {
+    // Server down (or no model list): show the saved value only, nothing else can break.
+    groups.push({ label: null, options: [{ value: data.selected, label: data.selected }] });
+  } else {
+    if (data.recommended.length) {
+      groups.push({
+        label: "Recommended",
+        options: data.recommended.map((m) => ({ value: m.name, label: llmOptionLabel(m), muted: !m.installed })),
+      });
+    }
+    if (data.other.length) {
+      groups.push({
+        label: data.protocol === "ollama" ? "Other installed models" : "Models on this server",
+        options: data.other.map((m) => ({ value: m.name, label: m.installed === false ? `${m.name} — not installed` : m.name })),
+      });
+    }
+  }
+  const ollama = data.ollama;
+  if (ollama && !ollama.active) {
+    // Not red when it does not answer: it is simply not installed yet.
+    if (!ollama.reachable) {
+      const stopped = ollama.state === "stopped";
+      groups.push({
+        label: stopped ? "Ollama — installed, not running" : "Ollama — not installed yet",
+        options: [
+          {
+            value: "",
+            label: stopped ? "Start Ollama below to use models on this PC" : "Install Ollama (ollama.com) to use models on this PC",
+            disabled: true,
+          },
+        ],
+      });
+    } else {
+      groups.push({
+        label: "Ollama",
+        options: ollama.models.length
+          ? ollama.models.map((m) => ({ value: llmServerValue(ollama.url, m.name), label: m.name }))
+          : [{ value: "", label: "No models installed yet", disabled: true }],
+      });
+    }
+  }
+  for (const server of data.servers || []) {
+    if (server.active) continue;
+    if (!server.reachable) {
+      groups.push({
+        label: `${server.name} — not answering`,
+        down: true,
+        options: [{ value: "", label: `No answer: ${server.error || "unknown error"}`, disabled: true, down: true }],
+      });
+    } else {
+      groups.push({
+        label: server.name,
+        options: server.models.length
+          ? server.models.map((m) => ({ value: llmServerValue(server.url, m.name), label: m.name }))
+          : [{ value: "", label: "No models listed", disabled: true }],
+      });
+    }
+  }
+  return groups;
 }
 
 // Refreshes the card while it is on screen and the page is visible. `fetchData()` returns the models payload,
@@ -217,7 +341,7 @@ function createLlmRefresher({ fetchData, render, isActive, schedule, cancel }) {
 // ── end of LLM card refresh ──────────────────────────────────────────
 
 function renderLlmOverview(data, m) {
-  const installed = !m || m.installed === null ? "Unknown (server not reachable)" : m.installed ? "Yes" : "No";
+  const installed = !m || m.installed === null ? (data.reachable ? "Not in the server's list" : "Unknown (server not reachable)") : m.installed ? "Yes" : "No";
   const size = m && m.size_gb ? `${m.size_gb} GB` : "Unknown";
   const runs = llmRunsOn(data);
   const rows = [
@@ -234,47 +358,37 @@ function renderLlmOverview(data, m) {
   setStatus(document.querySelector("#llm-overview-grid .llm-runs-on"), runs.warn ? "warn" : undefined, runs.text);
 }
 
-function llmOptionLabel(m) {
-  let label = m.name;
-  if (m.recommended_here) label += " — recommended for this PC";
-  if (m.installed === false && m.size_gb) label += ` — not installed, ${m.size_gb} GB`;
-  else if (m.installed === false) label += " — not installed";
-  return label;
-}
-
 function renderLlmModels(data, rebuildOptions) {
   llmSavedModel = data.selected;
   lastLlmModels = data;
   refreshLlmHints();
   loadLlmStatus().catch(() => {}); // the hints follow the live status, fetched on its own
+  renderLlmServers(data.servers || [], data.ollama || null);
   llmSlowHint.hidden = !data.slow_hint;
-  if (!data.reachable) {
-    // Server down (or no model list): show the saved value only, nothing else can break.
-    if (rebuildOptions) {
-      llmModelSelect.replaceChildren(new Option(data.selected, data.selected));
-      llmModelSelect.value = data.selected;
+  if (rebuildOptions) {
+    llmModelSelect.replaceChildren();
+    for (const group of llmOptionGroups(data)) {
+      const parent = group.label === null ? llmModelSelect : document.createElement("optgroup");
+      if (group.label !== null) {
+        parent.label = group.label;
+        if (group.down) setStatus(parent, "down"); // red through the one helper; the text stays
+        parent.disabled = Boolean(group.down);
+        llmModelSelect.append(parent);
+      }
+      for (const o of group.options) {
+        const opt = new Option(o.label, o.value);
+        if (o.muted) opt.style.color = "var(--text-muted, gray)";
+        if (o.down) setStatus(opt, "down");
+        opt.disabled = Boolean(o.disabled);
+        parent.append(opt);
+      }
     }
+    llmModelSelect.value = data.selected;
+  }
+  if (!data.reachable) {
     llmPullSelected.hidden = true;
     renderLlmOverview(data, null);
     return;
-  }
-  if (rebuildOptions) {
-    llmModelSelect.replaceChildren();
-    const rec = document.createElement("optgroup");
-    rec.label = "Recommended";
-    for (const m of data.recommended) {
-      const opt = new Option(llmOptionLabel(m), m.name);
-      if (!m.installed) opt.style.color = "var(--text-muted, gray)";
-      rec.append(opt);
-    }
-    llmModelSelect.append(rec);
-    if (data.other.length) {
-      const other = document.createElement("optgroup");
-      other.label = "Other installed models";
-      for (const m of data.other) other.append(new Option(m.installed === false ? `${m.name} — not installed` : m.name, m.name));
-      llmModelSelect.append(other);
-    }
-    llmModelSelect.value = data.selected;
   }
   const selectedModel = [...data.recommended, ...data.other].find((m) => m.name === data.selected) || null;
   renderLlmOverview(data, selectedModel);
@@ -286,6 +400,135 @@ function renderLlmModels(data, rebuildOptions) {
     Object.fromEntries(data.recommended.filter((m) => !m.installed).map((m) => [m.name, m.size_gb])),
   );
 }
+
+// ── Custom servers ───────────────────────────────────────────────────
+const llmServersList = document.getElementById("llm-servers-list");
+const llmServerUrl = document.getElementById("llm-server-url");
+const llmServerKey = document.getElementById("llm-server-key");
+const llmServerName = document.getElementById("llm-server-name");
+const llmServerAdd = document.getElementById("llm-server-add");
+const llmServerStatus = document.getElementById("llm-server-status");
+
+// The saved servers with their state; Remove asks twice (no browser dialog): the first click arms it.
+function renderLlmServers(servers, ollama) {
+  llmServersList.replaceChildren();
+  if (ollama) llmServersList.append(ollamaRow(ollama));
+  for (const server of servers) {
+    const row = document.createElement("div");
+    row.className = "overview-row";
+    const label = document.createElement("span");
+    label.className = "overview-label";
+    label.textContent = `${server.name} (${server.protocol === "ollama" ? "Ollama" : "OpenAI-compatible"})`;
+    const value = document.createElement("span");
+    value.className = "overview-value";
+    const state = document.createElement("span");
+    const count = server.models.length;
+    if (server.reachable) setStatus(state, "ok", `● ${server.url} · ${count} model${count === 1 ? "" : "s"}`);
+    else setStatus(state, "down", `○ ${server.url} · not answering: ${server.error || "unknown error"}`);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => removeLlmServer(server.url, remove));
+    value.append(state, " ", remove);
+    row.append(label, value);
+    llmServersList.append(row);
+  }
+  llmServersList.style.display = servers.length || ollama ? "" : "none";
+}
+
+// The fixed Ollama row: no Remove, and never red - "not installed yet" explains itself and links the install page.
+function ollamaRow(ollama) {
+  const row = document.createElement("div");
+  row.className = "overview-row";
+  const label = document.createElement("span");
+  label.className = "overview-label";
+  label.textContent = "Ollama (this PC)";
+  const value = document.createElement("span");
+  value.className = "overview-value";
+  const state = document.createElement("span");
+  if (ollama.reachable) {
+    const count = ollama.models.length;
+    setStatus(state, "ok", `● ${ollama.url} · ${count} model${count === 1 ? "" : "s"}`);
+  } else if (ollama.state === "stopped") {
+    renderOllamaNotRunning(state, startOllama);
+  } else {
+    renderOllamaNotInstalled(state);
+  }
+  value.append(state);
+  row.append(label, value);
+  return row;
+}
+
+// Starts the installed Ollama, waits for it on the server side (about 15 s), then reloads the model list.
+async function startOllama(button) {
+  button.disabled = true;
+  button.textContent = "Starting Ollama...";
+  try {
+    const resp = await postSetting("/api/settings/ollama-start", {});
+    const data = await resp.json();
+    if (data.error) setStatus(llmServerStatus, "down", data.error);
+    else if (!data.running) setStatus(llmServerStatus, "warn", data.hint);
+    else setStatus(llmServerStatus, "ok", "Ollama is running.");
+  } catch {
+    setStatus(llmServerStatus, "down", "The dashboard could not reach the app. Try again.");
+  }
+  await loadLlmModels();
+  loadLlmStatus();
+}
+
+let removeArmed = null;
+async function removeLlmServer(url, button) {
+  if (removeArmed !== button) {
+    removeArmed = button;
+    button.textContent = "Click again to remove";
+    setTimeout(() => {
+      if (removeArmed === button) removeArmed = null;
+      button.textContent = "Remove";
+    }, 4000);
+    return;
+  }
+  removeArmed = null;
+  const resp = await fetch("/api/settings/llm-servers", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  const data = await resp.json();
+  if (data.error) setStatus(llmServerStatus, "down", data.error);
+  await loadLlmModels();
+}
+
+llmServerAdd.addEventListener("click", async () => {
+  const url = llmServerUrl.value.trim();
+  if (!url) {
+    setStatus(llmServerStatus, "down", "Enter the server address with its port, e.g. http://127.0.0.1:8081");
+    return;
+  }
+  llmServerAdd.disabled = true;
+  setStatus(llmServerStatus, undefined, "Looking for a model server...");
+  try {
+    const resp = await postSetting("/api/settings/llm-servers", {
+      url,
+      api_key: llmServerKey.value,
+      name: llmServerName.value,
+    });
+    const data = await resp.json();
+    if (data.error) {
+      setStatus(llmServerStatus, "down", data.error);
+      return;
+    }
+    const kind = data.server.protocol === "ollama" ? "Ollama" : "OpenAI-compatible";
+    setStatus(llmServerStatus, "ok", `Saved ${data.server.name} (${kind}). Its models are in the list above.`);
+    llmServerUrl.value = llmServerKey.value = llmServerName.value = "";
+    await loadLlmModels();
+  } catch {
+    setStatus(llmServerStatus, "down", "The dashboard could not reach the app. Try again.");
+  } finally {
+    llmServerAdd.disabled = false;
+  }
+});
+// ── end of custom servers ────────────────────────────────────────────
 
 const llmRefresher = createLlmRefresher({
   fetchData: () => api("/api/settings/llm-models"),
@@ -378,8 +621,23 @@ async function startLlmPull(name, sizeGb) {
   pollLlmPull();
 }
 
+// A model of another saved server: that server and the model become the one in use.
+async function selectServerModel(url, model) {
+  const resp = await postSetting("/api/settings/llm-select", { url, model });
+  const s = await resp.json();
+  if (s.error) setStatus(llmServerStatus, "down", s.error);
+  await loadLlmModels();
+  loadLlmStatus();
+}
+
 llmModelSelect.addEventListener("change", async () => {
   const name = llmModelSelect.value;
+  const choice = llmServerChoice(name);
+  if (choice) {
+    llmModelSelect.value = llmSavedModel; // until the switch is saved
+    await selectServerModel(choice[0], choice[1]);
+    return;
+  }
   const missing = JSON.parse(llmModelSelect.dataset.notInstalled || "{}");
   if (!(name in missing)) {
     await saveLlmModel(name);

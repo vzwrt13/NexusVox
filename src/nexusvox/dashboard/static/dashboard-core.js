@@ -135,9 +135,16 @@ async function api(path) {
 // names (bookmarks, the tray's link) open it.
 const TAB_ALIASES = { meetings: "recordings", upload: "recordings" };
 
-// No hash is the Home tab.
+// The hash as the page it shows: no hash is Home, a bare "#settings" its first page.
+function pageOfHash(hash) {
+  if (!hash) return "#home";
+  if (hash === "#settings") return "#settings/" + defaultSettingsSlug();
+  if (hash === "#analytics/overview") return "#analytics";
+  return hash;
+}
+
 function samePage(a, b) {
-  return (a || "#home") === (b || "#home");
+  return pageOfHash(a) === pageOfHash(b);
 }
 
 function replaceHash(hash) {
@@ -148,9 +155,16 @@ function replaceHash(hash) {
 // a gesture is skipped by the browser's Back button), the first entry becomes a marker and a copy of it takes its
 // place: Back lands on the marker, and the popstate handler in dashboard-init.js steps forward again. A reload
 // keeps the marker, so it is added once per tab.
+// It waits until the page start has settled the hash (`markHistoryReady`): the marker and its copy must carry the
+// URL the user sees, since a later `replaceHash` corrects only the entry it is on.
 let historyGuarded = false;
+let historyReady = false;
+function markHistoryReady() {
+  historyReady = true;
+}
+
 function guardHistory() {
-  if (historyGuarded) return;
+  if (historyGuarded || !historyReady) return;
   historyGuarded = true;
   if (history.state && history.state.nv) return;
   history.replaceState({ nv: "start" }, "", window.location.href);
@@ -300,25 +314,40 @@ function openExtensionPanel(id) {
   document.head.appendChild(script);
 }
 
+// Resolves when the page is settled: only a recording has to be looked up first.
 function restoreTabFromHash() {
-  const [name, page] = window.location.hash.replace(/^#/, "").split("/"); // "#settings/models": tab and page
+  const hash = window.location.hash;
+  const [name, page] = hash.replace(/^#/, "").split("/"); // "#settings/models": tab and page
   // No hash, or one for a tab that is off, opens Home.
   if (!name) {
     activateTab("home");
-    return;
+    return Promise.resolve();
   }
+  if (name === "recordings" && page) return restoreRecording(hash, page);
   // A hash for a tab that is off (an experimental one, or an extension that is gone) must not stay in the URL.
   if (!activateTab(name)) {
     replaceHash(window.location.pathname + window.location.search);
     activateTab("home");
   } else if (TAB_ALIASES[name]) replaceHash("#" + TAB_ALIASES[name]);
-  else if (name === "settings" && page) showSettingsPageBySlug(page);
-  else if (name === "recordings" && page) {
-    // "#recordings/12": that recording, as opened from elsewhere. One that is gone leaves the plain tab.
-    showRecording(decodeURIComponent(page), { push: false }).then((found) => {
-      if (!found) replaceHash("#recordings");
-    });
+  else if (name === "settings") showSettingsPageBySlug(page || defaultSettingsSlug());
+  return Promise.resolve();
+}
+
+// "#recordings/12": that recording, as opened from elsewhere. showRecording opens the tab itself, so the tab is not
+// opened twice. A recording that is gone or an id that cannot be read leaves the plain tab; the lookup is async, so
+// nothing is changed once the user has moved on to another entry.
+async function restoreRecording(hash, page) {
+  let id = null;
+  try {
+    id = decodeURIComponent(page);
+  } catch (err) {
+    console.warn("The address names no recording:", err);
   }
+  const current = () => window.location.hash === hash;
+  if (id !== null && (await showRecording(id, { restore: true, current }))) return;
+  if (!current()) return;
+  replaceHash("#recordings");
+  activateTab("recordings");
 }
 
 

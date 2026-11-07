@@ -625,6 +625,10 @@ function settingsPageHash() {
   return "#settings" + (link ? "/" + link.dataset.page : "");
 }
 
+function defaultSettingsSlug() {
+  return settingsLinks()[0].dataset.page;
+}
+
 function showSettingsPageBySlug(slug) {
   const link = settingsLinks().find((l) => l.dataset.page === slug);
   if (link) showSettingsPage(link.dataset.card);

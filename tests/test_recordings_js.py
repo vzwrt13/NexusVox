@@ -358,21 +358,49 @@ def test_show_transcript_switches_to_the_transcript_tab_and_marks_the_passage():
     assert result == [True, "transcript", 765, "7", ["recordings"], 2, ["#recordings/7"]]
 
 
-def test_a_recording_restored_from_history_adds_no_step_and_choosing_one_in_the_list_drops_the_id():
+def test_a_recording_restored_from_history_adds_no_step_and_choosing_another_one_renames_the_address():
     result = run_recordings(
         DETAIL
         + """replies.set(LIST_URL, ROWS);
         const opened = []; activateTab = (...args) => opened.push(args[0]);
         const d = makeDetail(ROWS[0]);
         d._editing = true; // a pane being edited is kept, so no detail has to be drawn
-        showRecording(7, { push: false }).then((found) => {
+        showRecording(7, { restore: true }).then((found) => {
           window.location.hash = "#recordings/7";
           renderSelectedRecording = () => {}; // the pane is not under test here
           selectRecording(3);
           out([found, recSelectedId, pushed]);
         });"""
     )
-    assert result == [True, "3", ["replace #recordings"]]
+    assert result == [True, "3", ["replace #recordings/3"]]
+
+
+def test_coming_back_to_the_chosen_recording_keeps_its_tab_and_passage():
+    result = run_recordings(
+        DETAIL
+        + """replies.set(LIST_URL, ROWS);
+        const opened = []; activateTab = (...args) => opened.push(args[0]);
+        const d = makeDetail(ROWS[0]);
+        d._editing = true;
+        recSelectedId = "7"; recChosenTab = "summary"; recMark = { id: "7", start: 1, end: 2, text: "x" };
+        showRecording(7, { restore: true }).then((found) => {
+          out([found, recChosenTab, recMark.start, opened]);
+        });"""
+    )
+    assert result == [True, "summary", 1, ["recordings"]]
+
+
+def test_a_recording_looked_up_for_a_step_that_was_left_meanwhile_changes_nothing():
+    result = run_recordings(
+        DETAIL
+        + """replies.set(LIST_URL, ROWS);
+        const opened = []; activateTab = (...args) => opened.push(args[0]);
+        recChosenTab = "summary";
+        showRecording(7, { restore: true, current: () => false }).then((found) => {
+          out([found, recChosenTab, recSelectedId, opened, recItems.length]);
+        });"""
+    )
+    assert result == [False, "summary", None, [], 0]
 
 
 def test_show_transcript_of_an_unknown_recording_leaves_the_page_alone():

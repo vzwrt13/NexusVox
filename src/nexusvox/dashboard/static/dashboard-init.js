@@ -25,12 +25,15 @@ window.addEventListener("hashchange", restoreTabFromHash);
 window.addEventListener("popstate", (e) => {
   if (e.state && e.state.nv === "start") history.forward();
 });
-for (const type of ["pointerdown", "keydown"]) document.addEventListener(type, guardHistory, { capture: true });
+// The first click or key press arms the guard; the Back button of a mouse or Alt+Left must not arm it, they are the
+// request to go back (a browser tab opened from another page can still be left that way until the user acts).
+document.addEventListener("pointerdown", (e) => { if (e.button === 0) guardHistory(); }, { capture: true });
+document.addEventListener("keydown", (e) => { if (!e.altKey) guardHistory(); }, { capture: true });
 
 document.addEventListener("DOMContentLoaded", () => {
   featuresReady = loadFeatures();
   // Before the tab loaders: extensions and the hash live in core, so a tab file that failed cannot take them along.
-  Promise.all([featuresReady, loadExtensions()]).then(restoreTabFromHash);
+  Promise.all([featuresReady, loadExtensions()]).then(restoreTabFromHash).finally(markHistoryReady);
   settingsReady = loadSettings();
   loadMeetingSettings();
   openSetupOnFreshInstall();

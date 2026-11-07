@@ -345,8 +345,9 @@ recSearch.addEventListener("input", () => {
 
 function selectRecording(id) {
   recSelectedId = String(id);
-  // A recording chosen in the list is not what "#recordings/<id>" names any more: a reload must not jump back.
-  if (window.location.hash.startsWith("#recordings/")) replaceHash("#recordings");
+  // A recording chosen in the list is what "#recordings/<id>" names now, so a reload does not jump back; the entry
+  // is rewritten, not followed by a new one, so Back still has one step to take.
+  if (window.location.hash.startsWith("#recordings/")) replaceHash("#recordings/" + encodeURIComponent(id));
   markSelectedRow();
   renderSelectedRecording(false);
 }
@@ -1066,14 +1067,19 @@ async function showRecording(id, options = {}) {
   }
   const item = rows.find((i) => String(i.id) === String(id));
   if (!item) return false;
+  // A step in the history (`restore`) can have been left again while the list was fetched.
+  if (options && options.current && !options.current()) return false;
   const mark = options && options.mark;
-  recMark = mark ? { id: String(item.id), start: mark.start, end: mark.end, text: mark.text } : null;
-  recChosenTab = "transcript";
+  // Coming back to the recording that is already chosen keeps its tab and passage, as the user left them.
+  if (!(options && options.restore && recSelectedId === String(item.id))) {
+    recMark = mark ? { id: String(item.id), start: mark.start, end: mark.end, text: mark.text } : null;
+    recChosenTab = "transcript";
+  }
   recSelectedId = String(item.id);
   if (!matchesRecordingSearch(item, recSearch.value.trim().toLowerCase())) recSearch.value = "";
   applyRecordingRows(rows, false);
-  // Its own history step; Back and Forward restore it (restoreTabFromHash passes push: false).
-  if (!options || options.push !== false) pushPage("#recordings/" + encodeURIComponent(item.id));
+  // Its own history step; Back and Forward restore it (restoreRecording passes restore: true).
+  if (!(options && options.restore)) pushPage("#recordings/" + encodeURIComponent(item.id));
   // Opening the tab starts a load of its own, which makes any load still in flight stale (it drops its answer),
   // and keeps this recording chosen. Until it answers, the rows fetched here are what the tab shows.
   activateTab("recordings", { keepScroll: true });

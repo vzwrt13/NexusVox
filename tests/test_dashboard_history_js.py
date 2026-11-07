@@ -39,30 +39,40 @@ const history = {
 const back = () => go(-1), forward = () => go(1);
 // What the page shows.
 let shown = null, settingsPage = null, recording = null;
+const activations = [];
 const activateTab = (name) => {
   name = TAB_ALIASES[name] || name;
   shown = name;
+  activations.push(name);
   return ["home", "settings", "analytics", "recordings"].includes(name);
 };
 const showSettingsPageBySlug = (slug) => { settingsPage = slug; };
-const showRecording = (id, options) => { recording = [id, options]; return Promise.resolve(id !== "gone"); };
-const settingsPageHash = () => "#settings" + (settingsPage ? "/" + settingsPage : "");
+let lookups = 0;
+const showRecording = (id, options) => {
+  lookups += 1;
+  recording = [id, { restore: options.restore }];
+  // The lookup answers later; a step left meanwhile (options.current) is not acted on.
+  return Promise.resolve().then(() => options.current() && id !== "gone");
+};
+const defaultSettingsSlug = () => "dictation";
+const settingsPageHash = () => "#settings/" + (settingsPage || defaultSettingsSlug());
 const analyticsViewHash = () => "#analytics";
 """
 
 
 def _function(source: str, name: str) -> str:
-    return re.search(rf"^function {name}\(.*?^}}$", source, re.S | re.M).group(0)
+    return re.search(rf"^(?:async )?function {name}\(.*?^}}$", source, re.S | re.M).group(0)
 
 
 def run_js(body: str):
     if shutil.which("node") is None:
         pytest.skip("Node.js is not installed")
     source = dashboard_source()
-    core = "".join(_function(source, n) for n in ("samePage", "replaceHash", "guardHistory", "pushPage", "bindTab"))
-    core += re.search(r"^let historyGuarded = false;$", source, re.M).group(0)
+    names = ("pageOfHash", "samePage", "replaceHash", "markHistoryReady", "guardHistory", "pushPage", "bindTab")
+    core = "\n".join(_function(source, n) for n in names)
+    core += "\nlet historyGuarded = false, historyReady = false;\n"
     core += re.search(r"^const TAB_ALIASES = .*?;$", source, re.M).group(0)
-    restore = _function(source, "restoreTabFromHash")
+    restore = _function(source, "restoreTabFromHash") + _function(source, "restoreRecording")
     init = (STATIC / "dashboard-init.js").read_text(encoding="utf-8")
     popstate = re.search(r'^window\.addEventListener\("popstate".*?^}\);$', init, re.S | re.M).group(0)
     wiring = 'window.addEventListener("hashchange", restoreTabFromHash);\n' + popstate
@@ -79,7 +89,7 @@ CLICKS = r"""
 const click = (tab) => { let fn; bindTab({ dataset: { tab }, addEventListener: (_, f) => (fn = f) }); fn(); };
 // The first user action arms the guard, as the pointerdown listener does.
 const act = () => guardHistory();
-restoreTabFromHash();
+restoreTabFromHash(); markHistoryReady();
 """
 
 
@@ -129,7 +139,7 @@ def test_a_settings_page_and_a_recording_are_steps_of_their_own():
     assert r[0] == ["settings", "models", None]
     assert r[1] == ["settings", "dictation"]
     # Forward opens the recording again without pushing a step of its own.
-    assert r[2] == ["7", {"push": False}]
+    assert r[2] == ["7", {"restore": True}]
 
 
 @needs_node
@@ -182,13 +192,90 @@ def test_a_recording_that_is_gone_leaves_the_plain_tab():
     r = run_js(
         CLICKS
         + """
-        act(); pushPage("#recordings/gone"); restoreTabFromHash();
-        Promise.resolve().then(() => Promise.resolve()).then(() => console.log(JSON.stringify([window.location.hash])));
+        act(); pushPage("#recordings/gone"); restoreTabFromHash().then(() => {
+          console.log(JSON.stringify([window.location.hash, shown]));
+        });
         """
     )
-    assert r == ["#recordings"]
+    assert r == ["#recordings", "recordings"]
 
 
-def test_the_page_listens_for_a_pointer_or_key_before_the_first_step():
+@needs_node
+def test_a_recording_is_looked_up_once_and_the_tab_is_not_opened_twice():
+    r = run_js(
+        CLICKS
+        + """
+        act(); pushPage("#recordings/7"); activations.length = 0;
+        restoreTabFromHash().then(() => console.log(JSON.stringify([lookups, activations])));
+        """
+    )
+    # showRecording opens the tab itself; restoring must not open it first.
+    assert r == [1, []]
+
+
+@needs_node
+def test_a_lookup_that_ends_after_the_user_moved_on_changes_nothing():
+    r = run_js(
+        CLICKS
+        + """
+        act(); pushPage("#recordings/gone");
+        const pending = restoreTabFromHash();
+        back();                                      // Home again before the lookup answers
+        pending.then(() => console.log(JSON.stringify([window.location.hash, shown, entries.map((e) => e.hash)])));
+        """
+    )
+    assert r == ["", "home", ["", "", "#recordings/gone"]]
+
+
+@needs_node
+def test_an_unreadable_recording_id_does_not_throw_and_leaves_the_plain_tab():
+    r = run_js(
+        CLICKS
+        + """
+        act(); pushPage("#recordings/%E0%A4%A");
+        restoreTabFromHash().then(() => console.log(JSON.stringify([lookups, window.location.hash, shown])));
+        """
+    )
+    assert r == [0, "#recordings", "recordings"]
+
+
+@needs_node
+def test_the_bare_settings_address_shows_the_first_page_and_is_that_page():
+    r = run_js(
+        CLICKS
+        + """
+        act(); settingsPage = "models"; pushPage("#settings"); restoreTabFromHash();
+        const bare = settingsPage;
+        const before = entries.length;
+        click("settings");                             // the page that is shown already: no second entry
+        pushPage("#settings/dictation"); pushPage("#analytics/overview"); pushPage("#analytics");
+        console.log(JSON.stringify([bare, entries.length - before]));
+        """
+    )
+    # "#settings" shows Dictation (not the Models page left open); only "#analytics/overview" -> "#analytics" is a step.
+    assert r == ["dictation", 1]
+
+
+@needs_node
+def test_the_guard_waits_for_the_page_start_and_then_keeps_the_address_the_user_sees():
+    r = run_js(
+        """
+        entries[0].hash = "#recordings/gone";
+        guardHistory();                                // before the start has settled: nothing is added
+        const early = [entries.length, history.state];
+        restoreTabFromHash().then(() => {
+          markHistoryReady(); guardHistory();
+          console.log(JSON.stringify([early, entries.map((e) => e.hash)]));
+        });
+        """
+    )
+    assert r[0] == [1, None]
+    # The marker and its copy both carry the corrected address.
+    assert r[1] == ["#recordings", "#recordings"]
+
+
+def test_the_back_button_of_a_mouse_and_alt_left_do_not_arm_the_guard():
     init = (STATIC / "dashboard-init.js").read_text(encoding="utf-8")
-    assert '["pointerdown", "keydown"]' in init and "guardHistory" in init
+    assert "if (e.button === 0) guardHistory()" in init
+    assert "if (!e.altKey) guardHistory()" in init
+    assert "markHistoryReady" in init

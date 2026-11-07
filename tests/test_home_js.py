@@ -57,6 +57,7 @@ def run_js(body: str):
         re.search(rf"^function {name}\(.*?^}}\n", source, re.S | re.M).group(0)
         for name in ("describeHomeStatus", "localIsoDate", "formatSavedMinutes")
     )
+    helpers = re.search(r"^const HOME_BUSY_PHASES = .*?;$", source, re.M).group(0) + helpers
     out = subprocess.run(
         ["node", "-e", f"{helpers}\n{body}"], capture_output=True, text=True, encoding="utf-8", check=True, timeout=30
     )
@@ -64,12 +65,13 @@ def run_js(body: str):
 
 
 @needs_node
-def test_status_says_loaded_device_and_offline():
+def test_status_names_model_device_and_offline_without_claiming_green():
     got = run_js(
         'const m = { name: "Parakeet", custom: false };'
         'console.log(JSON.stringify(describeHomeStatus(m, "cuda", { status: "idle" })))'
     )
-    assert got == {"state": "ok", "text": "Model loaded · Parakeet · GPU · runs offline"}
+    # Nothing probes the container or the custom server, so an idle model is shown neutral, never green.
+    assert got == {"text": "Speech model · Parakeet · GPU · runs offline"}
 
 
 @needs_node
@@ -97,3 +99,35 @@ def test_saved_time_and_local_dates():
         " formatSavedMinutes(-3), formatSavedMinutes(undefined), localIsoDate(new Date(2026, 0, 5))]))"
     )
     assert got == ["0 min", "12 min", "2 h 15 min", "0 min", "0 min", "2026-01-05"]
+
+
+def test_no_hash_and_a_disabled_tab_open_home_through_restore_tab_from_hash():
+    source = dashboard_source()
+    restore = re.search(r"^function restoreTabFromHash\(.*?^}$", source, re.S | re.M).group(0)
+    assert restore.count('activateTab("home")') == 2
+    assert "homeLoaded" not in source
+
+
+def test_the_home_cards_are_valid_html_inside_buttons():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    for button in re.findall(r'<button type="button" class="home-card.*?</button>', html, re.S):
+        assert not re.search(r"<(h[1-6]|p|div)[ >]", button), button
+
+
+def test_the_keycap_loop_exists_once():
+    source = dashboard_source()
+    assert source.count('className: "keycaps-plus"') == 1
+    assert "renderKeycapsInto(" in (STATIC / "dashboard-home.js").read_text(encoding="utf-8")
+
+
+def test_the_first_tip_follows_the_local_day():
+    assert "getTimezoneOffset()" in (STATIC / "dashboard-home.js").read_text(encoding="utf-8")
+
+
+def test_the_actions_do_not_repeat_what_opening_recordings_loads():
+    source = (STATIC / "dashboard-home.js").read_text(encoding="utf-8")
+    record = re.search(r'getElementById\("home-record"\).*?^}\);', source, re.S | re.M).group(0)
+    assert record.index("await refreshMeetingStatus()") < record.index("meetingToggleBtn.click()")
+    assert "openUploadDialog" not in source  # it refreshes what openRecordingsTab already refreshed
+    # a recent row opens its recording through showRecording alone (it opens the tab itself)
+    assert re.search(r"if \(!\(await showRecording\(item\.id\)\)\) goToTab\(\"recordings\"\)", source)

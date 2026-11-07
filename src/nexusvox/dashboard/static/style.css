@@ -1434,7 +1434,7 @@ canvas { width: 100% !important; max-height: 260px; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.home-card h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.home-card-title { margin: 0; font-size: 16px; font-weight: 600; }
 .home-card-text { margin: 0; font-size: 13px; color: var(--text-dim); }
 .home-card-action { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
 .home-card-action:hover, .home-card-action:focus-visible { border-color: rgba(162, 155, 254, 0.35); background: var(--surface2); }

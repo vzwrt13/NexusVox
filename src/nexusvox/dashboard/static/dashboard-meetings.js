@@ -288,12 +288,7 @@ meetingDictationToggle.addEventListener("change", async () => {
 });
 
 function renderMeetingHotkey(s) {
-  const keycaps = document.getElementById("meeting-hotkey-keycaps");
-  keycaps.replaceChildren();
-  describeHotkey(s.meeting_modifiers, s.meeting_key).split("+").forEach((name, i) => {
-    if (i) keycaps.append(Object.assign(document.createElement("span"), { className: "keycaps-plus", textContent: "+" }));
-    keycaps.append(Object.assign(document.createElement("kbd"), { textContent: name }));
-  });
+  renderKeycapsInto(document.getElementById("meeting-hotkey-keycaps"), s.meeting_modifiers, s.meeting_key);
   if (!meetingHotkeyKey.options.length) {
     for (const k of s.hotkey_key_options || []) meetingHotkeyKey.append(new Option(k.replace("_", " "), k));
   }

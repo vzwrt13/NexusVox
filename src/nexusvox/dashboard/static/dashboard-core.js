@@ -101,6 +101,11 @@ let FEATURES = {};
 // Resolves when the flags are known; started at page load next to the other loaders, awaited where one is needed.
 let featuresReady = Promise.resolve();
 
+// The page start's loadSettings (it also loads the model list) and the settings it fetched, so Home does not ask
+// for the same data a second time while the page starts.
+let settingsReady = Promise.resolve();
+let lastSettings = null;
+
 // ── API Helper ───────────────────────────────────────────────────────
 function dateParams() {
   const start = document.getElementById("filter-start").value;
@@ -263,10 +268,16 @@ function openExtensionPanel(id) {
 
 function restoreTabFromHash() {
   const [name, page] = window.location.hash.replace(/^#/, "").split("/"); // "#settings/models": tab and page
-  if (!name) return;
+  // No hash, or one for a tab that is off, opens Home.
+  if (!name) {
+    activateTab("home");
+    return;
+  }
   // A hash for a tab that is off (an experimental one, or an extension that is gone) must not stay in the URL.
-  if (!activateTab(name)) history.replaceState(null, "", window.location.pathname + window.location.search);
-  else if (TAB_ALIASES[name]) history.replaceState(null, "", "#" + TAB_ALIASES[name]);
+  if (!activateTab(name)) {
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+    activateTab("home");
+  } else if (TAB_ALIASES[name]) history.replaceState(null, "", "#" + TAB_ALIASES[name]);
   else if (name === "settings" && page) showSettingsPageBySlug(page);
 }
 

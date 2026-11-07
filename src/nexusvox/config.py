@@ -192,12 +192,12 @@ def with_hardware_defaults(config: Config) -> Config:
     return config
 
 
-# The default before -1: every config the app saved then holds it, so it is the old default, not a choice.
+# The default before "60m": every config the app saved then holds it, so it is the old default, not a choice.
 _OLD_LLM_KEEP_ALIVE = "10m"
 
 
 def _llm_keep_alive(llm_data: dict) -> str:
-    """`[llm].keep_alive`: the old default "10m" becomes the new one (-1: loaded while the app runs); any other
+    """`[llm].keep_alive`: the old default "10m" becomes the new one ("60m", renewed while the app runs); any other
     saved value is the user's own and stays. Written back on the next save."""
     value = str(llm_data.get("keep_alive", LlmConfig.keep_alive))
     return LlmConfig.keep_alive if value == _OLD_LLM_KEEP_ALIVE else value

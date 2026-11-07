@@ -20,6 +20,8 @@ from ..dictation.edit_watch import EditWatcher
 from ..dictation.hotkey import HotkeyListener, MeetingHotkey, describe_hotkey
 from ..dictation.overlay import Overlay
 from ..extensions import load_extensions
+from ..llm import start_renewal as llm_start_renewal
+from ..llm import stop_renewal as llm_stop_renewal
 from ..llm import unload_all as llm_unload_all
 from ..llm import warm_up as llm_warm_up
 from ..storage.db import Database
@@ -223,6 +225,7 @@ class NexusVoxApp(
             if self._config.mic_guard.enabled:
                 await self._loop.run_in_executor(None, self._mic_guard.warm_up)
 
+        llm_start_renewal(lambda: self._config.llm)  # keeps a loaded model loaded; loads nothing
         if self._config.cleanup.level != "off":
             # Auto cleanup gives up after [cleanup].timeout_s; a cold model would cost the first dictations.
             llm_warm_up(self._config.llm)
@@ -282,7 +285,8 @@ class NexusVoxApp(
         if self._mic_guard is not None:
             self._mic_guard.release()
         await self._transcriber.disconnect()
-        # The model stays loaded while the app runs ([llm].keep_alive = -1); give its memory back on quit.
+        # The model stays loaded while the app runs (renewed hourly); give its memory back on quit.
+        llm_stop_renewal()
         await asyncio.get_running_loop().run_in_executor(None, llm_unload_all, self._config.llm)
 
     def run(self) -> None:

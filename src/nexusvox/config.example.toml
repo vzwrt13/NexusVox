@@ -259,11 +259,12 @@ protocol = "ollama"
 # Sent as a Bearer token when set (cloud or protected servers). Leave empty for local ones.
 api_key = ""
 timeout_s = 60.0
-# Ollama only: how long the model stays loaded after a request. "-1" keeps it loaded while NexusVox
-# runs, so no dictation loses its cleanup after a pause; NexusVox unloads the model it loaded itself
-# when you quit. A duration such as "10m" frees the VRAM sooner (the speech model needs its share),
-# but the first request after unloading takes 10-50 s.
-keep_alive = "-1"
+# Ollama only: how long the model stays loaded after a request. "60m" is renewed in the background
+# while NexusVox runs, so no dictation loses its cleanup after a pause; after a crash the model
+# expires on its own within the hour, and NexusVox unloads the models it uses when you quit.
+# A shorter duration frees the VRAM sooner (the speech model needs its share), but the first
+# request after unloading takes 10-50 s. "-1" never expires (not renewed, not released after a crash).
+keep_alive = "60m"
 
 # Extra servers you saved in the dashboard (Settings > Models > Add custom server). Their models are listed in
 # the language model dropdown, grouped by server; picking one copies that server's url, protocol and api_key

@@ -96,9 +96,20 @@ def _headers(config: LlmConfig) -> dict[str, str]:
     return headers
 
 
-def _never_expires(config: LlmConfig) -> bool:
-    value = _keep_alive_value(config.keep_alive)
-    return isinstance(value, int | float) and value < 0
+_DURATION_RE = re.compile(r"(\d+(?:\.\d+)?)(h|m|s)")
+_UNIT_S = {"h": 3600.0, "m": 60.0, "s": 1.0}
+
+
+def _keep_alive_seconds(keep_alive: str) -> float | None:
+    """The keep_alive as seconds; None for "never" (negative), "unload now" (0) or what cannot be read."""
+    value = _keep_alive_value(keep_alive)
+    if isinstance(value, int | float):
+        return float(value) if value > 0 else None
+    text = value.strip()
+    parts = _DURATION_RE.findall(text)
+    if not parts or "".join(f"{n}{u}" for n, u in parts) != text:
+        return None
+    return sum(float(n) * _UNIT_S[u] for n, u in parts) or None
 
 
 @contextmanager
@@ -196,7 +207,7 @@ def _log_request(config: LlmConfig, started: float, outcome: str) -> None:
 def _send(config: LlmConfig, system: str, user: str) -> str:
     started = time.monotonic()
     headers = _headers(config)
-    if config.protocol == "ollama" and _never_expires(config):
+    if config.protocol == "ollama" and _keep_alive_value(config.keep_alive) != 0:
         _note_pinned(config)
     deadline = time.monotonic() + config.timeout_s  # one deadline for the request and a retry together
     try:
@@ -276,9 +287,9 @@ def warm_up(config: LlmConfig) -> None:
 
 _reload_lock = threading.Lock()
 _reloading: set[tuple[str, str]] = set()  # (url, model) with a reload in flight
-# Every (url, model) this app sent a never-expire request to, noted before the first one goes out so that a load
-# still in flight is covered too. The value says who loaded it: True when it was not loaded yet (the app's own),
-# False when it already was (the user's session, e.g. `ollama run`).
+# Every (url, model) this app sent a keep-loaded request to (keep_alive other than 0), noted before the first
+# one goes out so that a load still in flight is covered too. The value says who loaded it: True when it was not
+# loaded yet (the app's own), False when it already was (the user's session, e.g. `ollama run`).
 _pinned: dict[tuple[str, str], bool] = {}
 _UNLOAD_TIMEOUT_S = 3.0
 # What Ollama itself uses; a model the user had loaded goes back to expiring like that, instead of being unloaded.
@@ -374,6 +385,81 @@ def unload_all(config: LlmConfig) -> None:
                 config, url=url, model=model, protocol="ollama", api_key=config.api_key if same_server else ""
             )
         )
+
+
+# The expiry is renewed after this share of the keep_alive has passed (60m: every 50 minutes).
+_RENEW_SHARE = 5 / 6
+_MIN_RENEW_INTERVAL_S = 30.0
+_renew_stop = threading.Event()
+_renew_thread: threading.Thread | None = None
+
+
+def _renew_interval(config: LlmConfig) -> float | None:
+    seconds = _keep_alive_seconds(config.keep_alive)
+    return None if seconds is None else max(seconds * _RENEW_SHARE, _MIN_RENEW_INTERVAL_S)
+
+
+def renew_once(config: LlmConfig) -> int:
+    """Restart the keep_alive clock of every model this app uses that Ollama still holds, with a load-only request
+    (`/api/generate`, no prompt). A model that is not loaded is skipped, never loaded: the reload after the next
+    timeout covers that. Skipped for a keep_alive that is never or now. Never raises; returns how many were renewed."""
+    value = _keep_alive_value(config.keep_alive)
+    if config.protocol != "ollama" or _keep_alive_seconds(config.keep_alive) is None:
+        return 0
+    with _reload_lock:
+        keys = list(_pinned)
+    renewed = 0
+    for url, model in keys:
+        target = dataclasses.replace(
+            config,
+            url=url,
+            model=model,
+            protocol="ollama",
+            api_key=config.api_key if url == config.url.rstrip("/") else "",
+        )
+        if loaded_model(target, model) is None:
+            continue
+        request = urllib.request.Request(
+            f"{url}/api/generate",
+            json.dumps({"model": model, "keep_alive": value}).encode("utf-8"),
+            _headers(target),
+            method="POST",
+        )
+        try:
+            _post(request, _UNLOAD_TIMEOUT_S * 2)
+            renewed += 1
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError) as exc:
+            logger.info("Language model %s could not be kept loaded (%s)", model, exc)
+    return renewed
+
+
+def start_renewal(get_config) -> None:
+    """Renew the models' expiry in the background while the app runs. *get_config* returns the live `LlmConfig`,
+    read at every round, so a changed keep_alive applies without a restart. Idempotent."""
+    global _renew_thread
+    if _renew_thread is not None and _renew_thread.is_alive():
+        return
+    _renew_stop.clear()
+
+    def run() -> None:
+        while True:
+            config = get_config()
+            if _renew_stop.wait(_renew_interval(config) or 600.0):  # never/now: look again in ten minutes
+                return
+            config = get_config()
+            if _renew_interval(config) is not None:
+                renew_once(config)
+
+    _renew_thread = threading.Thread(target=run, daemon=True, name="llm-renew")
+    _renew_thread.start()
+
+
+def stop_renewal() -> None:
+    """Stop the renewal timer (quit); waits briefly for a round in progress."""
+    _renew_stop.set()
+    thread = _renew_thread
+    if thread is not None and thread.is_alive():
+        thread.join(2.0)
 
 
 def reload_unless_loaded(config: LlmConfig) -> bool:

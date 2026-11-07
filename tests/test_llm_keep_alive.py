@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 
 import pytest
 
@@ -45,9 +46,14 @@ def _request(monkeypatch, config: LlmConfig, already_loaded: bool = False) -> No
     llm.complete(config, "system", "user")
 
 
-def test_the_default_keeps_the_model_loaded_and_goes_out_as_a_number(server):
-    assert LlmConfig().keep_alive == "-1"
+def test_the_default_is_an_hour_that_the_app_renews(server):
+    assert LlmConfig().keep_alive == "60m"
     llm.complete(LlmConfig(), "system", "user")
+    assert server.bodies[0]["keep_alive"] == "60m"
+
+
+def test_a_never_expire_value_goes_out_as_a_number(server):
+    llm.complete(LlmConfig(keep_alive="-1"), "system", "user")
     assert server.bodies[0]["keep_alive"] == -1  # a string "-1" is rejected by Ollama
 
 
@@ -59,12 +65,12 @@ def test_a_user_set_duration_is_sent_unchanged(server):
 @pytest.mark.parametrize(
     ("saved", "loaded"),
     [
-        ('keep_alive = "10m"', "-1"),  # the old default, saved by every earlier version
+        ('keep_alive = "10m"', "60m"),  # the old default, saved by every earlier version
         ('keep_alive = "30m"', "30m"),
         ('keep_alive = "24h"', "24h"),
         ("keep_alive = 0", "0"),
-        ('keep_alive = "-1"', "-1"),
-        ("", "-1"),  # key missing
+        ('keep_alive = "-1"', "-1"),  # the user's own, stays
+        ("", "60m"),  # key missing
     ],
 )
 def test_the_old_default_migrates_and_a_chosen_value_stays(tmp_path, monkeypatch, saved, loaded):
@@ -80,7 +86,7 @@ def test_the_old_default_migrates_and_a_chosen_value_stays(tmp_path, monkeypatch
 def test_a_fresh_config_uses_the_new_default(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     save_config(Config())
-    assert load_config().llm.keep_alive == "-1"
+    assert load_config().llm.keep_alive == "60m"
 
 
 def test_quit_unloads_a_model_the_app_loaded_whatever_loaded_it(server, monkeypatch):
@@ -141,8 +147,8 @@ def test_nothing_is_unloaded_for_other_protocols(server):
     assert not llm._pinned
 
 
-def test_a_finite_keep_alive_pins_nothing(server):
-    llm.complete(LlmConfig(keep_alive="10m"), "system", "user")
+def test_unload_now_notes_nothing(server):
+    llm.complete(LlmConfig(keep_alive="0"), "system", "user")
     assert not llm._pinned
 
 
@@ -187,3 +193,89 @@ def test_switching_the_model_releases_the_old_one(flask_client, server, monkeypa
 def test_picking_a_model_in_the_grouped_dropdown_releases_the_old_one(flask_client, server, monkeypatch):
     payload = {"url": "http://127.0.0.1:11434", "model": "other:1b"}
     _switch(flask_client, server, monkeypatch, "/api/settings/llm-select", payload)
+
+
+# -- the renewal timer ------------------------------------------------------------------------------
+
+
+class Ollama:
+    """A fake Ollama: /api/ps lists `loaded`, every POST is recorded as (path, body)."""
+
+    def __init__(self, loaded: set[str]):
+        self.loaded, self.posts = loaded, []
+
+    def __call__(self, request, timeout=None):
+        import io
+
+        if isinstance(request, str):  # /api/ps
+            models = [{"name": m, "size": 5, "size_vram": 5} for m in sorted(self.loaded)]
+            return io.BytesIO(json.dumps({"models": models}).encode())
+        self.posts.append((request.full_url.rsplit("/api/", 1)[1], json.loads(request.data)))
+        return io.BytesIO(b'{"message": {"content": "OK"}}')
+
+
+@pytest.fixture
+def ollama(monkeypatch):
+    llm._pinned.clear()
+    fake = Ollama({"a:1b"})
+    monkeypatch.setattr(llm.urllib.request, "urlopen", fake)
+    yield fake
+    llm._pinned.clear()
+    llm.stop_renewal()
+
+
+def test_the_timer_renews_a_model_that_is_still_loaded(ollama):
+    llm._pinned[("http://127.0.0.1:11434", "a:1b")] = True
+    assert llm.renew_once(LlmConfig(model="a:1b")) == 1
+    assert ollama.posts == [("generate", {"model": "a:1b", "keep_alive": "60m"})]  # load-only: no prompt
+
+
+def test_the_timer_never_loads_a_model_ollama_dropped(ollama):
+    llm._pinned[("http://127.0.0.1:11434", "gone:1b")] = True
+    assert llm.renew_once(LlmConfig(model="gone:1b")) == 0
+    assert ollama.posts == []
+
+
+def test_the_timer_renews_with_a_custom_value(ollama):
+    llm._pinned[("http://127.0.0.1:11434", "a:1b")] = True
+    llm.renew_once(LlmConfig(keep_alive="30m"))
+    assert ollama.posts[0][1]["keep_alive"] == "30m"
+
+
+@pytest.mark.parametrize("value", ["-1", "0", "forever"])
+def test_the_timer_skips_a_never_or_now_value(ollama, value):
+    llm._pinned[("http://127.0.0.1:11434", "a:1b")] = True
+    assert llm.renew_once(LlmConfig(keep_alive=value)) == 0
+    assert ollama.posts == []
+
+
+def test_only_the_ollama_protocol_is_renewed(ollama):
+    llm._pinned[("http://127.0.0.1:11434", "a:1b")] = True
+    assert llm.renew_once(LlmConfig(protocol="openai")) == 0
+
+
+@pytest.mark.parametrize(
+    ("value", "seconds"),
+    [("60m", 3600), ("1h30m", 5400), ("90s", 90), ("300", 300), ("-1", None), ("0", None), ("x", None)],
+)
+def test_keep_alive_durations(value, seconds):
+    assert llm._keep_alive_seconds(value) == seconds
+
+
+def test_the_renewal_runs_every_fifty_minutes_and_stops_on_quit(ollama, monkeypatch):
+    assert llm._renew_interval(LlmConfig()) == 3000.0
+    assert llm._renew_interval(LlmConfig(keep_alive="-1")) is None
+    llm._pinned[("http://127.0.0.1:11434", "a:1b")] = True
+    config = LlmConfig(keep_alive="1m")
+    monkeypatch.setattr(llm, "_MIN_RENEW_INTERVAL_S", 0.05)
+    monkeypatch.setattr(llm, "_RENEW_SHARE", 0.001)  # a round every ~0.06 s
+    llm.start_renewal(lambda: config)
+    deadline = time.monotonic() + 5
+    while not ollama.posts and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert ollama.posts
+    llm.stop_renewal()
+    assert not llm._renew_thread.is_alive()
+    count = len(ollama.posts)
+    time.sleep(0.3)
+    assert len(ollama.posts) == count  # quit stopped the timer

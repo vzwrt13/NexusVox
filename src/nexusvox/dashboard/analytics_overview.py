@@ -288,6 +288,52 @@ def get_model_speed(session_factory: sessionmaker, *, start: str | None = None, 
     return result
 
 
+# The device of a "Transcription speed by model" row whose dictation was saved before the device was stored.
+UNKNOWN_DEVICE = "unknown"
+
+
+def get_transcription_speed(
+    session_factory: sessionmaker, *, start: str | None = None, end: str | None = None
+) -> list[dict]:
+    """Per transcription model and device: dictations, the median transcription time, the median real-time factor.
+
+    Dictations only (no command or polish rows), from stored data: a row needs its `model` and its
+    `transcribe_ms`, otherwise it is left out. A row from before the device was stored counts under
+    `UNKNOWN_DEVICE`, so older history shows. The real-time factor is `transcribe_ms / duration_ms` per
+    dictation (below 1 is faster than speaking); a dictation without duration has none and only counts and
+    adds its time. Most dictations first, ties by model, device.
+    """
+    with session_factory() as session:
+        query = session.query(
+            Transcription.model,
+            Transcription.transcribe_device,
+            Transcription.transcribe_ms,
+            Transcription.duration_ms,
+        )
+        rows = (
+            _dictations(query, start, end)
+            .filter(Transcription.model.isnot(None), Transcription.transcribe_ms.isnot(None))
+            .all()
+        )
+    groups: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for model, device, transcribe_ms, duration_ms in rows:
+        groups.setdefault((model, device or UNKNOWN_DEVICE), []).append((transcribe_ms, duration_ms))
+    result = []
+    for (model, device), items in groups.items():
+        factors = [ms / duration for ms, duration in items if duration > 0]
+        result.append(
+            {
+                "model": model,
+                "device": device,
+                "count": len(items),
+                "median_ms": round(statistics.median(ms for ms, _ in items)),
+                "median_rtf": round(statistics.median(factors), 2) if factors else None,
+            }
+        )
+    result.sort(key=lambda r: (-r["count"], r["model"], r["device"]))
+    return result
+
+
 def _speaker_count(words_json: str | None) -> int:
     """Distinct speakers in a stored `words` JSON; 0 when there is no word list or no speaker detection ran."""
     try:

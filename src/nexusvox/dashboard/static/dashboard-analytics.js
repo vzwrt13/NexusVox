@@ -328,7 +328,7 @@ document.getElementById("btn-clear-dates").addEventListener("click", () => {
 
 // ── Analytics Loading ────────────────────────────────────────────────
 async function loadAnalytics() {
-  const [overview, lang, hours, words, heatmap, models, apps, speed] = await Promise.all([
+  const [overview, lang, hours, words, heatmap, models, apps, speed, transcription] = await Promise.all([
     api("/api/overview"),
     api("/api/language-distribution"),
     api("/api/peak-usage-hours"),
@@ -337,6 +337,7 @@ async function loadAnalytics() {
     api("/api/model-breakdown"),
     api("/api/app-breakdown"),
     api("/api/model-speed"),
+    api("/api/transcription-speed"),
   ]);
 
   renderOverview(overview);
@@ -347,6 +348,7 @@ async function loadAnalytics() {
   renderModelBreakdown(models);
   renderAppBreakdown(apps);
   renderModelSpeed(speed);
+  renderTranscriptionSpeed(transcription);
   loadTimeline();
 }
 
@@ -614,7 +616,7 @@ function renderModelBreakdown(rows) {
 
 // ── Speed By Model ───────────────────────────────────────────────────
 const SPEED_LEVELS = { light: "Cleanup, light", medium: "Cleanup, medium", polish: "Polish" };
-const SPEED_DEVICES = { cpu: "CPU", gpu: "GPU", local: "Local server", remote: "Remote server" };
+const SPEED_DEVICES = { cpu: "CPU", gpu: "GPU", local: "Local server", remote: "Remote server", unknown: "Unknown" };
 
 function renderModelSpeed(rows) {
   const body = document.getElementById("model-speed");
@@ -631,6 +633,25 @@ function renderModelSpeed(rows) {
         <td>${r.count}</td>
         <td>${r.median_ms != null ? formatDuration(r.median_ms) : "--"}</td>
         <td>${Math.round(r.timeout_share * 100)}%</td>
+      </tr>`
+    )
+    .join("");
+}
+
+function renderTranscriptionSpeed(rows) {
+  const body = document.getElementById("transcription-speed");
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="5" class="empty-state">No timed dictations yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows
+    .map(
+      (r) => `<tr>
+        <td>${escapeHtml(r.model)}</td>
+        <td>${escapeHtml(SPEED_DEVICES[r.device] || r.device)}</td>
+        <td>${r.count}</td>
+        <td>${formatDuration(r.median_ms)}</td>
+        <td>${r.median_rtf != null ? r.median_rtf.toFixed(2) : "--"}</td>
       </tr>`
     )
     .join("");

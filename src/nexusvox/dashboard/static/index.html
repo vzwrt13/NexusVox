@@ -845,6 +845,26 @@
           </div>
         </div>
         <div class="chart-card wide">
+          <h3>Transcription speed by model</h3>
+          <p class="hint">How long the speech recognition took per model and device, and its real-time factor (time
+            taken divided by the length of the dictation; below 1 is faster than speaking). Dictations from before
+            the device was stored show "Unknown".</p>
+          <div class="table-wrap">
+            <table class="model-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Transcribed on</th>
+                  <th>Dictations</th>
+                  <th>Median time</th>
+                  <th>Real-time factor</th>
+                </tr>
+              </thead>
+              <tbody id="transcription-speed"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="chart-card wide">
           <h3>By App</h3>
           <div class="table-wrap">
             <table class="model-table">

@@ -59,6 +59,7 @@ def test_every_chart_and_table_is_still_on_the_charts_view():
         "model-breakdown",
         "app-breakdown",
         "model-speed",
+        "transcription-speed",
         "chart-accuracy",
         "dictionary-usage",
         "chart-words",

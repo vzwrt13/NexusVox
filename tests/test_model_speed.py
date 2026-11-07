@@ -6,7 +6,7 @@ import sqlite3
 from datetime import UTC, datetime
 
 from nexusvox.config import CleanupConfig, CustomServerConfig, DatabaseConfig, InferenceConfig, LlmConfig
-from nexusvox.dashboard.analytics import get_model_speed
+from nexusvox.dashboard.analytics import get_model_speed, get_transcription_speed
 from nexusvox.dictation.cleanup import cleanup
 from nexusvox.storage.db import Database
 from nexusvox.storage.models import COMMAND_APP, Transcription
@@ -285,6 +285,123 @@ def test_the_overview_counts_skipped_cleanups(session_factory):
     result = get_overview(session_factory)
 
     assert (result["cleanup_skipped"], result["cleanup_failed"]) == (1, 1)
+
+
+# ---- Transcription speed by model --------------------------------------------------------------
+
+
+def _dictation(model="parakeet", device="local", transcribe_ms=300, duration_ms=3000, **extra):
+    row = {
+        "text": "a",
+        "language": "en",
+        "duration_ms": duration_ms,
+        "created_at": datetime.now(UTC).replace(tzinfo=None),
+        "model": model,
+        "transcribe_device": device,
+        "transcribe_ms": transcribe_ms,
+    }
+    row.update(extra)
+    return row
+
+
+def test_transcription_speed_groups_by_model_and_device(session_factory):
+    _seed(
+        session_factory,
+        [
+            _dictation(transcribe_ms=200),
+            _dictation(transcribe_ms=400),
+            _dictation(transcribe_ms=900),
+            _dictation(device="cpu", transcribe_ms=2500),
+            _dictation(model="whisper", device="cpu", transcribe_ms=1500),
+        ],
+    )
+
+    rows = get_transcription_speed(session_factory)
+
+    assert [(r["model"], r["device"], r["count"], r["median_ms"]) for r in rows] == [
+        ("parakeet", "local", 3, 400),
+        ("parakeet", "cpu", 1, 2500),
+        ("whisper", "cpu", 1, 1500),
+    ]
+
+
+def test_the_real_time_factor_is_the_median_of_time_over_duration(session_factory):
+    _seed(
+        session_factory,
+        [
+            _dictation(transcribe_ms=300, duration_ms=3000),  # 0.1
+            _dictation(transcribe_ms=1000, duration_ms=2000),  # 0.5
+            _dictation(transcribe_ms=3000, duration_ms=2000),  # 1.5
+        ],
+    )
+
+    [row] = get_transcription_speed(session_factory)
+
+    assert (row["median_rtf"], row["median_ms"]) == (0.5, 1000)
+
+
+def test_a_dictation_without_duration_counts_but_has_no_factor(session_factory):
+    _seed(session_factory, [_dictation(duration_ms=0), _dictation(transcribe_ms=600, duration_ms=1200)])
+
+    [row] = get_transcription_speed(session_factory)
+
+    assert (row["count"], row["median_rtf"]) == (2, 0.5)
+    _seed(session_factory, [_dictation(model="only-zero", duration_ms=0)])
+    assert next(r for r in get_transcription_speed(session_factory) if r["model"] == "only-zero")["median_rtf"] is None
+
+
+def test_older_rows_without_a_device_show_as_unknown(session_factory):
+    _seed(session_factory, [_dictation(device=None), _dictation(device=None), _dictation(device="local")])
+
+    rows = get_transcription_speed(session_factory)
+
+    assert [(r["device"], r["count"]) for r in rows] == [("unknown", 2), ("local", 1)]
+
+
+def test_rows_without_a_time_or_a_model_are_left_out(session_factory):
+    _seed(
+        session_factory,
+        [
+            _dictation(transcribe_ms=None),
+            _dictation(model=None),
+            _dictation(),
+        ],
+    )
+
+    assert [r["count"] for r in get_transcription_speed(session_factory)] == [1]
+
+
+def test_transcription_speed_is_for_dictations_only(session_factory):
+    _seed(
+        session_factory,
+        [
+            _dictation(),
+            _dictation(app=COMMAND_APP),  # a voice command ran instead of typing
+            _dictation(polish_status="applied", polish_ms=500),  # polish on selected text
+        ],
+    )
+
+    assert [r["count"] for r in get_transcription_speed(session_factory)] == [1]
+
+
+def test_transcription_speed_follows_the_date_range(session_factory):
+    _seed(session_factory, [_dictation(created_at=datetime(2020, 1, 1, 12, 0)), _dictation()])
+
+    assert get_transcription_speed(session_factory, start="2020-01-01", end="2020-01-02")[0]["count"] == 1
+    assert get_transcription_speed(session_factory)[0]["count"] == 2
+
+
+def test_the_transcription_speed_endpoint(flask_client, db):
+    db.save_transcription("hello", "en", 2000, model="parakeet", transcribe_ms=500, transcribe_device="cpu")
+    db.save_transcription("old row", "en", 1000, model="parakeet", transcribe_ms=300)
+
+    resp = flask_client.get("/api/transcription-speed")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == [
+        {"model": "parakeet", "device": "cpu", "count": 1, "median_ms": 500, "median_rtf": 0.25},
+        {"model": "parakeet", "device": "unknown", "count": 1, "median_ms": 300, "median_rtf": 0.3},
+    ]
 
 
 def test_only_timeouts_leave_no_median(session_factory):

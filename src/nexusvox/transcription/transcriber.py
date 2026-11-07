@@ -153,10 +153,10 @@ class BaseTranscriber(ABC):
 
     model: str
     needs_docker: bool = True
-    # Where the recognition runs, stored with each dictation: "gpu" (the Docker server on this PC), "cpu"
-    # (in-process) or "remote" (a server the app does not run itself: the custom server wherever it is, or the
-    # Docker server's address when that is not this PC).
-    device: str = "gpu"
+    # Where the recognition runs, stored with each dictation, only as far as the app knows it for sure:
+    # "cpu" (in-process on the CPU), "gpu" (in-process on the GPU), "local" (a server on this PC, the Docker
+    # server included: that does not prove a GPU) or "remote" (a server at an address that is not this PC).
+    device: str = "local"
     # True when the app should call `warm_up()` in the background at start and after a switch to this engine.
     warms_up_at_start: bool = False
     # True when the engine can report per-word timing; `word_timestamps` then asks for it.
@@ -539,5 +539,4 @@ def _create_custom_transcriber(config: InferenceConfig) -> BaseTranscriber:
         transcriber = OpenAIHttpTranscriber(server_config)
     transcriber.model = custom.model_name
     transcriber.needs_docker = False
-    transcriber.device = "remote"  # a server the user runs, even on this PC: the app cannot tell what it runs on
     return transcriber

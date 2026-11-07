@@ -128,6 +128,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         "cleanup_rejected": cleanup_counts.get("rejected", 0),
         "cleanup_timeouts": cleanup_counts.get("timeout", 0),
         "cleanup_failed": cleanup_counts.get("failed", 0),
+        "cleanup_skipped": cleanup_counts.get("skipped", 0),
         "avg_cleanup_ms": round(avg_cleanup_ms) if avg_cleanup_ms is not None else None,
         **command_rows,
     }
@@ -139,6 +140,7 @@ _EMPTY_CLEANUP = {
     "cleanup_rejected": 0,
     "cleanup_timeouts": 0,
     "cleanup_failed": 0,
+    "cleanup_skipped": 0,
     "avg_cleanup_ms": None,
 }
 
@@ -236,7 +238,8 @@ def get_model_speed(session_factory: sessionmaker, *, start: str | None = None, 
     """Per language model, server, level and transcription device: passes, the median time, the timeout share.
 
     From the stored rows only: a dictation whose cleanup sent a request to a model, and a polish attempt that
-    did (an extension handled it: no model; a cleanup skipped while the model reloaded sent nothing). Rows from
+    did (an extension handled it: no model; a cleanup skipped while the model reloaded sent nothing and is
+    ignored). Rows from
     before the model was stored have no `llm_model` and are left out. `level` is "light" / "medium" for cleanup
     and `POLISH_LEVEL` for polish; `server` is the `host:port` of the model's server, so one model name on two
     servers stays two rows; `device` is the transcription device ("cpu", "gpu", "remote") or None, and always
@@ -264,7 +267,7 @@ def get_model_speed(session_factory: sessionmaker, *, start: str | None = None, 
             status, ms = c_status, c_ms
         else:
             continue
-        if level is None:
+        if level is None or status == "skipped":  # a skipped pass sent no request: it says nothing about the model
             continue
         groups.setdefault((model, _server_of(url), level, device), []).append((status, ms))
     result = []

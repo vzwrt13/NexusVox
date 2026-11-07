@@ -392,6 +392,7 @@ function renderOverview(d) {
   if (d.cleanup_timeouts) cleanParts.push(d.cleanup_timeouts + " timed out");
   if (d.cleanup_rejected) cleanParts.push(d.cleanup_rejected + " rejected");
   if (d.cleanup_failed) cleanParts.push(d.cleanup_failed + " failed");
+  if (d.cleanup_skipped) cleanParts.push(d.cleanup_skipped + " skipped");
   document.getElementById("stat-cleaned-label").textContent =
     "Cleaned Up" + (cleanParts.length ? " (" + cleanParts.join(", ") + ")" : "");
 
@@ -613,7 +614,7 @@ function renderModelBreakdown(rows) {
 
 // ── Speed By Model ───────────────────────────────────────────────────
 const SPEED_LEVELS = { light: "Cleanup, light", medium: "Cleanup, medium", polish: "Polish" };
-const SPEED_DEVICES = { cpu: "CPU", gpu: "GPU", remote: "Remote server" };
+const SPEED_DEVICES = { cpu: "CPU", gpu: "GPU", local: "Local server", remote: "Remote server" };
 
 function renderModelSpeed(rows) {
   const body = document.getElementById("model-speed");

@@ -250,7 +250,7 @@ class AutoParakeetTranscriber(BaseTranscriber):
             reachable = await asyncio.get_running_loop().run_in_executor(None, probe_server, self._health_url)
             self._apply(reachable)
         self.model = self._gpu.model if self._engine == GPU else self._cpu_transcriber().model
-        self.device = self._gpu.device if self._engine == GPU else CPU
+        self.device = self._gpu.device if self._engine == GPU else CPU  # the server's: local or remote
 
     # ---- Properties that follow the engine ----------------------------------
 

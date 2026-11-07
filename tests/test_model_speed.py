@@ -108,13 +108,26 @@ def test_cleanup_that_never_asked_names_no_model():
 
 
 def test_the_transcription_device_follows_the_backend():
-    assert create_transcriber(InferenceConfig(model="parakeet-tdt-0.6b"), device="cuda").device == "gpu"
+    assert create_transcriber(InferenceConfig(model="parakeet-tdt-0.6b"), device="cuda").device == "local"
     assert create_transcriber(InferenceConfig(model="parakeet-tdt-0.6b"), device="cpu").device == "cpu"
     assert create_transcriber(InferenceConfig(model="whisper-large-v3-turbo"), device="cpu").device == "cpu"
     far = InferenceConfig(model="parakeet-tdt-0.6b", server_url="http://gpubox:8002/v1/audio/transcriptions")
     assert create_transcriber(far, device="cuda").device == "remote"
     custom = InferenceConfig(model="custom-server", custom=CustomServerConfig(url="http://localhost:9/v1"))
-    assert create_transcriber(custom, device="cuda").device == "remote"  # a server the app does not run
+    assert create_transcriber(custom, device="cuda").device == "local"  # judged by its address, like the Docker server
+    abroad = InferenceConfig(model="custom-server", custom=CustomServerConfig(url="https://stt.example.com/v1"))
+    assert create_transcriber(abroad, device="cuda").device == "remote"
+
+
+def test_an_engine_in_the_app_says_the_device_it_runs_on():
+    from nexusvox.config import resolve_compute_type
+    from nexusvox.transcribers.local_whisper import LocalWhisperTranscriber
+
+    config = InferenceConfig(model="whisper-large-v3-turbo")
+    assert (
+        LocalWhisperTranscriber(config, device="cuda", compute_type=resolve_compute_type("cuda", None)).device == "gpu"
+    )
+    assert LocalWhisperTranscriber(config, device="cpu", compute_type="int8").device == "cpu"
 
 
 def test_the_pc_knows_its_own_host_name():
@@ -245,7 +258,33 @@ def test_a_cleanup_skipped_while_the_model_reloads_is_no_pass(monkeypatch):
     result = cleanup("Ähm ich komme äh heute später", CleanupConfig(level="light"), LlmConfig())
 
     assert called == []
-    assert (result.status, result.llm_model, result.llm_url, result.level) == ("failed", None, None, None)
+    assert (result.status, result.llm_model, result.llm_url, result.level) == ("skipped", None, None, None)
+
+
+def test_skipped_passes_count_for_nothing(session_factory):
+    _seed(
+        session_factory,
+        [
+            _row(ms=300),
+            _row(status="skipped", ms=None),
+            _row(status="skipped", ms=None),
+            _row(status="timeout", ms=None),
+        ],
+    )
+
+    [row] = get_model_speed(session_factory)
+
+    assert (row["count"], row["median_ms"], row["timeout_share"]) == (2, 300, 0.5)
+
+
+def test_the_overview_counts_skipped_cleanups(session_factory):
+    from nexusvox.dashboard.analytics import get_overview
+
+    _seed(session_factory, [_row(status="skipped", ms=None), _row(status="failed", ms=None)])
+
+    result = get_overview(session_factory)
+
+    assert (result["cleanup_skipped"], result["cleanup_failed"]) == (1, 1)
 
 
 def test_only_timeouts_leave_no_median(session_factory):

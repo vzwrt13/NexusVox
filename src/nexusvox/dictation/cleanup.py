@@ -34,6 +34,8 @@ MIN_WORDS = 3
 
 # `CleanupResult.error` when the model answered with something that is not the dictation cleaned up.
 IMPLAUSIBLE = "implausible reply"
+# `CleanupResult.error` when no request was sent because the model was still reloading.
+RELOADING = "the model is reloading"
 
 _COMMON = (
     "The dictation is inside <dictation> tags. It will be typed for someone else exactly as the user "
@@ -91,9 +93,12 @@ class CleanupResult:
 
     @property
     def status(self) -> str | None:
-        """How the pass ended, for the stats: applied, unchanged, rejected, timeout or failed; None if never asked."""
+        """How the pass ended, for the stats: applied, unchanged, rejected, timeout, failed or skipped (the model was
+        reloading, no request was sent); None if never asked."""
         if self.error == IMPLAUSIBLE:
             return "rejected"
+        if self.error == RELOADING:
+            return "skipped"
         if self.error:
             return "timeout" if self.timed_out else "failed"
         if self.ms is None:
@@ -136,7 +141,7 @@ def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = M
     if reload_running(llm):
         # The model is loading: a request now only waits behind the load and times out. Type at once.
         # No request is sent, so the result names no model: it is no pass of that model.
-        return CleanupResult(text, error="the model is reloading")
+        return CleanupResult(text, error=RELOADING)
     asked = {"llm_model": llm.model, "llm_url": llm.url, "level": config.level}
     started = time.monotonic()
     try:

@@ -54,7 +54,7 @@ class Transcription(Base):
     # transcript took to arrive, and how long until the text was at the cursor.
     transcribe_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Auto cleanup: how the model's pass ended ("applied", "unchanged", "rejected", "timeout", "failed")
+    # Auto cleanup: how the model's pass ended ("applied", "unchanged", "rejected", "timeout", "failed", "skipped")
     # and how long it took; both NULL when cleanup was off or the dictation too short to send.
     cleanup_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
     cleanup_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -67,9 +67,9 @@ class Transcription(Base):
     llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     llm_url: Mapped[str | None] = mapped_column(String(200), nullable=True)
     cleanup_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    # Where the transcription ran: "cpu" (in-process), "gpu" (the Docker server this app starts) or "remote" (a
-    # server it does not run: the custom server wherever it is, or a server address that is not this PC); NULL for
-    # older rows.
+    # Where the transcription ran, as far as the app knows it for sure: "cpu" or "gpu" (the engine runs in the app
+    # on that device), "local" (a server on this PC, the Docker server included: no proof of a GPU) or "remote" (a
+    # server at an address that is not this PC); NULL for older rows.
     transcribe_device: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # The process file name of the app the text was typed into ("outlook.exe"), read at paste time.
     # Never a window title; NULL for older rows, phone dictations and texts the clipboard refused;

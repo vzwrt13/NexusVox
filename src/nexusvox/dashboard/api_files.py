@@ -105,6 +105,7 @@ class FilesMixin(DashboardState):
         """
         started = time.monotonic()
         progress = job.update if job else None
+        logger.info("File transcription started: %d KB", len(file_bytes) // 1024)
         if progress:
             progress("converting")
 
@@ -166,6 +167,12 @@ class FilesMixin(DashboardState):
         except Exception as exc:
             logger.error("Saving the transcription of %s failed: %s", filename, exc)
             return {"ok": False, "error": f"Saving the transcript failed: {exc}"}
+        logger.info(
+            "Transcription saved: id=%s, kind=%s, %.1f s of audio",
+            record.id,
+            record.kind or "upload",
+            (record.duration_ms or 0) / 1000,
+        )
 
         extension_results: dict = {}
         try:

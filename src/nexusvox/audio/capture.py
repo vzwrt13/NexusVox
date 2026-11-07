@@ -16,6 +16,45 @@ from .devices import find_input_device, input_open_lock, wasapi_index
 
 logger = logging.getLogger("nexusvox.audio")
 
+# A chunk quieter than this (RMS of full scale) counts as silent: a muted or unplugged microphone reads far below it,
+# room noise of a working one stays above it.
+SILENT_DB = -60.0
+# A recording shorter than this is a tap, not evidence of a muted microphone: no silence warning for it.
+MIN_SILENCE_WARNING_S = 0.5
+
+
+def _to_db(level: float) -> float:
+    return 20 * math.log10(max(level, 1e-10))
+
+
+class RecordingLevels:
+    """Level statistics of one recording, filled chunk by chunk from the audio thread."""
+
+    def __init__(self) -> None:
+        self.chunks = 0
+        self.silent = 0
+        self.peak = 0.0  # highest chunk RMS, 0..1
+        self._power = 0.0  # sum of the chunks' mean squares
+
+    def add(self, rms: float) -> None:
+        self.chunks += 1
+        self._power += rms * rms
+        self.peak = max(self.peak, rms)
+        if _to_db(rms) < SILENT_DB:
+            self.silent += 1
+
+    @property
+    def average_db(self) -> float:
+        return _to_db(math.sqrt(self._power / self.chunks)) if self.chunks else _to_db(0.0)
+
+    @property
+    def peak_db(self) -> float:
+        return _to_db(self.peak)
+
+    @property
+    def silent_share(self) -> float:
+        return self.silent / self.chunks if self.chunks else 0.0
+
 
 class AudioCapture:
     """Captures microphone audio and yields PCM16 chunks for streaming."""
@@ -29,9 +68,12 @@ class AudioCapture:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._chunk_count = 0
         self._log_interval = 0  # set in start()
+        self._frames_per_chunk = max(1, config.chunk_size // 2)
+        self._levels = RecordingLevels()
+        self._device_name = ""  # the microphone of the running recording
         # Called from the audio thread with each chunk's RMS (0..1); must return at once.
         self.on_rms: Callable[[float], None] | None = None
-        # Asked per chunk before the RMS is computed for `on_rms`; None means always.
+        # Asked per chunk before the RMS is passed to `on_rms`; None means always.
         self.rms_wanted: Callable[[], bool] | None = None
 
     def _audio_callback(
@@ -52,13 +94,12 @@ class AudioCapture:
         self._chunk_count += 1
         log_now = self._log_interval > 0 and self._chunk_count % self._log_interval == 0
         feed = self.on_rms is not None and (self.rms_wanted is None or self.rms_wanted())
-        if feed or log_now:
-            rms = float(np.sqrt(np.mean(samples**2)))
-            if feed:
-                self.on_rms(rms)
+        rms = float(np.sqrt(np.mean(samples**2)))
+        self._levels.add(rms)
+        if feed:
+            self.on_rms(rms)
         if log_now:
-            db = 20 * math.log10(max(rms, 1e-10))
-            logger.info("Audio: chunks=%d rms=%.1fdB", self._chunk_count, db)
+            logger.debug("Audio: chunks=%d rms=%.1fdB", self._chunk_count, _to_db(rms))
 
         if self._loop is not None:
             self._loop.call_soon_threadsafe(self._queue.put_nowait, pcm_bytes)
@@ -70,10 +111,12 @@ class AudioCapture:
         # (a stream that stopped reading early) would otherwise come out as this recording's audio.
         self._queue = asyncio.Queue()
         self._chunk_count = 0
+        self._levels = RecordingLevels()
         # Calculate frames per callback to produce ~chunk_size bytes
         # Each PCM16 sample = 2 bytes, mono = 1 channel
         frames_per_chunk = self._chunk_size // 2
-        # Log audio level roughly every second
+        self._frames_per_chunk = max(1, frames_per_chunk)
+        # Log audio level roughly every second (at DEBUG)
         self._log_interval = max(1, self._sample_rate // frames_per_chunk)
 
         # Finding the device and opening the stream happen under one lock, and the stream is counted before it is
@@ -131,6 +174,7 @@ class AudioCapture:
                     logger.warning("The chosen microphone %r could not be opened (%s); using the default", name, exc)
                 continue
             logger.info("Audio device: %s, %d Hz", name, self._sample_rate)
+            self._device_name = name
             return stream
         raise error if error is not None else OSError("No microphone could be opened")
 
@@ -141,9 +185,30 @@ class AudioCapture:
             self._stream.close()
             self._stream = None
             audio_state.stream_closed()
+            self._log_summary()
         # Signal end of stream
         if self._loop is not None:
             self._loop.call_soon_threadsafe(self._queue.put_nowait, None)
+
+    def _log_summary(self) -> None:
+        """One INFO line for the recording that just ended, and a WARNING when it was silent throughout."""
+        levels = self._levels
+        if levels.chunks == 0:
+            return
+        seconds = levels.chunks * self._frames_per_chunk / self._sample_rate
+        logger.info(
+            "Audio: %.1f s, %d chunks, rms avg %.0f dB, peak %.0f dB, %.0f%% silent",
+            seconds,
+            levels.chunks,
+            levels.average_db,
+            levels.peak_db,
+            levels.silent_share * 100,
+        )
+        if levels.silent == levels.chunks and seconds >= MIN_SILENCE_WARNING_S:
+            logger.warning(
+                "Audio: the recording was silent throughout (device: %s); the microphone may be muted or the wrong one",
+                self._device_name or "unknown",
+            )
 
     async def chunks(self) -> AsyncIterator[bytes]:
         """Yield PCM16 audio chunks until stopped."""

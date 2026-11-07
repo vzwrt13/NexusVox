@@ -807,3 +807,4 @@ def save_config(config: Config, path: Path | None = None) -> None:
         ]
         # The platform's line ending, as `Path.write_text` wrote it before.
         _write_atomic(path, os.linesep.join(lines).encode("utf-8"))
+    logger.info("Settings saved")

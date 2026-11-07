@@ -169,6 +169,10 @@ class SelectionPolish:
             finally:
                 if changed:
                     (self._edit_watcher.cancel if pasted else self._edit_watcher.resume)()
+        if pasted:
+            logger.info(
+                "Polish: reply pasted (%s)", "extension" if model_ms is None else f"model answered in {model_ms} ms"
+            )
         await self._save_polish(
             recording,
             kind,

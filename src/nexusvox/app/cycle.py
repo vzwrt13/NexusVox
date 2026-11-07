@@ -410,7 +410,7 @@ class TranscriptionCycle:
             except Exception as exc:
                 logger.exception("Error streaming audio")
                 failure = exc
-        logger.info("Streamed %d audio chunks to server", count)
+        logger.debug("Streamed %d audio chunks to server", count)
         if failure is not None:
             raise failure
         return buffer

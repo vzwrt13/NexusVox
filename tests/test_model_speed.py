@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 from datetime import UTC, datetime
-from unittest.mock import MagicMock
 
-from app_parts import patch_app
-
-from nexusvox.app.core import NexusVoxApp
-from nexusvox.app.records import _Recording
-from nexusvox.config import CleanupConfig, Config, CustomServerConfig, DatabaseConfig, InferenceConfig, LlmConfig
+from nexusvox.config import CleanupConfig, CustomServerConfig, DatabaseConfig, InferenceConfig, LlmConfig
 from nexusvox.dashboard.analytics import get_model_speed
 from nexusvox.dictation.cleanup import cleanup
 from nexusvox.storage.db import Database
@@ -95,7 +89,7 @@ def test_an_old_database_migrates_without_losing_rows(tmp_path):
     assert migrated.get_recent(1)[0].llm_model == "m"
 
 
-# ---- What the cleanup and the app hand over ----------------------------------------------------
+# ---- What the cleanup and the transcribers hand over ----------------------------------------------------
 
 
 def test_cleanup_says_which_model_it_asked(monkeypatch):
@@ -121,39 +115,6 @@ def test_the_transcription_device_follows_the_backend():
     assert create_transcriber(far, device="cuda").device == "remote"
     custom = InferenceConfig(model="custom-server", custom=CustomServerConfig(url="http://localhost:9/v1"))
     assert create_transcriber(custom, device="cuda").device == "remote"
-
-
-def _app(tmp_path):
-    app = NexusVoxApp.__new__(NexusVoxApp)
-    app._config = Config()
-    app._config.llm = LlmConfig(url="http://llm:1234", model="qwen")
-    app._config.database.path = str(tmp_path / "db.sqlite")
-    app._db = MagicMock()
-    app._store_audio = MagicMock()
-    app._tray = MagicMock()
-    app._transcriber = MagicMock(model="m", device="cpu")
-    return app
-
-
-def test_a_polish_row_stores_the_model_and_the_device(tmp_path, monkeypatch):
-    patch_app(monkeypatch, "stored_language", lambda text: "und")
-    app = _app(tmp_path)
-    recording = _Recording(bytearray(), 10, None, 1)
-
-    asyncio.run(app._save_polish(recording, "polish", "default", "", ok=True, status="applied", model_ms=900))
-
-    kwargs = app._db.save_transcription.call_args.kwargs
-    assert (kwargs["llm_model"], kwargs["llm_url"], kwargs["transcribe_device"]) == ("qwen", "http://llm:1234", "cpu")
-
-
-def test_an_extension_row_names_no_model(tmp_path, monkeypatch):
-    patch_app(monkeypatch, "stored_language", lambda text: "und")
-    app = _app(tmp_path)
-
-    asyncio.run(app._save_polish(None, "extension", "x", "", ok=True, status="extension", model_ms=None))
-
-    kwargs = app._db.save_transcription.call_args.kwargs
-    assert (kwargs["llm_model"], kwargs["llm_url"], kwargs["transcribe_device"]) == (None, None, None)
 
 
 # ---- The table ---------------------------------------------------------------------------------

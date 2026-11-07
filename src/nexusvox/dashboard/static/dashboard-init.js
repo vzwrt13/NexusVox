@@ -25,7 +25,11 @@ window.addEventListener("hashchange", restoreTabFromHash);
 document.addEventListener("DOMContentLoaded", () => {
   featuresReady = loadFeatures();
   // Before the tab loaders: extensions and the hash live in core, so a tab file that failed cannot take them along.
-  Promise.all([featuresReady, loadExtensions()]).then(restoreTabFromHash);
+  Promise.all([featuresReady, loadExtensions()]).then(restoreTabFromHash).then(() => {
+    // Home is the page the dashboard opens on; a hash for another tab has switched away from it by now. A hash
+    // for Home itself already loaded it.
+    if (document.getElementById("tab-home").classList.contains("active") && !homeLoaded) openHomeTab();
+  });
   loadSettings();
   loadMeetingSettings();
 });

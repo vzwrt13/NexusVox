@@ -7,10 +7,11 @@ invented data. One command, no setup beyond the usual `pip install -e ".[dev]"`:
 python scripts/dashboard_screenshots.py
 ```
 
-It writes three PNGs to `docs/images/`:
+It writes four PNGs to `docs/images/`:
 
 | File | Tab | Image ends |
 |---|---|---|
+| `dashboard-home.png` | Home | the whole page (the page the dashboard opens on) |
 | `dashboard-analytics.png` | Analytics | below the Latency Trend chart |
 | `dashboard-recordings.png` | Recordings | one window (1280 x 860): list and detail pane |
 | `dashboard-settings.png` | Settings | the Dictation page (the page Settings opens on) |
@@ -46,7 +47,7 @@ as well. No browser-automation package is needed.
    detection), five dictionary entries and three polish presets.
 3. Serves the real dashboard on a free port on 127.0.0.1 and photographs each tab with a headless browser into a
    staging folder.
-4. Copies the three images to `--out` once all of them succeeded (a failed run never leaves a mix of old and
+4. Copies the four images to `--out` once all of them succeeded (a failed run never leaves a mix of old and
    new images), then deletes the temporary folder.
 
 ## What it never touches

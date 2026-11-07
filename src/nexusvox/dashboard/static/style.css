@@ -1373,7 +1373,7 @@ canvas { width: 100% !important; max-height: 260px; }
 
 /* Duotone icons for the built-in tabs, the Settings sub-links and the Settings section headings. Decorative:
    they are CSS backgrounds, so screen readers never see them. Tabs from extensions have no icon and keep the dot. */
-.tab:is([data-tab="settings"],[data-tab="analytics"],[data-tab="edit"],[data-tab="recordings"],[data-tab="review"],[data-tab="dev"],[data-tab="feedback"])::before {
+.tab:is([data-tab="home"],[data-tab="settings"],[data-tab="analytics"],[data-tab="edit"],[data-tab="recordings"],[data-tab="review"],[data-tab="dev"],[data-tab="feedback"])::before {
   width: 18px;
   height: 18px;
   border-radius: 0;
@@ -1382,6 +1382,7 @@ canvas { width: 100% !important; max-height: 260px; }
   background-position: center;
   background-size: contain;
 }
+.tab[data-tab="home"]::before { background-image: url("icons/duotone-home.svg"); }
 .tab[data-tab="settings"]::before { background-image: url("icons/duotone-settings.svg"); }
 .tab[data-tab="analytics"]::before { background-image: url("icons/duotone-analytics.svg"); }
 .tab[data-tab="edit"]::before { background-image: url("icons/duotone-edit.svg"); }
@@ -1415,3 +1416,58 @@ canvas { width: 100% !important; max-height: 260px; }
 #settings-card-privacy > .nexus-section-title::before { background-image: url("icons/duotone-privacy.svg"); }
 .settings-link[data-card="settings-advanced"]::before { background-image: url("icons/duotone-advanced.svg"); }
 #settings-advanced > .nexus-section-title::before { background-image: url("icons/duotone-advanced.svg"); }
+
+/* Home: status, three starting points, the newest recordings and this week, a tip. */
+.home-status { margin: 0 0 20px; font-size: 14px; }
+.home-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px; margin-bottom: 20px; }
+.home-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 20px;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.home-card h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.home-card-text { margin: 0; font-size: 13px; color: var(--text-dim); }
+.home-card-action { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.home-card-action:hover, .home-card-action:focus-visible { border-color: rgba(162, 155, 254, 0.35); background: var(--surface2); }
+.home-card-action:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+.home-card-icon { width: 28px; height: 28px; background: center / contain no-repeat; }
+.home-icon-dictation { background-image: url("icons/duotone-dictation.svg"); }
+.home-icon-meeting { background-image: url("icons/duotone-meeting.svg"); }
+.home-icon-upload { background-image: url("icons/duotone-upload.svg"); }
+.home-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 12px; margin-bottom: 20px; }
+.home-panel { min-width: 0; padding: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.home-panel-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 12px; }
+.home-panel-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.home-link { font-size: 13px; }
+.home-recent { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.home-recent-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-ctl);
+  cursor: pointer;
+}
+.home-recent-row:hover, .home-recent-row:focus-visible { background: var(--surface2); }
+.home-recent-title { font-size: 14px; }
+.home-recent-meta { font-size: 12px; color: var(--text-dim); }
+.home-week { display: flex; flex-wrap: wrap; gap: 12px 32px; }
+.home-week-stat { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.home-tip { margin: 0; font-size: 13px; color: var(--text-dim); }
+.home-tip-label { margin-right: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-light); }

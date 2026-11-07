@@ -139,6 +139,7 @@ function activateTab(name, { keepScroll = false } = {}) {
   panel.classList.add("active");
   if (!keepScroll) window.scrollTo(0, 0);
 
+  if (name === "home") openHomeTab();
   if (name === "analytics") loadAnalytics();
   if (name === "edit") loadFlaggedTranscriptions();
   if (name === "recordings") openRecordingsTab();

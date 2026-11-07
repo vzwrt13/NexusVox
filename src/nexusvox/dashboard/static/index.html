@@ -15,7 +15,8 @@
       <h1>Nexus<span class="brand-vox">Vox</span></h1>
     </div>
     <nav class="tabs">
-      <button class="tab active" data-tab="settings">Settings</button>
+      <button class="tab active" data-tab="home">Home</button>
+      <button class="tab" data-tab="settings">Settings</button>
       <button class="tab" data-tab="analytics">Analytics</button>
       <button class="tab" data-tab="edit" data-feature="flag_command" hidden>Edit</button>
       <button class="tab" data-tab="recordings">Recordings</button>
@@ -28,8 +29,64 @@
   </header>
 
   <main>
+    <!-- Home Tab -->
+    <section id="tab-home" class="tab-content active">
+      <h2 class="visually-hidden">Home</h2>
+      <p class="home-status status-line" id="home-status" role="status">Checking the speech model...</p>
+
+      <div class="home-actions">
+        <div class="home-card" id="home-dictate">
+          <span class="home-card-icon home-icon-dictation" aria-hidden="true"></span>
+          <h3>Dictate</h3>
+          <p class="home-card-text" id="home-dictate-text">Hold your hotkey and speak.</p>
+          <span class="keycaps" id="home-hotkey-keycaps" aria-label="Your dictation hotkey"></span>
+        </div>
+        <button type="button" class="home-card home-card-action" id="home-record">
+          <span class="home-card-icon home-icon-meeting" aria-hidden="true"></span>
+          <h3>Record a meeting</h3>
+          <p class="home-card-text">Capture your microphone and the other side, then get a transcript.</p>
+        </button>
+        <button type="button" class="home-card home-card-action" id="home-upload">
+          <span class="home-card-icon home-icon-upload" aria-hidden="true"></span>
+          <h3>Transcribe a file</h3>
+          <p class="home-card-text">Turn an audio or video file into text.</p>
+        </button>
+      </div>
+
+      <div class="home-columns">
+        <section class="home-panel" aria-labelledby="home-recent-title">
+          <div class="home-panel-head">
+            <h3 id="home-recent-title">Recent</h3>
+            <a href="#recordings" class="home-link" data-home-go="recordings">All recordings</a>
+          </div>
+          <ul class="home-recent" id="home-recent" aria-label="Newest recordings"></ul>
+          <p class="empty-state" id="home-recent-empty" hidden>No recordings yet.</p>
+        </section>
+        <section class="home-panel" aria-labelledby="home-week-title">
+          <div class="home-panel-head">
+            <h3 id="home-week-title">This week</h3>
+            <a href="#analytics" class="home-link" data-home-go="analytics">Analytics</a>
+          </div>
+          <div class="home-week">
+            <div class="home-week-stat">
+              <span class="stat-value" id="home-week-words">--</span>
+              <span class="stat-label">Words dictated</span>
+            </div>
+            <div class="home-week-stat">
+              <span class="stat-value" id="home-week-saved">--</span>
+              <span class="stat-label">Time saved</span>
+            </div>
+          </div>
+          <p class="settings-hint" id="home-week-note">The last 7 days.</p>
+        </section>
+      </div>
+
+      <p class="home-tip"><span class="home-tip-label">Tip</span> <span id="home-tip-text"></span>
+        <button type="button" class="link-btn" id="home-tip-next">Next tip</button></p>
+    </section>
+
     <!-- Settings Tab -->
-    <section id="tab-settings" class="tab-content active">
+    <section id="tab-settings" class="tab-content">
       <div class="settings-layout">
         <nav class="settings-nav" id="settings-nav" aria-label="Settings sections">
           <div class="settings-search">
@@ -998,6 +1055,7 @@
   <script src="dashboard-upload.js"></script>
   <script src="dashboard-meetings.js"></script>
   <script src="dashboard-recordings.js"></script>
+  <script src="dashboard-home.js"></script>
   <script src="dashboard-dev.js"></script>
   <script src="dashboard-init.js"></script>
 </body>

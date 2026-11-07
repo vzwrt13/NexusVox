@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import date, timedelta
 
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
 from ..dictation.lang_detect import UNDETERMINED
 from ..storage.models import COMMAND_APP, Transcription
-from .analytics_common import _apply_date_filter
+from .analytics_common import _apply_date_filter, parse_day
 
 
 def get_transcriptions_over_time(
@@ -26,6 +27,48 @@ def get_transcriptions_over_time(
         rows = _apply_date_filter(query, start, end).group_by("period").order_by("period").all()
 
     return {"labels": [r.period for r in rows], "values": [r.count for r in rows]}
+
+
+def get_day_totals(session_factory: sessionmaker, start: str | None = None, end: str | None = None) -> dict[str, dict]:
+    """Dictations, words and spoken milliseconds per local day (`YYYY-MM-DD`), days with a dictation only.
+
+    Command rows are no dictation, so their label text is not counted. One query, so a report that needs the
+    days of a range, their words and their total reads the rows once.
+    """
+    local_day = func.strftime("%Y-%m-%d", Transcription.created_at, "localtime")
+    with session_factory() as session:
+        query = session.query(local_day, Transcription.text, Transcription.duration_ms)
+        query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
+        rows = _apply_date_filter(query, start, end).all()
+
+    days: dict[str, dict] = {}
+    for day, text, duration_ms in rows:
+        total = days.setdefault(day, {"count": 0, "words": 0, "duration_ms": 0})
+        total["count"] += 1
+        total["words"] += len(text.split())
+        total["duration_ms"] += duration_ms
+    return days
+
+
+def day_labels(first: date, last: date) -> list[str]:
+    """Every ISO day from `first` to `last`, both included."""
+    return [(first + timedelta(days=n)).isoformat() for n in range((last - first).days + 1)]
+
+
+def get_words_per_day(session_factory: sessionmaker, start: str | None = None, end: str | None = None) -> dict:
+    """Dictated words per local day, every day from `start` to `end` listed (0 for a day without dictation).
+
+    Without `start` the list begins on the first day with a dictation, without `end` it runs to today. A bound
+    that is not a `YYYY-MM-DD` date counts as missing, for the list and for the filter alike.
+    """
+    first, last = parse_day(start), parse_day(end)
+    days = get_day_totals(session_factory, first and first.isoformat(), last and last.isoformat())
+    first = first or (date.fromisoformat(min(days)) if days else None)
+    last = last or date.today()
+    if first is None or first > last:
+        return {"labels": [], "values": []}
+    labels = day_labels(first, last)
+    return {"labels": labels, "values": [days[label]["words"] if label in days else 0 for label in labels]}
 
 
 def get_language_distribution(

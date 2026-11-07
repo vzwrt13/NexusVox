@@ -29,6 +29,15 @@ def register(app: Flask, api: DashboardAPI) -> None:
         start, end = _date_args()
         return jsonify(api.get_transcriptions_over_time(period, start, end))
 
+    @app.route("/api/words-per-day")
+    def words_per_day():
+        start, end = _date_args()
+        return jsonify(api.get_words_per_day(start, end))
+
+    @app.route("/api/week")
+    def week():
+        return jsonify(api.get_week(request.args.get("week") or None))
+
     @app.route("/api/language-distribution")
     def language_distribution():
         start, end = _date_args()

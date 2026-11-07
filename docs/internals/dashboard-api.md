@@ -94,6 +94,8 @@ A route reads its JSON body through `_json_object` in `routes_base.py`: valid JS
 | POST | `/api/settings/learn-from-edits` | Toggle learning from edits after a paste |
 | GET | `/api/accuracy` | Corrections per 100 words over time (`period`, date range), `most_corrected`, stored `learn` outcomes and `dictionary` usage per entry |
 | GET | `/api/settings/learn-from-edits-status` | How the pastes since start ended for learning: `{counts, watched, last: {outcome, message, at}}`; `watched` lists the outcome keys of watches that ran to their end (the rest were skipped; also answered without the app) |
+| GET | `/api/words-per-day` | `{labels, values}`: dictated words per local day between `start` and `end` (`YYYY-MM-DD`, both optional), every day listed with 0 for a quiet one; the Overview chart |
+| GET | `/api/week` | The report behind Analytics > Your week for the Monday-to-Sunday week containing `week` (`YYYY-MM-DD`; this week when missing, unreadable or in the future): `start`, `end`, `is_current`, `first_week`, `words`, `dictations`, `time_saved_minutes`, `previous_words`, `days`, `days_dictated`, `days_counted` (the days that have started: Monday to today in the current week, 7 in a past one), `meetings` (`count`, `seconds`), `learned` (`total`, `entries`, `entries_total`, `suggestions_accepted`) |
 | GET | `/api/benchmarks` | List benchmark files with summary stats |
 | GET | `/api/benchmarks/compare` | Cross-model comparison with pass/fail |
 | GET | `/api/benchmarks/<filename>` | Full benchmark data (summary + samples) |

@@ -27,4 +27,6 @@ from .analytics_usage import (  # noqa: F401
     get_peak_usage_hours,
     get_top_words,
     get_transcriptions_over_time,
+    get_words_per_day,
 )
+from .analytics_week import get_week  # noqa: F401

@@ -44,6 +44,12 @@ class AnalyticsMixin(DashboardState):
     def get_app_breakdown(self, start: str | None = None, end: str | None = None) -> list[dict]:
         return analytics.get_app_breakdown(self._sf, start=start, end=end)
 
+    def get_words_per_day(self, start: str | None = None, end: str | None = None) -> dict:
+        return analytics.get_words_per_day(self._sf, start, end)
+
+    def get_week(self, week: str | None = None) -> dict:
+        return analytics.get_week(self._sf, week)
+
     def get_accuracy(self, period: str = "day", start: str | None = None, end: str | None = None) -> dict:
         return {
             **analytics.get_accuracy_over_time(self._sf, period, start=start, end=end),

@@ -7,12 +7,13 @@ invented data. One command, no setup beyond the usual `pip install -e ".[dev]"`:
 python scripts/dashboard_screenshots.py
 ```
 
-It writes eight PNGs to `docs/images/`: one per tab, and one per step of the first-run setup:
+It writes nine PNGs to `docs/images/`: one per tab, and one per step of the first-run setup:
 
 | File | Tab | Image ends |
 |---|---|---|
 | `dashboard-home.png` | Home | the whole page (the page the dashboard opens on) |
-| `dashboard-analytics.png` | Analytics | below the Latency Trend chart |
+| `dashboard-analytics.png` | Analytics | the Overview (the view the tab opens on) |
+| `dashboard-analytics-week.png` | Analytics | the Your week view |
 | `dashboard-recordings.png` | Recordings | one window (1280 x 860): list and detail pane |
 | `dashboard-settings.png` | Settings | the Dictation page (the page Settings opens on) |
 | `dashboard-setup-welcome.png`, `-microphone.png`, `-hotkey.png`, `-ready.png` | First-run setup | one image per step, ending at the step's card and the *Skip setup* link |
@@ -22,8 +23,8 @@ setup due; the script tells the page which step to show (`SETUP_SCRIPT`), fills 
 replaces the microphone list and level with demo values (the real audio devices are never probed).
 
 The Recordings tab fills one window with its two panes and is photographed at a window's height. The
-Analytics tab runs on for a long way. The script serves its own copy of the page with
-the elements after the last card to show hidden (the selectors are in `SHOTS`), photographs it in a tall
+script serves its own copy of the page with the elements after the last card to show hidden when a tab
+runs on for a long way (the selectors are in `SHOTS`; Analytics needs none now), photographs it in a tall
 viewport and cuts the empty strip below the last card, so each image ends at an element and follows the
 dashboard when its layout changes. Settings is photographed on the page it opens on (Dictation); its other pages are
 not displayed, so nothing is hidden there. If a selector stops matching, the image simply gets longer: look at the

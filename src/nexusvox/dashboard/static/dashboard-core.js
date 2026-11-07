@@ -145,7 +145,7 @@ function activateTab(name, { keepScroll = false } = {}) {
   if (!keepScroll) window.scrollTo(0, 0);
 
   if (name === "home") openHomeTab();
-  if (name === "analytics") loadAnalytics();
+  if (name === "analytics") openAnalyticsTab();
   if (name === "edit") loadFlaggedTranscriptions();
   if (name === "recordings") openRecordingsTab();
   if (name === "settings") {
@@ -161,7 +161,7 @@ function activateTab(name, { keepScroll = false } = {}) {
 function bindTab(btn) {
   btn.addEventListener("click", () => {
     const name = btn.dataset.tab;
-    const hash = name === "settings" ? settingsPageHash() : "#" + name;
+    const hash = name === "analytics" ? analyticsViewHash() : name === "settings" ? settingsPageHash() : "#" + name;
     if (window.location.hash !== hash) history.replaceState(null, "", hash);
     activateTab(name);
   });

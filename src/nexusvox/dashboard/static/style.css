@@ -1471,3 +1471,36 @@ canvas { width: 100% !important; max-height: 260px; }
 .home-week-stat { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .home-tip { margin: 0; font-size: 13px; color: var(--text-dim); }
 .home-tip-label { margin-right: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-light); }
+
+/* Analytics: Overview and Your week */
+.analytics-views { margin-bottom: 16px; flex-wrap: wrap; }
+.analytics-view[hidden] { display: none; }
+.analytics-view .charts-grid { margin-bottom: 16px; }
+.analytics-more { margin: 0 0 16px; }
+#analytics-overview > .analytics-more { text-align: right; }
+.analytics-chart { min-width: 0; }
+.analytics-chart[hidden] { display: none; }
+.filter-bar .period-selector { flex-wrap: wrap; }
+
+.app-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.app-bar { display: grid; grid-template-columns: minmax(80px, 140px) minmax(0, 1fr) auto; align-items: center; gap: 12px; font-size: 13px; }
+.app-bar-name { min-width: 0; color: var(--text); }
+.app-bar-track { height: 8px; border-radius: 999px; background: var(--surface2); overflow: hidden; }
+.app-bar-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.app-bar-count { min-width: 2.5em; text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.week-switcher { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
+.week-range { min-width: 12em; text-align: center; font-size: 14px; font-weight: 500; }
+.week-headline { margin: 0 0 20px; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.3; max-width: 40em; }
+.week-days {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px;
+  height: 160px; margin-bottom: 20px; padding: 16px 16px 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.week-day { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 0; text-align: center; }
+.week-day-value { font-size: 11px; color: var(--text-dim); min-height: 1.2em; overflow: hidden; text-overflow: ellipsis; }
+.week-day-plot { flex: 1 1 0; min-height: 0; display: flex; align-items: flex-end; justify-content: center; }
+.week-day-bar { display: block; width: min(100%, 36px); border-radius: 4px 4px 0 0; background: var(--accent); }
+.week-day-name { font-size: 11px; color: var(--text-faint); }
+.week-learned { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.week-learned-more { color: var(--text-dim); list-style: none; margin-left: -18px; }

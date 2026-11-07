@@ -10,6 +10,7 @@ Callers decide what to do on failure; `LlmError` covers every way it can fail.
 
 from __future__ import annotations
 
+import dataclasses
 import http.client
 import json
 import logging
@@ -237,6 +238,41 @@ def warm_up(config: LlmConfig) -> None:
             logger.info("Language model warm-up at %s failed (%s)", config.url, exc)
 
     threading.Thread(target=run, daemon=True, name="llm-warm-up").start()
+
+
+# How long a recovery warm-up may take: loading a model into memory can need a minute or more.
+RELOAD_DEADLINE_S = 180.0
+_reload_lock = threading.Lock()
+_reload_running = False
+
+
+def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_S) -> bool:
+    """Load the model after a request timed out, with a long deadline; True if a load was started.
+
+    Ollama aborts a half-loaded model when the client closes the connection, so short requests
+    (auto cleanup gives up after a few seconds) can never load it. This keeps one connection open
+    until the model answers. At most one reload runs at a time; a second call starts none.
+    Never raises; the outcome is only logged.
+    """
+    global _reload_running
+    with _reload_lock:
+        if _reload_running:
+            return False
+        _reload_running = True
+
+    def run() -> None:
+        global _reload_running
+        try:
+            complete(dataclasses.replace(config, timeout_s=deadline_s), "Reply with OK.", "OK")
+            logger.info("Language model %s reloaded after a timeout", config.model)
+        except LlmError as exc:
+            logger.info("Language model reload at %s failed (%s)", config.url, exc)
+        finally:
+            with _reload_lock:
+                _reload_running = False
+
+    threading.Thread(target=run, daemon=True, name="llm-reload").start()
+    return True
 
 
 def is_reachable(config: LlmConfig) -> bool:

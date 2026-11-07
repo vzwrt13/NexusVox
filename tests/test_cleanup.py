@@ -152,3 +152,58 @@ def test_cuda_available_is_false_when_the_probe_fails(monkeypatch):
 
     monkeypatch.setattr(config, "resolve_device", boom)
     assert config.cuda_available() is False
+
+
+# ── Background reload after a timeout ─────────────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)  # no test may start a real load against a server
+def reload_calls(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cleanup_module, "reload_in_background", lambda llm: calls.append(llm))
+    return calls
+
+
+def test_a_timeout_starts_a_background_reload(model, reload_calls):
+    model.reply = LlmError("TimeoutError: timed out", timed_out=True)
+    llm = LlmConfig()
+    result = cleanup("Ähm ich komme äh heute später", LIGHT, llm)
+    assert result.text == "Ähm ich komme äh heute später"
+    assert reload_calls == [llm]
+
+
+def test_another_failure_starts_no_reload(model, reload_calls):
+    model.reply = LlmError("connection refused")
+    cleanup("Ähm ich komme äh heute später", LIGHT, LlmConfig())
+    assert reload_calls == []
+
+
+def test_a_successful_cleanup_starts_no_reload(model, reload_calls):
+    model.reply = "So, I think we should ship it."
+    cleanup("um so I think we should ship it", LIGHT, LlmConfig())
+    assert reload_calls == []
+
+
+def test_only_one_reload_runs_at_a_time(monkeypatch):
+    import threading
+
+    from nexusvox import llm as llm_module
+
+    started, release, calls = threading.Event(), threading.Event(), []
+
+    def slow_complete(config, system, user):
+        calls.append(config.timeout_s)
+        started.set()
+        release.wait(5)
+        return "OK"
+
+    monkeypatch.setattr(llm_module, "complete", slow_complete)
+    config = LlmConfig()
+    assert llm_module.reload_in_background(config) is True
+    assert started.wait(5)
+    assert llm_module.reload_in_background(config) is False  # one is running
+    release.set()
+    for _ in range(100):  # the flag clears once the thread is done
+        if llm_module.reload_in_background(config):
+            break
+        threading.Event().wait(0.05)
+    release.set()
+    assert calls[0] == llm_module.RELOAD_DEADLINE_S

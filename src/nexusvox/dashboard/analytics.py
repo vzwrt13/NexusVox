@@ -11,7 +11,7 @@ from .analytics_accuracy import (  # noqa: F401
     get_learn_outcomes,
     get_most_corrected,
 )
-from .analytics_overview import _command_kind, get_overview, get_upload_overview  # noqa: F401
+from .analytics_overview import _command_kind, get_model_speed, get_overview, get_upload_overview  # noqa: F401
 from .analytics_review import get_flagged_transcriptions, get_unreviewed_transcriptions  # noqa: F401
 from .analytics_usage import (  # noqa: F401
     APP_NAMES,

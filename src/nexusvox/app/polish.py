@@ -174,5 +174,16 @@ class SelectionPolish:
         A failed attempt gets its own label so the history does not show it as a polish that happened.
         """
         label = f"[{kind}{'' if ok else ' failed'}] {detail}"
-        save = functools.partial(self._save_command, recording, label, spoken, polish_status=status, polish_ms=model_ms)
+        # An extension handled it: no language model was asked.
+        llm = None if status == "extension" else self._config.llm
+        save = functools.partial(
+            self._save_command,
+            recording,
+            label,
+            spoken,
+            polish_status=status,
+            polish_ms=model_ms,
+            llm_model=llm.model if llm else None,
+            llm_url=llm.url if llm else None,
+        )
         await asyncio.get_running_loop().run_in_executor(None, save)

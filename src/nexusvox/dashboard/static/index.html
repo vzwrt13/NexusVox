@@ -825,6 +825,26 @@
           </div>
         </div>
         <div class="chart-card wide">
+          <h3>Speed by model</h3>
+          <p class="hint">Language model passes (cleanup and polish) from your stored dictations: how long the
+            model took and how often it ran out of time. Dictations from before this was stored are not counted.</p>
+          <div class="table-wrap">
+            <table class="model-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Level</th>
+                  <th>Transcribed on</th>
+                  <th>Passes</th>
+                  <th>Median time</th>
+                  <th>Timed out</th>
+                </tr>
+              </thead>
+              <tbody id="model-speed"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="chart-card wide">
           <h3>By App</h3>
           <div class="table-wrap">
             <table class="model-table">

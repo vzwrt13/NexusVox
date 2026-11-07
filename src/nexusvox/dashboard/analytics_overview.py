@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import statistics
 from collections import Counter
 
 from sqlalchemy import func
@@ -210,6 +211,58 @@ def _command_row_stats(session_factory: sessionmaker, start: str | None, end: st
         "command_count": sum(kinds.values()),
         "top_commands": [{"kind": kind, "count": count} for kind, count in ranked],
     }
+
+
+# The `level` of a "Speed by model" row that is polish on selected text, which has no cleanup level.
+POLISH_LEVEL = "polish"
+
+
+def get_model_speed(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> list[dict]:
+    """Per language model, level and transcription device: how many passes, the median time, the timeout share.
+
+    From the stored rows only: a dictation whose cleanup asked a model, and a polish attempt that did (an
+    extension handled it: no model). Rows from before the model was stored have no `llm_model` and are left
+    out. `level` is "light" / "medium" for cleanup and `POLISH_LEVEL` for polish; `device` is "cpu", "gpu",
+    "remote" or None. The time is the model's own, over the passes that got an answer (a timeout has none);
+    `timeout_share` is timeouts over all passes, 0 to 1. Most passes first, ties by model, level, device.
+    """
+    with session_factory() as session:
+        query = session.query(
+            Transcription.llm_model,
+            Transcription.cleanup_level,
+            Transcription.transcribe_device,
+            Transcription.cleanup_status,
+            Transcription.cleanup_ms,
+            Transcription.polish_status,
+            Transcription.polish_ms,
+        )
+        rows = _apply_date_filter(query, start, end, polish=True).filter(Transcription.llm_model.isnot(None)).all()
+    groups: dict[tuple[str, str, str | None], list] = {}
+    for model, level, device, c_status, c_ms, p_status, p_ms in rows:
+        if p_status is not None:
+            level, status, ms = POLISH_LEVEL, p_status, p_ms
+        elif c_status is not None:
+            status, ms = c_status, c_ms
+        else:
+            continue
+        if level is None:
+            continue
+        groups.setdefault((model, level, device), []).append((status, ms))
+    result = []
+    for (model, level, device), passes in groups.items():
+        times = [ms for status, ms in passes if ms is not None and status != "timeout"]
+        result.append(
+            {
+                "model": model,
+                "level": level,
+                "device": device,
+                "count": len(passes),
+                "median_ms": round(statistics.median(times)) if times else None,
+                "timeout_share": sum(status == "timeout" for status, _ in passes) / len(passes),
+            }
+        )
+    result.sort(key=lambda r: (-r["count"], r["model"], r["level"], r["device"] or ""))
+    return result
 
 
 def _speaker_count(words_json: str | None) -> int:

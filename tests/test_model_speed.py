@@ -1,0 +1,252 @@
+"""Which language model and device produced a dictation's timings, and the "Speed by model" table."""
+
+from __future__ import annotations
+
+import asyncio
+import sqlite3
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
+
+from app_parts import patch_app
+
+from nexusvox.app.core import NexusVoxApp
+from nexusvox.app.records import _Recording
+from nexusvox.config import CleanupConfig, Config, CustomServerConfig, DatabaseConfig, InferenceConfig, LlmConfig
+from nexusvox.dashboard.analytics import get_model_speed
+from nexusvox.dictation.cleanup import cleanup
+from nexusvox.storage.db import Database
+from nexusvox.storage.models import COMMAND_APP, Transcription
+from nexusvox.transcription.transcriber import create_transcriber
+
+
+def _row(model="gemma", level="light", device="gpu", status="applied", ms=200, **extra):
+    row = {
+        "text": "a",
+        "language": "en",
+        "duration_ms": 1000,
+        "created_at": datetime.now(UTC).replace(tzinfo=None),
+        "llm_model": model,
+        "cleanup_level": level,
+        "transcribe_device": device,
+        "cleanup_status": status,
+        "cleanup_ms": ms,
+    }
+    row.update(extra)
+    return row
+
+
+def _seed(session_factory, rows):
+    with session_factory() as session:
+        for r in rows:
+            session.add(Transcription(**r))
+        session.commit()
+
+
+# ---- Storing -----------------------------------------------------------------------------------
+
+
+def test_the_new_fields_are_stored(db):
+    record = db.save_transcription(
+        "hi",
+        "en",
+        500,
+        cleanup_status="applied",
+        cleanup_ms=300,
+        llm_model="gemma4:12b",
+        llm_url="http://x:11434",
+        cleanup_level="medium",
+        transcribe_device="cpu",
+    )
+    stored = db.get_recent(1)[0]
+    assert record.id == stored.id
+    assert (stored.llm_model, stored.llm_url, stored.cleanup_level, stored.transcribe_device) == (
+        "gemma4:12b",
+        "http://x:11434",
+        "medium",
+        "cpu",
+    )
+
+
+def test_a_row_without_them_has_null_columns(db):
+    db.save_transcription("hi", "en", 500)
+    stored = db.get_recent(1)[0]
+    assert (stored.llm_model, stored.llm_url, stored.cleanup_level, stored.transcribe_device) == (None,) * 4
+
+
+def test_an_old_database_migrates_without_losing_rows(tmp_path):
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE transcriptions (id INTEGER PRIMARY KEY, text TEXT NOT NULL,"
+            " language VARCHAR(5) NOT NULL, duration_ms INTEGER NOT NULL, created_at DATETIME, confidence FLOAT,"
+            " cleanup_status VARCHAR(10), cleanup_ms INTEGER)"
+        )
+        conn.execute(
+            "INSERT INTO transcriptions (text, language, duration_ms, cleanup_status, cleanup_ms)"
+            " VALUES ('old row', 'en', 1, 'applied', 250)"
+        )
+
+    migrated = Database(DatabaseConfig(path=str(path)))
+
+    old = migrated.get_recent(1)[0]
+    assert (old.text, old.cleanup_ms) == ("old row", 250)
+    assert (old.llm_model, old.llm_url, old.cleanup_level, old.transcribe_device) == (None,) * 4
+    migrated.save_transcription("new", "en", 1, llm_model="m", transcribe_device="gpu")
+    assert migrated.get_recent(1)[0].llm_model == "m"
+
+
+# ---- What the cleanup and the app hand over ----------------------------------------------------
+
+
+def test_cleanup_says_which_model_it_asked(monkeypatch):
+    from nexusvox.dictation import cleanup as module
+
+    monkeypatch.setattr(module, "complete", lambda *_: "Ich komme heute später.")
+    llm = LlmConfig(url="http://llm:1234", model="qwen")
+    result = cleanup("Ähm ich komme äh heute später", CleanupConfig(level="medium"), llm)
+    assert (result.llm_model, result.llm_url, result.level) == ("qwen", "http://llm:1234", "medium")
+
+
+def test_cleanup_that_never_asked_names_no_model():
+    result = cleanup("Ähm ich komme äh heute später", CleanupConfig(), LlmConfig())
+    assert (result.llm_model, result.llm_url, result.level) == (None, None, None)
+    assert result.status is None
+
+
+def test_the_transcription_device_follows_the_backend():
+    assert create_transcriber(InferenceConfig(model="parakeet-tdt-0.6b"), device="cuda").device == "gpu"
+    assert create_transcriber(InferenceConfig(model="parakeet-tdt-0.6b"), device="cpu").device == "cpu"
+    assert create_transcriber(InferenceConfig(model="whisper-large-v3-turbo"), device="cpu").device == "cpu"
+    far = InferenceConfig(model="parakeet-tdt-0.6b", server_url="http://gpubox:8002/v1/audio/transcriptions")
+    assert create_transcriber(far, device="cuda").device == "remote"
+    custom = InferenceConfig(model="custom-server", custom=CustomServerConfig(url="http://localhost:9/v1"))
+    assert create_transcriber(custom, device="cuda").device == "remote"
+
+
+def _app(tmp_path):
+    app = NexusVoxApp.__new__(NexusVoxApp)
+    app._config = Config()
+    app._config.llm = LlmConfig(url="http://llm:1234", model="qwen")
+    app._config.database.path = str(tmp_path / "db.sqlite")
+    app._db = MagicMock()
+    app._store_audio = MagicMock()
+    app._tray = MagicMock()
+    app._transcriber = MagicMock(model="m", device="cpu")
+    return app
+
+
+def test_a_polish_row_stores_the_model_and_the_device(tmp_path, monkeypatch):
+    patch_app(monkeypatch, "stored_language", lambda text: "und")
+    app = _app(tmp_path)
+    recording = _Recording(bytearray(), 10, None, 1)
+
+    asyncio.run(app._save_polish(recording, "polish", "default", "", ok=True, status="applied", model_ms=900))
+
+    kwargs = app._db.save_transcription.call_args.kwargs
+    assert (kwargs["llm_model"], kwargs["llm_url"], kwargs["transcribe_device"]) == ("qwen", "http://llm:1234", "cpu")
+
+
+def test_an_extension_row_names_no_model(tmp_path, monkeypatch):
+    patch_app(monkeypatch, "stored_language", lambda text: "und")
+    app = _app(tmp_path)
+
+    asyncio.run(app._save_polish(None, "extension", "x", "", ok=True, status="extension", model_ms=None))
+
+    kwargs = app._db.save_transcription.call_args.kwargs
+    assert (kwargs["llm_model"], kwargs["llm_url"], kwargs["transcribe_device"]) == (None, None, None)
+
+
+# ---- The table ---------------------------------------------------------------------------------
+
+
+def test_empty_database_has_no_rows(session_factory):
+    assert get_model_speed(session_factory) == []
+
+
+def test_groups_by_model_level_and_device(session_factory):
+    _seed(
+        session_factory,
+        [
+            _row(ms=100),
+            _row(ms=300),
+            _row(ms=900),
+            _row(status="timeout", ms=None),
+            _row(level="medium", ms=500),
+            _row(device="cpu", ms=2000),
+            _row(model="qwen", ms=50),
+        ],
+    )
+
+    rows = get_model_speed(session_factory)
+
+    assert rows[0] == {
+        "model": "gemma",
+        "level": "light",
+        "device": "gpu",
+        "count": 4,
+        "median_ms": 300,
+        "timeout_share": 0.25,
+    }
+    assert [(r["model"], r["level"], r["device"], r["count"]) for r in rows[1:]] == [
+        ("gemma", "light", "cpu", 1),
+        ("gemma", "medium", "gpu", 1),
+        ("qwen", "light", "gpu", 1),
+    ]
+
+
+def test_rows_from_before_the_model_was_stored_are_left_out(session_factory):
+    _seed(session_factory, [_row(model=None, level=None, device=None), _row()])
+
+    assert [r["count"] for r in get_model_speed(session_factory)] == [1]
+
+
+def test_polish_attempts_are_their_own_level_and_extensions_are_not_counted(session_factory):
+    polish = {"cleanup_status": None, "cleanup_ms": None, "cleanup_level": None, "app": COMMAND_APP}
+    _seed(
+        session_factory,
+        [
+            _row(**polish, polish_status="applied", polish_ms=800),
+            _row(**polish, polish_status="timeout", polish_ms=None),
+            _row(**{**polish, "llm_model": None}, polish_status="extension", polish_ms=None),
+        ],
+    )
+
+    [row] = get_model_speed(session_factory)
+
+    assert (row["level"], row["count"], row["median_ms"], row["timeout_share"]) == ("polish", 2, 800, 0.5)
+
+
+def test_only_timeouts_leave_no_median(session_factory):
+    _seed(session_factory, [_row(status="timeout", ms=None)])
+
+    [row] = get_model_speed(session_factory)
+
+    assert (row["median_ms"], row["timeout_share"]) == (None, 1.0)
+
+
+def test_the_table_follows_the_date_range(session_factory):
+    old = datetime(2020, 1, 1, 12, 0)
+    _seed(session_factory, [_row(created_at=old), _row()])
+
+    assert get_model_speed(session_factory, start="2020-01-01", end="2020-01-02")[0]["count"] == 1
+    assert get_model_speed(session_factory)[0]["count"] == 2
+
+
+def test_the_endpoint_serves_the_table(flask_client, db):
+    db.save_transcription(
+        "hello",
+        "en",
+        500,
+        cleanup_status="applied",
+        cleanup_ms=120,
+        llm_model="gemma",
+        cleanup_level="light",
+        transcribe_device="gpu",
+    )
+
+    resp = flask_client.get("/api/model-speed")
+
+    assert resp.status_code == 200
+    assert resp.get_json() == [
+        {"model": "gemma", "level": "light", "device": "gpu", "count": 1, "median_ms": 120, "timeout_share": 0.0}
+    ]

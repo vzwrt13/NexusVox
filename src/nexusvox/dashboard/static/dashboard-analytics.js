@@ -328,7 +328,7 @@ document.getElementById("btn-clear-dates").addEventListener("click", () => {
 
 // ── Analytics Loading ────────────────────────────────────────────────
 async function loadAnalytics() {
-  const [overview, lang, hours, words, heatmap, models, apps] = await Promise.all([
+  const [overview, lang, hours, words, heatmap, models, apps, speed] = await Promise.all([
     api("/api/overview"),
     api("/api/language-distribution"),
     api("/api/peak-usage-hours"),
@@ -336,6 +336,7 @@ async function loadAnalytics() {
     api("/api/activity-heatmap"),
     api("/api/model-breakdown"),
     api("/api/app-breakdown"),
+    api("/api/model-speed"),
   ]);
 
   renderOverview(overview);
@@ -345,6 +346,7 @@ async function loadAnalytics() {
   renderHeatmap(heatmap);
   renderModelBreakdown(models);
   renderAppBreakdown(apps);
+  renderModelSpeed(speed);
   loadTimeline();
 }
 
@@ -604,6 +606,30 @@ function renderModelBreakdown(rows) {
         <td>${m.avg_wpm}</td>
         <td>${formatDuration(m.avg_duration_ms)}</td>
         <td>${m.avg_transcribe_ms != null ? formatDuration(m.avg_transcribe_ms) : "--"}</td>
+      </tr>`
+    )
+    .join("");
+}
+
+// ── Speed By Model ───────────────────────────────────────────────────
+const SPEED_LEVELS = { light: "Cleanup, light", medium: "Cleanup, medium", polish: "Polish" };
+const SPEED_DEVICES = { cpu: "CPU", gpu: "GPU", remote: "Remote server" };
+
+function renderModelSpeed(rows) {
+  const body = document.getElementById("model-speed");
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">No language model passes recorded yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows
+    .map(
+      (r) => `<tr>
+        <td>${escapeHtml(r.model)}</td>
+        <td>${escapeHtml(SPEED_LEVELS[r.level] || r.level)}</td>
+        <td>${escapeHtml(SPEED_DEVICES[r.device] || "--")}</td>
+        <td>${r.count}</td>
+        <td>${r.median_ms != null ? formatDuration(r.median_ms) : "--"}</td>
+        <td>${Math.round(r.timeout_share * 100)}%</td>
       </tr>`
     )
     .join("");

@@ -62,6 +62,13 @@ class Transcription(Base):
     # in ms (NULL for an extension, which is not the model); both NULL for rows from before and for dictations.
     polish_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
     polish_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Which language model produced the cleanup or polish timings above: its name, its server URL and, for
+    # cleanup, the level ("light" / "medium"). All NULL when no model was asked and for rows from before.
+    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    llm_url: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    cleanup_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Where the transcription ran ("cpu", "gpu" or "remote": a server that is not on this PC); NULL for older rows.
+    transcribe_device: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # The process file name of the app the text was typed into ("outlook.exe"), read at paste time.
     # Never a window title; NULL for older rows, phone dictations and texts the clipboard refused;
     # COMMAND_APP for rows that ran a command.

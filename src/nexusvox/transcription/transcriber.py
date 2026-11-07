@@ -150,6 +150,9 @@ class BaseTranscriber(ABC):
 
     model: str
     needs_docker: bool = True
+    # Where the recognition runs, stored with each dictation: "gpu" (the Docker server on this PC), "cpu"
+    # (in-process) or "remote" (a server that is not on this PC, the custom server included).
+    device: str = "gpu"
     # True when the app should call `warm_up()` in the background at start and after a switch to this engine.
     warms_up_at_start: bool = False
     # True when the engine can report per-word timing; `word_timestamps` then asks for it.
@@ -208,6 +211,8 @@ class VoxtralRealtimeTranscriber(BaseTranscriber):
         self._server_url = config.server_url
         self._ws: websockets.ClientConnection | None = None
         self.model = "realtime"  # a custom server sets its own model_name
+        if not _is_local_url(config.server_url):
+            self.device = "remote"
 
     async def connect(self) -> None:
         """Connect to the vLLM realtime endpoint and initialize session."""
@@ -334,6 +339,11 @@ class VoxtralRealtimeTranscriber(BaseTranscriber):
         return self._ws is not None and self._ws.state == State.OPEN
 
 
+def _is_local_url(url: str) -> bool:
+    """Whether *url* points at this PC."""
+    return (urlsplit(url).hostname or "localhost") in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+
+
 class OpenAIHttpTranscriber(BaseTranscriber):
     """Buffers audio chunks, then POSTs complete WAV to an OpenAI-compatible endpoint.
 
@@ -355,6 +365,8 @@ class OpenAIHttpTranscriber(BaseTranscriber):
         self._audio_buffer = bytearray()
         self._sample_rate = 16_000
         self.model = MODEL_REGISTRY[config.model]["hf_name"]
+        if not _is_local_url(config.server_url):
+            self.device = "remote"
         self._connected = False
 
     async def connect(self) -> None:
@@ -504,4 +516,5 @@ def _create_custom_transcriber(config: InferenceConfig) -> BaseTranscriber:
         transcriber = OpenAIHttpTranscriber(server_config)
     transcriber.model = custom.model_name
     transcriber.needs_docker = False
+    transcriber.device = "remote"  # a server the user runs: the app cannot tell what it runs on
     return transcriber

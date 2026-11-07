@@ -65,6 +65,10 @@ class Database:
             "ALTER TABLE transcriptions ADD COLUMN app VARCHAR(100)",
             "ALTER TABLE transcriptions ADD COLUMN polish_status VARCHAR(10)",
             "ALTER TABLE transcriptions ADD COLUMN polish_ms INTEGER",
+            "ALTER TABLE transcriptions ADD COLUMN llm_model VARCHAR(100)",
+            "ALTER TABLE transcriptions ADD COLUMN llm_url VARCHAR(200)",
+            "ALTER TABLE transcriptions ADD COLUMN cleanup_level VARCHAR(10)",
+            "ALTER TABLE transcriptions ADD COLUMN transcribe_device VARCHAR(10)",
             "ALTER TABLE snippets ADD COLUMN options TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN words TEXT",
             "ALTER TABLE file_transcriptions ADD COLUMN cleaned_text TEXT",
@@ -102,6 +106,10 @@ class Database:
         app: str | None = None,
         polish_status: str | None = None,
         polish_ms: int | None = None,
+        llm_model: str | None = None,
+        llm_url: str | None = None,
+        cleanup_level: str | None = None,
+        transcribe_device: str | None = None,
     ) -> Transcription:
         """Save a transcription record to the database."""
         with self._session_factory() as session:
@@ -124,6 +132,10 @@ class Database:
                 app=app,
                 polish_status=polish_status,
                 polish_ms=polish_ms,
+                llm_model=llm_model,
+                llm_url=llm_url,
+                cleanup_level=cleanup_level,
+                transcribe_device=transcribe_device,
             )
             session.add(record)
             session.commit()

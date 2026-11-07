@@ -335,6 +335,10 @@ class TranscriptionCycle:
                 latency_ms=latency_ms,
                 cleanup_status=processed.cleanup.status,
                 cleanup_ms=processed.cleanup.ms,
+                llm_model=processed.cleanup.llm_model,
+                llm_url=processed.cleanup.llm_url,
+                cleanup_level=processed.cleanup.level,
+                transcribe_device=self._transcriber.device,
                 app=target_app,
             )
             record = await loop.run_in_executor(None, save)

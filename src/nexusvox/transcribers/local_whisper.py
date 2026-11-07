@@ -31,6 +31,7 @@ class LocalWhisperTranscriber(BaseTranscriber):
     """Transcribe with faster-whisper in-process. No HTTP, no Docker."""
 
     needs_docker = False
+    device = "cpu"
 
     _model_cache: dict[tuple[str, str, str], object] = {}
     _cache_lock = threading.Lock()

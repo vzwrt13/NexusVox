@@ -65,6 +65,11 @@ def register(app: Flask, api: DashboardAPI) -> None:
         start, end = _date_args()
         return jsonify(api.get_latency_trend(period, start, end))
 
+    @app.route("/api/model-speed")
+    def model_speed():
+        start, end = _date_args()
+        return jsonify(api.get_model_speed(start, end))
+
     @app.route("/api/model-breakdown")
     def model_breakdown():
         start, end = _date_args()

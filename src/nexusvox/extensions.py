@@ -141,7 +141,7 @@ class DashboardPanel:
 
 @dataclass(frozen=True)
 class ExportTarget:
-    """A way to export a stored file transcription, offered as a download next to it in the Upload tab."""
+    """A way to export a stored file transcription, offered in the Export menu of the Recordings tab."""
 
     id: str  # same rules as `DashboardPanel.id`
     label: str  # shown on the download link
@@ -247,7 +247,7 @@ class Extension:
         """Change a transcript text the core shows or exports for a stored upload or meeting.
 
         *text* is the upload's transcript, its cleaned version, or a subtitle cue (`Speaker 1: ...`); it is
-        called once per text, for the Upload tab and the built-in TXT, SRT and VTT exports. Return the text to
+        called once per text, for the Recordings tab and the built-in TXT, SRT and VTT exports. Return the text to
         show instead (e.g. with `Speaker 1` replaced by a name), or None to leave it. The stored transcript
         never changes. Several extensions run in entry-point order, each seeing the previous result; one that
         raises, answers with something that is not a string, or is too slow (`HOOK_TIMEOUT_S`) is skipped.

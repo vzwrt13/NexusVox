@@ -16,7 +16,7 @@ meeting would show it under your own voice; by default NexusVox leaves it out (s
 - **Hotkey:** the meeting hotkey (default `Ctrl+Shift+F9`, `[meeting]` in `config.toml`, also editable
   in the Settings tab's Meetings card) starts and stops a meeting from anywhere. It is separate from the dictation
   hotkey and needs a key plus at least one modifier; a binding that would also start dictation is
-  refused, and so is a dictation hotkey that the meeting hotkey would also start. While the consent hint is on, the hotkey opens the Meetings tab to start a meeting, so the
+  refused, and so is a dictation hotkey that the meeting hotkey would also start. While the consent hint is on, the hotkey opens the Recordings tab to start a meeting, so the
   hint is shown first; stopping always works straight from the hotkey. A short beep confirms start
   and stop, an error beep says it failed.
 
@@ -35,7 +35,7 @@ played on.
 
 ## Live transcript
 
-While a meeting records, the Meetings tab shows a live transcript: what you say under your own-voice label
+While a meeting records, the Recordings tab shows a live transcript: what you say under your own-voice label
 (default `Speaker 1`), what everyone else says under `Others`, a few seconds behind the call. It is a preview. Both tracks are
 cut into windows of about six seconds (at a pause where possible) and sent to the transcription model one
 window at a time; silent windows are not sent. The live text cannot tell the other participants apart (so they are all `Others`; the stored transcript numbers them `Speaker 2`, `Speaker 3`, ...), and has no echo filter and no
@@ -45,7 +45,7 @@ The transcript made after **Stop** is the stored one and does not depend on the 
 cannot keep up, the live view skips audio instead of falling behind; the tab then says how much it skipped and
 shows the share of time the model spent on live windows. It is **off by default**, because
 its load during a whole meeting is not measured yet: switch it on with *Show a live transcript while recording*
-in the Meetings tab (`[meeting].live_transcript`); the change applies from the next meeting.
+in the Recordings tab's recording options (▾ next to *Start recording*, `[meeting].live_transcript`); the change applies from the next meeting.
 
 ## Speakers
 
@@ -54,7 +54,7 @@ Your microphone is **Speaker 1**. Set **Meetings: name for your own voice** in t
 the same speaker detection as uploads (Parakeet in its Docker container, up to four voices) and becomes
 **Speaker 2**, **Speaker 3**, ... If speaker detection is unavailable (CPU mode, no GPU container, another
 model) or fails, everyone on the system audio is **Speaker 2** and the transcript still completes; a note says
-why. The labels are stored the same way as for uploads, so the Meetings and Upload tabs, TXT, SRT and VTT
+why. The labels are stored the same way as for uploads, so the Recordings tab, TXT, SRT and VTT
 exports and extensions all show the same names (the name of your own voice is stored with the meeting, so it
 cannot get lost in an edit of the text). A name such as `Speaker 2` is refused, since another participant gets
 that label. Speaker detection sends the whole system audio in one request, so a meeting longer than two hours
@@ -113,6 +113,6 @@ NexusVox shows this reminder before each recording from the dashboard. *Don't sh
 
 ## Delete a meeting
 
-Every entry in the Upload history and every meeting in the Meetings tab has a **Delete** button with a
+Every meeting and upload in the Recordings tab can be deleted (**⋯ > Delete…**), with a
 confirmation in the page. It removes the entry and its audio: for an upload its stored audio, for a
 meeting the whole folder (whatever is left of `mic.wav`, `system.wav`, `meeting.wav` and `meeting.json`).

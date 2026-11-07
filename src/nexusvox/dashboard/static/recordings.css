@@ -1,0 +1,418 @@
+/* NexusVox Dashboard - Recordings tab: list pane, detail pane, upload dialog.
+   Kept apart from style.css; every colour is one of its :root tokens. */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The two panes use the full width of the page instead of the 1180px column of the other tabs. */
+main:has(#tab-recordings.active) { max-width: none; padding-top: 24px; padding-bottom: 24px; }
+
+.rec-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 0;
+  min-height: calc(100vh - 48px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* Both panes scroll on their own, so a long transcript scrolls inside the detail pane and the list stays put. */
+.rec-list-pane,
+.rec-detail-pane {
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  min-width: 0;
+}
+.rec-list-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 12px;
+  border-right: 1px solid var(--border);
+}
+.rec-detail-pane { padding: 24px 32px 32px; }
+@media (prefers-reduced-motion: reduce) {
+  .rec-list-pane, .rec-detail-pane { scroll-behavior: auto; }
+}
+
+/* ── List pane: split button, upload button, options popover ─────── */
+.rec-actions { display: flex; gap: 8px; align-items: center; }
+.rec-split { display: flex; flex: 1 1 auto; min-width: 0; }
+.rec-split-main,
+.rec-split-more {
+  height: 44px;
+  border: 0;
+  background: var(--accent);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rec-split-main { flex: 1 1 auto; min-width: 0; padding: 0 16px; border-radius: 22px 6px 6px 22px; }
+.rec-split-more { width: 44px; flex: 0 0 44px; margin-left: 2px; border-radius: 6px 22px 22px 6px; }
+.rec-split-main:hover, .rec-split-more:hover { background: var(--accent-light); color: var(--bg); }
+.rec-split-main:disabled { opacity: 0.6; cursor: progress; }
+.rec-split-main.is-recording { background: var(--red); color: var(--bg); }
+
+.rec-icon-btn {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 22px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface2);
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+}
+.rec-icon-btn:hover { border-color: var(--accent-light); color: var(--text); }
+.rec-upload-btn { background: var(--surface2) url("icons/duotone-upload.svg") center / 20px no-repeat; }
+
+.rec-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface3);
+}
+.rec-popover[hidden] { display: none; }
+.rec-popover-title { font-size: 12px; color: var(--text-dim); }
+.rec-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-dim); }
+.rec-field .select-input { width: 100%; max-width: 100%; }
+.rec-field-row { display: flex; align-items: center; gap: 12px; }
+.rec-field-label { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; font-size: 14px; color: var(--text); }
+.rec-field-hint { font-size: 12px; line-height: 1.5; color: var(--text-dim); }
+.rec-field-hint .keycaps { vertical-align: middle; }
+
+.rec-recording {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  font-size: 14px;
+}
+.rec-recording[hidden] { display: none; }
+.rec-recording .meeting-timer { margin-left: auto; font-family: var(--mono); color: var(--text-dim); }
+.rec-list-pane .meeting-consent,
+.rec-list-pane .meeting-live { margin: 0; }
+.rec-list-pane .meeting-live-text { max-height: 200px; }
+.rec-list-pane .upload-progress { margin: 0; }
+.rec-list-pane .upload-status { margin: 0; }
+
+.rec-pending { padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.rec-pending-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.rec-pending .flagged-card { padding: 10px 12px; margin-top: 8px; }
+
+.rec-search input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 14px;
+}
+.rec-search input:focus { border-color: var(--accent-light); outline: none; }
+
+/* ── List rows ────────────────────────────────────────────────────── */
+.rec-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.rec-list .empty-state { padding: 24px 8px; font-size: 14px; }
+.rec-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.rec-row:hover { background: var(--surface2); }
+.rec-row[aria-current="true"] { background: var(--surface3); }
+.rec-row-icon {
+  flex: 0 0 18px;
+  height: 18px;
+  margin-top: 2px;
+  background: center / contain no-repeat url("icons/duotone-meeting.svg");
+}
+.rec-row[data-kind="upload"] .rec-row-icon { background-image: url("icons/duotone-upload.svg"); }
+.rec-row-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rec-row-title { font-size: 15px; font-weight: 500; }
+.rec-row-meta { font-size: 13px; color: var(--text-dim); }
+
+/* ── Detail pane: head and menus ──────────────────────────────────── */
+.rec-detail-pane > .empty-state { padding-top: 96px; }
+.rec-detail { display: flex; flex-direction: column; gap: 16px; }
+.rec-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; }
+.rec-head-text { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.rec-title-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rec-title { font-size: 24px; font-weight: 600; line-height: 1.25; }
+.rec-title-row .rec-icon-btn { width: 32px; height: 32px; flex-basis: 32px; font-size: 14px; border-color: transparent; background: transparent; }
+.rec-title-row .upload-rename-input { flex: 1 1 auto; min-width: 0; font-size: 18px; }
+.rec-meta { font-size: 14px; color: var(--text-dim); }
+.rec-head-actions { display: flex; gap: 8px; }
+
+.rec-menu-wrap { position: relative; }
+.rec-menu-btn {
+  height: 44px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface3);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+.rec-menu-btn:hover, .rec-menu-wrap.open .rec-menu-btn { border-color: var(--accent-light); }
+.rec-more-btn { width: 44px; padding: 0; font-size: 18px; color: var(--text-dim); }
+.rec-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 220px;
+  max-width: min(320px, 80vw);
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface3);
+  display: flex;
+  flex-direction: column;
+}
+.rec-menu[hidden] { display: none; }
+.rec-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-ctl);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.rec-menu-item:hover:not([disabled]), .rec-menu-item:focus-visible { background: var(--surface2); }
+.rec-menu-item[disabled] { color: var(--text-dim); cursor: default; }
+.rec-menu-reason { font-size: 12px; color: var(--text-dim); }
+.rec-menu-danger { color: var(--red); }
+.rec-menu-sep { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+.rec-menu-empty { padding: 10px 12px; font-size: 13px; color: var(--text-dim); }
+
+.rec-states:empty, .rec-delete-row[hidden] { display: none; }
+.rec-delete-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rec-detail .upload-error, .rec-detail .upload-note { margin: 0; }
+
+/* ── Audio player ─────────────────────────────────────────────────── */
+.rec-player {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+}
+.rec-play {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 22px;
+  border: 0;
+  background: var(--accent);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.rec-play:hover { background: var(--accent-light); color: var(--bg); }
+.rec-seek {
+  --progress: 0%;
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 4px;
+  appearance: none;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--accent-light) var(--progress), var(--surface3) var(--progress));
+  cursor: pointer;
+}
+.rec-seek::-webkit-slider-thumb { appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--text); }
+.rec-seek::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--text); }
+.rec-clock { font-size: 13px; font-family: var(--mono); color: var(--text-dim); white-space: nowrap; }
+
+/* ── Tab row ──────────────────────────────────────────────────────── */
+.rec-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border); }
+.rec-tab {
+  height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rec-tab:hover { color: var(--text); }
+.rec-tab[aria-selected="true"] { color: var(--text); font-weight: 500; border-bottom-color: var(--green); }
+.pro-label {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--accent-soft);
+  color: var(--accent-light);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
+/* ── Transcript ───────────────────────────────────────────────────── */
+.rec-transcript { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+.rec-transcript-bar { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-dim); }
+/* A long transcript stays smooth: lines off screen are not laid out until they come near. */
+.rec-line {
+  display: flex;
+  gap: 16px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
+  /* Room for the mark background, which the paint containment of content-visibility would clip */
+  padding: 6px 8px;
+  margin: -6px -8px;
+  border-radius: var(--radius-ctl);
+}
+.rec-line.untimed { gap: 0; }
+.rec-time {
+  flex: 0 0 52px;
+  padding-top: 2px;
+  font-size: 13px;
+  font-family: var(--mono);
+  color: var(--text-dim);
+  text-align: left;
+}
+button.rec-time { border: 0; background: transparent; cursor: pointer; align-self: flex-start; }
+button.rec-time:hover { color: var(--accent-light); text-decoration: underline; }
+.rec-line-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rec-who { font-size: 13px; font-weight: 600; }
+.rec-who-0 { color: var(--accent-light); }
+.rec-who-1 { color: var(--green); }
+.rec-who-2 { color: var(--orange); }
+.rec-who-3 { color: var(--text); }
+.rec-text { font-size: 15px; line-height: 1.6; white-space: pre-wrap; }
+.rec-line.rec-mark { background: var(--accent-fill); }
+.rec-text mark { background: var(--accent-soft); color: var(--text); border-radius: 3px; }
+
+/* ── Speakers and the Pro note ────────────────────────────────────── */
+.rec-speaker-list { list-style: none; display: flex; flex-direction: column; gap: 14px; max-width: 560px; }
+.rec-speaker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: baseline; }
+.rec-speaker .rec-who { font-size: 15px; }
+.rec-speaker-meta { font-size: 13px; color: var(--text-dim); }
+.rec-speaker-bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--surface3); overflow: hidden; }
+.rec-speaker-fill { display: block; height: 100%; border-radius: 3px; }
+.rec-fill-0 { background: var(--accent-light); }
+.rec-fill-1 { background: var(--green); }
+.rec-fill-2 { background: var(--orange); }
+.rec-fill-3 { background: var(--text-dim); }
+.rec-speakers .empty-state, .rec-transcript .empty-state { text-align: left; padding: 16px 0; }
+
+.rec-pro-note {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+}
+.rec-pro-note h3 { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rec-pro-note p { font-size: 14px; line-height: 1.6; color: var(--text-dim); }
+.rec-pro-link { align-self: flex-start; font-weight: 600; }
+
+/* ── Upload dialog and the drop overlay ───────────────────────────── */
+.rec-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  margin: auto;
+  padding: 0;
+  border-radius: 20px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface2);
+  color: var(--text);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+.rec-dialog::backdrop { background: color-mix(in srgb, var(--bg) 70%, transparent); }
+.rec-dialog-body { display: flex; flex-direction: column; gap: 14px; padding: 24px; }
+.rec-dialog-head { display: flex; align-items: center; gap: 8px; }
+.rec-dialog-head h2 { flex: 1 1 auto; font-size: 20px; font-weight: 600; }
+.rec-close { border-color: transparent; background: transparent; }
+.rec-dialog .upload-zone { margin: 0; padding: 28px 16px; }
+/* Each option: its text on the left, the level and the switch on the right */
+.rec-dialog .upload-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0;
+}
+.rec-dialog .upload-option .select-input { width: auto; min-width: 104px; }
+.rec-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 0; }
+.rec-upload-glyph { width: 32px; height: 32px; margin: 0 auto 4px; background: center / contain no-repeat url("icons/duotone-upload.svg"); }
+
+#tab-recordings { position: relative; }
+.rec-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent-light);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  font-size: 18px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.rec-drop-overlay[hidden] { display: none; }
+
+/* ── Narrow windows: the panes stack and the page scrolls as a whole ─ */
+@media (max-width: 900px) {
+  .rec-layout { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .rec-list-pane, .rec-detail-pane { position: static; max-height: none; overflow: visible; }
+  .rec-list-pane { border-right: 0; border-bottom: 1px solid var(--border); }
+  .rec-list { max-height: 360px; overflow-y: auto; }
+  .rec-detail-pane { padding: 20px 16px; }
+}
+@media (max-width: 480px) {
+  main:has(#tab-recordings.active) { padding-left: 12px; padding-right: 12px; }
+  .rec-dialog-body { padding: 18px; }
+  .rec-dialog .upload-option { grid-template-columns: minmax(0, 1fr) auto; }
+  .rec-dialog .upload-option .setting-info { grid-column: 1 / -1; }
+  .rec-time { flex-basis: 44px; }
+  .rec-line { gap: 10px; }
+}

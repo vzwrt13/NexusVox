@@ -1,4 +1,4 @@
-"""An upload action's error lands in the tab of the list it was started from (run under Node)."""
+"""An upload action's error lands next to the recording it was run on (run under Node)."""
 
 import json
 import re
@@ -25,15 +25,20 @@ def run_js(body: str):
     )
     stubs = """
     const box = () => ({ style: { display: "none" }, textContent: "" });
-    const uploadErrorEl = box(), uploadNoteEl = box(), meetingErrorEl = box(), meetingNoteEl = box();
+    const uploadErrorEl = box(), uploadNoteEl = box(), detailErrorEl = box(), detailNoteEl = box();
     const extensionUploadActions = [{ id: "act", label: "Act", panel: "p" }];
     const uploadActionHandlers = { act: async () => { throw new Error("boom"); } };
     const runningUploadActions = new Set();
     const loadFileTranscriptions = () => {};
-    // A button inside a list; `tab` is the tab section that holds it.
-    const button = (tab) => ({
+    // The detail pane of the chosen recording, with its own error and note boxes.
+    const detail = {
+      querySelector: (sel) => ({ ".rec-detail-error": detailErrorEl, ".rec-detail-note": detailNoteEl })[sel] || null,
+      querySelectorAll: () => [],
+    };
+    // A button inside the detail pane, or one outside it.
+    const button = (inDetail) => ({
       dataset: { action: "act" },
-      closest: (sel) => (sel === "#tab-meetings" ? (tab === "meetings" ? {} : null) : null),
+      closest: (sel) => (sel === ".rec-detail" && inDetail ? detail : null),
     });
     """
     script = f"{stubs}\n{parts}\n(async () => {{ {body} }})();"
@@ -41,19 +46,19 @@ def run_js(body: str):
     return json.loads(out)
 
 
-def test_error_from_the_meetings_list_shows_in_the_meetings_tab():
+def test_error_of_an_action_in_the_detail_pane_shows_in_the_detail_pane():
     result = run_js(
-        """await runUploadAction(button("meetings"), { id: 1 });
-        console.log(JSON.stringify([meetingErrorEl.textContent, meetingErrorEl.style.display,
+        """await runUploadAction(button(true), { id: 1 });
+        console.log(JSON.stringify([detailErrorEl.textContent, detailErrorEl.style.display,
           uploadErrorEl.textContent, uploadErrorEl.style.display]))"""
     )
     assert result == ["Act failed: boom", "block", "", "none"]
 
 
-def test_error_from_the_upload_list_still_shows_in_the_upload_tab():
+def test_error_from_outside_the_detail_pane_shows_in_the_list_pane():
     result = run_js(
-        """await runUploadAction(button("upload"), { id: 2 });
+        """await runUploadAction(button(false), { id: 2 });
         console.log(JSON.stringify([uploadErrorEl.textContent, uploadErrorEl.style.display,
-          meetingErrorEl.textContent, meetingErrorEl.style.display]))"""
+          detailErrorEl.textContent, detailErrorEl.style.display]))"""
     )
     assert result == ["Act failed: boom", "block", "", "none"]

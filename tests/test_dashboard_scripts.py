@@ -22,6 +22,7 @@ ORDER = [
     "dashboard-review.js",
     "dashboard-upload.js",
     "dashboard-meetings.js",
+    "dashboard-recordings.js",
     "dashboard-dev.js",
     "dashboard-init.js",
 ]
@@ -107,7 +108,7 @@ def test_the_scripts_run_together_in_order():
     )
     assert out.returncode == 0, out.stderr
     result = json.loads(out.stdout)
-    assert {"registerPanel", "registerUploadAction", "showTranscript"} <= set(result["ext"])
+    assert {"registerPanel", "registerUploadAction", "showTranscript", "registerRecordingTab"} <= set(result["ext"])
     assert result["loaders"] == 1
     # A file's duration is a float: Upload rounds it, the Meetings timer shows whole seconds with hours.
     assert result["clocks"] == ["3:25", "1:06", "1:01:01", "01:01"]

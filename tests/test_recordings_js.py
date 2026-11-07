@@ -1,0 +1,374 @@
+"""The Recordings tab under Node with a small stand-in DOM: the list, the upload dialog and the detail pane's tabs,
+extension tabs included (registering, switching, a redraw keeping the chosen tab and its content, no extension)."""
+
+import json
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+from dashboard_js import STATIC, dashboard_source
+
+pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
+
+# A stand-in DOM (tests/fake_dom.js) and a few page helpers, loaded first into every script.
+FAKE_DOM = (Path(__file__).with_name("fake_dom.js")).read_text(encoding="utf-8")
+
+# Helpers the Recordings script takes from earlier files; the pending-state helpers are the real ones.
+RECORDINGS_STUBS = r"""
+page([["rec-list", "ul"], ["rec-detail", "section"], ["rec-search", "input"], ["rec-options"],
+  ["rec-options-toggle", "button"], ["rec-detail-empty", "p"], ["tab-recordings", "section"]]);
+let extensionExports = [{ id: "txt", label: "Text" }];
+let extensionUploadActions = [];
+const runningUploadActions = new Set();
+const extensionPanels = {};
+const formatClock = (s) => Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+const setStatus = () => {};
+for (const f of ["openExtensionPanel", "loadPendingMeetings", "openMeetingRecording", "refreshDiarizeToggle",
+  "resumeUploadJob", "activateTab", "downloadExport", "runUploadAction"]) globalThis[f] = () => {};
+const loadLlmStatus = () => Promise.resolve();
+"""
+
+ROWS = [
+    {
+        "id": 7,
+        "kind": "meeting",
+        "title": "Weekly sync",
+        "original_filename": "meeting-1",
+        "text": "Speaker 1: Let us move the beta.\n\nSpeaker 2: Works for me.",
+        "duration_ms": 2520000,
+        "created_at": "2026-11-06T14:30:00",
+        "has_audio": True,
+        "language": "en",
+    },
+    {
+        "id": 3,
+        "kind": "upload",
+        "title": None,
+        "original_filename": "pricing-memo.wav",
+        "text": "A short memo about pricing.",
+        "duration_ms": 360000,
+        "created_at": "2026-10-30T09:00:00",
+        "has_audio": False,
+        "language": "en",
+    },
+]
+
+
+def _node(script: str) -> subprocess.CompletedProcess:
+    # Through stdin: the script is longer than a Windows command line may be.
+    return subprocess.run(["node", "-"], input=script, capture_output=True, text=True, encoding="utf-8", timeout=30)
+
+
+def _section(source: str, start: str, end: str) -> str:
+    return source[source.index(start) : source.index(end)]
+
+
+def run_recordings(body: str):
+    source = dashboard_source()
+    pending = _section(source, "// ── Pending and failed states", "// ── end of pending and failed states")
+    recordings = (STATIC / "dashboard-recordings.js").read_text(encoding="utf-8")
+    script = "\n".join([FAKE_DOM, RECORDINGS_STUBS, pending, recordings, f"const ROWS = {json.dumps(ROWS)};", body])
+    out = _node(script)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+# A detail pane as buildRecordingDetail lays it out, built from elements so the tab row can be walked.
+DETAIL = r"""
+function makeDetail(item) {
+  const detail = document.createElement("article");
+  detail.className = "rec-detail";
+  detail.dataset.id = String(item.id);
+  detail._item = item;
+  detail._lines = transcriptLines(item.text, []);
+  detail._textKey = recordingTextKey(item);
+  const tabs = document.createElement("div"); tabs.className = "rec-tabs";
+  const panels = document.createElement("div"); panels.className = "rec-panels";
+  detail.append(tabs, panels);
+  document.getElementById("rec-detail").replaceChildren(detail);
+  renderRecordingTabs(detail, item);
+  return detail;
+}
+const NexusVoxExt_register = (id, tab) => addRecordingTab(id, tab);
+// A redraw through the real path: the list was loaded again and the same recording is still chosen. The head is
+// left out (it is markup this stand-in DOM does not parse), as it is while its title is being edited.
+function renderSelectedRecordingFor(d) {
+  recItems = ROWS;
+  recSelectedId = d.dataset.id;
+  d._editing = true;
+  renderSelectedRecording(false);
+  d._editing = false;
+}
+const tabNames = (d) => d.querySelectorAll(".rec-tab").map((b) => b.textContent);
+const chosen = (d) => d.querySelector('.rec-tab[aria-selected="true"]').dataset.tab;
+const panelKind = (d) => d.querySelector(".rec-panel").children[0].className;
+"""
+
+
+# -- the list -------------------------------------------------------------------------------------
+
+
+def test_the_list_holds_meetings_and_uploads_and_marks_the_uploads():
+    result = run_recordings(
+        """recItems = ROWS; recSelectedId = "7"; renderRecordingList();
+        const html = document.getElementById("rec-list").innerHTML;
+        out([(html.match(/data-kind="(\\w+)"/g) || []), html.includes("Weekly sync"), html.includes("pricing-memo.wav"),
+          recordingListMeta(ROWS[0]).includes("Upload"), recordingListMeta(ROWS[1]).endsWith("6 min · Upload"),
+          /data-id="7"[^>]*\\n?\\s*aria-current="true"/.test(html)]);"""
+    )
+    assert result == [['data-kind="meeting"', 'data-kind="upload"'], True, True, False, True, True]
+
+
+def test_search_finds_titles_and_transcript_text_and_says_when_nothing_matches():
+    result = run_recordings(
+        """recItems = ROWS; const search = document.getElementById("rec-search");
+        const found = (q) => { search.value = q; return shownRecordings().map((i) => i.id); };
+        const counts = [found(""), found("WEEKLY"), found("pricing"), found("works for me"), found("nothing like it")];
+        renderRecordingList();
+        out([counts, document.getElementById("rec-list").innerHTML.includes("Nothing matches")]);"""
+    )
+    assert result == [[[7, 3], [7], [3], [7], []], True]
+
+
+def test_lengths_read_like_the_design():
+    result = run_recordings("out([45000, 360000, 2520000, 4320000].map(formatRecordingLength));")
+    assert result == ["45 s", "6 min", "42 min", "1 h 12 min"]
+
+
+# -- the transcript ---------------------------------------------------------------------------------
+
+
+def test_speaker_paragraphs_become_timed_lines_when_the_turns_line_up():
+    result = run_recordings(
+        """const turns = [{speaker: 1, start: 751.2, end: 760}, {speaker: 2, start: 764, end: 770}];
+        out([transcriptLines(ROWS[0].text, turns), transcriptLines(ROWS[0].text, turns.slice(0, 1)).map((l) => l.start),
+          transcriptLines("Note: one paragraph only.", [])]);"""
+    )
+    timed, mismatched, plain = result
+    assert timed == [
+        {"who": "Speaker 1", "colour": 0, "text": "Let us move the beta.", "start": 751.2, "end": 760},
+        {"who": "Speaker 2", "colour": 1, "text": "Works for me.", "start": 764, "end": 770},
+    ]
+    assert mismatched == [None, None]  # two paragraphs, one turn: no times rather than wrong ones
+    assert plain == [{"who": None, "colour": None, "text": "Note: one paragraph only.", "start": None, "end": None}]
+
+
+# -- the detail pane's tabs and the extension hook ---------------------------------------------------
+
+
+def test_without_extensions_the_transcript_shows_and_summary_is_a_pro_note():
+    result = run_recordings(
+        DETAIL
+        + """const d = makeDetail(ROWS[0]);
+        const summary = d.querySelector('.rec-tab[data-tab="summary"]');
+        const before = [tabNames(d), chosen(d), panelKind(d), recordingTabs.length];
+        summary.click();
+        const note = d.querySelector(".rec-panel").children[0];
+        out([...before, chosen(d), panelKind(d), note.innerHTML.includes("nexusvox.app/pro")]);"""
+    )
+    assert result == [
+        ["SummaryPro", "Transcript", "Speakers"],
+        "transcript",
+        "rec-transcript",
+        0,
+        "summary",
+        "rec-pro-note",
+        True,
+    ]
+
+
+def test_an_extension_tab_is_registered_switched_to_and_kept_across_redraws():
+    result = run_recordings(
+        DETAIL
+        + """const rendered = [];
+        const d = makeDetail(ROWS[0]);
+        const render = (c, rec) => { rendered.push(rec.id); c.textContent = "Notes of " + rec.id; };
+        const ok = NexusVoxExt_register("notes", { title: "Notes", render });
+        const names = tabNames(d);
+        const lazy = rendered.length;                      // nothing drawn until the tab is opened
+        d.querySelector('.rec-tab[data-tab="notes"]').click();
+        const kept = d.querySelector(".rec-ext-tab");
+        renderSelectedRecordingFor(d);                     // a redraw of the same recording
+        const afterRedraw = [chosen(d), d.querySelector(".rec-ext-tab") === kept, kept.textContent, rendered.length];
+        const other = makeDetail(ROWS[1]);                 // another recording: same tab, its own content
+        const otherText = other.querySelector(".rec-ext-tab").textContent;
+        const back = makeDetail(ROWS[0]);                  // back again: the first content, not drawn again
+        const same = back.querySelector(".rec-ext-tab") === kept;
+        out([ok, names, lazy, afterRedraw, chosen(other), otherText, same, rendered]);""",
+    )
+    assert result == [
+        True,
+        ["SummaryPro", "Transcript", "Speakers", "Notes"],
+        0,
+        ["notes", True, "Notes of 7", 1],
+        "notes",
+        "Notes of 3",
+        True,
+        [7, 3],
+    ]
+
+
+def test_a_summary_tab_takes_the_pro_notes_place_and_can_be_drawn_again():
+    result = run_recordings(
+        DETAIL
+        + """let draws = 0;
+        const render = (c) => { draws += 1; c.textContent = "draw " + draws; };
+        NexusVoxExt_register("summary", { title: "Summary", render });
+        const d = makeDetail(ROWS[0]);
+        chooseRecordingTab("summary");
+        const first = d.querySelector(".rec-ext-tab").textContent;
+        refreshRecordingTabContent("summary", 7);           // e.g. a summary was just generated
+        out([tabNames(d), first, d.querySelector(".rec-ext-tab").textContent, draws]);"""
+    )
+    assert result == [["Summary", "Transcript", "Speakers"], "draw 1", "draw 2", 2]
+
+
+def test_the_hook_refuses_core_and_malformed_ids_and_hides_unavailable_tabs():
+    result = run_recordings(
+        DETAIL
+        + """const r = (id, tab) => NexusVoxExt_register(id, tab);
+        const render = () => {};
+        const meetingsOnly = { title: "Meeting notes", render, available: (rec) => rec.kind === "meeting" };
+        const answers = [r("transcript", { render }), r("Bad Id", { render }), r("x", {}),
+          r("only-meetings", meetingsOnly), r("only-meetings", { render })];
+        out([answers, tabNames(makeDetail(ROWS[0])).length, tabNames(makeDetail(ROWS[1])).length,
+          chooseRecordingTab("only-meetings"), chooseRecordingTab("nope")]);"""
+    )
+    # On the upload the tab does not exist, so it cannot be chosen there.
+    assert result == [[False, False, False, True, False], 4, 3, False, False]
+
+
+def test_show_transcript_switches_to_the_transcript_tab_and_marks_the_passage():
+    result = run_recordings(
+        DETAIL
+        + """recItems = ROWS;
+        NexusVoxExt_register("notes", { title: "Notes", render: () => {} });
+        recChosenTab = "notes";
+        // showRecording loads the list first; here the list is already in.
+        loadFileTranscriptions = async () => {};
+        const d = makeDetail(ROWS[0]);
+        d._editing = true;
+        d._lines = transcriptLines(ROWS[0].text, [{start: 750, end: 760}, {start: 764, end: 770}]);
+        showRecording(7, { mark: { start: 765, end: 766 } }).then((found) => {
+          out([found, recChosenTab, recMark.start, recMark.id]);
+        });"""
+    )
+    assert result == [True, "transcript", 765, "7"]
+
+
+# -- the upload dialog --------------------------------------------------------------------------------
+
+
+def run_upload(body: str):
+    source = dashboard_source()
+    pending = _section(source, "// ── Pending and failed states", "// ── end of pending and failed states")
+    upload = (STATIC / "dashboard-upload.js").read_text(encoding="utf-8")
+    upload = upload[: upload.index("// ── Pending and failed states")]  # the helpers come in once, below
+    ids = [
+        "upload-zone",
+        ["upload-input", "input"],
+        ["upload-browse", "button"],
+        "upload-selected",
+        "upload-selected-name",
+        "upload-selected-meta",
+        ["upload-remove", "button"],
+        "upload-zone-text",
+        "upload-zone-ready",
+        ["upload-transcribe", "button"],
+        ["upload-dialog", "dialog"],
+        ["tab-recordings", "section"],
+        "rec-drop-overlay",
+        ["upload-browse-again", "button"],
+        ["upload-open", "button"],
+        ["upload-cleanup-toggle", "input"],
+        ["upload-cleanup-level", "select"],
+        ["upload-diarize-toggle", "input"],
+        "upload-diarize-hint",
+        "upload-status",
+        "upload-status-text",
+        "upload-progress",
+        ["upload-progress-bar", "progress"],
+        "upload-error",
+        "upload-note",
+    ]
+    stubs = f"""
+    page({json.dumps([i if isinstance(i, list) else [i] for i in ids])});
+    const URL = {{ createObjectURL: () => "blob:x", revokeObjectURL() {{}} }};
+    class Audio {{ addEventListener() {{}} removeAttribute() {{}} load() {{}} }};
+    const setInterval = () => 0;
+    // The duration probe's 10 s timeout must not keep Node running; a zero delay still runs.
+    const nodeSetTimeout = globalThis.setTimeout;
+    const setTimeout = (fn, ms) => (ms ? 0 : nodeSetTimeout(fn, 0));
+    const clearTimeout = () => {{}};
+    const refreshLlmHints = () => {{}};
+    let llmLoads = 0;
+    const loadLlmStatus = () => {{ llmLoads += 1; return Promise.resolve(); }};
+    const FormData = class {{ append() {{}} }};
+    let extensionUploadActions = [];
+    const uploadActionHandlers = {{}};
+    const file = {{ name: "call.wav", size: 2048 }};
+    const files = (list) => ({{ dataTransfer: {{ types: ["Files"], files: list }} }});
+    """
+    script = "\n".join([FAKE_DOM, stubs, upload, pending, body])
+    out = _node(script)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout.strip().splitlines()[-1])
+
+
+def test_the_upload_button_opens_the_dialog_with_fresh_options():
+    result = run_upload(
+        """const dialog = document.getElementById("upload-dialog");
+        document.getElementById("upload-open").click();
+        out([dialog.open, llmLoads, fetched.map((f) => f[0])]);"""
+    )
+    assert result == [True, 1, ["/api/models/current"]]
+
+
+def test_a_file_dropped_on_the_tab_opens_the_dialog_with_it():
+    result = run_upload(
+        """const tab = document.getElementById("tab-recordings"), overlay = document.getElementById("rec-drop-overlay");
+        overlay.hidden = true;
+        tab.dispatch("dragenter", files([]));
+        const shown = !overlay.hidden;
+        tab.dispatch("drop", files([file]));
+        const el = (id) => document.getElementById(id);
+        out([shown, overlay.hidden, el("upload-dialog").open, el("upload-selected-name").textContent,
+          el("upload-transcribe").disabled]);"""
+    )
+    assert result == [True, True, True, "call.wav", False]
+
+
+def test_a_drop_on_the_dialogs_own_zone_is_taken_once():
+    result = run_upload(
+        """const dialog = document.getElementById("upload-dialog");
+        dialog.append(document.getElementById("upload-zone"));
+        document.getElementById("tab-recordings").append(dialog);
+        let opened = 0; dialog.showModal = () => { opened += 1; dialog.open = true; };
+        document.getElementById("upload-zone").dispatch("drop", files([file]));
+        out([opened, document.getElementById("upload-selected-name").textContent]);"""
+    )
+    assert result == [0, "call.wav"]
+
+
+def test_transcribe_closes_the_dialog_and_starts_the_job():
+    result = run_upload(
+        """const dialog = document.getElementById("upload-dialog");
+        selectUploadFile(file);
+        dialog.showModal();
+        document.getElementById("upload-transcribe").click();
+        setTimeout(() => out([dialog.open, uploadRunning, fetched.map((f) => f.join(" "))]), 0);"""
+    )
+    assert result[0] is False and result[1] is True
+    assert "/api/file-transcribe POST" in result[2]
+
+
+def test_a_drop_while_a_file_is_transcribing_says_so_instead():
+    result = run_upload(
+        """uploadRunning = true;
+        document.getElementById("tab-recordings").dispatch("drop", files([file]));
+        const error = document.getElementById("upload-error");
+        const said = error.textContent.includes("still being transcribed");
+        out([document.getElementById("upload-dialog").open, error.style.display, said]);"""
+    )
+    assert result == [False, "block", True]

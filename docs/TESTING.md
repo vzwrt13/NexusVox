@@ -86,7 +86,8 @@ tests/
 ├── test_docker_ctl.py             # Docker profile start/stop and health checks
 ├── test_file_transcribe.py        # Audio file upload conversion and transcription
 ├── test_file_cleanup.py           # Optional LLM cleanup of uploaded transcripts
-├── test_file_jobs.py              # Background job registry behind the Upload tab progress bar
+├── test_file_jobs.py              # Background job registry behind the upload progress bar
+├── test_recordings_js.py          # Recordings tab under Node (stand-in DOM fake_dom.js): list, upload dialog, extension tabs
 ├── test_extensions.py             # Extension interface: entry points, failing extensions, the three hooks (dummy extension)
 ├── test_os_commands.py            # Nexus OS command parsing and dispatch
 ├── test_experimental.py           # [experimental] dashboard side: endpoints not registered and elements hidden by default, back with the flag

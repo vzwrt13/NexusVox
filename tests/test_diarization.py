@@ -9,6 +9,7 @@ from nexusvox.transcription.diarization import (
     label_words,
     speaker_at,
     speaker_paragraphs,
+    speaker_turns,
 )
 from nexusvox.transcription.transcriber import SpeakerTurn, Word, diarization_url, parse_turns
 
@@ -82,6 +83,20 @@ def test_consecutive_words_of_one_speaker_form_a_paragraph():
     assert format_transcript(labelled) == (
         "Speaker 1: Good morning, everyone.\n\nSpeaker 2: Hi! Guten Morgen.\n\nSpeaker 1: Let's start."
     )
+
+
+def test_speaker_turns_line_up_with_the_paragraphs_and_carry_their_times():
+    words = [
+        Word("Hello", 0.5, 0.9, speaker=1),
+        Word("there.", 1.0, 1.4, speaker=1),
+        Word("um", 1.6, 1.7),  # no speaker: left out, as in the paragraphs
+        Word("Hi!", 2.0, 2.3, speaker=2),
+        Word("Bye.", 5.0, 5.5, speaker=1),
+    ]
+
+    assert speaker_turns(words) == [(1, 0.5, 1.4), (2, 2.0, 2.3), (1, 5.0, 5.5)]
+    assert [speaker for speaker, _ in speaker_paragraphs(words)] == [1, 2, 1]
+    assert speaker_turns(_words(("plain", 0.0, 1.0))) == []
 
 
 def test_four_speakers_across_a_long_file():

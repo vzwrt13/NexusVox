@@ -3,7 +3,7 @@
     python scripts/dashboard_screenshots.py [--out docs/images] [--browser PATH] [--scale 1.5]
 
 The script starts the real dashboard against a temporary data folder that it fills with invented
-dictations, meetings and uploads, and photographs the Analytics, Meetings, Upload and Settings tabs
+dictations, meetings and uploads, and photographs the Analytics, Recordings and Settings tabs
 with a headless Chromium browser (Microsoft Edge or Google Chrome, whichever is installed; no extra
 package). The dashboard has one theme, dark, so there is one image per tab.
 
@@ -58,16 +58,16 @@ DEFAULT_OUT = _PROJECT_ROOT / "docs" / "images"
 SEED = 20260101
 VIEWPORT_WIDTH = 1280
 
-# (dashboard tab, file name, CSS selector of the elements to hide, or None). Every tab is photographed in a
-# viewport taller than the tab, and the empty strip below the last card is cut off, so an image ends at the
-# content. Analytics, Upload and Settings run on for a long way (charts, history, more settings), so the page
-# is served with the elements after the last card to show hidden: the cut sits at an element, not at a guess.
+# (dashboard tab, file name, CSS selector of the elements to hide or None, window height or None). A tab without
+# a height is photographed in a viewport taller than the tab, and the empty strip below the last card is cut off,
+# so an image ends at the content. Analytics and Settings run on for a long way (charts, more settings), so the
+# page is served with the elements after the last card to show hidden: the cut sits at an element, not at a
+# guess. The Recordings tab fills the window with its two panes, so it is photographed at a window's height.
 VIEWPORT_HEIGHT = 4000
 SHOTS = (
-    ("analytics", "dashboard-analytics.png", ".chart-card:has(#chart-latency) ~ *"),  # up to the latency chart
-    ("meetings", "dashboard-meetings.png", None),
-    ("upload", "dashboard-upload.png", "#upload-list > :nth-child(n+5)"),  # the four uploads, not the meetings
-    ("settings", "dashboard-settings.png", "#settings-card-vocabulary ~ *"),  # Dictation and Vocabulary
+    ("analytics", "dashboard-analytics.png", ".chart-card:has(#chart-latency) ~ *", None),  # up to the latency chart
+    ("recordings", "dashboard-recordings.png", None, 860),
+    ("settings", "dashboard-settings.png", "#settings-card-vocabulary ~ *", None),  # Dictation and Vocabulary
 )
 CROP_PADDING = 32  # CSS pixels of page background kept below the last card
 
@@ -309,6 +309,9 @@ def seed_database(db) -> None:
                 kind="meeting",
                 speaker_names=json.dumps({str(k): v for k, v in SPEAKER_NAMES.items()}),
                 processing_ms=meeting["minutes"] * 700,
+                words=_speaker_words(meeting["turns"]),
+                # Shows the player; nothing plays, there is no file (the browser never asks for it in a still).
+                audio_path=f"audio/meetings/{meeting['folder']}/meeting.wav",
             )
         )
 
@@ -443,7 +446,7 @@ def _find_browser(explicit: str | None) -> Path:
     raise SystemExit("No Chromium browser found. Install Microsoft Edge or Google Chrome, or pass --browser PATH.")
 
 
-def _photograph(browser: Path, url: str, target: Path, profile: Path, scale: float) -> None:
+def _photograph(browser: Path, url: str, target: Path, profile: Path, scale: float, height: int) -> None:
     """One headless screenshot of `url`. The launch URL redirects to the tab and sets the session cookie."""
     command = [
         str(browser),
@@ -463,7 +466,7 @@ def _photograph(browser: Path, url: str, target: Path, profile: Path, scale: flo
         # Only the dashboard on 127.0.0.1 may be reached.
         "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
         f"--user-data-dir={profile}",
-        f"--window-size={VIEWPORT_WIDTH},{VIEWPORT_HEIGHT}",
+        f"--window-size={VIEWPORT_WIDTH},{height}",
         f"--force-device-scale-factor={scale}",
         "--virtual-time-budget=10000",
         f"--screenshot={target}",
@@ -536,12 +539,14 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
             db = Database(config.database)
             stack.callback(db._engine.dispose)  # the open SQLite file would keep the folder from being deleted
             seed_database(db)
+            extensions = ExtensionRegistry()
+            extensions.add_builtin_exports()  # TXT, SRT and VTT, as in the app: no extension is loaded
             api = DashboardAPI(
                 db._session_factory,
                 config,
                 db=db,
                 benchmarks_dir=data_dir / "benchmarks",
-                extensions=ExtensionRegistry(),
+                extensions=extensions,
             )
 
             port = _free_port()
@@ -555,16 +560,17 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
             stack.callback(thread.join, 5)
             stack.callback(server.shutdown)
 
-            for tab, filename, hide in SHOTS:
+            for tab, filename, hide, height in SHOTS:
                 _hide_css = _tab_style(hide)
                 url = f"http://127.0.0.1:{port}/?launch={guard.new_launch_secret()}&tab={tab}"
                 profile = data_dir / "browser-profile" / tab  # a fresh profile each time: no cookie carries over
                 target = staging / filename
-                _photograph(browser_path, url, target, profile, scale)
-                _crop_to_content(target, scale)
+                _photograph(browser_path, url, target, profile, scale, height or VIEWPORT_HEIGHT)
+                if height is None:
+                    _crop_to_content(target, scale)
 
         written = []
-        for _tab, filename, _hide in SHOTS:
+        for _tab, filename, _hide, _height in SHOTS:
             destination = out_dir / filename
             shutil.copyfile(staging / filename, destination)
             written.append(destination)

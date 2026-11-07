@@ -115,7 +115,7 @@ async function loadLlmStatus() {
 // or its card is hidden. Runs while a tab with a hint is open and the page is visible.
 setInterval(() => {
   if (document.hidden) return;
-  const open = ["tab-settings", "tab-upload"].some((id) => document.getElementById(id).classList.contains("active"));
+  const open = ["tab-settings", "tab-recordings"].some((id) => document.getElementById(id).classList.contains("active"));
   if (open) loadLlmStatus().catch(() => {});
 }, 5000);
 document.addEventListener("visibilitychange", () => {

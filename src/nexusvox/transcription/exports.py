@@ -1,7 +1,7 @@
 """Built-in export targets for stored file transcriptions: plain text, SRT and WebVTT subtitles.
 
 They are registered through the same `ExportTarget` mechanism as an extension's (see `load_extensions`), so the
-Upload tab shows them as download links next to every stored upload. The subtitle cues are built from the
+Recordings tab offers them in the Export menu of every stored recording. The subtitle cues are built from the
 per-word timing (`FileTranscript.words`); an upload without it cannot be exported as subtitles.
 """
 

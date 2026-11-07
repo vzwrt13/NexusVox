@@ -68,6 +68,19 @@ def speaker_paragraphs(words: list[Word]) -> list[tuple[int, str]]:
     return [(speaker, " ".join(parts)) for speaker, parts in paragraphs]
 
 
+def speaker_turns(words: list[Word]) -> list[tuple[int, float, float]]:
+    """(speaker number, start, end) in seconds for each paragraph `speaker_paragraphs` makes, in the same order."""
+    turns: list[tuple[int, float, float]] = []
+    for word in words:
+        if word.speaker is None:
+            continue
+        if turns and turns[-1][0] == word.speaker:
+            turns[-1] = (word.speaker, turns[-1][1], word.end)
+        else:
+            turns.append((word.speaker, word.start, word.end))
+    return turns
+
+
 def format_transcript(words: list[Word], names: dict[int, str] | None = None) -> str:
     """The labelled transcript: "Speaker 1: ..." paragraphs separated by a blank line.
 

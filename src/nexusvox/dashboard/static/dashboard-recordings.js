@@ -20,9 +20,13 @@ let recSelectedId = null; // id (string) of the recording in the detail pane
 let recChosenTab = "transcript"; // the tab the user chose; kept across redraws and other recordings
 let recMark = null; // {id, start, end, text}: the passage an extension asked to mark in the transcript
 const recShowOriginal = new Set(); // ids of cleaned recordings switched to the transcript as transcribed
-const recTurns = new Map(); // id -> Promise of the speaker turns [{speaker, start, end}]
+const recTurns = new Map(); // "id:text" -> Promise of the speaker turns [{speaker, start, end}]
 const recordingTabs = []; // extension tabs: {id, title, render, available}
-const recTabContent = new Map(); // "tab:recording" -> the container an extension tab drew into
+// "tab:recording" -> the container an extension tab drew into, least recently shown first. At most
+// REC_TAB_KEEP are kept (the shown recording's never drop out); older ones are drawn again when shown.
+const recTabContent = new Map();
+const REC_TAB_KEEP = 24;
+const recordingScriptsLoaded = new Set(); // panel ids whose recording_script was added to the page
 let recPending = false; // the last load had a row with a pending state
 let recLoadGeneration = 0; // a load that is no longer the newest drops its answer
 
@@ -62,12 +66,26 @@ function openRecordingsTab() {
   loadRecordingTabScripts();
 }
 
-// Extension tabs in the detail pane are registered by the extensions' panel scripts, so those load when the
-// Recordings tab opens, not only when their own sidebar tab does.
+// An extension registers its detail-pane tabs from a light script of their own (`recording_script` of its
+// panel), added once when the Recordings tab first opens. The panel's main script is not loaded for this: it
+// runs only when its own sidebar tab is opened, so a panel that polls or starts timers stays quiet until then.
 function loadRecordingTabScripts() {
-  const ids = Object.keys(extensionPanels);
-  ids.forEach(openExtensionPanel);
-  Promise.all(ids.map((id) => extensionPanels[id].ready)).then(() => renderSelectedRecording(false));
+  const loading = [];
+  for (const [id, panel] of Object.entries(extensionPanels)) {
+    if (!panel.recordingScript || recordingScriptsLoaded.has(id)) continue;
+    recordingScriptsLoaded.add(id);
+    const script = document.createElement("script");
+    script.src = panel.recordingScript;
+    loading.push(new Promise((resolve) => {
+      script.onload = resolve;
+      script.onerror = () => {
+        console.error("Recording tab script failed to load:", panel.recordingScript);
+        resolve();
+      };
+    }));
+    document.head.appendChild(script);
+  }
+  if (loading.length) Promise.all(loading).then(() => renderSelectedRecording(false));
 }
 
 const recPendingPoller = createPendingPoller(() => {
@@ -84,22 +102,37 @@ document.addEventListener("visibilitychange", () => {
 async function loadFileTranscriptions(poll = false) {
   const generation = ++recLoadGeneration;
   try {
-    const [rows] = await Promise.all([
-      fetch(`/api/file-transcriptions?limit=${REC_LIST_LIMIT}`).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      }),
-      poll ? null : loadPendingMeetings(),
-    ]);
+    const [rows] = await Promise.all([fetchRecordingRows(), poll ? null : loadPendingMeetings()]);
     if (generation !== recLoadGeneration) return;
-    recItems = rows;
-    recPending = rowsHavePending(rows);
-    renderRecordingList();
-    renderSelectedRecording(poll);
+    applyRecordingRows(rows, poll);
   } catch (err) {
     console.error("Failed to load the recordings:", err);
   }
   if (generation === recLoadGeneration) recPendingPoller.update(recPending && recordingsShown());
+}
+
+function fetchRecordingRows() {
+  return fetch(`/api/file-transcriptions?limit=${REC_LIST_LIMIT}`).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  });
+}
+
+function applyRecordingRows(rows, poll) {
+  recItems = rows;
+  recPending = rowsHavePending(rows);
+  pruneRecordingCaches(rows);
+  renderRecordingList();
+  renderSelectedRecording(poll);
+}
+
+// What is kept per recording (extension tab content, speaker turns, the original/cleaned switch) goes once the
+// recording is no longer listed (deleted, or pushed out of the list by newer ones).
+function pruneRecordingCaches(rows) {
+  const listed = new Set(rows.map((r) => String(r.id)));
+  for (const key of [...recTabContent.keys()]) if (!listed.has(key.split(":")[1])) recTabContent.delete(key);
+  for (const key of [...recTurns.keys()]) if (!listed.has(key.split(":")[0])) recTurns.delete(key);
+  for (const id of [...recShowOriginal]) if (!listed.has(id)) recShowOriginal.delete(id);
 }
 
 // ── The list ─────────────────────────────────────────────────────────
@@ -140,25 +173,61 @@ function shownRecordings() {
   return recItems.filter((item) => matchesRecordingSearch(item, query));
 }
 
-function renderRecordingList() {
-  const shown = shownRecordings();
-  if (!recItems.length) {
-    recList.innerHTML = `<li class="empty-state">No recordings yet.</li>`;
-    return;
-  }
-  if (!shown.length) {
-    recList.innerHTML = `<li class="empty-state">Nothing matches your search.</li>`;
-    return;
-  }
-  recList.innerHTML = shown.map((item) => `
-    <li><button type="button" class="rec-row" data-id="${item.id}" data-kind="${item.kind === "meeting" ? "meeting" : "upload"}"
-      aria-current="${String(item.id) === recSelectedId}">
+function recordingRowHtml(item) {
+  return `<button type="button" class="rec-row" data-id="${item.id}" data-kind="${item.kind === "meeting" ? "meeting" : "upload"}">
       <span class="rec-row-icon" aria-hidden="true"></span>
       <span class="rec-row-text">
         <span class="rec-row-title">${escapeHtml(recordingTitle(item))}</span>
         <span class="rec-row-meta">${escapeHtml(recordingListMeta(item))}<span class="visually-hidden">${item.kind === "meeting" ? ", meeting" : ""}</span></span>
       </span>
-    </button></li>`).join("");
+    </button>`;
+}
+
+// Keyed by recording: a row whose content did not change keeps its element, and rows move only when the order
+// changed, so a refresh (the pending poll runs every few seconds) never takes the keyboard focus or a screen
+// reader's place away from the row the user is on.
+function renderRecordingList() {
+  const shown = shownRecordings();
+  const active = document.activeElement;
+  const focusedId = active && recList.contains(active) && active.dataset ? active.dataset.id : undefined;
+  const message = !recItems.length ? "No recordings yet." : !shown.length ? "Nothing matches your search." : "";
+  if (message) {
+    recList.innerHTML = `<li class="empty-state">${message}</li>`;
+    return;
+  }
+  const existing = new Map([...recList.children].filter((li) => li.dataset.id).map((li) => [li.dataset.id, li]));
+  const rows = shown.map((item) => {
+    const id = String(item.id);
+    let li = existing.get(id);
+    existing.delete(id);
+    if (!li) {
+      li = document.createElement("li");
+      li.dataset.id = id;
+    }
+    const html = recordingRowHtml(item);
+    if (li._html !== html) {
+      li.innerHTML = html;
+      li._html = html;
+    }
+    return li;
+  });
+  [...recList.children].forEach((child) => {
+    if (!child.dataset.id || existing.has(child.dataset.id)) child.remove();
+  });
+  rows.forEach((li, i) => {
+    if (recList.children[i] !== li) recList.insertBefore(li, recList.children[i] || null);
+  });
+  markSelectedRow();
+  if (focusedId !== undefined && !recList.contains(document.activeElement)) {
+    const again = recList.querySelector(`.rec-row[data-id="${focusedId}"]`);
+    if (again) again.focus({ preventScroll: true });
+  }
+}
+
+function markSelectedRow() {
+  recList.querySelectorAll(".rec-row").forEach((row) => {
+    row.setAttribute("aria-current", String(row.dataset.id === recSelectedId));
+  });
 }
 
 recList.addEventListener("click", (e) => {
@@ -185,9 +254,7 @@ recSearch.addEventListener("input", () => {
 
 function selectRecording(id) {
   recSelectedId = String(id);
-  recList.querySelectorAll(".rec-row").forEach((row) => {
-    row.setAttribute("aria-current", String(row.dataset.id === recSelectedId));
-  });
+  markSelectedRow();
   renderSelectedRecording(false);
 }
 
@@ -204,11 +271,12 @@ function currentDetail() {
   return recDetailPane.querySelector(":scope > .rec-detail");
 }
 
-// The recording the detail pane shows: the chosen one while it is listed and matches the search, else the
-// first one shown. `poll` keeps a pane whose recording did not change untouched.
+// The recording the detail pane shows: the chosen one as long as it is listed, also while the search hides
+// its row (typing must not stop its audio or drop a confirmation), else the first one shown. `poll` keeps a
+// pane whose recording did not change untouched.
 function renderSelectedRecording(poll) {
   const shown = shownRecordings();
-  let item = shown.find((i) => String(i.id) === recSelectedId);
+  let item = recItems.find((i) => String(i.id) === recSelectedId);
   if (!item) item = shown[0];
   const detail = currentDetail();
   if (!item) {
@@ -242,9 +310,7 @@ function renderSelectedRecording(poll) {
 
 function selectRecordingRow(id) {
   recSelectedId = String(id);
-  recList.querySelectorAll(".rec-row").forEach((row) => {
-    row.setAttribute("aria-current", String(row.dataset.id === recSelectedId));
-  });
+  markSelectedRow();
 }
 
 function recordingTextKey(item) {
@@ -306,7 +372,7 @@ function fillRecordingHead(detail, item) {
   head.querySelectorAll(".rec-menu-wrap").forEach(bindRecMenu);
   head.querySelector(".rec-rename").addEventListener("click", () => editFileTitle(detail));
   head.querySelectorAll(".rec-export").forEach((entry) => {
-    entry.addEventListener("click", () => downloadExport(entry.dataset.href, entry));
+    entry.addEventListener("click", () => downloadExport(entry.dataset.href, detail._item));
   });
   head.querySelectorAll(".upload-action").forEach((button) => {
     button.addEventListener("click", () => runUploadAction(button, detail._item));
@@ -566,25 +632,33 @@ function bindRecordingPlayer(detail) {
 // ── Body: the tab row and its panels ─────────────────────────────────
 // The speaker turns come from the word timing; until they are in (or when there are none) the transcript shows
 // without times.
-function loadRecordingTurns(id) {
-  const key = String(id);
+// Kept per recording and text: an action that rewrites a transcript (and its word timing) brings new text,
+// so its turns are fetched again. A failed fetch is not kept, so the next draw asks again.
+function loadRecordingTurns(item) {
+  const key = `${item.id}:${(item.text || "").length}:${(item.text || "").slice(0, 120)}`;
   if (!recTurns.has(key)) {
-    recTurns.set(key, fetch(`/api/file-transcriptions/${key}/turns`)
-      .then((r) => (r.ok ? r.json() : { turns: [] }))
+    recTurns.set(key, fetch(`/api/file-transcriptions/${item.id}/turns`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((body) => body.turns || [])
-      .catch(() => []));
+      .catch(() => {
+        recTurns.delete(key);
+        return [];
+      }));
   }
   return recTurns.get(key);
 }
 
 function drawRecordingBody(detail, item) {
   detail._textKey = recordingTextKey(item);
-  detail._lines = transcriptLines(shownRecordingText(item), []);
+  detail._lines = transcriptLines(shownRecordingText(item), [], item.kind);
   renderRecordingTabs(detail, item);
-  loadRecordingTurns(item.id).then((turns) => {
+  loadRecordingTurns(item).then((turns) => {
     if (!detail.isConnected || detail._textKey !== recordingTextKey(detail._item)) return;
     detail._turns = turns;
-    detail._lines = transcriptLines(shownRecordingText(detail._item), turns);
+    detail._lines = transcriptLines(shownRecordingText(detail._item), turns, detail._item.kind);
     detail._speakerCount = new Set(detail._lines.map((l) => l.who).filter(Boolean)).size;
     if (!detail._editing) {
       detail.querySelector(".rec-meta").textContent = recordingDetailMeta(detail._item, detail._speakerCount);
@@ -697,17 +771,19 @@ function proSummaryNote() {
 
 // ── Transcript ───────────────────────────────────────────────────────
 // "Speaker 1: ..." paragraphs become timed lines: the time comes from the paragraph's speaker turn when the
-// paragraphs and turns line up one to one; otherwise the lines go without times.
+// paragraphs and turns line up one to one; otherwise the lines go without times. A prefix is read as a speaker
+// only for a meeting (always split by speaker) or a recording with speaker-labelled word timing, never because a
+// plain text happens to have paragraphs such as "Agenda: ..." and "Note: ...".
 const SPEAKER_PREFIX = /^([^:\n]{1,60}):\s+([\s\S]+)$/;
 
-function transcriptLines(text, turns) {
+function transcriptLines(text, turns, kind) {
   const paragraphs = (text || "").split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   const parsed = paragraphs.map((p) => {
     const match = SPEAKER_PREFIX.exec(p);
     return match ? { who: match[1].trim(), text: match[2] } : { who: null, text: p };
   });
   const timed = turns.length > 0 && turns.length === paragraphs.length;
-  const labelled = parsed.length > 0 && parsed.every((p) => p.who) && (timed || parsed.length > 1);
+  const labelled = parsed.length > 0 && parsed.every((p) => p.who) && (turns.length > 0 || kind === "meeting");
   const order = new Map();
   return parsed.map((p, i) => {
     const who = labelled ? p.who : null;
@@ -848,7 +924,10 @@ function addRecordingTab(id, tab) {
 function recordingTabContainer(tab, item) {
   const key = `${tab.id}:${item.id}`;
   let container = recTabContent.get(key);
-  if (!container) {
+  if (container) {
+    recTabContent.delete(key); // to the end: the most recently shown
+    recTabContent.set(key, container);
+  } else {
     container = document.createElement("div");
     container.className = "rec-ext-tab";
     recTabContent.set(key, container);
@@ -858,8 +937,16 @@ function recordingTabContainer(tab, item) {
       console.error("Recording tab failed:", tab.id, err);
       container.textContent = "This tab failed to load.";
     }
+    trimRecordingTabContent(String(item.id));
   }
   return container;
+}
+
+function trimRecordingTabContent(shownId) {
+  for (const key of [...recTabContent.keys()]) {
+    if (recTabContent.size <= REC_TAB_KEEP) return;
+    if (key.split(":")[1] !== shownId) recTabContent.delete(key);
+  }
 }
 
 function refreshRecordingTabContent(id, recordingId) {
@@ -874,22 +961,28 @@ function refreshRecordingTabContent(id, recordingId) {
 }
 
 // NexusVoxExt.showTranscript(id, {mark}): the recording in the detail pane, on its Transcript tab.
+// The recording is looked up in a list of its own fetching, before anything on screen changes: an unknown id
+// (deleted, or older than the listed rows) leaves the user where they are and resolves false.
 async function showRecording(id, options = {}) {
-  history.replaceState(null, "", "#recordings");
-  activateTab("recordings", { keepScroll: true });
-  await loadFileTranscriptions();
-  const item = recItems.find((i) => String(i.id) === String(id));
+  let rows;
+  try {
+    rows = await fetchRecordingRows();
+  } catch (err) {
+    console.error("Could not look the recording up:", err);
+    return false;
+  }
+  const item = rows.find((i) => String(i.id) === String(id));
   if (!item) return false;
   const mark = options && options.mark;
   recMark = mark ? { id: String(item.id), start: mark.start, end: mark.end, text: mark.text } : null;
   recChosenTab = "transcript";
-  if (!matchesRecordingSearch(item, recSearch.value.trim().toLowerCase())) {
-    recSearch.value = "";
-    renderRecordingList();
-  }
-  const detail = currentDetail();
-  if (detail && detail.dataset.id === String(item.id)) renderRecordingTabs(detail, detail._item);
-  selectRecording(item.id);
+  recSelectedId = String(item.id);
+  if (!matchesRecordingSearch(item, recSearch.value.trim().toLowerCase())) recSearch.value = "";
+  applyRecordingRows(rows, false);
+  history.replaceState(null, "", "#recordings");
+  // Opening the tab starts a load of its own, which makes any load still in flight stale (it drops its answer),
+  // and keeps this recording chosen. Until it answers, the rows fetched here are what the tab shows.
+  activateTab("recordings", { keepScroll: true });
   const row = recList.querySelector(`.rec-row[data-id="${item.id}"]`);
   if (row) {
     row.scrollIntoView({ behavior: "smooth", block: "nearest" });

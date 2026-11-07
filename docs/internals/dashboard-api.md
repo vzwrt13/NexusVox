@@ -42,7 +42,7 @@ A route reads its JSON body through `_json_object` in `routes_base.py`: valid JS
 | GET | `/api/file-transcribe/current` | `{job}`: the running job, or the latest unread finished one, else `null` |
 | GET | `/api/file-transcriptions` | List file transcription results (`?kind=upload` / `?kind=meeting` narrows them) |
 | DELETE | `/api/file-transcriptions/<id>` | Delete an upload or a meeting with its audio files (404 unknown id) |
-| GET | `/api/file-transcriptions/<id>/turns` | `{turns: [{speaker, start, end}]}` in seconds, one per speaker paragraph of the text in order (`speaker_turns` over the stored word timing); empty without speaker-labelled words; 404 unknown id. The Recordings tab times its speaker lines with it |
+| GET | `/api/file-transcriptions/<id>/turns` | `{turns: [{speaker, start, end}]}` in seconds, one per speaker paragraph of the text in order (`speaker_turns` over the stored word timing; it groups words through `speaker_runs`, the same helper `speaker_paragraphs` uses, so turns and paragraphs never split differently); empty without speaker-labelled words; 404 unknown id. The Recordings tab times its speaker lines with it |
 | GET | `/api/meetings/status` | `{recording, elapsed_s, folder}` |
 | POST | `/api/meetings/start` | Start recording a meeting (500 with `error` when a device cannot be opened or one runs already) |
 | POST | `/api/meetings/stop` | Stop it and start the transcription job: `{ok, job_id, folder}`, or `busy` when another file is being transcribed |
@@ -58,7 +58,7 @@ A route reads its JSON body through `_json_object` in `routes_base.py`: valid JS
 | POST | `/api/settings/meeting-own-voice-label` | Name of the microphone's speaker in meeting transcripts `{label}` (empty = `Speaker 1`; read at transcription time) |
 | POST | `/api/settings/meeting-store-audio` | Keep the `meeting.wav` mix after transcription `{enabled}` (default on; read at transcription time; tracks are always deleted after a successful one) |
 | POST | `/api/settings/meeting-leave-dictation-out` | Drop dictated words from a meeting transcript `{enabled}` (default on; read at transcription time) |
-| GET | `/api/extensions` | Loaded extensions, their dashboard panels (`id`, `title`, `script`) and export targets (`id`, `label`, `extension`, `mimetype`); the built-in `txt`, `srt`, `vtt` exports are always listed, panels and extensions are empty when none is installed |
+| GET | `/api/extensions` | Loaded extensions, their dashboard panels (`id`, `title`, `script`, and `recording_script` when the panel has one) and export targets (`id`, `label`, `extension`, `mimetype`); the built-in `txt`, `srt`, `vtt` exports are always listed, panels and extensions are empty when none is installed |
 | GET | `/ext/<panel_id>/<path>` | Static file of an extension's dashboard panel (404 for an unknown panel or file) |
 | GET | `/api/file-transcriptions/<id>/audio` | Playable audio kept for a row (a meeting's `meeting.wav` mix; 404 for an upload). `GET /api/file-transcriptions` adds `kind` (`upload`/`meeting`) and `has_audio`; the Recordings detail pane shows its player when there is audio |
 | GET | `/api/file-transcriptions/<id>/export/<target_id>` | Download a stored upload through an export target (built-in `txt`, `srt`, `vtt`, or an extension's) (404 unknown id or target, 500 with `error` when the export raises) |

@@ -1,4 +1,4 @@
-"""An upload action's error lands next to the recording it was run on (run under Node)."""
+"""An upload action's error lands next to its recording, or in the list pane once that is no longer shown (Node)."""
 
 import json
 import re
@@ -21,7 +21,13 @@ def _fn(source: str, name: str, is_async: bool = False) -> str:
 def run_js(body: str):
     source = dashboard_source()
     parts = "\n".join(
-        [_fn(source, "feedbackEls"), _fn(source, "showUploadError"), _fn(source, "runUploadAction", True)]
+        [
+            _fn(source, "feedbackEls"),
+            _fn(source, "hideFeedback"),
+            _fn(source, "showFeedback"),
+            _fn(source, "showUploadError"),
+            _fn(source, "runUploadAction", True),
+        ]
     )
     stubs = """
     const box = () => ({ style: { display: "none" }, textContent: "" });
@@ -30,35 +36,36 @@ def run_js(body: str):
     const uploadActionHandlers = { act: async () => { throw new Error("boom"); } };
     const runningUploadActions = new Set();
     const loadFileTranscriptions = () => {};
-    // The detail pane of the chosen recording, with its own error and note boxes.
+    // The detail pane shows recording `shown`, with its own error and note boxes.
+    let shown = "1";
     const detail = {
+      get dataset() { return { id: shown }; },
       querySelector: (sel) => ({ ".rec-detail-error": detailErrorEl, ".rec-detail-note": detailNoteEl })[sel] || null,
       querySelectorAll: () => [],
     };
-    // A button inside the detail pane, or one outside it.
-    const button = (inDetail) => ({
-      dataset: { action: "act" },
-      closest: (sel) => (sel === ".rec-detail" && inDetail ? detail : null),
-    });
+    const pane = { querySelector: () => detail };
+    const document = { getElementById: (id) => (id === "rec-detail" ? pane : null) };
+    const button = { dataset: { action: "act" }, closest: () => detail };
     """
     script = f"{stubs}\n{parts}\n(async () => {{ {body} }})();"
     out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True, timeout=30).stdout
     return json.loads(out)
 
 
-def test_error_of_an_action_in_the_detail_pane_shows_in_the_detail_pane():
+def test_error_of_an_action_shows_in_the_detail_pane_while_it_shows_the_recording():
     result = run_js(
-        """await runUploadAction(button(true), { id: 1 });
+        """await runUploadAction(button, { id: 1, title: "Sync" });
         console.log(JSON.stringify([detailErrorEl.textContent, detailErrorEl.style.display,
           uploadErrorEl.textContent, uploadErrorEl.style.display]))"""
     )
     assert result == ["Act failed: boom", "block", "", "none"]
 
 
-def test_error_from_outside_the_detail_pane_shows_in_the_list_pane():
+def test_error_of_an_action_whose_recording_was_left_shows_in_the_list_pane_with_its_name():
     result = run_js(
-        """await runUploadAction(button(false), { id: 2 });
+        """uploadActionHandlers.act = async () => { shown = "2"; throw new Error("boom"); };  // user moved on
+        await runUploadAction(button, { id: 1, title: null, original_filename: "call.wav" });
         console.log(JSON.stringify([uploadErrorEl.textContent, uploadErrorEl.style.display,
           detailErrorEl.textContent, detailErrorEl.style.display]))"""
     )
-    assert result == ["Act failed: boom", "block", "", "none"]
+    assert result == ["call.wav: Act failed: boom", "block", "", "none"]

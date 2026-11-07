@@ -55,30 +55,31 @@ def label_words(words: list[Word], turns: list[SpeakerTurn]) -> list[Word]:
     return labelled
 
 
-def speaker_paragraphs(words: list[Word]) -> list[tuple[int, str]]:
-    """(speaker number, text) for each run of consecutive words of one speaker."""
-    paragraphs: list[tuple[int, list[str]]] = []
+def speaker_runs(words: list[Word]) -> list[list[Word]]:
+    """The runs of consecutive words of one speaker, in order; words without a speaker are left out.
+
+    The one grouping behind `speaker_paragraphs` and `speaker_turns`: the dashboard pairs the turns with the
+    paragraphs of the stored text by position, so the two must never split differently.
+    """
+    runs: list[list[Word]] = []
     for word in words:
         if word.speaker is None:
             continue
-        if paragraphs and paragraphs[-1][0] == word.speaker:
-            paragraphs[-1][1].append(word.word)
+        if runs and runs[-1][0].speaker == word.speaker:
+            runs[-1].append(word)
         else:
-            paragraphs.append((word.speaker, [word.word]))
-    return [(speaker, " ".join(parts)) for speaker, parts in paragraphs]
+            runs.append([word])
+    return runs
+
+
+def speaker_paragraphs(words: list[Word]) -> list[tuple[int, str]]:
+    """(speaker number, text) for each run of consecutive words of one speaker."""
+    return [(run[0].speaker, " ".join(w.word for w in run)) for run in speaker_runs(words)]
 
 
 def speaker_turns(words: list[Word]) -> list[tuple[int, float, float]]:
     """(speaker number, start, end) in seconds for each paragraph `speaker_paragraphs` makes, in the same order."""
-    turns: list[tuple[int, float, float]] = []
-    for word in words:
-        if word.speaker is None:
-            continue
-        if turns and turns[-1][0] == word.speaker:
-            turns[-1] = (word.speaker, turns[-1][1], word.end)
-        else:
-            turns.append((word.speaker, word.start, word.end))
-    return turns
+    return [(run[0].speaker, run[0].start, run[-1].end) for run in speaker_runs(words)]
 
 
 def format_transcript(words: list[Word], names: dict[int, str] | None = None) -> str:

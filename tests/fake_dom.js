@@ -22,6 +22,9 @@ class El {
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
   append(...nodes) { for (const n of nodes) { if (typeof n === "string") { this._text += n; continue; }
     if (n.parent) n.remove(); n.parent = this; this.children.push(n); } }
+  appendChild(n) { this.append(n); return n; }
+  insertBefore(n, ref) { if (n.parent) n.remove(); n.parent = this;
+    const at = ref ? this.children.indexOf(ref) : -1; at < 0 ? this.children.push(n) : this.children.splice(at, 0, n); return n; }
   replaceChildren(...nodes) { [...this.children].forEach((c) => c.remove()); this._text = ""; this._html = ""; this.append(...nodes); }
   remove() { if (this.parent) { this.parent.children = this.parent.children.filter((c) => c !== this); this.parent = null; } }
   contains(n) { for (let x = n; x; x = x.parent) if (x === this) return true; return false; }
@@ -63,6 +66,7 @@ function matches(el, sel) {
 const docListeners = {};
 const document = {
   body: new El("body"),
+  head: new El("head"),
   get activeElement() { return activeElement; },
   createElement: (tag) => new El(tag),
   getElementById: (id) => byId.get(id) || null,
@@ -77,11 +81,16 @@ function page(ids) {
 }
 const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const fetched = [];
-// The model check answers at once (the upload waits for it); everything else stays in flight.
+// Answers by URL: a test sets `replies.set(url, body)` (a status other than 200 with `{status, body}`). The model
+// check answers at once (the upload waits for it); every other request stays in flight.
+const replies = new Map([["/api/models/current", { diarization: true }]]);
 const fetch = (url, opts) => {
   fetched.push([url, (opts && opts.method) || "GET"]);
-  if (url === "/api/models/current") return Promise.resolve({ ok: true, json: async () => ({ diarization: true }) });
-  return new Promise(() => {});
+  if (!replies.has(url)) return new Promise(() => {});
+  const reply = replies.get(url);
+  const status = reply && reply.status ? reply.status : 200;
+  const body = reply && reply.status ? reply.body : reply;
+  return Promise.resolve({ ok: status < 400, status, json: async () => body });
 };
 const history = { replaceState() {} };
 const out = (value) => console.log(JSON.stringify(value));

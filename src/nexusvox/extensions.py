@@ -129,7 +129,9 @@ class DashboardPanel:
 
     `static_dir` is served at `/ext/<id>/`; the browser loads `/ext/<id>/<script>`, which registers a render
     function with `NexusVoxExt.registerPanel("<id>", container => ...)`. `blueprint` (optional) is mounted at
-    `/api/ext/<id>/`, so its routes are the panel's backend.
+    `/api/ext/<id>/`, so its routes are the panel's backend. `recording_script` (optional, also in `static_dir`)
+    is loaded when the dashboard's Recordings tab opens, so it can add tabs to the recording detail pane with
+    `NexusVoxExt.registerRecordingTab`; keep it light, it runs whether or not the panel's own tab is ever opened.
     """
 
     id: str  # lower-case letters, digits, `-` and `_`; unique across all extensions
@@ -137,6 +139,7 @@ class DashboardPanel:
     static_dir: Path
     script: str = "panel.js"
     blueprint: Blueprint | None = None
+    recording_script: str | None = None
 
 
 @dataclass(frozen=True)
@@ -309,7 +312,19 @@ def _problem_with_panel(panel: DashboardPanel) -> str:
         return f"static_dir {str(folder)!r} is not absolute (use Path(__file__).parent / ...)"
     if not folder.is_dir():
         return f"static_dir {str(folder)!r} is not a folder"
+    if panel.recording_script is not None and (
+        not isinstance(panel.recording_script, str) or not panel.recording_script
+    ):
+        return "recording_script must be a file name in static_dir"
     return ""
+
+
+def _describe_panel(panel: DashboardPanel) -> dict:
+    """A panel as `GET /api/extensions` lists it; `recording_script` only when the panel has one."""
+    described = {"id": panel.id, "title": panel.title, "script": f"/ext/{panel.id}/{panel.script}"}
+    if panel.recording_script:
+        described["recording_script"] = f"/ext/{panel.id}/{panel.recording_script}"
+    return described
 
 
 def _problem_with_target(target: ExportTarget) -> str:
@@ -826,9 +841,7 @@ class ExtensionRegistry:
         return {
             "api_version": API_VERSION,
             "extensions": [{"name": e.name, "version": e.version} for e in self.extensions],
-            "panels": [
-                {"id": p.id, "title": p.title, "script": f"/ext/{p.id}/{p.script}"} for p in self._panels.values()
-            ],
+            "panels": [_describe_panel(p) for p in self._panels.values()],
             "exports": [
                 {"id": t.id, "label": t.label, "extension": t.extension, "mimetype": t.mimetype}
                 for t in self._targets.values()

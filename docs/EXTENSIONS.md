@@ -93,6 +93,7 @@ def dashboard_panels(self) -> list[DashboardPanel]:
 | `static_dir` | Absolute path of an existing folder, served at `/ext/<id>/` (use `Path(__file__).parent / "static"`; a relative or missing one drops the panel) |
 | `script` | File in `static_dir` the browser loads when the tab is first opened (default `panel.js`) |
 | `blueprint` | Optional Flask `Blueprint`, mounted at `/api/ext/<id>/`: the tab's backend |
+| `recording_script` | Optional file in `static_dir` the browser loads when the Recordings tab first opens, whether or not this tab is ever opened; it registers tabs for the recording detail pane (see below). Keep it light. An empty value drops the panel |
 
 The script draws into its tab by registering a render function:
 
@@ -109,7 +110,7 @@ The dashboard is local-only (127.0.0.1) and has no CDN: ship what the tab needs 
 Blueprint names must be unique across the app; a blueprint that cannot be mounted is logged and the tab
 stays without its backend.
 
-Every tab, an extension's included, opens at the top of the page. A panel that links to a stored transcript (for example from a summary) calls `NexusVoxExt.showTranscript(id)` with the upload id as listed by `GET /api/file-transcriptions`: the dashboard opens the Recordings tab with that recording in the detail pane, on its Transcript tab, and highlights its row in the list. The call returns a promise that resolves with `false` when no such recording exists.
+Every tab, an extension's included, opens at the top of the page. A panel that links to a stored transcript (for example from a summary) calls `NexusVoxExt.showTranscript(id)` with the upload id as listed by `GET /api/file-transcriptions`: the dashboard opens the Recordings tab with that recording in the detail pane, on its Transcript tab, and highlights its row in the list. The call returns a promise that resolves with `false` when no such recording exists among the 100 newest (deleted, or older); the page then stays where it is.
 
 ### Tabs in the Recordings detail pane
 
@@ -127,14 +128,18 @@ NexusVoxExt.registerRecordingTab("my-notes", {
 
 | Call | What it does |
 |------|--------------|
-| `registerRecordingTab(id, {title, render, available})` | Adds a tab. `id` follows the panel id rules; `transcript` and `speakers` are taken, and so is an id registered before. Returns `false` (and logs why) when the tab was not added. `render(container, recording)` runs once per recording, the first time its tab is shown; `recording` is the row as listed by `GET /api/file-transcriptions`. The container is kept: switching tabs, choosing another recording and coming back, and every redraw of the pane (a list refresh, a rename, a finished upload action) put the same element back with what you drew in it, and the tab stays chosen. A `render` that throws shows "This tab failed to load." in the tab |
+| `registerRecordingTab(id, {title, render, available})` | Adds a tab. `id` follows the panel id rules; `transcript` and `speakers` are taken, and so is an id registered before. Returns `false` (and logs why) when the tab was not added. `render(container, recording)` runs once per recording, the first time its tab is shown; `recording` is the row as listed by `GET /api/file-transcriptions`. The container is kept: switching tabs, choosing another recording and coming back, and every redraw of the pane (a list refresh, a rename, a finished upload action) put the same element back with what you drew in it, and the tab stays chosen. The dashboard keeps the containers of the 24 most recently shown recording tabs (the shown recording's always) and drops a recording's as soon as it is no longer listed; a dropped one is drawn again with `render` when it is shown next, so keep no state only in the DOM that you cannot draw again. A `render` that throws shows "This tab failed to load." in the tab |
 | `refreshRecordingTab(id, recordingId)` | Drops what the tab drew for that recording (for all of them without `recordingId`), so the next show calls `render` again; a tab on screen is drawn again at once. Use it when the content changed, for example a summary that has just been generated |
 | `selectRecordingTab(id)` | Switches the detail pane to a tab (`summary`, `transcript`, `speakers` or an extension's id). Returns `false` when the shown recording has no such tab |
 | `showTranscript(id, {mark})` | As above, and `mark` marks a passage on the Transcript tab and scrolls it into view: `{start, end}` in seconds marks the speaker lines whose turn overlaps that span (needs stored word timing), `{text}` marks the first line that holds the text and highlights it. A mark stays until another one is set |
 
 The id `summary` is special: a tab registered under it takes the *Summary* place at the start of the row. Without one, NexusVox shows a short note there that summaries come with NexusVox Pro and links to the Pro page; NexusVox without extensions shows no extension tabs and opens every recording on its Transcript tab.
 
-Panel scripts are loaded when the Recordings tab is opened (not only when their own sidebar tab is), so a panel script can register its recording tabs without its sidebar tab being visited. A panel script that also draws its sidebar tab still does that through `registerPanel`, unchanged. These calls are additions: an older NexusVox has no `registerRecordingTab`, so check for it (`if (NexusVoxExt.registerRecordingTab) ...`) when your extension must run on older releases too.
+Register recording tabs from the panel's `recording_script`: the dashboard adds it once, when the Recordings tab first opens. The panel's main `script` is not loaded for this; it still runs only when its own sidebar tab is opened (or an upload action needs its handler), so a panel that polls a server or starts timers stays quiet until then. A main script may call `registerRecordingTab` too, but its tabs appear only after that script has run. These calls and the field are additions: an older NexusVox has no `registerRecordingTab` and ignores `recording_script`, so check for it (`if (NexusVoxExt.registerRecordingTab) ...`) when your extension must run on older releases too.
+
+```python
+DashboardPanel("my-tab", "My Tab", static_dir=Path(__file__).parent / "static", recording_script="recording.js")
+```
 
 ## Hook 3: export targets
 

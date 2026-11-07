@@ -218,12 +218,29 @@ const uploadProgressBar = document.getElementById("upload-progress-bar");
 const uploadErrorEl = document.getElementById("upload-error");
 const uploadNoteEl = document.getElementById("upload-note");
 
-// The error and note boxes for `el`: an export or action of the recording in the detail pane reports there,
-// next to the recording it was run on; anything else (the upload job) in the list pane.
-function feedbackEls(el) {
-  const detail = el && el.closest ? el.closest(".rec-detail") : null;
-  if (detail) return { error: detail.querySelector(".rec-detail-error"), note: detail.querySelector(".rec-detail-note") };
-  return { error: uploadErrorEl, note: uploadNoteEl };
+// Where a message about `item` (a recording) goes, looked up when it is shown, not when the export or action
+// started: the detail pane while it still shows that recording, else the list pane with the recording's name in
+// front. A slow action whose recording the user has left meanwhile must not report into a pane that is gone.
+function feedbackEls(item) {
+  const pane = document.getElementById("rec-detail");
+  const detail = pane && item ? pane.querySelector(":scope > .rec-detail") : null;
+  if (detail && detail.dataset.id === String(item.id)) {
+    return { error: detail.querySelector(".rec-detail-error"), note: detail.querySelector(".rec-detail-note"), prefix: "" };
+  }
+  return { error: uploadErrorEl, note: uploadNoteEl, prefix: item ? `${item.title || item.original_filename}: ` : "" };
+}
+
+function hideFeedback(item) {
+  const { error, note } = feedbackEls(item);
+  error.style.display = "none";
+  note.style.display = "none";
+}
+
+function showFeedback(item, kind, text) {
+  const boxes = feedbackEls(item);
+  if (kind === "error") return showUploadError(boxes.prefix + text, boxes.error);
+  boxes.note.textContent = boxes.prefix + text;
+  boxes.note.style.display = "block";
 }
 
 function showUploadProgress(job) {
@@ -385,14 +402,13 @@ setInterval(() => {
 
 // An export is fetched, not followed as a link, so a failing one shows its message instead of
 // saving the error reply as a file.
-async function downloadExport(url, source) {
-  const { error: errorBox } = feedbackEls(source);
-  errorBox.style.display = "none";
+async function downloadExport(url, item) {
+  hideFeedback(item);
   try {
     const res = await fetch(url);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      showUploadError(body.error || `Export failed (${res.status})`, errorBox);
+      showFeedback(item, "error", body.error || `Export failed (${res.status})`);
       return;
     }
     const disposition = res.headers.get("Content-Disposition") || "";
@@ -406,7 +422,7 @@ async function downloadExport(url, source) {
     a.click();
     URL.revokeObjectURL(blobUrl);
   } catch (err) {
-    showUploadError(`Export failed: ${err.message}`, errorBox);
+    showFeedback(item, "error", `Export failed: ${err.message}`);
   }
 }
 
@@ -420,9 +436,7 @@ async function runUploadAction(button, item) {
   const key = `${action.id}:${item.id}`;
   if (runningUploadActions.has(key)) return;
   runningUploadActions.add(key);
-  const { error: errorBox, note: noteBox } = feedbackEls(button);
-  errorBox.style.display = "none";
-  noteBox.style.display = "none";
+  hideFeedback(item);
   // The menu item and the Retry of a failed state run the same action: both go quiet meanwhile.
   const card = button.closest(".rec-detail");
   const siblings = (card ? [...card.querySelectorAll(".upload-action, .upload-retry")] : [button])
@@ -433,10 +447,9 @@ async function runUploadAction(button, item) {
       const res = await fetch(action.endpoint.replaceAll("{id}", item.id), { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body.ok === false) {
-        showUploadError(body.error || `${action.label} failed (${res.status})`, errorBox);
+        showFeedback(item, "error", body.error || `${action.label} failed (${res.status})`);
       } else if (body.note || body.message) {
-        noteBox.textContent = body.note || body.message;
-        noteBox.style.display = "block";
+        showFeedback(item, "note", body.note || body.message);
       }
     } else {
       if (!uploadActionHandlers[action.id]) {
@@ -450,7 +463,7 @@ async function runUploadAction(button, item) {
       await handler(item, button);
     }
   } catch (err) {
-    showUploadError(`${action.label} failed: ${err.message}`, errorBox);
+    showFeedback(item, "error", `${action.label} failed: ${err.message}`);
   } finally {
     runningUploadActions.delete(key);
     siblings.forEach((b) => { b.disabled = false; });
@@ -460,7 +473,7 @@ async function runUploadAction(button, item) {
 }
 
 // ── Pending and failed states ────────────────────────────────────────
-// An extension's `available` check may answer a string (greyed out, the text is the tooltip) or a dict:
+// An extension's `available` check may answer a string (greyed out, the text shown under it) or a dict:
 // `{pending: label}` (spinner, the list keeps refreshing) or `{error: reason, retry: action id}`.
 const PENDING_POLL_MS = 4000;
 

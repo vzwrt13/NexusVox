@@ -81,7 +81,7 @@ function makeDetail(item) {
   detail.className = "rec-detail";
   detail.dataset.id = String(item.id);
   detail._item = item;
-  detail._lines = transcriptLines(item.text, []);
+  detail._lines = transcriptLines(item.text, [], item.kind);
   detail._textKey = recordingTextKey(item);
   const tabs = document.createElement("div"); tabs.className = "rec-tabs";
   const panels = document.createElement("div"); panels.className = "rec-panels";
@@ -103,6 +103,8 @@ function renderSelectedRecordingFor(d) {
 const tabNames = (d) => d.querySelectorAll(".rec-tab").map((b) => b.textContent);
 const chosen = (d) => d.querySelector('.rec-tab[aria-selected="true"]').dataset.tab;
 const panelKind = (d) => d.querySelector(".rec-panel").children[0].className;
+const listHtml = () => document.getElementById("rec-list").children.map((li) => li._html || li.innerHTML).join("");
+const LIST_URL = "/api/file-transcriptions?limit=100";
 """
 
 
@@ -111,13 +113,34 @@ const panelKind = (d) => d.querySelector(".rec-panel").children[0].className;
 
 def test_the_list_holds_meetings_and_uploads_and_marks_the_uploads():
     result = run_recordings(
-        """recItems = ROWS; recSelectedId = "7"; renderRecordingList();
-        const html = document.getElementById("rec-list").innerHTML;
+        DETAIL
+        + """recItems = ROWS; recSelectedId = "7"; renderRecordingList();
+        const html = listHtml();
         out([(html.match(/data-kind="(\\w+)"/g) || []), html.includes("Weekly sync"), html.includes("pricing-memo.wav"),
-          recordingListMeta(ROWS[0]).includes("Upload"), recordingListMeta(ROWS[1]).endsWith("6 min · Upload"),
-          /data-id="7"[^>]*\\n?\\s*aria-current="true"/.test(html)]);"""
+          recordingListMeta(ROWS[0]).includes("Upload"), recordingListMeta(ROWS[1]).endsWith("6 min · Upload")]);"""
     )
-    assert result == [['data-kind="meeting"', 'data-kind="upload"'], True, True, False, True, True]
+    assert result == [['data-kind="meeting"', 'data-kind="upload"'], True, True, False, True]
+
+
+def test_a_refresh_keeps_the_row_elements_so_focus_and_place_survive():
+    result = run_recordings(
+        DETAIL
+        + """recItems = ROWS; renderRecordingList();
+        const list = document.getElementById("rec-list");
+        const [first, second] = list.children;
+        renderRecordingList();                                   // a poll with nothing changed
+        const unchanged = list.children[0] === first && list.children[1] === second;
+        recItems = [{ ...ROWS[0], title: "Renamed" }, ROWS[1]];  // one row changed
+        renderRecordingList();
+        const sameElement = list.children[0] === first && first._html.includes("Renamed");
+        recItems = [ROWS[1], ROWS[0]];                           // the order changed
+        renderRecordingList();
+        const moved = list.children[0] === second && list.children[1] === first;
+        recItems = [ROWS[1]];                                    // a row is gone
+        renderRecordingList();
+        out([unchanged, sameElement, moved, list.children.length, list.children[0] === second]);"""
+    )
+    assert result == [True, True, True, 1, True]
 
 
 def test_search_finds_titles_and_transcript_text_and_says_when_nothing_matches():
@@ -131,6 +154,22 @@ def test_search_finds_titles_and_transcript_text_and_says_when_nothing_matches()
     assert result == [[[7, 3], [7], [3], [7], []], True]
 
 
+def test_the_chosen_recording_stays_while_the_search_hides_it():
+    result = run_recordings(
+        DETAIL
+        + """recItems = ROWS; recSelectedId = "7";
+        const d = makeDetail(ROWS[0]);
+        d._editing = true;  // the head is markup this stand-in DOM does not parse
+        document.getElementById("rec-search").value = "pricing";   // matches only the upload
+        renderRecordingList(); renderSelectedRecording(false);
+        const kept = [currentDetail() === d, recSelectedId];
+        document.getElementById("rec-search").value = "";
+        renderRecordingList(); renderSelectedRecording(false);
+        out([...kept, currentDetail() === d, recSelectedId]);"""
+    )
+    assert result == [True, "7", True, "7"]
+
+
 def test_lengths_read_like_the_design():
     result = run_recordings("out([45000, 360000, 2520000, 4320000].map(formatRecordingLength));")
     assert result == ["45 s", "6 min", "42 min", "1 h 12 min"]
@@ -142,8 +181,9 @@ def test_lengths_read_like_the_design():
 def test_speaker_paragraphs_become_timed_lines_when_the_turns_line_up():
     result = run_recordings(
         """const turns = [{speaker: 1, start: 751.2, end: 760}, {speaker: 2, start: 764, end: 770}];
-        out([transcriptLines(ROWS[0].text, turns), transcriptLines(ROWS[0].text, turns.slice(0, 1)).map((l) => l.start),
-          transcriptLines("Note: one paragraph only.", [])]);"""
+        out([transcriptLines(ROWS[0].text, turns, "upload"),
+          transcriptLines(ROWS[0].text, turns.slice(0, 1), "upload").map((l) => l.start),
+          transcriptLines("Note: one paragraph only.", [], "upload")]);"""
     )
     timed, mismatched, plain = result
     assert timed == [
@@ -239,22 +279,91 @@ def test_the_hook_refuses_core_and_malformed_ids_and_hides_unavailable_tabs():
     assert result == [[False, False, False, True, False], 4, 3, False, False]
 
 
+def test_labels_need_speaker_timing_or_a_meeting():
+    result = run_recordings(
+        """const notes = "Agenda: the release.\\n\\nNote: ask the pilot users.";
+        const who = (lines) => lines.map((l) => l.who);
+        out([who(transcriptLines(notes, [], "upload")), who(transcriptLines(notes, [], "meeting")),
+          who(transcriptLines(notes, [{start: 0, end: 1}], "upload"))]);"""
+    )
+    # A plain upload with "Agenda:"/"Note:" paragraphs has no speakers; a meeting, or speaker timing, has them.
+    assert result == [[None, None], ["Agenda", "Note"], ["Agenda", "Note"]]
+
+
+def test_turns_are_fetched_again_for_new_text_and_after_a_failure():
+    result = run_recordings(
+        """replies.set("/api/file-transcriptions/7/turns", { turns: [{ speaker: 1, start: 0, end: 1 }] });
+        replies.set("/api/file-transcriptions/3/turns", { status: 500, body: {} });
+        const asked = () => fetched.filter((f) => f[0].endsWith("/turns")).map((f) => f[0].split("/")[3]);
+        (async () => {
+          await loadRecordingTurns(ROWS[0]);
+          await loadRecordingTurns(ROWS[0]);                             // cached
+          await loadRecordingTurns({ ...ROWS[0], text: "Speaker 1: Rewritten by an action." });
+          const failed = await loadRecordingTurns(ROWS[1]);
+          await loadRecordingTurns(ROWS[1]);                             // a failure is not kept
+          out([asked(), failed]);
+        })();"""
+    )
+    assert result == [["7", "7", "3", "3"], []]
+
+
+def test_what_is_kept_per_recording_goes_with_the_recording_and_stays_bounded():
+    result = run_recordings(
+        DETAIL
+        + """recTabContent.set("notes:99", {}); recTabContent.set("notes:7", {});
+        recTurns.set("99:1:x", Promise.resolve([])); recShowOriginal.add("99"); recShowOriginal.add("7");
+        pruneRecordingCaches(ROWS);
+        const pruned = [[...recTabContent.keys()], [...recTurns.keys()], [...recShowOriginal]];
+        recTabContent.clear();
+        const tab = { id: "notes", title: "Notes", render: () => {} };
+        for (let id = 1; id <= 40; id += 1) recordingTabContainer(tab, { id });
+        const bounded = recTabContent.size <= REC_TAB_KEEP;
+        out([pruned, bounded, recTabContent.has("notes:40"), recTabContent.has("notes:1")]);"""
+    )
+    assert result == [[["notes:7"], [], ["7"]], True, True, False]
+
+
 def test_show_transcript_switches_to_the_transcript_tab_and_marks_the_passage():
     result = run_recordings(
         DETAIL
-        + """recItems = ROWS;
+        + """replies.set(LIST_URL, ROWS);
+        const opened = []; activateTab = (...args) => opened.push(args[0]);
         NexusVoxExt_register("notes", { title: "Notes", render: () => {} });
         recChosenTab = "notes";
-        // showRecording loads the list first; here the list is already in.
-        loadFileTranscriptions = async () => {};
         const d = makeDetail(ROWS[0]);
         d._editing = true;
-        d._lines = transcriptLines(ROWS[0].text, [{start: 750, end: 760}, {start: 764, end: 770}]);
+        d._lines = transcriptLines(ROWS[0].text, [{start: 750, end: 760}, {start: 764, end: 770}], "meeting");
         showRecording(7, { mark: { start: 765, end: 766 } }).then((found) => {
-          out([found, recChosenTab, recMark.start, recMark.id]);
+          out([found, recChosenTab, recMark.start, recMark.id, opened, recItems.length]);
         });"""
     )
-    assert result == [True, "transcript", 765, "7"]
+    assert result == [True, "transcript", 765, "7", ["recordings"], 2]
+
+
+def test_show_transcript_of_an_unknown_recording_leaves_the_page_alone():
+    result = run_recordings(
+        DETAIL
+        + """replies.set(LIST_URL, ROWS);
+        const opened = []; activateTab = (...args) => opened.push(args[0]);
+        let hash = 0; history.replaceState = () => { hash += 1; };
+        recChosenTab = "speakers";
+        showRecording(42, { mark: { text: "beta" } }).then((found) => {
+          out([found, opened, hash, recChosenTab, recMark, recItems.length]);
+        });"""
+    )
+    assert result == [False, [], 0, "speakers", None, 0]
+
+
+def test_recording_tab_scripts_load_once_without_the_panels_main_script():
+    result = run_recordings(
+        """extensionPanels.pro = { script: "/ext/pro/panel.js", recordingScript: "/ext/pro/recording.js" };
+        extensionPanels.plain = { script: "/ext/plain/panel.js", recordingScript: null };
+        const opened = []; openExtensionPanel = (id) => opened.push(id);
+        loadRecordingTabScripts();
+        loadRecordingTabScripts();                                     // the tab opened again
+        out([document.head.children.map((s) => s.src), opened]);"""
+    )
+    assert result == [["/ext/pro/recording.js"], []]
 
 
 # -- the upload dialog --------------------------------------------------------------------------------

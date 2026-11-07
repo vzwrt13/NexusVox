@@ -229,14 +229,18 @@ async function loadExtensions() {
       section.id = "tab-ext-" + p.id;
       section.className = "tab-content";
       main.appendChild(section);
-      extensionPanels[p.id] = { title: p.title, script: p.script, section, container: null, render: null };
+      extensionPanels[p.id] = {
+        title: p.title, script: p.script, recordingScript: p.recording_script || null, section, container: null, render: null,
+      };
     });
   } catch (err) {
     console.error("Failed to load extensions:", err);
   }
-  // The Recordings list may have been drawn before the export targets were known.
-  if ((extensionExports.length || extensionUploadActions.length) && document.getElementById("tab-recordings").classList.contains("active")) {
-    loadFileTranscriptions();
+  // The Recordings tab may have opened before the extensions were known: draw its list again with the export
+  // targets and actions, and add the scripts that register its detail-pane tabs.
+  if (document.getElementById("tab-recordings").classList.contains("active")) {
+    if (extensionExports.length || extensionUploadActions.length) loadFileTranscriptions();
+    loadRecordingTabScripts();
   }
 }
 

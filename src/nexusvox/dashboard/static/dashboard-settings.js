@@ -625,6 +625,10 @@ function settingsPageHash() {
   return "#settings" + (link ? "/" + link.dataset.page : "");
 }
 
+function defaultSettingsSlug() {
+  return settingsLinks()[0].dataset.page;
+}
+
 function showSettingsPageBySlug(slug) {
   const link = settingsLinks().find((l) => l.dataset.page === slug);
   if (link) showSettingsPage(link.dataset.card);
@@ -633,7 +637,7 @@ function showSettingsPageBySlug(slug) {
 // Open a page from another tab (the Meetings link on the Recordings tab) and bring it into view.
 function openSettingsPageFromElsewhere(id) {
   const card = showSettingsPage(id);
-  history.replaceState(null, "", settingsPageHash());
+  pushPage(settingsPageHash());
   card.scrollIntoView({ behavior: "smooth", block: "start" });
   return card;
 }
@@ -643,7 +647,7 @@ settingsLinks().forEach((link) => {
     if (e.ctrlKey || e.metaKey || e.shiftKey) return; // the browser opens the href (#settings/<page>) in a new tab
     e.preventDefault();
     showSettingsPage(link.dataset.card);
-    history.replaceState(null, "", settingsPageHash());
+    pushPage(settingsPageHash());
     // Stacked below the sidebar tabs on a narrow window the page can be far below the fold: show its top.
     document.getElementById("settings-pages").scrollIntoView({ block: "start" });
   });

@@ -193,7 +193,8 @@ const byId = { "settings-search": input, "settings-no-match": noMatch, "tab-sett
 allCards.forEach((c) => (byId[c.id] = c));
 const slugs = ["dictation", "vocabulary", "advanced"];
 const links = allCards.map((c, i) => new Node("A", [], { dataset: { card: c.id, page: slugs[i] } }));
-const history = { url: null, replaceState: (a, b, url) => { history.url = url; } };
+const history = { url: null };
+const pushPage = (url) => { history.url = url; }; // the real one is tested in test_dashboard_history_js.py
 const document = { getElementById: (id) => byId[id],
   querySelectorAll: (sel) => (sel === "#settings-nav .settings-link" ? links : allCards) };
 const hiddenState = () => Object.fromEntries(allCards.map((c) => [c.id, c.cls.has("search-hidden")]));
@@ -338,7 +339,7 @@ def test_pollers_of_a_page_wait_for_their_page():
 
 def test_hash_carries_the_page_through_tab_clicks_and_reloads():
     assert 'name === "settings" ? settingsPageHash() : "#" + name' in JS
-    assert 'name === "settings" && page) showSettingsPageBySlug(page)' in JS
+    assert 'name === "settings") showSettingsPageBySlug(page || defaultSettingsSlug())' in JS
 
 
 def test_navigation_stacks_before_the_page_gets_too_narrow():

@@ -39,7 +39,7 @@ function openAnalyticsTab() {
 
 function chooseAnalyticsView(view) {
   showAnalyticsView(view);
-  history.replaceState(null, "", analyticsViewHash());
+  pushPage(analyticsViewHash());
   window.scrollTo(0, 0);
 }
 

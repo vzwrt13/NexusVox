@@ -418,6 +418,7 @@ def renew_once(config: LlmConfig) -> int:
             api_key=config.api_key if url == config.url.rstrip("/") else "",
         )
         if loaded_model(target, model) is None:
+            logger.info("Language model %s not loaded, renewal skipped", model)
             continue
         request = urllib.request.Request(
             f"{url}/api/generate",
@@ -428,8 +429,9 @@ def renew_once(config: LlmConfig) -> int:
         try:
             _post(request, _UNLOAD_TIMEOUT_S * 2)
             renewed += 1
+            logger.info("Language model %s kept loaded for %s", model, config.keep_alive)
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError) as exc:
-            logger.info("Language model %s could not be kept loaded (%s)", model, exc)
+            logger.debug("Language model %s could not be kept loaded (%s)", model, exc)
     return renewed
 
 

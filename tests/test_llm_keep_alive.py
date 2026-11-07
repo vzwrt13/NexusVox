@@ -224,15 +224,19 @@ def ollama(monkeypatch):
     llm.stop_renewal()
 
 
-def test_the_timer_renews_a_model_that_is_still_loaded(ollama):
+def test_the_timer_renews_a_model_that_is_still_loaded(ollama, caplog):
     llm._pinned[("http://127.0.0.1:11434", "a:1b")] = True
-    assert llm.renew_once(LlmConfig(model="a:1b")) == 1
+    with caplog.at_level("INFO", logger="nexusvox.llm"):
+        assert llm.renew_once(LlmConfig(model="a:1b")) == 1
+    assert [r.getMessage() for r in caplog.records] == ["Language model a:1b kept loaded for 60m"]
     assert ollama.posts == [("generate", {"model": "a:1b", "keep_alive": "60m"})]  # load-only: no prompt
 
 
-def test_the_timer_never_loads_a_model_ollama_dropped(ollama):
+def test_the_timer_never_loads_a_model_ollama_dropped(ollama, caplog):
     llm._pinned[("http://127.0.0.1:11434", "gone:1b")] = True
-    assert llm.renew_once(LlmConfig(model="gone:1b")) == 0
+    with caplog.at_level("INFO", logger="nexusvox.llm"):
+        assert llm.renew_once(LlmConfig(model="gone:1b")) == 0
+    assert [r.getMessage() for r in caplog.records] == ["Language model gone:1b not loaded, renewal skipped"]
     assert ollama.posts == []
 
 

@@ -170,7 +170,7 @@ class FilesMixin(DashboardState):
         logger.info(
             "Transcription saved: id=%s, kind=%s, %.1f s of audio",
             record.id,
-            record.kind or "upload",
+            record.kind,
             (record.duration_ms or 0) / 1000,
         )
 

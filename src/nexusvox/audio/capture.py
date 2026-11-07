@@ -21,6 +21,8 @@ logger = logging.getLogger("nexusvox.audio")
 SILENT_DB = -60.0
 # A recording shorter than this is a tap, not evidence of a muted microphone: no silence warning for it.
 MIN_SILENCE_WARNING_S = 0.5
+# A muted or blocked microphone often sends one click when the stream opens, so "silent throughout" allows for it.
+SILENT_WARNING_SHARE = 0.95
 
 
 def _to_db(level: float) -> float:
@@ -32,12 +34,14 @@ class RecordingLevels:
 
     def __init__(self) -> None:
         self.chunks = 0
+        self.frames = 0  # samples actually delivered, whatever block size the host API used
         self.silent = 0
         self.peak = 0.0  # highest chunk RMS, 0..1
         self._power = 0.0  # sum of the chunks' mean squares
 
-    def add(self, rms: float) -> None:
+    def add(self, rms: float, frames: int) -> None:
         self.chunks += 1
+        self.frames += frames
         self._power += rms * rms
         self.peak = max(self.peak, rms)
         if _to_db(rms) < SILENT_DB:
@@ -66,9 +70,7 @@ class AudioCapture:
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._stream: sd.InputStream | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._chunk_count = 0
         self._log_interval = 0  # set in start()
-        self._frames_per_chunk = max(1, config.chunk_size // 2)
         self._levels = RecordingLevels()
         self._device_name = ""  # the microphone of the running recording
         # Called from the audio thread with each chunk's RMS (0..1); must return at once.
@@ -91,15 +93,14 @@ class AudioCapture:
         clipped = np.clip(samples, -1.0, 1.0)
         pcm_bytes = (clipped * 32767).astype(np.int16).tobytes()
 
-        self._chunk_count += 1
-        log_now = self._log_interval > 0 and self._chunk_count % self._log_interval == 0
-        feed = self.on_rms is not None and (self.rms_wanted is None or self.rms_wanted())
-        rms = float(np.sqrt(np.mean(samples**2)))
-        self._levels.add(rms)
-        if feed:
+        # dot product, not samples**2: no temporary array on the real-time audio thread
+        rms = math.sqrt(float(np.dot(samples, samples)) / max(1, len(samples)))
+        levels = self._levels
+        levels.add(rms, len(samples))
+        if self.on_rms is not None and (self.rms_wanted is None or self.rms_wanted()):
             self.on_rms(rms)
-        if log_now:
-            logger.debug("Audio: chunks=%d rms=%.1fdB", self._chunk_count, _to_db(rms))
+        if self._log_interval > 0 and levels.chunks % self._log_interval == 0:
+            logger.debug("Audio: chunks=%d rms=%.1fdB", levels.chunks, _to_db(rms))
 
         if self._loop is not None:
             self._loop.call_soon_threadsafe(self._queue.put_nowait, pcm_bytes)
@@ -107,15 +108,18 @@ class AudioCapture:
     def start(self) -> None:
         """Start capturing audio from the microphone chosen in `[audio].device`, else the default one."""
         self._loop = asyncio.get_event_loop()
+        # A stream that is still open (a stop that failed) would keep feeding the new recording's queue and levels.
+        try:
+            self._close_stream()
+        except Exception:
+            logger.debug("Closing the stream of the earlier recording failed", exc_info=True)
         # A recording starts with an empty queue: chunks or an end marker an earlier one left behind
         # (a stream that stopped reading early) would otherwise come out as this recording's audio.
         self._queue = asyncio.Queue()
-        self._chunk_count = 0
         self._levels = RecordingLevels()
         # Calculate frames per callback to produce ~chunk_size bytes
         # Each PCM16 sample = 2 bytes, mono = 1 channel
         frames_per_chunk = self._chunk_size // 2
-        self._frames_per_chunk = max(1, frames_per_chunk)
         # Log audio level roughly every second (at DEBUG)
         self._log_interval = max(1, self._sample_rate // frames_per_chunk)
 
@@ -181,21 +185,32 @@ class AudioCapture:
     def stop(self) -> None:
         """Stop capturing audio."""
         if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
-            audio_state.stream_closed()
-            self._log_summary()
+            try:
+                self._close_stream()
+            finally:
+                # Also when the device failed: that is the recording the summary is there to explain.
+                self._log_summary()
         # Signal end of stream
         if self._loop is not None:
             self._loop.call_soon_threadsafe(self._queue.put_nowait, None)
+
+    def _close_stream(self) -> None:
+        """Stop and close the running stream, if any; it counts as closed even when PortAudio raises."""
+        stream, self._stream = self._stream, None
+        if stream is None:
+            return
+        try:
+            stream.stop()
+            stream.close()
+        finally:
+            audio_state.stream_closed()
 
     def _log_summary(self) -> None:
         """One INFO line for the recording that just ended, and a WARNING when it was silent throughout."""
         levels = self._levels
         if levels.chunks == 0:
             return
-        seconds = levels.chunks * self._frames_per_chunk / self._sample_rate
+        seconds = levels.frames / self._sample_rate
         logger.info(
             "Audio: %.1f s, %d chunks, rms avg %.0f dB, peak %.0f dB, %.0f%% silent",
             seconds,
@@ -204,9 +219,9 @@ class AudioCapture:
             levels.peak_db,
             levels.silent_share * 100,
         )
-        if levels.silent == levels.chunks and seconds >= MIN_SILENCE_WARNING_S:
+        if levels.silent_share >= SILENT_WARNING_SHARE and seconds >= MIN_SILENCE_WARNING_S:
             logger.warning(
-                "Audio: the recording was silent throughout (device: %s); the microphone may be muted or the wrong one",
+                "Audio: the recording was silent (device: %s); the microphone may be muted or the wrong one",
                 self._device_name or "unknown",
             )
 

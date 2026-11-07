@@ -19,7 +19,7 @@ FRAMES = AudioConfig().chunk_size // 2
 
 
 def _recording(monkeypatch, device: str = "Desk mic") -> audio_module.AudioCapture:
-    monkeypatch.setattr(audio_module.sd, "InputStream", lambda **kw: MagicMock())
+    monkeypatch.setattr(audio_module.sd, "InputStream", lambda **kw: MagicMock(), raising=True)
     monkeypatch.setattr(audio_module.sd, "query_devices", lambda kind=None: {"name": device})
     capture = audio_module.AudioCapture(AudioConfig())
     capture.start()
@@ -93,3 +93,49 @@ async def test_each_recording_counts_from_zero_and_a_second_stop_logs_nothing(mo
     assert len(summary) == 1
     assert ", 3 chunks," in summary[0]
     assert summary[0].endswith("0% silent")
+
+
+async def test_one_click_at_the_start_of_a_muted_recording_still_warns(monkeypatch, caplog):
+    capture = _recording(monkeypatch, device="Blocked mic")
+    with caplog.at_level(logging.INFO, logger="nexusvox.audio"):
+        _feed(capture, 0.3, 1)  # the click when the stream opens
+        _feed(capture, 0.0, 39)
+        capture.stop()
+    assert "98% silent" in _messages(caplog, logging.INFO)[-1]
+    assert "Blocked mic" in _messages(caplog, logging.WARNING)[0]
+
+
+async def test_the_length_adds_up_the_frames_the_callbacks_delivered(monkeypatch, caplog):
+    capture = _recording(monkeypatch)
+    rate = AudioConfig().sample_rate
+    block = np.full((rate // 10, 1), 0.01, dtype=np.float32)  # 100 ms blocks, not the configured chunk size
+    with caplog.at_level(logging.INFO, logger="nexusvox.audio"):
+        for _ in range(20):
+            capture._audio_callback(block, len(block), {}, 0)
+        capture.stop()
+    assert _messages(caplog, logging.INFO)[-1].startswith("Audio: 2.0 s, 20 chunks")
+
+
+async def test_a_device_that_fails_to_stop_still_leaves_the_summary(monkeypatch, caplog):
+    capture = _recording(monkeypatch)
+    capture._stream.stop.side_effect = OSError("device unplugged")
+    with caplog.at_level(logging.INFO, logger="nexusvox.audio"):
+        _feed(capture, 0.0, 10)
+        with pytest.raises(OSError):
+            capture.stop()
+    assert any("10 chunks" in m for m in _messages(caplog, logging.INFO))
+    assert _messages(caplog, logging.WARNING)
+    assert capture._stream is None
+
+
+async def test_a_new_recording_closes_a_stream_an_earlier_stop_left_open(monkeypatch):
+    first = _recording(monkeypatch)
+    old_stream = first._stream
+    _feed(first, 0.1, 5)
+
+    first.start()
+
+    old_stream.stop.assert_called_once()
+    old_stream.close.assert_called_once()
+    assert first._levels.chunks == 0
+    first.stop()

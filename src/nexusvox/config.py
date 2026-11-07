@@ -642,6 +642,42 @@ def _write_atomic(path: Path, data: bytes) -> None:
         raise
 
 
+_KEY_LINE = re.compile(r"^([A-Za-z_][\w-]*)\s*=\s*(.*)$")
+_MAX_LOGGED_KEYS = 8
+
+
+def _setting_lines(raw: bytes) -> dict[str, str]:
+    """`section.key` -> the rest of its line, for every single-line `key = value` of a config file."""
+    section = ""
+    found: dict[str, str] = {}
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith("["):
+            section = line.strip("[]").strip()
+        elif match := _KEY_LINE.match(line):
+            found[f"{section}.{match.group(1)}" if section else match.group(1)] = match.group(2)
+    return found
+
+
+def _log_saved(previous: bytes | None, data: bytes) -> None:
+    """One INFO line naming the settings a save changed (names only: values can be tokens or paths), none when it
+    changed nothing. Logging never fails a save."""
+    try:
+        if previous is None:
+            logger.info("Settings file created")
+            return
+        before, after = _setting_lines(previous), _setting_lines(data)
+        changed = sorted(key for key in before.keys() | after.keys() if before.get(key) != after.get(key))
+    except Exception:
+        logger.debug("Could not tell which settings a save changed", exc_info=True)
+        return
+    if not changed:
+        return
+    shown = ", ".join(changed[:_MAX_LOGGED_KEYS])
+    more = len(changed) - _MAX_LOGGED_KEYS
+    logger.info("Settings saved: %s%s", shown, f" and {more} more" if more > 0 else "")
+
+
 def save_config(config: Config, path: Path | None = None) -> None:
     """Write the current configuration back to TOML: to *path*, else to the file it was loaded from.
 
@@ -806,5 +842,10 @@ def save_config(config: Config, path: Path | None = None) -> None:
             *_section("support", ("feedback_form_url", config.support.feedback_form_url)),
         ]
         # The platform's line ending, as `Path.write_text` wrote it before.
-        _write_atomic(path, os.linesep.join(lines).encode("utf-8"))
-    logger.info("Settings saved")
+        data = os.linesep.join(lines).encode("utf-8")
+        try:
+            previous = path.read_bytes()
+        except OSError:
+            previous = None
+        _write_atomic(path, data)
+    _log_saved(previous, data)

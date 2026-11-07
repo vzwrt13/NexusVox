@@ -18,6 +18,7 @@ from ..config import (
     HOTKEY_MODIFIERS,
     OLLAMA_URL,
     HotkeyConfig,
+    LlmConfig,
     LlmServer,
     MeetingConfig,
     cuda_available,
@@ -174,16 +175,18 @@ class SettingsMixin(DashboardState):
     def set_polish_key(self, key: str) -> dict:
         return self._set_marker_key("polish_key", key)
 
+    @staticmethod
+    def _unload_in_background(llm: LlmConfig) -> None:
+        """The model `[llm]` points at is about to change: release the old one (it has nothing to do any more)."""
+        threading.Thread(target=llm_unload, args=(dataclasses.replace(llm),), daemon=True, name="llm-unload").start()
+
     def set_llm_model(self, model: str) -> dict:
         """The model name polish asks the [llm] server for (e.g. "qwen3.5:9b"). Read per request, so live."""
         model = str(model or "").strip()
         if not model:
             return {"error": "A model name is required", **self.get_settings()}
         if model != self._config.llm.model:
-            # The old model has nothing to do any more: free its memory (only if the app loaded it itself).
-            threading.Thread(
-                target=llm_unload, args=(dataclasses.replace(self._config.llm),), daemon=True, name="llm-unload"
-            ).start()
+            self._unload_in_background(self._config.llm)
         self._config.llm.model = model
         save_config(self._config)
         if self._config.cleanup.level != "off":
@@ -342,6 +345,8 @@ class SettingsMixin(DashboardState):
         if not model:
             return {"error": "A model name is required", **self.get_settings()}
         llm = self._config.llm
+        if (server.url, model) != (llm.url.rstrip("/"), llm.model):
+            self._unload_in_background(llm)
         llm.url, llm.protocol, llm.api_key, llm.model = server.url, server.protocol, server.api_key, model
         self._llm_server_cache.clear()
         save_config(self._config)

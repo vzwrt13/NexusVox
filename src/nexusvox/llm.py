@@ -78,13 +78,27 @@ def _request(config: LlmConfig, system: str, user: str) -> tuple[str, dict]:
     }
 
 
-def _keep_alive_value(keep_alive: str) -> str | int:
+def _keep_alive_value(keep_alive: str) -> str | int | float:
     """Ollama reads a bare number as seconds (`-1`: never unload, `0`: unload now) but rejects the string "-1"
-    (a duration needs a unit), so a numeric setting goes out as a number and "10m" stays a string."""
+    (a duration needs a unit), so a numeric setting goes out as a number and "10m" stays a string. A TOML float
+    such as `-1.0` reaches here as "-1.0"."""
     try:
-        return int(keep_alive.strip())
+        number = float(keep_alive.strip())
     except ValueError:
         return keep_alive
+    return int(number) if number.is_integer() else number
+
+
+def _headers(config: LlmConfig) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if config.api_key:
+        headers["Authorization"] = f"Bearer {config.api_key}"
+    return headers
+
+
+def _never_expires(config: LlmConfig) -> bool:
+    value = _keep_alive_value(config.keep_alive)
+    return isinstance(value, int | float) and value < 0
 
 
 @contextmanager
@@ -181,9 +195,9 @@ def _log_request(config: LlmConfig, started: float, outcome: str) -> None:
 
 def _send(config: LlmConfig, system: str, user: str) -> str:
     started = time.monotonic()
-    headers = {"Content-Type": "application/json"}
-    if config.api_key:
-        headers["Authorization"] = f"Bearer {config.api_key}"
+    headers = _headers(config)
+    if config.protocol == "ollama" and _never_expires(config):
+        _note_pinned(config)
     deadline = time.monotonic() + config.timeout_s  # one deadline for the request and a retry together
     try:
         url, body = _request(config, system, user)
@@ -262,10 +276,23 @@ def warm_up(config: LlmConfig) -> None:
 
 _reload_lock = threading.Lock()
 _reloading: set[tuple[str, str]] = set()  # (url, model) with a reload in flight
-# (url, model) the app loaded itself at start (or on a model switch): the only ones it unloads again on quit.
-# A model the user already had loaded in Ollama is theirs and stays.
-_warmed: set[tuple[str, str]] = set()
+# Every (url, model) this app sent a never-expire request to, noted before the first one goes out so that a load
+# still in flight is covered too. The value says who loaded it: True when it was not loaded yet (the app's own),
+# False when it already was (the user's session, e.g. `ollama run`).
+_pinned: dict[tuple[str, str], bool] = {}
 _UNLOAD_TIMEOUT_S = 3.0
+# What Ollama itself uses; a model the user had loaded goes back to expiring like that, instead of being unloaded.
+_OLLAMA_DEFAULT_KEEP_ALIVE = "5m"
+
+
+def _note_pinned(config: LlmConfig) -> None:
+    key = _reload_key(config)
+    with _reload_lock:
+        if key in _pinned:
+            return
+    ours = loaded_model(config, config.model) is None  # one short probe, the first time only
+    with _reload_lock:
+        _pinned.setdefault(key, ours)
 
 
 def _reload_key(config: LlmConfig) -> tuple[str, str]:
@@ -298,12 +325,8 @@ def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_
 
     def run() -> None:
         try:
-            ours = reason == "warm-up" and loaded_model(config, config.model) is None
             with background():  # nobody waits for this answer: live requests go first
                 complete(request_config, "Reply with OK.", "OK")
-            if ours:
-                with _reload_lock:
-                    _warmed.add(key)
             logger.info("Language model %s loaded (%s)", config.model, reason)
         except LlmError as exc:
             logger.info("Language model reload at %s failed (%s)", config.url, exc)
@@ -316,26 +339,41 @@ def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_
 
 
 def unload(config: LlmConfig) -> bool:
-    """Tell Ollama to drop the model now (`keep_alive: 0`), but only one this app loaded itself at start or on a
-    model switch (`_warmed`); True if the request went out. Only the Ollama protocol is asked. Blocking, at most
-    `_UNLOAD_TIMEOUT_S`; never raises, the outcome is only logged."""
+    """Give back the memory of a model this app pinned with a never-expire request (`_pinned`); True if the request
+    went out. A model the app loaded itself is unloaded (`keep_alive: 0`); one the user already had loaded goes back
+    to Ollama's own expiry. Only the Ollama protocol is asked. Blocking, at most `_UNLOAD_TIMEOUT_S`; never raises,
+    the outcome is only logged. The model stays noted until the server took the request, so a later call can retry."""
     key = _reload_key(config)
     with _reload_lock:
-        if config.protocol != "ollama" or key not in _warmed:
-            return False
-        _warmed.discard(key)
-    body = json.dumps({"model": config.model, "keep_alive": 0}).encode()
-    headers = {"Content-Type": "application/json"}
-    if config.api_key:
-        headers["Authorization"] = f"Bearer {config.api_key}"
-    request = urllib.request.Request(f"{key[0]}/api/chat", data=body, headers=headers, method="POST")
+        ours = _pinned.get(key)
+    if config.protocol != "ollama" or ours is None:
+        return False
+    body = {"model": config.model, "keep_alive": 0 if ours else _OLLAMA_DEFAULT_KEEP_ALIVE}
+    request = urllib.request.Request(
+        f"{key[0]}/api/chat", json.dumps(body).encode("utf-8"), _headers(config), method="POST"
+    )
     try:
         _post(request, _UNLOAD_TIMEOUT_S)
     except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError) as exc:
-        logger.info("Language model %s could not be unloaded (%s)", config.model, exc)
+        logger.info("Language model %s could not be released (%s)", config.model, exc)
         return False
-    logger.info("Language model %s unloaded", config.model)
+    with _reload_lock:
+        _pinned.pop(key, None)
+    logger.info("Language model %s %s", config.model, "unloaded" if ours else "back to the server's own expiry")
     return True
+
+
+def unload_all(config: LlmConfig) -> None:
+    """`unload` for every model this app pinned, whatever server and model `[llm]` points at now (quit)."""
+    with _reload_lock:
+        keys = list(_pinned)
+    for url, model in keys:
+        same_server = url == config.url.rstrip("/")
+        unload(
+            dataclasses.replace(
+                config, url=url, model=model, protocol="ollama", api_key=config.api_key if same_server else ""
+            )
+        )
 
 
 def reload_unless_loaded(config: LlmConfig) -> bool:
@@ -481,6 +519,13 @@ def detect_server(url: str, api_key: str = "", timeout_s: float = _LIST_TIMEOUT_
 PLAUSIBLE_SIZE_RATIO = 0.5
 
 
+def _same_model(wanted: str, reported: object) -> bool:
+    """Ollama reports an untagged name as `name:latest`."""
+    if not isinstance(reported, str):
+        return False
+    return wanted == reported or (":" not in wanted and f"{wanted}:latest" == reported)
+
+
 def loaded_model(config: LlmConfig, name: str, disk_gb: float | None = None) -> dict | None:
     """Where Ollama holds `name` right now (`/api/ps`), or None when it is not loaded or the server cannot say.
 
@@ -493,7 +538,7 @@ def loaded_model(config: LlmConfig, name: str, disk_gb: float | None = None) -> 
         with urllib.request.urlopen(f"{config.url.rstrip('/')}/api/ps", timeout=_LIST_TIMEOUT_S) as response:
             running = json.load(response)["models"]
         for m in running:
-            if isinstance(m, dict) and name in (m.get("name"), m.get("model")):
+            if isinstance(m, dict) and any(_same_model(name, n) for n in (m.get("name"), m.get("model"))):
                 total, vram = float(m.get("size", 0)), float(m.get("size_vram", 0))
                 if disk_gb and total / 1e9 < disk_gb * PLAUSIBLE_SIZE_RATIO:
                     return {"plausible": False, "on_gpu": vram > 0}

@@ -25,6 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ..config import CleanupConfig, Config, LlmConfig, TranslatorConfig, VoiceCommandsConfig
+from ..llm import config_for
 from ..storage.vocabulary import DictionaryEntry
 from ..system.logsetup import Text
 from .cleanup import MIN_WORDS, CleanupResult, cleanup
@@ -113,7 +114,7 @@ def process_text(
     processed = _voice_commands(protected, config.voice_commands)
 
     # Cleanup keeps every line break or is not used (cleanup.plausible).
-    cleaned = cleanup_fn(processed, config.cleanup, config.llm)
+    cleaned = cleanup_fn(processed, config.cleanup, config_for(config.llm, "dictation_cleanup"))
     if config.cleanup.level == "off":
         logger.debug("Cleanup: off, typing the dictation as it is")
     elif cleaned.status is None:  # the model was not asked: every other outcome logs its own line

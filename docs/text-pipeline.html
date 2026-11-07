@@ -5726,13 +5726,13 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>Gates</h3>
         </div>
         <ul>
-          <li>Polish: the selection is read through UI Automation, Ctrl+C only for controls that report none and in a terminal only with [polish].in_terminals (then pasted at the prompt); the [llm] model rewrites it by the spoken instruction - a preset name from polish_presets stands for its stored instruction, nothing said uses the default preset (else: improve it), the reply is pasted over and saved as a [polish] row; nothing selected or a model error beeps; focus moved to another window while the model ran: error beep, no paste, the paste key pastes the reply</li>
+          <li>Polish: the selection is read through UI Automation, Ctrl+C only for controls that report none and in a terminal only with [polish].in_terminals (then pasted at the prompt); the [llm] model (the main model when per-task models are on) rewrites it by the spoken instruction - a preset name from polish_presets stands for its stored instruction, nothing said uses the default preset (else: improve it), the reply is pasted over and saved as a [polish] row; nothing selected or a model error beeps; focus moved to another window while the model ran: error beep, no paste, the paste key pastes the reply</li>
           <li>A phone recording skips flag, extension, assistant and OS commands, and never splits press enter</li>
           <li>Extension command: the first extension whose on_command answers (label, opened) wins; the dictation is saved under the label, nothing is typed, and the error cue plays when opened is False; it runs before the assistant and OS commands</li>
           <li>Extension protect: an extension&#39;s protect hook shields parts of the dictation (a placeholder for a trigger phrase, say) from voice commands, cleanup and translation; it runs after the dictionary and the press-enter split, for the phone too (empty app); one that fails, is slow or answers wrongly is skipped and the dictation goes through unprotected</li>
           <li>Extension restore: after translation the restore functions put the real content back into the text to type and the text to save, before on_dictation; a restore that fails or answers None processes the dictation again without protect (cleanup and translation run twice), so a half-restored text is never typed or saved</li>
           <li>Extensions&#39; on_dictation hooks change the final text after restore (not for the phone: there is no active app)</li>
-          <li>Auto cleanup ([cleanup].level, [llm] model) types the dictation unchanged on a model error, after [cleanup].timeout_s (3 s), under 3 words, or when the reply lost a line break, grew or overlaps too little</li>
+          <li>Auto cleanup ([cleanup].level, [llm] model; with [llm].per_task on, the fast model of [llm.fast]) types the dictation unchanged on a model error, after [cleanup].timeout_s (3 s), under 3 words, or when the reply lost a line break, grew or overlaps too little</li>
         </ul>
       </div>
 

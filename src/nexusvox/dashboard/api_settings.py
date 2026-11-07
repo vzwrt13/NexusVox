@@ -8,6 +8,7 @@ import secrets
 import threading
 import time
 import urllib.parse
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from ..config import (
@@ -16,6 +17,7 @@ from ..config import (
     HOTKEY_KEY_VKS,
     HOTKEY_MODES,
     HOTKEY_MODIFIERS,
+    LLM_TASKS,
     OLLAMA_URL,
     HotkeyConfig,
     LlmConfig,
@@ -33,6 +35,7 @@ from ..config import (
 from ..dictation.edit_watch import WATCHED_KEYS
 from ..dictation.translator import is_reachable
 from ..llm import LlmError, detect_server, ollama_executable, server_models
+from ..llm import active_models as llm_active_models
 from ..llm import build_model_list as llm_build_model_list
 from ..llm import loaded_model as llm_loaded_model
 from ..llm import model_pull as llm_pull
@@ -52,8 +55,21 @@ SERVER_LIST_TTL_S = 20.0
 OLLAMA_START_WAIT_S = 15.0
 OLLAMA_START_POLL_S = 0.5
 
+# How the Models page names each task of `LLM_TASKS`, and the two roles.
+LLM_TASK_LABELS = {
+    "dictation_cleanup": "Dictation cleanup",
+    "polish": "Polish",
+    "file_cleanup": "Cleanup of uploaded files",
+}
+LLM_ROLES = ("main", "fast")
+
 # `[hotkey]` fields that hold a marker key, and how an error message names each.
 _MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
+
+
+def _model_key(llm: LlmConfig) -> tuple[str, str]:
+    """What tells two models apart: server address and model name."""
+    return llm.url.rstrip("/"), llm.model
 
 
 def _server_label(url: str) -> str:
@@ -177,21 +193,80 @@ class SettingsMixin(DashboardState):
 
     @staticmethod
     def _unload_in_background(llm: LlmConfig) -> None:
-        """The model `[llm]` points at is about to change: release the old one (it has nothing to do any more)."""
+        """A model is no longer in use: release it (it has nothing to do any more)."""
         threading.Thread(target=llm_unload, args=(dataclasses.replace(llm),), daemon=True, name="llm-unload").start()
+
+    def _change_llm(self, change: Callable[[LlmConfig], None]) -> None:
+        """Apply *change* to `[llm]` and save it. A model in use before and not after is released, whatever server or
+        protocol replaces it; with cleanup on, a model in use only now is warmed up (cleanup's short timeout would
+        skip dictations while it loads). A model in use on both sides is left alone, e.g. the main model that a
+        switched fast model leaves as it is."""
+        llm = self._config.llm
+        before = {_model_key(m): dataclasses.replace(m) for m in llm_active_models(llm)}
+        change(llm)
+        after = llm_active_models(llm)
+        kept = {_model_key(m) for m in after}
+        for key, old in before.items():
+            if key not in kept:
+                self._unload_in_background(old)
+        save_config(self._config)
+        if self._config.cleanup.level != "off":
+            for model in after:
+                if _model_key(model) not in before:
+                    llm_warm_up(model)
 
     def set_llm_model(self, model: str) -> dict:
         """The model name polish asks the [llm] server for (e.g. "qwen3.5:9b"). Read per request, so live."""
         model = str(model or "").strip()
         if not model:
             return {"error": "A model name is required", **self.get_settings()}
-        if model != self._config.llm.model:
-            self._unload_in_background(self._config.llm)
-        self._config.llm.model = model
-        save_config(self._config)
-        if self._config.cleanup.level != "off":
-            llm_warm_up(self._config.llm)  # cleanup's short timeout would skip dictations while it loads
+        self._change_llm(lambda llm: setattr(llm, "model", model))
         return self.get_settings()
+
+    def set_llm_per_task(self, enabled: bool) -> dict:
+        """The Advanced switch "Use different models per task". Off: the main model does everything, as before."""
+        self._change_llm(lambda llm: setattr(llm, "per_task", bool(enabled)))
+        return self.get_llm_models()
+
+    def set_llm_task_role(self, task: object, role: object) -> dict:
+        """Move one of `LLM_TASKS` to the fast or the main model. Read per request, so live."""
+        if task not in LLM_TASKS:
+            return {"error": f"Unknown task: {task}"}
+        if role not in LLM_ROLES:
+            return {"error": f"Unknown role: {role}"}
+
+        def change(llm: LlmConfig) -> None:
+            fast = set(llm.fast_tasks) - {task} | ({task} if role == "fast" else set())
+            llm.fast_tasks = [t for t in LLM_TASKS if t in fast]
+
+        self._change_llm(change)
+        return self.get_llm_models()
+
+    def _llm_roles(self) -> dict:
+        """The Advanced section's data: whether per-task models are on, the fast model and where each task goes."""
+        llm = self._config.llm
+        fast = llm.fast
+        return {
+            "enabled": llm.per_task,
+            "fast": {
+                "url": fast.url,
+                "protocol": fast.protocol,
+                "model": fast.model,
+                "server": self._llm_server_name(fast.url, fast.protocol),
+            }
+            if fast.url and fast.model
+            else None,
+            "tasks": [
+                {"id": task, "label": LLM_TASK_LABELS[task], "role": "fast" if task in llm.fast_tasks else "main"}
+                for task in LLM_TASKS
+            ],
+        }
+
+    def _llm_server_name(self, url: str, protocol: str) -> str:
+        if is_builtin_ollama(url, protocol):
+            return "Ollama"
+        saved = next((s for s in self._config.llm.servers if s.url == url.rstrip("/")), None)
+        return saved.name if saved is not None and saved.name else _server_label(url)
 
     def get_llm_status(self) -> dict:
         """Whether the [llm] server answers and has the configured model - probed live, like the translator."""
@@ -226,6 +301,8 @@ class SettingsMixin(DashboardState):
             **models,
             "ollama": ollama,
             "servers": servers,
+            "url": self._config.llm.url,
+            "roles": self._llm_roles(),
             "selected": selected,
             "device": "gpu" if cuda else "cpu",
             "loaded": llm_loaded_model(self._config.llm, selected, disk_gb) if models["reachable"] else None,
@@ -331,27 +408,38 @@ class SettingsMixin(DashboardState):
         save_config(self._config)
         return {"ok": True}
 
-    def select_llm_server_model(self, url: object, model: object) -> dict:
-        """Use *model* of the built-in Ollama or a saved server at *url*: `[llm]` takes its url, protocol and API key.
-        Read per request, so live. The server used until now is not saved anywhere: Ollama has its own entry."""
+    def select_llm_server_model(self, url: object, model: object, role: object = "main") -> dict:
+        """Use *model* of the built-in Ollama or a saved server at *url* for *role*: the main model (`[llm]`) or the
+        fast one (`[llm.fast]`) takes its url, protocol and API key. The fast model may also come from the server of
+        the main model, saved or not. Read per request, so live. The server used until now is not saved anywhere:
+        Ollama has its own entry."""
         url = str(url or "").strip().rstrip("/")
         model = str(model or "").strip()
+        llm = self._config.llm
+        if role not in LLM_ROLES:
+            return {"error": f"Unknown role: {role}", **self.get_settings()}
         if is_builtin_ollama(url, "ollama"):
             server = LlmServer(OLLAMA_URL, "ollama", "Ollama")
+        elif role == "fast" and url == llm.url.rstrip("/"):
+            server = LlmServer(url, llm.protocol, api_key=llm.api_key)
         else:
-            server = next((s for s in self._config.llm.servers if s.url == url), None)
+            server = next((s for s in llm.servers if s.url == url), None)
         if server is None:
             return {"error": "That server is not saved", **self.get_settings()}
         if not model:
             return {"error": "A model name is required", **self.get_settings()}
-        llm = self._config.llm
-        if (server.url, model) != (llm.url.rstrip("/"), llm.model):
-            self._unload_in_background(llm)
-        llm.url, llm.protocol, llm.api_key, llm.model = server.url, server.protocol, server.api_key, model
+
+        def change(llm: LlmConfig) -> None:
+            target = llm.fast if role == "fast" else llm
+            target.url, target.protocol, target.api_key, target.model = (
+                server.url,
+                server.protocol,
+                server.api_key,
+                model,
+            )
+
+        self._change_llm(change)
         self._llm_server_cache.clear()
-        save_config(self._config)
-        if self._config.cleanup.level != "off":
-            llm_warm_up(llm)
         return self.get_settings()
 
     def start_llm_pull(self, model: str) -> dict:

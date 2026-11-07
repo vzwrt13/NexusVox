@@ -205,7 +205,7 @@ function llmOptionLabel(m) {
 
 // What the dropdown's options depend on: a change here (and only here) rebuilds the <select>.
 function llmOptionsKey(data) {
-  return JSON.stringify([data.reachable, data.protocol, data.selected, data.recommended, data.other, data.servers, data.ollama]);
+  return JSON.stringify([data.reachable, data.protocol, data.selected, data.recommended, data.other, data.servers, data.ollama, data.url, data.roles]);
 }
 
 // A model of a saved server other than the one in use: its option value carries the server, `@@["url","model"]`.
@@ -290,6 +290,55 @@ function llmOptionGroups(data) {
   return groups;
 }
 
+// Models per task (Advanced). The name of the main model's server: Ollama, a saved server's name, or its address.
+function llmMainServerName(data) {
+  if (data.ollama && data.ollama.active) return "Ollama";
+  const saved = (data.servers || []).find((s) => s.active);
+  return saved ? saved.name : String(data.url || "").replace(/^https?:\/\//, "");
+}
+
+// The value of the saved fast model in its dropdown, "" when none is picked.
+function llmFastValue(data) {
+  const fast = data.roles && data.roles.fast;
+  return fast ? llmServerValue(fast.url.replace(/\/+$/, ""), fast.model) : "";
+}
+
+// The fast model's dropdown: the main model's list, with every option naming its server (the fast model may sit on
+// another server than the main one). A model that is not installed cannot be picked here; nothing downloads.
+function llmFastOptionGroups(data) {
+  const mainUrl = String(data.url || "").replace(/\/+$/, "");
+  const mainName = llmMainServerName(data);
+  const groups = llmOptionGroups(data).map((g) => {
+    const own = g.options.some((o) => o.value && !llmServerChoice(o.value));
+    return {
+      ...g,
+      label: own ? (g.label ? `${mainName} — ${g.label}` : mainName) : g.label,
+      options: g.options.map((o) =>
+        o.value && !llmServerChoice(o.value)
+          ? { ...o, value: llmServerValue(mainUrl, o.value), disabled: Boolean(o.disabled || o.muted) }
+          : o,
+      ),
+    };
+  });
+  const fast = data.roles && data.roles.fast;
+  const value = llmFastValue(data);
+  if (!fast) {
+    groups.unshift({ label: null, options: [{ value: "", label: "Choose a fast model", disabled: true }] });
+  } else if (!groups.some((g) => g.options.some((o) => o.value === value))) {
+    // Its server does not list it now (down, or removed): keep showing the saved choice.
+    groups.unshift({ label: fast.server, options: [{ value, label: fast.model }] });
+  }
+  return groups;
+}
+
+// What the main model is used for, for the overview: everything unless per-task models are on.
+function llmMainUsedFor(data) {
+  const roles = data.roles;
+  if (!roles || !roles.enabled || !roles.fast) return "Cleanup, Polish, upload cleanup, extensions";
+  const main = roles.tasks.filter((t) => t.role === "main").map((t) => t.label);
+  return [...main, "extensions"].join(", ");
+}
+
 // Refreshes the card while it is on screen and the page is visible. `fetchData()` returns the models payload,
 // `render(data, rebuildOptions)` draws it. Nothing is drawn when the payload did not change, and the options are
 // rebuilt only when they changed (an open dropdown stays open); `force` (after a save or a pull) always draws.
@@ -350,13 +399,110 @@ function renderLlmOverview(data, m) {
     ["Installed", installed],
     ["Runs on", `<span class="llm-runs-on"></span>`],
     ["Memory", llmMemory(data, m)],
-    ["Used for", "Cleanup, Polish, upload cleanup"],
+    ["Used for", escapeHtml(llmMainUsedFor(data))],
   ];
   document.getElementById("llm-overview-grid").innerHTML = rows
     .map(([label, value]) => `<div class="overview-row"><span class="overview-label">${label}</span><span class="overview-value">${value}</span></div>`)
     .join("");
   setStatus(document.querySelector("#llm-overview-grid .llm-runs-on"), runs.warn ? "warn" : undefined, runs.text);
 }
+
+// Fills a model dropdown with option groups (`llmOptionGroups`).
+function fillLlmSelect(select, groups) {
+  select.replaceChildren();
+  for (const group of groups) {
+    const parent = group.label === null ? select : document.createElement("optgroup");
+    if (group.label !== null) {
+      parent.label = group.label;
+      if (group.down) setStatus(parent, "down"); // red through the one helper; the text stays
+      parent.disabled = Boolean(group.down);
+      select.append(parent);
+    }
+    for (const o of group.options) {
+      const opt = new Option(o.label, o.value);
+      if (o.muted) opt.style.color = "var(--text-muted, gray)";
+      if (o.down) setStatus(opt, "down");
+      opt.disabled = Boolean(o.disabled);
+      parent.append(opt);
+    }
+  }
+}
+
+// ── Models per task: the Advanced section ──
+const llmModelTitle = document.getElementById("llm-model-title");
+const llmPerTaskToggle = document.getElementById("llm-per-task-toggle");
+const llmRolesDetails = document.getElementById("llm-roles-details");
+const llmFastSelect = document.getElementById("llm-fast-select");
+const llmFastStatus = document.getElementById("llm-fast-status");
+const llmTaskRoles = document.getElementById("llm-task-roles");
+
+function renderLlmRoles(data, rebuildOptions) {
+  const roles = data.roles;
+  if (!roles) return;
+  llmPerTaskToggle.checked = roles.enabled;
+  llmRolesDetails.hidden = !roles.enabled;
+  llmModelTitle.textContent = roles.enabled ? "Main model" : "Language model (LLM)";
+  if (!roles.enabled) return;
+  if (rebuildOptions) {
+    fillLlmSelect(llmFastSelect, llmFastOptionGroups(data));
+    llmFastSelect.value = llmFastValue(data);
+  }
+  if (!roles.fast) setStatus(llmFastStatus, "warn", "No fast model picked yet: the main model does its tasks.");
+  else setStatus(llmFastStatus, undefined, `Fast model: ${roles.fast.model} on ${roles.fast.server}`);
+  llmTaskRoles.replaceChildren();
+  for (const task of roles.tasks) {
+    const row = document.createElement("div");
+    row.className = "overview-row";
+    const label = document.createElement("span");
+    label.className = "overview-label";
+    label.textContent = task.label;
+    const select = document.createElement("select");
+    select.className = "select-input";
+    select.setAttribute("aria-label", `Model for ${task.label}`);
+    select.append(new Option("Fast model", "fast"), new Option("Main model", "main"));
+    select.value = task.role;
+    select.addEventListener("change", () => saveLlmTaskRole(task.id, select.value));
+    const value = document.createElement("span");
+    value.className = "overview-value";
+    value.append(select);
+    row.append(label, value);
+    llmTaskRoles.append(row);
+  }
+}
+
+async function saveLlmTaskRole(task, role) {
+  try {
+    const resp = await postSetting("/api/settings/llm-task-role", { task, role });
+    const data = await resp.json();
+    if (data.error) setStatus(llmFastStatus, "down", data.error);
+  } catch {
+    setStatus(llmFastStatus, "down", "The dashboard could not reach the app. Try again.");
+  }
+  await loadLlmModels();
+}
+
+llmPerTaskToggle.addEventListener("change", async () => {
+  try {
+    await postSetting("/api/settings/llm-per-task", { enabled: llmPerTaskToggle.checked });
+  } catch {
+    setStatus(llmFastStatus, "down", "The dashboard could not reach the app. Try again.");
+  }
+  await loadLlmModels();
+});
+
+llmFastSelect.addEventListener("change", async () => {
+  const choice = llmServerChoice(llmFastSelect.value);
+  if (!choice) return;
+  try {
+    const resp = await postSetting("/api/settings/llm-select", { url: choice[0], model: choice[1], role: "fast" });
+    const s = await resp.json();
+    if (s.error) setStatus(llmFastStatus, "down", s.error);
+  } catch {
+    setStatus(llmFastStatus, "down", "The dashboard could not reach the app. Try again.");
+  }
+  await loadLlmModels();
+});
+// ── end of the Advanced section ──
 
 function renderLlmModels(data, rebuildOptions) {
   llmSavedModel = data.selected;
@@ -365,24 +511,9 @@ function renderLlmModels(data, rebuildOptions) {
   loadLlmStatus().catch(() => {}); // the hints follow the live status, fetched on its own
   renderLlmServers(data.servers || [], data.ollama || null);
   llmSlowHint.hidden = !data.slow_hint;
+  renderLlmRoles(data, rebuildOptions);
   if (rebuildOptions) {
-    llmModelSelect.replaceChildren();
-    for (const group of llmOptionGroups(data)) {
-      const parent = group.label === null ? llmModelSelect : document.createElement("optgroup");
-      if (group.label !== null) {
-        parent.label = group.label;
-        if (group.down) setStatus(parent, "down"); // red through the one helper; the text stays
-        parent.disabled = Boolean(group.down);
-        llmModelSelect.append(parent);
-      }
-      for (const o of group.options) {
-        const opt = new Option(o.label, o.value);
-        if (o.muted) opt.style.color = "var(--text-muted, gray)";
-        if (o.down) setStatus(opt, "down");
-        opt.disabled = Boolean(o.disabled);
-        parent.append(opt);
-      }
-    }
+    fillLlmSelect(llmModelSelect, llmOptionGroups(data));
     llmModelSelect.value = data.selected;
   }
   if (!data.reachable) {

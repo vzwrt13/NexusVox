@@ -13,7 +13,7 @@ from ..dictation.overlay import ERROR
 from ..dictation.polish import polish, read_selection
 from ..dictation.polish_presets import resolve_instruction
 from ..extensions import loaded_extensions
-from ..llm import LlmError, reload_unless_loaded
+from ..llm import LlmError, config_for, reload_unless_loaded
 from ..system.logsetup import Text
 from .common import logger
 from .records import _Recording
@@ -91,17 +91,18 @@ class SelectionPolish:
         detail = preset or spoken or "default"
         # The model this request goes to, read now: settings apply live, so a switch while it runs must not
         # credit the old model's time to the new one.
-        asked = (self._config.llm.model, self._config.llm.url)
+        llm = config_for(self._config.llm, "polish")
+        asked = (llm.model, llm.url)
         started = time.perf_counter()  # not monotonic(): its tick is ~15 ms on Windows
         try:
-            rewritten = await loop.run_in_executor(None, polish, selection, instruction, self._config.llm)
+            rewritten = await loop.run_in_executor(None, polish, selection, instruction, llm)
         except LlmError as exc:
-            logger.warning("Polish: model at %s failed (%s); the selection stays as it was", self._config.llm.url, exc)
+            logger.warning("Polish: model at %s failed (%s); the selection stays as it was", llm.url, exc)
             self._cue(beep_error, ERROR)
             if exc.timed_out:
                 # Not loaded (Ollama restarted or unloaded it): a short request cannot load it, so load it for the
                 # next one. A model that is loaded and only slow is left alone.
-                await loop.run_in_executor(None, reload_unless_loaded, self._config.llm)
+                await loop.run_in_executor(None, reload_unless_loaded, llm)
             await self._save_polish(
                 recording,
                 "polish",

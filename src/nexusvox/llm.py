@@ -6,6 +6,9 @@ which can switch a reasoning model's thinking off and keep the model loaded for
 `keep_alive`) or any OpenAI-compatible `/chat/completions` endpoint
 (`protocol = "openai"`: LM Studio, llama.cpp server, vLLM, a cloud API).
 Callers decide what to do on failure; `LlmError` covers every way it can fail.
+
+With `[llm].per_task` on there are two models, a fast one and the main one: `config_for` says which one does a
+task, `active_models` which ones are in use (warmed up, kept loaded and released together).
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
-from .config import LLM_E4B_MIN_VRAM_GB, LlmConfig, LlmServer
+from .config import LLM_E4B_MIN_VRAM_GB, LLM_TASKS, LlmConfig, LlmServer
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +60,40 @@ class LlmError(Exception):
     def __init__(self, message: str, *, timed_out: bool = False) -> None:
         super().__init__(message)
         self.timed_out = timed_out
+
+
+def _fast_config(config: LlmConfig) -> LlmConfig | None:
+    """The fast model as a config of its own, or None when it is not in use (`per_task` off, or none picked)."""
+    fast = config.fast
+    if not config.per_task or not fast.url or not fast.model:
+        return None
+    return dataclasses.replace(
+        config,
+        url=fast.url,
+        protocol=fast.protocol,
+        model=fast.model,
+        api_key=fast.api_key,
+        per_task=False,
+        fast_tasks=[],
+    )
+
+
+def config_for(config: LlmConfig, task: str) -> LlmConfig:
+    """The config of the model that does *task* (one of `LLM_TASKS`): the fast model when per-task models are on,
+    one is picked and *task* is one of `fast_tasks`; the main model (`config` itself) otherwise."""
+    fast = _fast_config(config)
+    return fast if fast is not None and task in config.fast_tasks else config
+
+
+def active_models(config: LlmConfig) -> list[LlmConfig]:
+    """The models in use, main model first: the main model always (extensions use it too), the fast model when it
+    has a task and is not the main model itself. Warm-up, renewal and release apply to these and no other."""
+    models = [config]
+    fast = _fast_config(config)
+    if fast is not None and any(task in config.fast_tasks for task in LLM_TASKS):
+        if _reload_key(fast) != _reload_key(config):
+            models.append(fast)
+    return models
 
 
 def _request(config: LlmConfig, system: str, user: str) -> tuple[str, dict]:
@@ -287,6 +324,9 @@ def warm_up(config: LlmConfig) -> None:
 
 _reload_lock = threading.Lock()
 _reloading: set[tuple[str, str]] = set()  # (url, model) with a reload in flight
+# Models released while their load was still in flight: the load would pin them again when it ends, so they are
+# released once more then.
+_release_after_load: set[tuple[str, str]] = set()
 # Every (url, model) this app sent a keep-loaded request to (keep_alive other than 0), noted before the first
 # one goes out so that a load still in flight is covered too. The value says who loaded it: True when it was not
 # loaded yet (the app's own), False when it already was (the user's session, e.g. `ollama run`).
@@ -344,6 +384,10 @@ def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_
         finally:
             with _reload_lock:
                 _reloading.discard(key)
+                release = key in _release_after_load
+                _release_after_load.discard(key)
+            if release:
+                unload(config)
 
     threading.Thread(target=run, daemon=True, name="llm-reload").start()
     return True
@@ -353,10 +397,13 @@ def unload(config: LlmConfig) -> bool:
     """Give back the memory of a model this app pinned with a never-expire request (`_pinned`); True if the request
     went out. A model the app loaded itself is unloaded (`keep_alive: 0`); one the user already had loaded goes back
     to Ollama's own expiry. Only the Ollama protocol is asked. Blocking, at most `_UNLOAD_TIMEOUT_S`; never raises,
-    the outcome is only logged. The model stays noted until the server took the request, so a later call can retry."""
+    the outcome is only logged. The model stays noted until the server took the request, so a later call can retry.
+    A load of the model still in flight would pin it again when it ends, so it is released once more then."""
     key = _reload_key(config)
     with _reload_lock:
         ours = _pinned.get(key)
+        if config.protocol == "ollama" and ours is not None and key in _reloading:
+            _release_after_load.add(key)
     if config.protocol != "ollama" or ours is None:
         return False
     body = {"model": config.model, "keep_alive": 0 if ours else _OLLAMA_DEFAULT_KEEP_ALIVE}
@@ -369,20 +416,28 @@ def unload(config: LlmConfig) -> bool:
         logger.info("Language model %s could not be released (%s)", config.model, exc)
         return False
     with _reload_lock:
-        _pinned.pop(key, None)
+        if key not in _release_after_load:  # else still noted, for the release once the load has ended
+            _pinned.pop(key, None)
     logger.info("Language model %s %s", config.model, "unloaded" if ours else "back to the server's own expiry")
     return True
 
 
+def _api_key_for(config: LlmConfig, url: str) -> str:
+    """The API key the config holds for the server at *url*: of a model in use, else of a saved server."""
+    for model in active_models(config):
+        if model.url.rstrip("/") == url:
+            return model.api_key
+    return next((server.api_key for server in config.servers if server.url.rstrip("/") == url), "")
+
+
 def unload_all(config: LlmConfig) -> None:
-    """`unload` for every model this app pinned, whatever server and model `[llm]` points at now (quit)."""
+    """`unload` for every model this app pinned, whatever servers and models `[llm]` points at now (quit)."""
     with _reload_lock:
         keys = list(_pinned)
     for url, model in keys:
-        same_server = url == config.url.rstrip("/")
         unload(
             dataclasses.replace(
-                config, url=url, model=model, protocol="ollama", api_key=config.api_key if same_server else ""
+                config, url=url, model=model, protocol="ollama", api_key=_api_key_for(config, url), per_task=False
             )
         )
 
@@ -400,23 +455,20 @@ def _renew_interval(config: LlmConfig) -> float | None:
 
 
 def renew_once(config: LlmConfig) -> int:
-    """Restart the keep_alive clock of every model this app uses that Ollama still holds, with a load-only request
-    (`/api/generate`, no prompt). A model that is not loaded is skipped, never loaded: the reload after the next
-    timeout covers that. Skipped for a keep_alive that is never or now. Never raises; returns how many were renewed."""
+    """Restart the keep_alive clock of every model in use (`active_models`) that this app pinned and Ollama still
+    holds, with a load-only request (`/api/generate`, no prompt). A model that is not loaded is skipped, never loaded:
+    the reload after the next timeout covers that. A model no longer in use is never renewed, so it expires. Skipped
+    for a keep_alive that is never or now. Never raises; returns how many were renewed."""
     value = _keep_alive_value(config.keep_alive)
-    if config.protocol != "ollama" or _keep_alive_seconds(config.keep_alive) is None:
+    if _keep_alive_seconds(config.keep_alive) is None:
         return 0
     with _reload_lock:
-        keys = list(_pinned)
+        pinned = set(_pinned)
     renewed = 0
-    for url, model in keys:
-        target = dataclasses.replace(
-            config,
-            url=url,
-            model=model,
-            protocol="ollama",
-            api_key=config.api_key if url == config.url.rstrip("/") else "",
-        )
+    for target in active_models(config):
+        url, model = _reload_key(target)
+        if target.protocol != "ollama" or (url, model) not in pinned:
+            continue
         if loaded_model(target, model) is None:
             logger.info("Language model %s not loaded, renewal skipped", model)
             continue

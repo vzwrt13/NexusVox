@@ -537,70 +537,43 @@ async function saveSymbols() {
   });
 }
 
-// -- Settings submenu and search ----------------------------------------
-// The sidebar lists one entry per Settings card; the search field hides settings that do not match.
+// -- Settings pages and search ------------------------------------------
+// Each Settings card is one page. The navigation next to them lists the pages and shows one at a time (the first
+// by default); while the search field holds text, every card with a match is listed instead, one under the other.
 function settingsCards() {
-  return Array.from(document.querySelectorAll("#tab-settings > .settings-card"));
+  return Array.from(document.querySelectorAll("#settings-pages > .settings-card"));
 }
 
-let pinnedSubtab = null; // the entry just clicked stays active until the user scrolls by hand
-let subtabFrame = 0;
-
-function markActiveSubtab() {
-  if (!document.getElementById("tab-settings").classList.contains("active")) return;
-  const links = Array.from(document.querySelectorAll("#settings-submenu .subtab"));
-  const entries = links
-    .map((link) => ({ link, card: document.getElementById(link.dataset.card) }))
-    .filter((e) => e.card && !e.card.classList.contains("search-hidden"));
-  const atBottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
-  let current = null;
-  for (const e of entries) {
-    const top = e.card.getBoundingClientRect().top;
-    // At the end of the page the last cards can never reach the top: the lowest one in view counts.
-    if (top <= 120 || (atBottom && top < window.innerHeight)) current = e.link;
-  }
-  if (pinnedSubtab && entries.some((e) => e.link === pinnedSubtab)) current = pinnedSubtab;
-  links.forEach((l) => l.classList.toggle("active", l === current));
+function settingsLinks() {
+  return Array.from(document.querySelectorAll("#settings-nav .settings-link"));
 }
 
-function scheduleActiveSubtab() {
-  if (subtabFrame) return;
-  subtabFrame = requestAnimationFrame(() => {
-    subtabFrame = 0;
-    markActiveSubtab();
-  });
+function openSettingsPage(id) {
+  for (const card of settingsCards()) card.classList.toggle("active", card.id === id);
+  for (const link of settingsLinks()) link.classList.toggle("active", link.dataset.card === id);
+  return document.getElementById(id);
 }
 
-// Scroll to a Settings card: lifts a search filter that hides it and opens a collapsed card.
+// Open the page of a card; a search filter is lifted first, so the page always shows in full.
+function showSettingsPage(id) {
+  if (document.getElementById("settings-search").value) clearSettingsSearch();
+  return openSettingsPage(id);
+}
+
+// Open the page of a card from another tab (the Meetings link on the Recordings tab).
 function scrollToSettingsCard(id) {
-  const card = document.getElementById(id);
-  if (card.classList.contains("search-hidden")) clearSettingsSearch();
-  if (card.tagName === "DETAILS") {
-    card.open = true;
-    advancedWasOpen = null; // opened on purpose: clearing the search must not close it again
-  }
+  const card = showSettingsPage(id);
   card.scrollIntoView({ behavior: "smooth", block: "start" });
   return card;
 }
 
-document.querySelectorAll("#settings-submenu .subtab").forEach((link) => {
+settingsLinks().forEach((link) => {
   link.addEventListener("click", (e) => {
     e.preventDefault();
-    scrollToSettingsCard(link.dataset.card);
-    pinnedSubtab = link;
-    markActiveSubtab();
+    showSettingsPage(link.dataset.card);
+    window.scrollTo(0, 0);
   });
 });
-window.addEventListener("scroll", scheduleActiveSubtab, { passive: true });
-["wheel", "touchstart", "keydown"].forEach((type) =>
-  window.addEventListener(
-    type,
-    () => {
-      pinnedSubtab = null;
-    },
-    { passive: true },
-  ),
-);
 
 // Text a user can see and read as a label or hint: no option lists, buttons, fields, hidden parts or user data.
 function searchableText(node) {
@@ -613,21 +586,19 @@ function searchableText(node) {
 
 // A unit is a direct child of a card (setting row, sub-block, hint), apart from the title.
 function settingsUnits(card) {
-  return Array.from(card.children).filter((u) => !u.hidden && !["H4", "SUMMARY"].includes(u.tagName));
+  return Array.from(card.children).filter((u) => !u.hidden && u.tagName !== "H4");
 }
-
-let advancedWasOpen = null;
 
 function applySettingsSearch() {
   const query = document.getElementById("settings-search").value.trim().toLowerCase();
-  const advanced = document.getElementById("settings-advanced");
+  const tab = document.getElementById("tab-settings");
   let shown = 0;
   for (const card of settingsCards()) {
     const units = settingsUnits(card);
     card.classList.remove("search-hidden");
     units.forEach((u) => u.classList.remove("search-hidden"));
     if (!query) continue;
-    const titleText = (card.querySelector(".nexus-section-title, summary") || {}).textContent || "";
+    const titleText = (card.querySelector(".nexus-section-title") || {}).textContent || "";
     if (titleText.toLowerCase().includes(query)) {
       shown++;
       continue;
@@ -640,15 +611,12 @@ function applySettingsSearch() {
     if (any) shown++;
     else card.classList.add("search-hidden");
   }
-  if (query) {
-    if (advancedWasOpen === null) advancedWasOpen = advanced.open;
-    if (!advanced.classList.contains("search-hidden")) advanced.open = true;
-  } else if (advancedWasOpen !== null) {
-    advanced.open = advancedWasOpen;
-    advancedWasOpen = null;
+  tab.classList.toggle("searching", !!query);
+  for (const link of settingsLinks()) {
+    const card = document.getElementById(link.dataset.card);
+    link.classList.toggle("search-hidden", card.classList.contains("search-hidden"));
   }
   document.getElementById("settings-no-match").hidden = !query || shown > 0;
-  markActiveSubtab();
 }
 
 function clearSettingsSearch() {
@@ -663,7 +631,10 @@ document.getElementById("settings-search").addEventListener("keydown", (e) => {
     clearSettingsSearch();
   }
 });
-// A user who opens or closes Advanced by hand keeps that state when the search is cleared.
-document.querySelector("#settings-advanced > summary").addEventListener("click", () => {
-  advancedWasOpen = null;
+
+// "Run the first-run setup again": the setup itself announces itself by enabling this button and listening for the event.
+document.getElementById("settings-rerun-setup").addEventListener("click", () => {
+  document.dispatchEvent(new CustomEvent("nexusvox:rerun-setup"));
 });
+
+openSettingsPage(settingsLinks()[0].dataset.card);

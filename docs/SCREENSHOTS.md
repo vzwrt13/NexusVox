@@ -13,10 +13,10 @@ It writes three PNGs to `docs/images/`:
 |---|---|---|
 | `dashboard-analytics.png` | Analytics | below the Latency Trend chart |
 | `dashboard-recordings.png` | Recordings | one window (1280 x 860): list and detail pane |
-| `dashboard-settings.png` | Settings | below the Vocabulary card |
+| `dashboard-settings.png` | Settings | the Dictation page (the page Settings opens on) |
 
 The Recordings tab fills one window with its two panes and is photographed at a window's height. The
-Analytics and Settings tabs run on for a long way. The script serves its own copy of the page with
+Analytics tab runs on for a long way. The script serves its own copy of the page with
 the elements after the last card to show hidden (the selectors are in `SHOTS`), photographs it in a tall
 viewport and cuts the empty strip below the last card, so each image ends at an element and follows the
 dashboard when its layout changes. If a selector stops matching, the image simply gets longer: look at the

@@ -192,6 +192,17 @@ def with_hardware_defaults(config: Config) -> Config:
     return config
 
 
+# The default before -1: every config the app saved then holds it, so it is the old default, not a choice.
+_OLD_LLM_KEEP_ALIVE = "10m"
+
+
+def _llm_keep_alive(llm_data: dict) -> str:
+    """`[llm].keep_alive`: the old default "10m" becomes the new one (-1: loaded while the app runs); any other
+    saved value is the user's own and stays. Written back on the next save."""
+    value = str(llm_data.get("keep_alive", LlmConfig.keep_alive))
+    return LlmConfig.keep_alive if value == _OLD_LLM_KEEP_ALIVE else value
+
+
 def _llm_servers(raw: object) -> list[LlmServer]:
     """The saved servers of `[[llm.servers]]`. An entry without a URL, with an unknown protocol or the address of an
     earlier one is dropped, so a hand-edited file cannot break the dropdown. Ollama at its default address is a
@@ -515,7 +526,7 @@ def load_config(path: Path | None = None) -> Config:
             model=_llm_model(llm_data),
             api_key=str(llm_data.get("api_key", "")),
             timeout_s=float(llm_data.get("timeout_s", LlmConfig.timeout_s)),
-            keep_alive=str(llm_data.get("keep_alive", LlmConfig.keep_alive)),
+            keep_alive=_llm_keep_alive(llm_data),
             servers=_llm_servers(llm_data.get("servers")),
         ),
         polish=PolishConfig(in_terminals=bool(polish_data.get("in_terminals", False))),

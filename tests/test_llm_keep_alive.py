@@ -56,12 +56,29 @@ def test_a_user_set_duration_is_sent_unchanged(server):
     assert server.bodies[0]["keep_alive"] == "10m"
 
 
-def test_an_old_config_keeps_its_value_and_a_missing_key_gets_the_new_default(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("saved", "loaded"),
+    [
+        ('keep_alive = "10m"', "-1"),  # the old default, saved by every earlier version
+        ('keep_alive = "30m"', "30m"),
+        ('keep_alive = "24h"', "24h"),
+        ("keep_alive = 0", "0"),
+        ('keep_alive = "-1"', "-1"),
+        ("", "-1"),  # key missing
+    ],
+)
+def test_the_old_default_migrates_and_a_chosen_value_stays(tmp_path, monkeypatch, saved, loaded):
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "config.toml").write_text('[llm]\nkeep_alive = "10m"\n', encoding="utf-8")
-    assert load_config().llm.keep_alive == "10m"
-    (tmp_path / "config.toml").write_text("[llm]\nmodel = 'x'\n", encoding="utf-8")
-    assert load_config().llm.keep_alive == "-1"
+    (tmp_path / "config.toml").write_text("[llm]" + chr(10) + saved + chr(10), encoding="utf-8")
+    config = load_config()
+    assert config.llm.keep_alive == loaded
+    save_config(config)  # written back on the next save
+    assert load_config().llm.keep_alive == loaded
+    assert (f'keep_alive = "{loaded}"') in (tmp_path / "config.toml").read_text(encoding="utf-8")
+
+
+def test_a_fresh_config_uses_the_new_default(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     save_config(Config())
     assert load_config().llm.keep_alive == "-1"
 

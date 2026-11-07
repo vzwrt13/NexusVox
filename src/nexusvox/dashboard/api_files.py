@@ -11,6 +11,7 @@ from pathlib import Path
 from ..dictation.lang_detect import stored_language
 from ..extensions import HOOK_TIMEOUT_S, file_transcript_from_record
 from ..file_cleanup import clean_transcript
+from ..transcription.diarization import speaker_turns
 from ..transcription.exports import NO_TIMING_HINT, SUBTITLE_TARGET_IDS
 from ..transcription.file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
 from .api_base import DashboardState, logger
@@ -281,6 +282,19 @@ class FilesMixin(DashboardState):
                 }
             )
         return out
+
+    def get_speaker_turns(self, tid: int) -> list[dict] | None:
+        """`[{speaker, start, end}]` (seconds) for each speaker paragraph of a stored row, in text order; empty when
+        the row has no speaker-labelled word timing. None for an unknown id. The Recordings tab puts the start
+        next to each paragraph and sums the talk time per speaker."""
+        record = self._db.get_file_transcription(tid) if self._db else None
+        if record is None:
+            return None
+        words = list(file_transcript_from_record(record).words)
+        return [
+            {"speaker": speaker, "start": round(start, 2), "end": round(end, 2)}
+            for speaker, start, end in speaker_turns(words)
+        ]
 
     def _displayed(self, record, deadline: float) -> tuple[str, str | None]:
         """A row's `text` and `cleaned_text` as the extensions' `display_text` hook shows them, in one call."""

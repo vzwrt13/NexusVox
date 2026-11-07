@@ -66,7 +66,7 @@ class MeetingConfig:
     own_voice_label: str = DEFAULT_OWN_VOICE_LABEL
     # Show a rough transcript of both tracks (your voice and "Others") in the dashboard while the meeting
     # records. It sends the audio to the transcription model in 6 s windows all meeting long, and that load is not
-    # measured yet, so it is off until switched on (dashboard Meetings tab).
+    # measured yet, so it is off until switched on (dashboard Recordings tab).
     live_transcript: bool = False
     # Keep `meeting.wav`, the playable mix, after a successful transcription. The per-track WAVs are always
     # deleted then; off deletes the mix too. Meetings already stored keep their audio.

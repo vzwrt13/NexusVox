@@ -56,3 +56,11 @@ def test_caveat_hints_use_the_warn_state():
     assert re.search(r'id="llm-slow-hint"\s+class="[^"]*status-line warn', _HTML)
     assert re.search(r'class="[^"]*model-caution[^"]*status-line warn', _HTML)
     assert ".badge.warn" in _CSS
+
+
+def test_recordings_css_and_the_scrollbars_use_only_style_css_tokens():
+    recordings = (_STATIC / "recordings.css").read_text(encoding="utf-8")
+    assert not re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", recordings)
+    for token in ("--scrollbar-thumb", "--scrollbar-thumb-hover"):
+        assert re.search(rf":root\s*\{{[^}}]*{token}:\s*#[0-9a-fA-F]{{6}}", _CSS), token
+        assert f"var({token})" in recordings, token

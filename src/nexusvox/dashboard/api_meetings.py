@@ -39,7 +39,7 @@ def _remove_folder(folder: Path) -> None:
 
 
 class MeetingsMixin(DashboardState):
-    """Start, stop and the Meetings tab's lists and settings; the transcript is `MeetingTranscriptMixin`."""
+    """Start, stop and the Recordings tab's meeting lists and settings; the transcript is `MeetingTranscriptMixin`."""
 
     def _meetings_dir(self) -> Path:
         """Where each meeting gets its own folder: `meetings/` inside the audio directory."""
@@ -187,7 +187,7 @@ class MeetingsMixin(DashboardState):
         return self._set_meeting_flag("live_transcript", enabled)
 
     def get_meeting_live(self, after: int = 0) -> dict:
-        """Live transcript segments from `after` on (the Meetings tab polls this while a meeting records)."""
+        """Live transcript segments from `after` on (the Recordings tab polls this while a meeting records)."""
         return self._meeting.live(after)
 
     def _live_labels(self) -> dict[str, str]:

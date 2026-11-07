@@ -6,6 +6,7 @@
   <title>NexusVox Dashboard</title>
   <link rel="icon" type="image/svg+xml" href="logo.svg">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="recordings.css">
 </head>
 <body>
   <header>
@@ -26,8 +27,7 @@
       </div>
       <button class="tab" data-tab="analytics">Analytics</button>
       <button class="tab" data-tab="edit" data-feature="flag_command" hidden>Edit</button>
-      <button class="tab" data-tab="meetings">Meetings</button>
-      <button class="tab" data-tab="upload">Upload</button>
+      <button class="tab" data-tab="recordings">Recordings</button>
       <button class="tab" data-tab="review">Review</button>
       <button class="tab tab-dev" data-tab="dev" data-feature="dev_tab" hidden>Dev</button>
     </nav>
@@ -753,128 +753,149 @@
       <p class="settings-hint" style="margin-bottom: 16px;">Transcriptions flagged as incorrect via hotkey. Enter the correct text and save to build ground-truth data.</p>
       <div id="flagged-list" class="flagged-list"></div>
     </section>
-    <!-- Upload Tab -->
-    <section id="tab-upload" class="tab-content">
-      <h2 class="edit-heading">Upload Audio File</h2>
-      <p class="settings-hint" style="margin-bottom: 16px;">Choose an audio file, set the options, then click Transcribe to transcribe it with the current model. Supported formats: WAV, MP3, FLAC, OGG, WebM (max 25 MB).</p>
-
-      <div class="upload-zone" id="upload-zone">
-        <input type="file" id="upload-input" accept=".wav,.mp3,.flac,.ogg,.webm" hidden>
-        <div class="upload-zone-content">
-          <div class="upload-icon">&#x1F4C1;</div>
-          <p id="upload-zone-text">Drag &amp; drop an audio file here, or <button class="upload-browse-btn" id="upload-browse">browse</button></p>
-          <p id="upload-zone-ready" class="upload-zone-ready" hidden>Ready to transcribe &ndash; drop another file or <button class="upload-browse-btn" id="upload-browse-again" type="button">choose a different one</button></p>
-        </div>
-      </div>
-      <div id="upload-selected" class="upload-selected" hidden>
-        <div class="upload-selected-info">
-          <span class="upload-selected-name" id="upload-selected-name"></span>
-          <span class="upload-selected-meta" id="upload-selected-meta"></span>
-        </div>
-        <button type="button" class="upload-selected-remove" id="upload-remove" aria-label="Remove the selected file" title="Remove the selected file">&times;</button>
-      </div>
-
-      <div class="setting-row upload-option">
-        <div class="setting-info">
-          <h3>Detect speakers</h3>
-          <p id="upload-diarize-hint">Labels the transcript by speaker ("Speaker 1: ..."), one paragraph per turn. Tells up to 4 speakers apart.</p>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" id="upload-diarize-toggle">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-
-      <div class="setting-row upload-option">
-        <div class="setting-info">
-          <h3>Clean up text</h3>
-          <p>Runs the transcript through the language model afterwards, passage by passage: removes fillers and false starts and fixes punctuation (Light), or also grammar (Medium). Speaker labels stay. The original transcript is kept and can be shown instead. Takes a while for a long file; a passage the model fails on keeps its original wording.</p>
-          <p id="upload-llm-hint" class="settings-hint status-line" hidden></p>
-        </div>
-        <select id="upload-cleanup-level" class="select-input" disabled aria-label="Cleanup level">
-          <option value="light">Light</option>
-          <option value="medium">Medium</option>
-        </select>
-        <label class="toggle">
-          <input type="checkbox" id="upload-cleanup-toggle">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-
-      <div class="upload-actions">
-        <button type="button" class="flagged-save-btn" id="upload-transcribe" disabled>Transcribe</button>
-      </div>
-
-      <div id="upload-status" class="upload-status" style="display: none;">
-        <span class="model-status-spinner"></span>
-        <span id="upload-status-text">Transcribing...</span>
-      </div>
-      <div id="upload-progress" class="upload-progress" style="display: none;">
-        <progress id="upload-progress-bar" max="100" value="0"></progress>
-      </div>
-
-      <div id="upload-error" class="upload-error" style="display: none;"></div>
-      <div id="upload-note" class="upload-note" style="display: none;"></div>
-
-      <h3 class="upload-history-heading">Previous Uploads</h3>
-      <div id="upload-list" class="flagged-list"></div>
-    </section>
-    <!-- Meetings Tab -->
-    <section id="tab-meetings" class="tab-content">
-      <h2 class="edit-heading">Meetings</h2>
-      <p class="settings-hint">Records your microphone and the system audio (what the other participants say) and turns them into one transcript with numbered speakers (<em>Speaker 1</em> is you). Dictation keeps working during a meeting.</p>
-
-      <div class="settings-card meeting-card">
-        <div class="meeting-controls">
-          <span id="meeting-indicator" class="meeting-indicator" aria-hidden="true"></span>
-          <span id="meeting-timer" class="meeting-timer">00:00</span>
-          <button type="button" class="flagged-save-btn" id="meeting-toggle">Start recording</button>
-        </div>
-        <p id="meeting-status" class="status-line" hidden></p>
-        <div id="meeting-live" class="meeting-live" hidden>
-          <h3>Live transcript</h3>
-          <p class="settings-hint">A rough preview a few seconds behind the call. The transcript made after you stop is the one that is saved.</p>
-          <div id="meeting-live-text" class="meeting-live-text" aria-live="polite"></div>
-          <p id="meeting-live-status" class="settings-hint"></p>
-        </div>
-        <div id="meeting-progress" class="upload-progress" style="display: none;">
-          <progress id="meeting-progress-bar" max="100" value="0"></progress>
-        </div>
-        <p class="settings-hint">Hotkey: <span id="meeting-hotkey-keycaps" class="keycaps"></span> (press to start, press again to stop).</p>
-
-        <div id="meeting-consent" class="meeting-consent" role="dialog" aria-labelledby="meeting-consent-title" hidden>
-          <h3 id="meeting-consent-title">Inform all participants before you record</h3>
-          <p>Recording a conversation without everyone's consent can be a criminal offence (in Germany, &sect;&nbsp;201 StGB). Tell the participants that you are recording.</p>
-          <label class="meeting-consent-skip"><input type="checkbox" id="meeting-consent-skip"> Don't show this again</label>
-          <div class="hotkey-actions">
-            <button type="button" class="flagged-save-btn" id="meeting-consent-ok">Start recording</button>
-            <button type="button" class="period-btn" id="meeting-consent-cancel">Cancel</button>
+    <!-- Recordings Tab: meetings and uploaded files in one list, the chosen one in the detail pane -->
+    <section id="tab-recordings" class="tab-content">
+      <h2 class="visually-hidden">Recordings</h2>
+      <div class="rec-layout" id="rec-layout">
+        <section class="rec-list-pane" id="rec-list-pane" aria-label="Recordings list">
+          <div class="rec-actions">
+            <div class="rec-split">
+              <button type="button" class="rec-split-main" id="meeting-toggle">Start recording</button>
+              <button type="button" class="rec-split-more" id="rec-options-toggle" aria-label="Recording options" aria-expanded="false" aria-controls="rec-options">&#9662;</button>
+            </div>
+            <button type="button" class="rec-icon-btn rec-upload-btn" id="upload-open" aria-label="Upload a file" title="Upload a file"></button>
           </div>
-        </div>
-      </div>
 
-      <div class="settings-card meeting-card">
-        <p class="settings-hint" id="meeting-devices-info">Microphone: <strong id="meeting-info-mic">System default</strong> &middot; Output: <strong id="meeting-info-output">System default</strong> &middot; <a href="#settings" id="meeting-settings-link">Meeting settings</a></p>
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Show a live transcript while recording</h3>
-            <p>Transcribes both sides in short windows during the meeting and labels your voice with your own-voice name and everyone else <em>Others</em>, since it cannot tell several people apart while recording. The transcript saved after you stop numbers them (<code>Speaker 2</code>, <code>Speaker 3</code>, ...). It uses the transcription model all through the call, so it is off by default. Applies from the next meeting.</p>
+          <div id="rec-options" class="rec-popover" hidden>
+            <p class="rec-popover-title">Recording options</p>
+            <label class="rec-field">Microphone
+              <select id="rec-mic-select" class="select-input"></select>
+            </label>
+            <label class="rec-field">Other participants (output device)
+              <select id="rec-output-select" class="select-input"></select>
+            </label>
+            <div class="rec-field-row">
+              <label for="meeting-live-toggle" class="rec-field-label">Live transcript
+                <span class="rec-field-hint">A rough preview during the call, labelled you and <em>Others</em>. It keeps the transcription model busy, so it is off by default. Applies from the next meeting.</span>
+              </label>
+              <label class="toggle"><input type="checkbox" id="meeting-live-toggle"><span class="toggle-slider"></span></label>
+            </div>
+            <p class="rec-field-hint">Hotkey <span id="meeting-hotkey-keycaps" class="keycaps"></span> starts and stops a meeting from anywhere. <a href="#settings" id="meeting-settings-link">All meeting settings</a></p>
           </div>
-          <label class="toggle"><input type="checkbox" id="meeting-live-toggle"><span class="toggle-slider"></span></label>
-        </div>
+
+          <div class="rec-recording" id="rec-recording" hidden>
+            <span id="meeting-indicator" class="meeting-indicator" aria-hidden="true"></span>
+            <span>Recording</span>
+            <span id="meeting-timer" class="meeting-timer">00:00</span>
+          </div>
+          <p id="meeting-status" class="status-line" hidden></p>
+          <div id="meeting-progress" class="upload-progress" style="display: none;">
+            <progress id="meeting-progress-bar" max="100" value="0"></progress>
+          </div>
+
+          <div id="meeting-consent" class="meeting-consent" role="dialog" aria-labelledby="meeting-consent-title" hidden>
+            <h3 id="meeting-consent-title">Inform all participants before you record</h3>
+            <p>Recording a conversation without everyone's consent can be a criminal offence (in Germany, &sect;&nbsp;201 StGB). Tell the participants that you are recording.</p>
+            <label class="meeting-consent-skip"><input type="checkbox" id="meeting-consent-skip"> Don't show this again</label>
+            <div class="hotkey-actions">
+              <button type="button" class="flagged-save-btn" id="meeting-consent-ok">Start recording</button>
+              <button type="button" class="period-btn" id="meeting-consent-cancel">Cancel</button>
+            </div>
+          </div>
+
+          <div id="meeting-live" class="meeting-live" hidden>
+            <h3>Live transcript</h3>
+            <p class="settings-hint">A rough preview a few seconds behind the call. The transcript made after you stop is the one that is saved.</p>
+            <div id="meeting-live-text" class="meeting-live-text" aria-live="polite"></div>
+            <p id="meeting-live-status" class="settings-hint"></p>
+          </div>
+
+          <div id="upload-status" class="upload-status" style="display: none;">
+            <span class="model-status-spinner"></span>
+            <span id="upload-status-text">Transcribing...</span>
+          </div>
+          <div id="upload-progress" class="upload-progress" style="display: none;">
+            <progress id="upload-progress-bar" max="100" value="0"></progress>
+          </div>
+          <div id="upload-error" class="upload-error" style="display: none;"></div>
+          <div id="upload-note" class="upload-note" style="display: none;"></div>
+
+          <div id="meeting-pending" class="rec-pending" hidden>
+            <h3 class="rec-pending-title">Recorded, not yet transcribed</h3>
+            <p class="rec-field-hint">Another file was being transcribed, NexusVox quit during the meeting, or the transcription failed.</p>
+            <div id="meeting-pending-list" class="flagged-list"></div>
+          </div>
+
+          <label class="rec-search"><span class="visually-hidden">Search recordings</span>
+            <input type="search" id="rec-search" placeholder="Search" autocomplete="off">
+          </label>
+          <ul id="rec-list" class="rec-list" aria-label="Recordings"></ul>
+        </section>
+
+        <div class="rec-resizer" id="rec-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the recordings list" aria-controls="rec-list-pane" aria-valuemin="240" tabindex="0" title="Drag to resize, double-click to reset"></div>
+
+        <section class="rec-detail-pane" id="rec-detail" aria-label="Recording">
+          <p class="empty-state" id="rec-detail-empty">No recordings yet. Start a recording or upload an audio file.</p>
+        </section>
       </div>
 
-      <div id="meeting-pending" hidden>
-        <h3 class="upload-history-heading">Recorded, not yet transcribed</h3>
-        <p class="settings-hint">These recordings have no transcript yet: another file was being transcribed, NexusVox quit during the meeting, or the transcription failed.</p>
-        <div id="meeting-pending-list" class="flagged-list"></div>
-      </div>
+      <dialog id="upload-dialog" class="rec-dialog" aria-labelledby="upload-dialog-title">
+        <form method="dialog" class="rec-dialog-body">
+          <div class="rec-dialog-head">
+            <h2 id="upload-dialog-title">Upload a file</h2>
+            <button type="submit" value="cancel" class="rec-icon-btn rec-close" aria-label="Close">&times;</button>
+          </div>
+          <div class="upload-zone" id="upload-zone">
+            <input type="file" id="upload-input" accept=".wav,.mp3,.flac,.ogg,.webm" hidden>
+            <div class="upload-zone-content">
+              <div class="rec-upload-glyph" aria-hidden="true"></div>
+              <p id="upload-zone-text">Drop an audio file here, or <button class="upload-browse-btn" id="upload-browse" type="button" autofocus>browse</button></p>
+              <p id="upload-zone-ready" class="upload-zone-ready" hidden>Ready to transcribe &ndash; drop another file or <button class="upload-browse-btn" id="upload-browse-again" type="button">choose a different one</button></p>
+              <p class="rec-field-hint">WAV, MP3, FLAC, OGG, WebM up to 25 MB. Transcribed with the current model.</p>
+            </div>
+          </div>
+          <div id="upload-selected" class="upload-selected" hidden>
+            <div class="upload-selected-info">
+              <span class="upload-selected-name" id="upload-selected-name"></span>
+              <span class="upload-selected-meta" id="upload-selected-meta"></span>
+            </div>
+            <button type="button" class="upload-selected-remove" id="upload-remove" aria-label="Remove the selected file" title="Remove the selected file">&times;</button>
+          </div>
 
-      <div id="meeting-error" class="upload-error" style="display: none;"></div>
-      <div id="meeting-note" class="upload-note" style="display: none;"></div>
+          <div class="setting-row upload-option">
+            <div class="setting-info">
+              <h3>Detect speakers</h3>
+              <p id="upload-diarize-hint">Labels the transcript by speaker ("Speaker 1: ..."), one paragraph per turn. Tells up to 4 speakers apart.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="upload-diarize-toggle" aria-label="Detect speakers">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
 
-      <h3 class="upload-history-heading">Previous Meetings</h3>
-      <div id="meeting-list" class="flagged-list"></div>
+          <div class="setting-row upload-option">
+            <div class="setting-info">
+              <h3>Clean up text</h3>
+              <p>Runs the transcript through the language model afterwards: removes fillers and false starts and fixes punctuation (Light), or also grammar (Medium). Speaker labels stay, and the original is kept.</p>
+              <p id="upload-llm-hint" class="settings-hint status-line" hidden></p>
+            </div>
+            <select id="upload-cleanup-level" class="select-input" disabled aria-label="Cleanup level">
+              <option value="light">Light</option>
+              <option value="medium">Medium</option>
+            </select>
+            <label class="toggle">
+              <input type="checkbox" id="upload-cleanup-toggle" aria-label="Clean up text">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="upload-actions rec-dialog-actions">
+            <button type="submit" value="cancel" class="period-btn" id="upload-cancel">Cancel</button>
+            <button type="button" class="flagged-save-btn" id="upload-transcribe" disabled>Transcribe</button>
+          </div>
+        </form>
+      </dialog>
+      <div class="rec-drop-overlay" id="rec-drop-overlay" hidden><p>Drop the audio file to upload it</p></div>
     </section>
     <!-- Review Tab -->
     <section id="tab-review" class="tab-content">
@@ -971,6 +992,7 @@
   <script src="dashboard-review.js"></script>
   <script src="dashboard-upload.js"></script>
   <script src="dashboard-meetings.js"></script>
+  <script src="dashboard-recordings.js"></script>
   <script src="dashboard-dev.js"></script>
   <script src="dashboard-init.js"></script>
 </body>

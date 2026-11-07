@@ -21,6 +21,7 @@ from nexusvox.dashboard import _create_app
 from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.meetings.recorder import META_FILENAME
 from nexusvox.meetings.session import MeetingSession
+from nexusvox.transcription.transcriber import Word
 
 # -- config ---------------------------------------------------------------------------------------
 
@@ -461,13 +462,14 @@ def test_deleting_an_unknown_entry_is_a_404(env):
     assert resp.status_code == 404 and "error" in resp.get_json()
 
 
-def test_the_page_has_a_meetings_tab_and_in_page_delete_confirmation():
+def test_the_page_has_a_recordings_tab_and_in_page_delete_confirmation():
     static = Path(__file__).resolve().parents[1] / "src" / "nexusvox" / "dashboard" / "static"
     html = (static / "index.html").read_text(encoding="utf-8")
     js = dashboard_source()
-    assert 'data-tab="meetings"' in html and 'id="meeting-consent"' in html
+    assert 'data-tab="recordings"' in html and 'id="meeting-consent"' in html
+    assert 'data-tab="meetings"' not in html and 'data-tab="upload"' not in html
     assert "Inform all participants before you record" in html
-    section = js[js.index("function askDeleteFileTranscription") : js.index("// ── Meetings")]
+    section = js[js.index("function askDeleteRecording") : js.index("// ── Audio player")]
     assert "confirm(" not in section and "alert(" not in section
 
 
@@ -578,7 +580,7 @@ def _app(monkeypatch, result, beeps, opened):
         # the recording ended, only the transcription has to wait: not an error
         ({"ok": False, "busy": True, "action": "stop"}, ["beep_stop"], []),
         ({"ok": False, "action": "start", "error": "no device"}, ["beep_error"], []),
-        ({"ok": True, "action": "consent"}, [], ["meetings"]),
+        ({"ok": True, "action": "consent"}, [], ["recordings"]),
         (RuntimeError("boom"), ["beep_error"], []),
     ],
 )
@@ -594,6 +596,23 @@ def test_a_press_while_the_previous_one_is_handled_is_ignored(monkeypatch):
     app._meeting_toggle_lock.acquire()
     app._toggle_meeting()
     assert beeps == [] and opened == []
+
+
+# -- speaker turns for the Recordings tab ---------------------------------------------------------
+
+
+def test_turns_give_each_speaker_paragraph_its_time(env):
+    client, _, db, *_ = env
+    words = [Word("Hi.", 1.234, 1.5, speaker=1), Word("Hello", 2.0, 2.4, speaker=2), Word("you.", 2.5, 2.9, speaker=2)]
+    text = "Me: Hi.\n\nSpeaker 2: Hello you."
+    row = db.save_file_transcription(text, "en", 3000, "m", kind="meeting", words=words)
+    plain = db.save_file_transcription("hello", "en", 1000, "call.wav")
+
+    assert client.get(f"/api/file-transcriptions/{row.id}/turns").get_json() == {
+        "turns": [{"speaker": 1, "start": 1.23, "end": 1.5}, {"speaker": 2, "start": 2.0, "end": 2.9}]
+    }
+    assert client.get(f"/api/file-transcriptions/{plain.id}/turns").get_json() == {"turns": []}
+    assert client.get("/api/file-transcriptions/999/turns").status_code == 404
 
 
 # -- renaming -------------------------------------------------------------------------------------

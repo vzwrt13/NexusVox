@@ -123,8 +123,12 @@ async function api(path) {
 // The active tab is mirrored into the URL hash (e.g. "#analytics") so a page
 // refresh, bookmark, or back/forward navigation lands on the same tab.
 // Every switch opens the tab at the top; only a deliberate jump (`keepScroll`, e.g. the "Meeting settings"
-// link) scrolls on its own afterwards.
+// link) scrolls on its own afterwards. The Meetings and Upload tabs became the Recordings tab: their old
+// names (bookmarks, the tray's link) open it.
+const TAB_ALIASES = { meetings: "recordings", upload: "recordings" };
+
 function activateTab(name, { keepScroll = false } = {}) {
+  name = TAB_ALIASES[name] || name;
   const btn = document.querySelector(`.tab[data-tab="${name}"]`);
   const panel = document.getElementById("tab-" + name);
   if (!btn || !panel || btn.hidden) return false;
@@ -137,16 +141,10 @@ function activateTab(name, { keepScroll = false } = {}) {
 
   if (name === "analytics") loadAnalytics();
   if (name === "edit") loadFlaggedTranscriptions();
-  if (name === "meetings") openMeetingsTab();
+  if (name === "recordings") openRecordingsTab();
   if (name === "settings") {
     loadMeetingSettings();
     markActiveSubtab();
-  }
-  if (name === "upload") {
-    loadFileTranscriptions();
-    loadLlmStatus().catch(() => {}); // the cleanup hint must reflect Ollama as it is now
-    refreshDiarizeToggle();
-    resumeUploadJob();
   }
   if (name === "review") loadReviewTranscriptions();
   if (name === "dev") loadBenchmarks();
@@ -184,10 +182,23 @@ window.NexusVoxExt = {
   registerUploadAction(id, handler) {
     uploadActionHandlers[id] = handler;
   },
-  // Opens the transcript card of a stored upload or meeting (a summary links to its transcript this way):
-  // meetings in the Meetings tab, everything else in the Upload tab. Resolves with false when there is no such card.
-  showTranscript(id) {
-    return showTranscriptCard(id);
+  // Opens a stored upload or meeting in the Recordings tab on its Transcript tab; `options.mark` marks a passage
+  // ({start, end} in seconds, or {text}). A summary links to its transcript this way. Resolves with false when
+  // there is no such recording.
+  showTranscript(id, options) {
+    return showRecording(id, options);
+  },
+  // A tab of its own in the Recordings detail pane, next to Summary, Transcript and Speakers (docs/EXTENSIONS.md).
+  registerRecordingTab(id, tab) {
+    return addRecordingTab(id, tab);
+  },
+  // Draws an extension tab again for one recording (or for all), e.g. once a summary has been generated.
+  refreshRecordingTab(id, recordingId) {
+    refreshRecordingTabContent(id, recordingId);
+  },
+  // Switches the detail pane to a tab: "summary", "transcript", "speakers" or an extension tab's id.
+  selectRecordingTab(id) {
+    return chooseRecordingTab(id);
   },
 };
 
@@ -218,14 +229,18 @@ async function loadExtensions() {
       section.id = "tab-ext-" + p.id;
       section.className = "tab-content";
       main.appendChild(section);
-      extensionPanels[p.id] = { title: p.title, script: p.script, section, container: null, render: null };
+      extensionPanels[p.id] = {
+        title: p.title, script: p.script, recordingScript: p.recording_script || null, section, container: null, render: null,
+      };
     });
   } catch (err) {
     console.error("Failed to load extensions:", err);
   }
-  // The Upload history may have been drawn before the export targets were known.
-  if ((extensionExports.length || extensionUploadActions.length) && document.getElementById("tab-upload").classList.contains("active")) {
-    loadFileTranscriptions();
+  // The Recordings tab may have opened before the extensions were known: draw its list again with the export
+  // targets and actions, and add the scripts that register its detail-pane tabs.
+  if (document.getElementById("tab-recordings").classList.contains("active")) {
+    if (extensionExports.length || extensionUploadActions.length) loadFileTranscriptions();
+    loadRecordingTabScripts();
   }
 }
 
@@ -254,6 +269,7 @@ function restoreTabFromHash() {
   if (!name) return;
   // A hash for a tab that is off (an experimental one, or an extension that is gone) must not stay in the URL.
   if (!activateTab(name)) history.replaceState(null, "", window.location.pathname + window.location.search);
+  else if (TAB_ALIASES[name]) history.replaceState(null, "", "#" + TAB_ALIASES[name]);
 }
 
 

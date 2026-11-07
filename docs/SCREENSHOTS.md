@@ -7,23 +7,24 @@ invented data. One command, no setup beyond the usual `pip install -e ".[dev]"`:
 python scripts/dashboard_screenshots.py
 ```
 
-It writes four PNGs to `docs/images/`:
+It writes three PNGs to `docs/images/`:
 
 | File | Tab | Image ends |
 |---|---|---|
 | `dashboard-analytics.png` | Analytics | below the Latency Trend chart |
-| `dashboard-meetings.png` | Meetings | below the last meeting (whole tab) |
-| `dashboard-upload.png` | Upload | below the fourth upload |
+| `dashboard-recordings.png` | Recordings | one window (1280 x 860): list and detail pane |
 | `dashboard-settings.png` | Settings | below the Vocabulary card |
 
-The Analytics, Upload and Settings tabs run on for a long way. The script serves its own copy of the page with
+The Recordings tab fills one window with its two panes and is photographed at a window's height. The
+Analytics and Settings tabs run on for a long way. The script serves its own copy of the page with
 the elements after the last card to show hidden (the selectors are in `SHOTS`), photographs it in a tall
 viewport and cuts the empty strip below the last card, so each image ends at an element and follows the
 dashboard when its layout changes. If a selector stops matching, the image simply gets longer: look at the
 result before committing.
 
-The dashboard has a single (dark) theme, so there is one image per tab. The older `dashboard.png` and
-`settings.png` are not touched.
+The dashboard has a single (dark) theme, so there is one image per tab. The older `dashboard.png`,
+`settings.png`, `dashboard-meetings.png` and `dashboard-upload.png` (from before the Recordings tab) are
+not touched.
 
 ## Options
 
@@ -39,11 +40,12 @@ as well. No browser-automation package is needed.
 ## What it does
 
 1. Moves into a temporary folder and builds a fresh config (saved nowhere but inside that folder).
-2. Creates a database there and fills it with about 500 made-up dictations over 75 days, three meetings, four
-   uploads (two of them with speaker detection), five dictionary entries and three polish presets.
+2. Creates a database there and fills it with about 500 made-up dictations over 75 days, three meetings (with
+   word timing and an audio path, so the player and the timed lines show), four uploads (two of them with speaker
+   detection), five dictionary entries and three polish presets.
 3. Serves the real dashboard on a free port on 127.0.0.1 and photographs each tab with a headless browser into a
    staging folder.
-4. Copies the four images to `--out` once all of them succeeded (a failed run never leaves a mix of old and
+4. Copies the three images to `--out` once all of them succeeded (a failed run never leaves a mix of old and
    new images), then deletes the temporary folder.
 
 ## What it never touches

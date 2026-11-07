@@ -136,7 +136,7 @@ def test_week_counts_words_days_and_time_saved(session_factory):
     _dictation(session_factory, 9, 999)  # next week
     _dictation(session_factory, 1, 999)  # Sunday before
 
-    got = get_week(session_factory, "2026-11-04", today=THURSDAY)  # any day of the week names it
+    got = get_week(session_factory, "2026-11-04", today=date(2026, 11, 12))  # any day of the week names it
 
     assert got["start"] == WEEK
     assert got["words"] == 700
@@ -145,6 +145,38 @@ def test_week_counts_words_days_and_time_saved(session_factory):
     assert [d["words"] for d in got["days"]] == [500, 0, 0, 0, 200, 0, 0]
     assert got["time_saved_minutes"] > 0
     assert got["previous_words"] == 999
+
+
+def test_the_current_week_counts_only_days_that_have_started(session_factory):
+    # Monday to Saturday, a dictation on every day but Wednesday; Sunday has not happened yet.
+    for day in (2, 3, 5, 6, 7):
+        _dictation(session_factory, day, 100)
+
+    saturday = get_week(session_factory, None, today=date(2026, 11, 7))
+
+    assert (saturday["days_dictated"], saturday["days_counted"]) == (5, 6)
+    assert len(saturday["days"]) == 7  # the chart still shows the whole week
+
+    _dictation(session_factory, 4, 100)
+    full = get_week(session_factory, None, today=date(2026, 11, 7))
+    assert (full["days_dictated"], full["days_counted"]) == (6, 6)
+
+
+def test_monday_is_one_of_one(session_factory):
+    _dictation(session_factory, 2, 100)
+
+    monday = get_week(session_factory, None, today=date(2026, 11, 2))
+
+    assert (monday["days_dictated"], monday["days_counted"]) == (1, 1)
+    assert get_week(session_factory, None, today=date(2026, 11, 8))["days_counted"] == 7  # the Sunday itself
+
+
+def test_a_past_week_is_whole(session_factory):
+    _dictation(session_factory, 2, 100)
+
+    got = get_week(session_factory, WEEK, today=date(2026, 11, 12))
+
+    assert (got["is_current"], got["days_counted"], got["days_dictated"]) == (False, 7, 1)
 
 
 def test_week_counts_meetings_but_not_uploads(session_factory):

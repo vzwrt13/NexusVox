@@ -227,6 +227,11 @@ def test_the_words_chart_names_the_year_when_the_range_spans_years():
     assert "d.labels[0].slice(0, 4) !== d.labels[d.labels.length - 1].slice(0, 4)" in source
 
 
+def test_days_dictated_is_counted_against_the_days_that_have_started():
+    source = (STATIC / "dashboard-analytics.js").read_text(encoding="utf-8")
+    assert "`${week.days_dictated} of ${week.days_counted}`" in source and "week.days.length" not in source
+
+
 def test_home_shows_the_week_that_its_link_opens():
     home = (STATIC / "dashboard-home.js").read_text(encoding="utf-8")
     assert 'fetch("/api/week")' in home and "/api/overview" not in home

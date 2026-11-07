@@ -71,6 +71,9 @@ def get_week(session_factory: sessionmaker, week: str | None = None, *, today: d
         }
         for label in labels
     ]
+    # Only days that have started count: on a Saturday the week has six days so far, not seven. A past week
+    # is whole. Weeks stay Monday to Sunday.
+    days_counted = (today - monday).days + 1 if monday == current else 7
     this_week = [totals[label] for label in labels if label in totals]
     words = sum(d["words"] for d in this_week)
     duration_ms = sum(d["duration_ms"] for d in this_week)
@@ -98,7 +101,8 @@ def get_week(session_factory: sessionmaker, week: str | None = None, *, today: d
         "time_saved_minutes": round(time_saved_minutes(words, duration_ms), 1),
         "previous_words": previous_words,
         "days": days,
-        "days_dictated": sum(1 for d in days if d["words"] > 0),
+        "days_dictated": sum(1 for d in days[:days_counted] if d["words"] > 0),
+        "days_counted": days_counted,
         "meetings": {"count": int(meeting_count), "seconds": round(int(meeting_ms) / 1000)},
         "learned": {
             # An accepted suggestion only makes a new entry when its phrase is not in the dictionary yet; one

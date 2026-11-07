@@ -267,7 +267,7 @@ function renderWeek(week) {
   document.getElementById("week-headline").textContent = weekHeadline(week);
   renderWeekDays(week.days);
 
-  document.getElementById("week-days-dictated").textContent = `${week.days_dictated} of ${week.days.length}`;
+  document.getElementById("week-days-dictated").textContent = `${week.days_dictated} of ${week.days_counted}`;
   const meetings = week.meetings;
   document.getElementById("week-meetings").textContent = meetings.count;
   document.getElementById("week-meetings-label").textContent =

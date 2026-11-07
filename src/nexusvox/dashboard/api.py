@@ -68,6 +68,7 @@ class DashboardAPI(
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
         self._file_jobs = FileJobs()
         self._download_cache: dict[str, tuple[float, dict]] = {}
+        self._llm_server_cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
         self.extensions = extensions if extensions is not None else ExtensionRegistry()
         self._meeting = meeting or MeetingSession(
             config.meeting,

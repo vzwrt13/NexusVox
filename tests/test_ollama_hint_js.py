@@ -147,3 +147,30 @@ def test_wiring_covers_the_triggers_that_make_a_hint_recover():
     )  # Upload tab
     assert "setInterval(() => {" in source and '"tab-upload"' in source  # own poll, not the model list's
     assert source.count("refreshLlmHints();") >= 5  # cleanup (before and after save), polish, upload toggle, models
+
+
+def test_default_ollama_that_does_not_answer_reads_not_installed_yet_and_is_not_red():
+    out = run_js(
+        f"const s = {DOWN};"
+        "const u = ui({modelsData: {reachable: false, protocol: 'ollama'}});"
+        "renderLlmHints(s, u); console.log(JSON.stringify(view(u.models)));"
+    )
+    assert out["hidden"] is False and out["down"] is False and out["ok"] is False
+    assert out["text"].startswith("Not installed yet. Ollama is a free app") and out["links"] == 1
+
+
+def test_a_remote_ollama_that_does_not_answer_is_still_red():
+    out = run_js(
+        "const s = {reachable: false, protocol: 'ollama', url: 'http://10.0.0.5:11434', model: 'm'};"
+        "const u = ui({modelsData: {reachable: false, protocol: 'ollama'}});"
+        "renderLlmHints(s, u); console.log(JSON.stringify(view(u.models)));"
+    )
+    assert out["down"] is True and "Not installed yet" not in out["text"]
+
+
+def test_the_not_installed_line_links_the_ollama_site():
+    out = run_js(
+        "const e = el(); renderOllamaNotInstalled(e);"
+        "console.log(JSON.stringify([e.children[0].href, e.children[0].textContent, e.hidden]));"
+    )
+    assert out == ["https://ollama.com", "Install Ollama", False]

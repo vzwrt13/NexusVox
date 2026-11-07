@@ -14,11 +14,13 @@ from ..config import (
     HOTKEY_KEY_VKS,
     HOTKEY_MODES,
     HOTKEY_MODIFIERS,
+    OLLAMA_URL,
     HotkeyConfig,
     LlmServer,
     MeetingConfig,
     cuda_available,
     gpu_vram_gb,
+    is_builtin_ollama,
     llm_runs_fast,
     meeting_hotkey_clash,
     normalize_hotkey_key,
@@ -186,23 +188,24 @@ class SettingsMixin(DashboardState):
         }
 
     def get_llm_models(self) -> dict:
-        """The dropdown's content: recommended models, other installed ones, the saved value and the saved servers."""
+        """The dropdown's content: recommended models, other installed ones, the saved value, the built-in Ollama
+        entry and the saved custom servers."""
         cuda = cuda_available()
         with ThreadPoolExecutor(max_workers=1) as pool:
             others = pool.submit(self._llm_server_lists)  # while the server in use is asked
             models = llm_build_model_list(self._config.llm, cuda, gpu_vram_gb() if cuda else None)
-            servers = others.result()
+            ollama, servers = others.result()
         selected = self._config.llm.model
         known = [*models["recommended"], *models["other"]]
-        for server in servers:
-            if server["active"]:  # already asked above: not again
-                listed = [m for m in known if m["installed"]]
-                server.update(reachable=models["reachable"], models=listed)
+        for entry in (ollama, *servers):
+            if entry["active"]:  # already asked above: not again
+                entry.update(reachable=models["reachable"], models=[m for m in known if m["installed"]])
                 if not models["reachable"]:
-                    server["error"] = "no answer"
+                    entry["error"] = "no answer"
         disk_gb = next((m["size_gb"] for m in known if m["name"] == selected), None)
         return {
             **models,
+            "ollama": ollama,
             "servers": servers,
             "selected": selected,
             "device": "gpu" if cuda else "cpu",
@@ -220,27 +223,39 @@ class SettingsMixin(DashboardState):
         self._llm_server_cache[key] = (time.monotonic(), listing)
         return listing
 
-    def _llm_server_lists(self) -> list[dict]:
-        """Every saved server with its models, asked at the same time so a dead one costs one timeout, not one each.
-        `active` marks the one `[llm]` points at; its models are filled in by the caller from the main list, so it
-        is not asked twice."""
-        servers = self._config.llm.servers
-        if not servers:
-            return []
-        active_url = self._config.llm.url.rstrip("/")
-        todo = [s for s in servers if s.url != active_url]
-        with ThreadPoolExecutor(max_workers=min(max(len(todo), 1), 8)) as pool:
-            listings = dict(zip((s.url for s in todo), pool.map(self._server_listing, todo), strict=True))
-        return [
+    def _llm_server_lists(self) -> tuple[dict, list[dict]]:
+        """The built-in Ollama entry and every saved custom server with its models, asked at the same time so a dead
+        one costs one timeout, not one each. `active` marks the one `[llm]` points at; its models are filled in by
+        the caller from the main list, so it is not asked twice. Ollama is `installed: False` when it does not answer
+        (the page says "not installed yet", not "broken"); only a custom server is in error then."""
+        llm = self._config.llm
+        active_url = llm.url.rstrip("/")
+        ollama_active = is_builtin_ollama(llm.url, llm.protocol)
+        builtin = LlmServer(OLLAMA_URL, "ollama", "Ollama")
+        todo = [s for s in llm.servers if s.url != active_url]
+        asked = ([] if ollama_active else [builtin]) + todo
+        with ThreadPoolExecutor(max_workers=min(max(len(asked), 1), 8)) as pool:
+            listings = dict(zip((s.url for s in asked), pool.map(self._server_listing, asked), strict=True))
+        empty = {"reachable": False, "models": []}
+        ollama = {
+            "name": "Ollama",
+            "url": OLLAMA_URL,
+            "protocol": "ollama",
+            "active": ollama_active,
+            **listings.get(OLLAMA_URL, empty),
+        }
+        ollama.pop("error", None)  # not a fault: no answer there means it is not installed (yet)
+        servers = [
             {
                 "name": server.name or _server_label(server.url),
                 "url": server.url,
                 "protocol": server.protocol,
                 "active": server.url == active_url,
-                **listings.get(server.url, {"reachable": False, "models": []}),
+                **listings.get(server.url, empty),
             }
-            for server in servers
+            for server in llm.servers
         ]
+        return ollama, servers
 
     def add_llm_server(self, url: object, api_key: object = "", name: object = "") -> dict:
         """Save a custom server: find out which API it speaks (Ollama, or OpenAI-compatible with or without `/v1`)
@@ -250,6 +265,8 @@ class SettingsMixin(DashboardState):
             server = detect_server(str(url or ""), key)
         except LlmError as exc:
             return {"error": f"No model server found there: {exc}"}
+        if is_builtin_ollama(server.url, server.protocol):
+            return {"error": "Ollama on this PC is built in: pick its models in the language model list"}
         if any(server.url == saved.url for saved in self._config.llm.servers):
             return {"error": "That server is already saved"}
         server.name = str(name or "").strip()[:MAX_SERVER_NAME_CHARS] or _server_label(server.url)
@@ -270,18 +287,19 @@ class SettingsMixin(DashboardState):
         return {"ok": True}
 
     def select_llm_server_model(self, url: object, model: object) -> dict:
-        """Use *model* of the saved server at *url*: `[llm]` takes its url, protocol and API key. The server in use
-        until now is saved first, so it stays in the dropdown. Read per request, so live."""
+        """Use *model* of the built-in Ollama or a saved server at *url*: `[llm]` takes its url, protocol and API key.
+        Read per request, so live. The server used until now is not saved anywhere: Ollama has its own entry."""
         url = str(url or "").strip().rstrip("/")
         model = str(model or "").strip()
-        server = next((s for s in self._config.llm.servers if s.url == url), None)
+        if is_builtin_ollama(url, "ollama"):
+            server = LlmServer(OLLAMA_URL, "ollama", "Ollama")
+        else:
+            server = next((s for s in self._config.llm.servers if s.url == url), None)
         if server is None:
             return {"error": "That server is not saved", **self.get_settings()}
         if not model:
             return {"error": "A model name is required", **self.get_settings()}
         llm = self._config.llm
-        if not any(s.url == llm.url.rstrip("/") for s in llm.servers):  # saved servers are told apart by address
-            llm.servers.append(LlmServer(llm.url.rstrip("/"), llm.protocol, _server_label(llm.url), llm.api_key))
         llm.url, llm.protocol, llm.api_key, llm.model = server.url, server.protocol, server.api_key, model
         self._llm_server_cache.clear()
         save_config(self._config)

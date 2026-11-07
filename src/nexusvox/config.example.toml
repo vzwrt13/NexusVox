@@ -257,6 +257,7 @@ keep_alive = "10m"
 # Extra servers you saved in the dashboard (Settings > Models > Add custom server). Their models are listed in
 # the language model dropdown, grouped by server; picking one copies that server's url, protocol and api_key
 # into [llm] above. Add one by hand the same way. A server that does not answer is shown red in the dropdown.
+# Ollama on this PC (http://127.0.0.1:11434) is a fixed entry of the dashboard and is not listed here.
 # [[llm.servers]]
 # name = "llama.cpp"                  # label of the group in the dropdown
 # url = "http://127.0.0.1:8081/v1"    # Ollama: without /v1; OpenAI-compatible: up to /v1

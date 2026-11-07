@@ -4,6 +4,26 @@
 // Free 1.0 bundles no language model runtime: dictation works without one, Cleanup, Polish and upload cleanup
 // need Ollama. `ollamaHint` turns /api/settings/llm-status into the hint every area shows; null = nothing to say.
 const OLLAMA_DOWNLOAD_URL = "https://ollama.com/download";
+// Ollama at its default address is a fixed entry. When nothing answers there the page does not call it broken (red):
+// a first-time user has probably never heard of it, so it says what Ollama is and links the install page.
+const OLLAMA_SITE_URL = "https://ollama.com";
+const OLLAMA_DEFAULT_URL = "http://127.0.0.1:11434";
+const OLLAMA_NOT_INSTALLED =
+  "Not installed yet. Ollama is a free app that runs AI language models on your own PC. Cleanup and Polish stay off until it is installed and running; everything else works without it.";
+function isDefaultOllamaUrl(url) {
+  return String(url || "").replace(/\/+$/, "") === OLLAMA_DEFAULT_URL;
+}
+// Writes the neutral "not installed yet" line (no colour state) plus the install link into `el`.
+function renderOllamaNotInstalled(el) {
+  setStatus(el, undefined, `${OLLAMA_NOT_INSTALLED} `);
+  const a = document.createElement("a");
+  a.href = OLLAMA_SITE_URL;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.textContent = "Install Ollama";
+  el.append(a);
+  el.hidden = false;
+}
 function isLocalLlmUrl(url) {
   try {
     return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(url).hostname);
@@ -65,6 +85,9 @@ function renderOllamaHint(el, s, visible = true, opts = {}) {
 function renderModelsHint(el, s, data) {
   if (!data) return hideHint(el);
   if (data.reachable) return renderOllamaHint(el, s, true, { here: true });
+  if (!s.reachable && s.protocol === "ollama" && isDefaultOllamaUrl(s.url)) {
+    return renderOllamaNotInstalled(el);
+  }
   if (s.reachable) {
     // The server answers but the model list does not come back: not a missing install.
     const what = data.protocol === "ollama" ? "Ollama" : "The server";
@@ -170,7 +193,7 @@ function llmOptionLabel(m) {
 
 // What the dropdown's options depend on: a change here (and only here) rebuilds the <select>.
 function llmOptionsKey(data) {
-  return JSON.stringify([data.reachable, data.protocol, data.selected, data.recommended, data.other, data.servers]);
+  return JSON.stringify([data.reachable, data.protocol, data.selected, data.recommended, data.other, data.servers, data.ollama]);
 }
 
 // A model of a saved server other than the one in use: its option value carries the server, `@@["url","model"]`.
@@ -208,6 +231,23 @@ function llmOptionGroups(data) {
       groups.push({
         label: data.protocol === "ollama" ? "Other installed models" : "Models on this server",
         options: data.other.map((m) => ({ value: m.name, label: m.installed === false ? `${m.name} — not installed` : m.name })),
+      });
+    }
+  }
+  const ollama = data.ollama;
+  if (ollama && !ollama.active) {
+    // Not red when it does not answer: it is simply not installed yet.
+    if (!ollama.reachable) {
+      groups.push({
+        label: "Ollama — not installed yet",
+        options: [{ value: "", label: "Install Ollama (ollama.com) to use models on this PC", disabled: true }],
+      });
+    } else {
+      groups.push({
+        label: "Ollama",
+        options: ollama.models.length
+          ? ollama.models.map((m) => ({ value: llmServerValue(ollama.url, m.name), label: m.name }))
+          : [{ value: "", label: "No models installed yet", disabled: true }],
       });
     }
   }
@@ -304,7 +344,7 @@ function renderLlmModels(data, rebuildOptions) {
   lastLlmModels = data;
   refreshLlmHints();
   loadLlmStatus().catch(() => {}); // the hints follow the live status, fetched on its own
-  renderLlmServers(data.servers || []);
+  renderLlmServers(data.servers || [], data.ollama || null);
   llmSlowHint.hidden = !data.slow_hint;
   if (rebuildOptions) {
     llmModelSelect.replaceChildren();
@@ -351,8 +391,9 @@ const llmServerAdd = document.getElementById("llm-server-add");
 const llmServerStatus = document.getElementById("llm-server-status");
 
 // The saved servers with their state; Remove asks twice (no browser dialog): the first click arms it.
-function renderLlmServers(servers) {
+function renderLlmServers(servers, ollama) {
   llmServersList.replaceChildren();
+  if (ollama) llmServersList.append(ollamaRow(ollama));
   for (const server of servers) {
     const row = document.createElement("div");
     row.className = "overview-row";
@@ -374,7 +415,28 @@ function renderLlmServers(servers) {
     row.append(label, value);
     llmServersList.append(row);
   }
-  llmServersList.style.display = servers.length ? "" : "none";
+  llmServersList.style.display = servers.length || ollama ? "" : "none";
+}
+
+// The fixed Ollama row: no Remove, and never red - "not installed yet" explains itself and links the install page.
+function ollamaRow(ollama) {
+  const row = document.createElement("div");
+  row.className = "overview-row";
+  const label = document.createElement("span");
+  label.className = "overview-label";
+  label.textContent = "Ollama (this PC)";
+  const value = document.createElement("span");
+  value.className = "overview-value";
+  const state = document.createElement("span");
+  if (ollama.reachable) {
+    const count = ollama.models.length;
+    setStatus(state, "ok", `● ${ollama.url} · ${count} model${count === 1 ? "" : "s"}`);
+  } else {
+    renderOllamaNotInstalled(state);
+  }
+  value.append(state);
+  row.append(label, value);
+  return row;
 }
 
 let removeArmed = null;

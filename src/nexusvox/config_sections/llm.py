@@ -5,6 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 LLM_PROTOCOLS = ("ollama", "openai")
+# Where Ollama listens on this PC. The dashboard lists it as a fixed entry, never as a saved custom server.
+OLLAMA_URL = "http://127.0.0.1:11434"
+
+
+def is_builtin_ollama(url: str, protocol: str) -> bool:
+    """Whether *url* with *protocol* is Ollama at its default address on this PC."""
+    return protocol == "ollama" and url.strip().rstrip("/") == OLLAMA_URL
+
+
 # Preselected when `[llm].model` is not set and there is no CUDA GPU (docs/llm-cpu-test.md).
 LLM_MODEL_CPU = "gemma4:e2b"
 
@@ -27,7 +36,7 @@ class LlmConfig:
     stays loaded after a request; shorter frees the VRAM sooner, longer avoids reloads.
     `servers` are the extra servers saved in the dashboard; their models fill the dropdown too."""
 
-    url: str = "http://127.0.0.1:11434"
+    url: str = OLLAMA_URL
     protocol: str = "ollama"
     model: str = "gemma4:e4b"  # without a CUDA GPU and with no choice made: LLM_MODEL_CPU
     api_key: str = ""

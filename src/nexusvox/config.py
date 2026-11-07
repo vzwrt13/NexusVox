@@ -64,10 +64,12 @@ from .config_sections.llm import (  # noqa: F401
     CLEANUP_TIMEOUT_CPU_S,
     LLM_MODEL_CPU,
     LLM_PROTOCOLS,
+    OLLAMA_URL,
     CleanupConfig,
     LlmConfig,
     LlmServer,
     PolishConfig,
+    is_builtin_ollama,
 )
 from .config_sections.meeting import (  # noqa: F401
     _MEETING_HOTKEY_FALLBACKS,
@@ -192,13 +194,17 @@ def with_hardware_defaults(config: Config) -> Config:
 
 def _llm_servers(raw: object) -> list[LlmServer]:
     """The saved servers of `[[llm.servers]]`. An entry without a URL, with an unknown protocol or the address of an
-    earlier one is dropped, so a hand-edited file cannot break the dropdown."""
+    earlier one is dropped, so a hand-edited file cannot break the dropdown. Ollama at its default address is a
+    fixed entry of the dashboard, so a copy of it that an earlier version saved here is dropped as well."""
     servers: list[LlmServer] = []
     for entry in raw if isinstance(raw, list) else []:
         if not isinstance(entry, dict):
             continue
         url = str(entry.get("url", "")).strip().rstrip("/")
         protocol = entry.get("protocol")
+        if protocol in LLM_PROTOCOLS and is_builtin_ollama(url, protocol):
+            logger.info("Dropped Ollama at %s from [[llm.servers]]: it is a built-in entry", OLLAMA_URL)
+            continue
         if not url or protocol not in LLM_PROTOCOLS or any(url == s.url for s in servers):
             logger.warning("Ignored an unusable entry of [[llm.servers]] in the config")
             continue

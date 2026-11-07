@@ -399,8 +399,8 @@ def test_picking_a_model_of_a_saved_server_sets_url_protocol_key_and_model(api, 
         "sk-9",
         "qwen-27b",
     )
-    # The Ollama server used until now stays in the dropdown.
-    assert LlmServer("http://127.0.0.1:11434", "ollama", "127.0.0.1:11434", "") in llm_config.servers
+    # The Ollama used until now is not copied into the custom list: it has its own, fixed entry.
+    assert [s.url for s in llm_config.servers] == ["http://live:1/v1"]
     assert api.select_llm_server_model("http://nope:1", "m")["error"] == "That server is not saved"
 
 
@@ -500,17 +500,19 @@ def test_a_server_that_trickles_its_answer_is_dropped_at_the_deadline(monkeypatc
 
 # ── the Models card does not hammer saved servers ─────────────────────────────────────────────────
 def test_saved_server_lists_are_reused_between_polls_and_the_server_in_use_is_asked_once(api, monkeypatch):
+    api._config.llm = LlmConfig(url="http://here:1/v1", protocol="openai", model="qwen-27b")
     api._config.llm.servers = [
-        LlmServer("http://127.0.0.1:11434", "ollama", "Here"),
+        LlmServer("http://here:1/v1", "openai", "Here"),
         LlmServer("http://dead:1", "ollama", "Dead"),
     ]
-    seen = _serve(monkeypatch, {"http://127.0.0.1:11434/api/tags": TAGS})
+    seen = _serve(monkeypatch, {"http://here:1/v1/models": OPENAI_MODELS, "http://127.0.0.1:11434/api/tags": TAGS})
     api.get_llm_models()
     api.get_llm_models()  # the next poll, 5 s later
     assert seen.count("http://dead:1/api/tags") == 1  # the dead one is not probed on every poll
-    assert seen.count("http://127.0.0.1:11434/api/tags") == 2  # once per poll (the list of the server in use)
+    assert seen.count("http://127.0.0.1:11434/api/tags") == 1  # nor is the built-in Ollama
+    assert seen.count("http://here:1/v1/models") == 2  # once per poll (the list of the server in use)
     here = next(s for s in api.get_llm_models()["servers"] if s["active"])
-    assert here["reachable"] is True and [m["name"] for m in here["models"]] == ["gemma4:e4b"]
+    assert here["reachable"] is True and [m["name"] for m in here["models"]] == ["qwen-27b", "other"]
 
 
 def test_changing_the_saved_servers_drops_the_reused_lists(api, monkeypatch):
@@ -522,13 +524,86 @@ def test_changing_the_saved_servers_drops_the_reused_lists(api, monkeypatch):
     assert seen.count("http://dead:1/api/tags") == 2
 
 
-def test_a_server_is_told_apart_by_its_address_only(api, monkeypatch):
-    # [llm] and a saved entry share an address but not the protocol: it must not be saved a second time.
-    api._config.llm = LlmConfig(url="http://same:1/v1", protocol="ollama", model="m")
-    api._config.llm.servers = [LlmServer("http://same:1/v1", "openai", "Same"), LlmServer("http://b:1", "ollama", "B")]
+def test_switching_servers_never_changes_the_custom_list(api, monkeypatch):
+    api._config.llm.servers = [LlmServer("http://b:1", "ollama", "B")]
     _serve(monkeypatch, {})
-    api.select_llm_server_model("http://b:1", "x")
-    assert [s.url for s in api._config.llm.servers] == ["http://same:1/v1", "http://b:1"]
+    api.select_llm_server_model("http://b:1", "x")  # away from Ollama ...
+    api.select_llm_server_model("http://127.0.0.1:11434/", "gemma4:e4b")  # ... and back through its own entry
+    llm_config = api._config.llm
+    assert (llm_config.url, llm_config.protocol, llm_config.api_key, llm_config.model) == (
+        "http://127.0.0.1:11434",
+        "ollama",
+        "",
+        "gemma4:e4b",
+    )
+    assert [s.url for s in llm_config.servers] == ["http://b:1"]
+
+
+# ── the built-in Ollama entry ─────────────────────────────────────────────────────────────────────
+def test_ollama_that_answers_is_a_fixed_entry_with_its_models(api, monkeypatch):
+    api._config.llm = LlmConfig(url="http://live:1/v1", protocol="openai", model="qwen-27b")
+    api._config.llm.servers = [LlmServer("http://live:1/v1", "openai", "Live")]
+    _serve(monkeypatch, {"http://127.0.0.1:11434/api/tags": TAGS, "http://live:1/v1/models": OPENAI_MODELS})
+    data = api.get_llm_models()
+    assert data["ollama"] == {
+        "name": "Ollama",
+        "url": "http://127.0.0.1:11434",
+        "protocol": "ollama",
+        "active": False,
+        "reachable": True,
+        "models": [{"name": "gemma4:e4b", "size_gb": 6.6}],
+    }
+    assert [s["name"] for s in data["servers"]] == ["Live"]  # Ollama is never in the custom list
+
+
+def test_ollama_that_does_not_answer_is_not_an_error(api, monkeypatch):
+    api._config.llm = LlmConfig(url="http://live:1/v1", protocol="openai", model="qwen-27b")
+    _serve(monkeypatch, {"http://live:1/v1/models": OPENAI_MODELS})
+    ollama = api.get_llm_models()["ollama"]
+    assert ollama["reachable"] is False and ollama["models"] == [] and "error" not in ollama  # "not installed yet"
+
+
+def test_the_active_ollama_is_the_built_in_entry_and_asked_once(api, monkeypatch):
+    seen = _serve(monkeypatch, {"http://127.0.0.1:11434/api/tags": TAGS})
+    ollama = api.get_llm_models()["ollama"]
+    assert ollama["active"] is True and ollama["reachable"] is True
+    assert seen.count("http://127.0.0.1:11434/api/tags") == 1
+    _serve(monkeypatch, {})
+    down = api.get_llm_models()["ollama"]
+    assert down["active"] is True and down["reachable"] is False
+
+
+def test_ollama_cannot_be_added_as_a_custom_server(api, monkeypatch):
+    _serve(monkeypatch, {"http://127.0.0.1:11434/api/tags": TAGS})
+    resp = api.add_llm_server("http://127.0.0.1:11434", "", "")
+    assert "built in" in resp["error"] and api._config.llm.servers == []
+
+
+def test_ollama_has_no_remove(api):
+    api._config.llm.servers = [LlmServer("http://a:1", "ollama", "A")]
+    assert api.remove_llm_server("http://127.0.0.1:11434")["error"] == "That server is not saved"
+
+
+def test_an_auto_saved_ollama_entry_is_dropped_on_load(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[[llm.servers]]\nname = "127.0.0.1:11434"\nurl = "http://127.0.0.1:11434"\nprotocol = "ollama"\n'
+        '[[llm.servers]]\nname = "llama.cpp"\nurl = "http://127.0.0.1:8081/v1"\nprotocol = "openai"\n'
+        '[[llm.servers]]\nname = "Büro"\nurl = "http://10.0.0.5:11434/"\nprotocol = "ollama"\n',
+        encoding="utf-8",
+    )
+    loaded = load_config(path)
+    assert [s.name for s in loaded.llm.servers] == ["llama.cpp", "Büro"]
+    save_config(loaded, path)
+    written = path.read_text(encoding="utf-8")
+    assert written.count("[[llm.servers]]") == 2 and 'name = "127.0.0.1:11434"' not in written  # cleaned for good
+
+
+def test_an_openai_entry_at_the_ollama_address_is_a_custom_server(tmp_path):
+    # Only Ollama's own protocol at the default address is the built-in entry.
+    path = tmp_path / "config.toml"
+    path.write_text('[[llm.servers]]\nurl = "http://127.0.0.1:11434"\nprotocol = "openai"\n', encoding="utf-8")
+    assert [s.protocol for s in load_config(path).llm.servers] == ["openai"]
 
 
 # ── one log line per request ──────────────────────────────────────────────────────────────────────
@@ -577,3 +652,40 @@ def test_an_empty_reply_is_logged_as_an_error(monkeypatch, caplog):
     with pytest.raises(LlmError):
         complete(LlmConfig(), "s", "u")
     assert _request_lines(caplog)[0].endswith("error: the model returned no text")
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
+@pytest.mark.parametrize(
+    ("ollama", "expected"),
+    [
+        (
+            {"url": "http://127.0.0.1:11434", "active": False, "reachable": False, "models": []},
+            {"label": "Ollama — not installed yet", "down": None},
+        ),
+        (
+            {"url": "http://127.0.0.1:11434", "active": False, "reachable": True, "models": [{"name": "gemma4:e4b"}]},
+            {"label": "Ollama", "down": None},
+        ),
+    ],
+)
+def test_dropdown_shows_the_built_in_ollama_and_never_in_red(ollama, expected):
+    source = dashboard_source()
+    helpers = source[source.index(START) : source.index(END)]
+    script = (
+        helpers
+        + f"""
+        const data = {{reachable: true, protocol: "openai", selected: "m", recommended: [], other: [],
+          servers: [], ollama: {json.dumps(ollama)}}};
+        console.log(JSON.stringify(llmOptionGroups(data)));
+        """
+    )
+    out = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, encoding="utf-8", check=True, timeout=30
+    ).stdout
+    (group,) = json.loads(out)
+    assert group["label"] == expected["label"] and "down" not in group
+    assert not any(o.get("down") for o in group["options"])
+    if ollama["reachable"]:
+        assert group["options"][0]["value"].startswith("@@") and group["options"][0]["label"] == "gemma4:e4b"
+    else:
+        assert group["options"][0]["disabled"] is True  # nothing to pick yet

@@ -326,6 +326,18 @@
           <h3 class="overview-title">Model Overview</h3>
           <div id="model-overview-grid" class="overview-grid"></div>
         </div>
+        <div class="settings-sub" id="llm-servers-card">
+          <h3 class="overview-title">Custom language model servers</h3>
+          <p class="settings-hint">Add a server you run yourself (Ollama, llama.cpp, LM Studio, vLLM or any OpenAI-compatible API) by its address with the port. NexusVox finds out which API it speaks, saves it, and lists its models in the language model dropdown above.</p>
+          <div id="llm-servers-list" class="overview-grid" style="display: none;"></div>
+          <div class="setting-row">
+            <input type="text" id="llm-server-url" class="dict-input" placeholder="http://127.0.0.1:8081" aria-label="Server address with port" style="max-width: 280px;">
+            <input type="password" id="llm-server-key" class="dict-input" placeholder="API key (optional)" aria-label="API key" autocomplete="off" style="max-width: 180px;">
+            <input type="text" id="llm-server-name" class="dict-input" placeholder="Name (optional)" aria-label="Name" maxlength="60" style="max-width: 160px;">
+            <button type="button" id="llm-server-add" class="btn">Add custom server</button>
+          </div>
+          <p id="llm-server-status" class="settings-hint status-line"></p>
+        </div>
         <div class="settings-sub" id="llm-overview-card">
           <h3 class="overview-title">Language Model Overview</h3>
           <div id="llm-overview-grid" class="overview-grid"></div>

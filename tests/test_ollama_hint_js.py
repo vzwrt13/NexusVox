@@ -123,14 +123,14 @@ def test_models_card_does_not_claim_ollama_is_down_when_only_the_list_fails():
     assert out[1]["hidden"] is True
 
 
-def test_other_servers_get_no_ollama_link_and_the_models_card_keeps_its_note():
+def test_other_servers_get_no_ollama_link_and_the_models_card_names_the_server():
     out = run_js(
         "const s = {reachable: false, protocol: 'openai', url: 'http://x'};"
         "const u = ui({modelsData: {reachable: false, protocol: 'openai'}});"
         "renderLlmHints(s, u); console.log(JSON.stringify([view(u.cleanup), view(u.models)]));"
     )
     assert "ollama" not in out[0]["text"].lower() and out[0]["links"] == 0
-    assert "no model list" in out[1]["text"]
+    assert "No model server at http://x" in out[1]["text"] and out[1]["links"] == 0
 
 
 @pytest.mark.parametrize(

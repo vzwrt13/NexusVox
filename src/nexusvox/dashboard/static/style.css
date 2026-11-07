@@ -226,6 +226,7 @@ body::before {
 .status-line.ok { color: var(--green); }
 .status-line.warn { color: var(--yellow); }
 .status-line.down { color: var(--red); }
+.llm-option-unreachable { color: var(--red); }
 
 .badge {
   display: inline-block;

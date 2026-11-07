@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import secrets
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 
 from ..config import (
     CLEANUP_LEVELS,
@@ -12,6 +14,7 @@ from ..config import (
     HOTKEY_MODES,
     HOTKEY_MODIFIERS,
     HotkeyConfig,
+    LlmServer,
     MeetingConfig,
     cuda_available,
     gpu_vram_gb,
@@ -23,6 +26,7 @@ from ..config import (
 )
 from ..dictation.edit_watch import WATCHED_KEYS
 from ..dictation.translator import is_reachable
+from ..llm import LlmError, detect_server, server_models
 from ..llm import build_model_list as llm_build_model_list
 from ..llm import loaded_model as llm_loaded_model
 from ..llm import model_pull as llm_pull
@@ -33,8 +37,15 @@ from ..system.feedback_send import FeedbackError, app_feedback_url, build_report
 from ..system.logsetup import log_dir
 from .api_base import DashboardState, logger
 
+MAX_SERVER_NAME_CHARS = 60
+
 # `[hotkey]` fields that hold a marker key, and how an error message names each.
 _MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
+
+
+def _server_label(url: str) -> str:
+    """`host:port` of a server address, the name a server gets when the user gave none."""
+    return urllib.parse.urlsplit(url).netloc or url
 
 
 class SettingsMixin(DashboardState):
@@ -180,11 +191,76 @@ class SettingsMixin(DashboardState):
         disk_gb = next((m["size_gb"] for m in known if m["name"] == selected), None)
         return {
             **models,
+            "servers": self._llm_server_lists(),
             "selected": selected,
             "device": "gpu" if cuda else "cpu",
             "loaded": llm_loaded_model(self._config.llm, selected, disk_gb) if models["reachable"] else None,
             "slow_hint": not llm_runs_fast(),
         }
+
+    def _llm_server_lists(self) -> list[dict]:
+        """Every saved server with its models, asked at the same time so a dead one costs one timeout, not one each.
+        `active` marks the one `[llm]` points at (its models are also in the main lists)."""
+        servers = self._config.llm.servers
+        if not servers:
+            return []
+        with ThreadPoolExecutor(max_workers=min(len(servers), 8)) as pool:
+            listings = list(pool.map(server_models, servers))
+        active = (self._config.llm.url.rstrip("/"), self._config.llm.protocol)
+        return [
+            {
+                "name": server.name or _server_label(server.url),
+                "url": server.url,
+                "protocol": server.protocol,
+                "active": (server.url, server.protocol) == active,
+                **listing,
+            }
+            for server, listing in zip(servers, listings, strict=True)
+        ]
+
+    def add_llm_server(self, url: object, api_key: object = "", name: object = "") -> dict:
+        """Save a custom server: find out which API it speaks (Ollama, or OpenAI-compatible with or without `/v1`)
+        and keep it in the config. An error says why it could not be added."""
+        key = str(api_key or "").strip()
+        try:
+            server = detect_server(str(url or ""), key)
+        except LlmError as exc:
+            return {"error": f"No model server found there: {exc}"}
+        if any(server.url == saved.url for saved in self._config.llm.servers):
+            return {"error": "That server is already saved"}
+        server.name = str(name or "").strip()[:MAX_SERVER_NAME_CHARS] or _server_label(server.url)
+        self._config.llm.servers.append(server)
+        save_config(self._config)
+        return {"ok": True, "server": {"name": server.name, "url": server.url, "protocol": server.protocol}}
+
+    def remove_llm_server(self, url: object) -> dict:
+        """Forget a saved server. The server in `[llm]` keeps working, whether it was saved or not."""
+        url = str(url or "").strip().rstrip("/")
+        kept = [s for s in self._config.llm.servers if s.url != url]
+        if len(kept) == len(self._config.llm.servers):
+            return {"error": "That server is not saved"}
+        self._config.llm.servers = kept
+        save_config(self._config)
+        return {"ok": True}
+
+    def select_llm_server_model(self, url: object, model: object) -> dict:
+        """Use *model* of the saved server at *url*: `[llm]` takes its url, protocol and API key. The server in use
+        until now is saved first, so it stays in the dropdown. Read per request, so live."""
+        url = str(url or "").strip().rstrip("/")
+        model = str(model or "").strip()
+        server = next((s for s in self._config.llm.servers if s.url == url), None)
+        if server is None:
+            return {"error": "That server is not saved", **self.get_settings()}
+        if not model:
+            return {"error": "A model name is required", **self.get_settings()}
+        llm = self._config.llm
+        if not any((s.url, s.protocol) == (llm.url.rstrip("/"), llm.protocol) for s in llm.servers):
+            llm.servers.append(LlmServer(llm.url.rstrip("/"), llm.protocol, _server_label(llm.url), llm.api_key))
+        llm.url, llm.protocol, llm.api_key, llm.model = server.url, server.protocol, server.api_key, model
+        save_config(self._config)
+        if self._config.cleanup.level != "off":
+            llm_warm_up(llm)
+        return self.get_settings()
 
     def start_llm_pull(self, model: str) -> dict:
         """Download a model through Ollama. Only ever called after the user confirmed it in the dashboard."""

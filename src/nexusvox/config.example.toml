@@ -254,6 +254,15 @@ timeout_s = 60.0
 # sooner (the speech model needs its share); the first request after unloading takes 10-50 s.
 keep_alive = "10m"
 
+# Extra servers you saved in the dashboard (Settings > Models > Add custom server). Their models are listed in
+# the language model dropdown, grouped by server; picking one copies that server's url, protocol and api_key
+# into [llm] above. Add one by hand the same way. A server that does not answer is shown red in the dropdown.
+# [[llm.servers]]
+# name = "llama.cpp"                  # label of the group in the dropdown
+# url = "http://127.0.0.1:8081/v1"    # Ollama: without /v1; OpenAI-compatible: up to /v1
+# protocol = "openai"                 # "ollama" or "openai"
+# api_key = ""
+
 [cleanup]
 # Tidy every dictation through the [llm] model before it is typed (same model as polish).
 # "off" (default), "light": removes fillers ("um", "äh"), false starts and repeated words and

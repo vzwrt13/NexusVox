@@ -98,6 +98,21 @@ def register(app: Flask, api: DashboardAPI) -> None:
     def get_llm_models():
         return jsonify(api.get_llm_models())
 
+    @app.route("/api/settings/llm-servers", methods=["POST", "DELETE"])
+    def llm_servers():
+        data = _json_object()
+        if request.method == "DELETE":
+            resp = api.remove_llm_server(data.get("url", ""))
+        else:
+            resp = api.add_llm_server(data.get("url", ""), data.get("api_key", ""), data.get("name", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
+    @app.route("/api/settings/llm-select", methods=["POST"])
+    def select_llm_server_model():
+        data = _json_object()
+        resp = api.select_llm_server_model(data.get("url", ""), data.get("model", ""))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
     @app.route("/api/settings/llm-pull", methods=["GET", "POST", "DELETE"])
     def llm_pull():
         if request.method == "POST":

@@ -226,13 +226,19 @@ def clean_reply(reply: str) -> str:
     return m.group(1).strip() if m else reply
 
 
+# How long a load or recovery warm-up may take: loading a model into memory can need a minute or more.
+RELOAD_DEADLINE_S = 180.0
+
+
 def warm_up(config: LlmConfig) -> None:
     """Load the model in the background, so the first real request does not wait 10-50 s for
-    it - auto cleanup gives up after a few seconds. Never raises; a failure is only logged."""
+    it - auto cleanup gives up after a few seconds. Uses the long reload deadline, never less than the
+    configured `timeout_s`: Ollama aborts a load whose client gave up. Never raises; a failure is only logged."""
+    request_config = dataclasses.replace(config, timeout_s=max(config.timeout_s, RELOAD_DEADLINE_S))
 
     def run() -> None:
         try:
-            complete(config, "Reply with OK.", "OK")
+            complete(request_config, "Reply with OK.", "OK")
             logger.info("Language model %s is loaded", config.model)
         except LlmError as exc:
             logger.info("Language model warm-up at %s failed (%s)", config.url, exc)
@@ -240,8 +246,6 @@ def warm_up(config: LlmConfig) -> None:
     threading.Thread(target=run, daemon=True, name="llm-warm-up").start()
 
 
-# How long a recovery warm-up may take: loading a model into memory can need a minute or more.
-RELOAD_DEADLINE_S = 180.0
 _reload_lock = threading.Lock()
 _reloading: set[tuple[str, str]] = set()  # (url, model) with a reload in flight
 

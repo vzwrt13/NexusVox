@@ -13,7 +13,7 @@ from ..dictation.overlay import ERROR
 from ..dictation.polish import polish, read_selection
 from ..dictation.polish_presets import resolve_instruction
 from ..extensions import loaded_extensions
-from ..llm import LlmError
+from ..llm import LlmError, reload_in_background
 from ..system.logsetup import Text
 from .common import logger
 from .records import _Recording
@@ -95,6 +95,9 @@ class SelectionPolish:
         except LlmError as exc:
             logger.warning("Polish: model at %s failed (%s); the selection stays as it was", self._config.llm.url, exc)
             self._cue(beep_error, ERROR)
+            if exc.timed_out:
+                # Probably not loaded: a short request cannot load it, so load it for the next one.
+                reload_in_background(self._config.llm)
             await self._save_polish(
                 recording,
                 "polish",

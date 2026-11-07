@@ -253,3 +253,12 @@ def test_other_protocols_start_no_reload(reload_env):
     llm_module, started, release, calls = reload_env
     assert llm_module.reload_in_background(LlmConfig(protocol="openai")) is False
     assert calls == []
+
+
+def test_a_polish_timeout_and_a_cleanup_timeout_share_one_reload(reload_env):
+    llm_module, started, release, calls = reload_env
+    config = LlmConfig()
+    assert llm_module.reload_in_background(config) is True  # e.g. started by a cleanup timeout
+    assert started.wait(5)
+    assert llm_module.reload_in_background(config) is False  # a polish timeout meanwhile starts no second one
+    assert len(calls) == 1

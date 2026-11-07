@@ -142,10 +142,7 @@ function activateTab(name, { keepScroll = false } = {}) {
   if (name === "analytics") loadAnalytics();
   if (name === "edit") loadFlaggedTranscriptions();
   if (name === "recordings") openRecordingsTab();
-  if (name === "settings") {
-    loadMeetingSettings();
-    markActiveSubtab();
-  }
+  if (name === "settings") loadMeetingSettings();
   if (name === "review") loadReviewTranscriptions();
   if (name === "dev") loadBenchmarks();
   if (name.startsWith("ext-")) openExtensionPanel(name.slice(4));
@@ -155,9 +152,8 @@ function activateTab(name, { keepScroll = false } = {}) {
 function bindTab(btn) {
   btn.addEventListener("click", () => {
     const name = btn.dataset.tab;
-    if (window.location.hash !== "#" + name) {
-      history.replaceState(null, "", "#" + name);
-    }
+    const hash = name === "settings" ? settingsPageHash() : "#" + name;
+    if (window.location.hash !== hash) history.replaceState(null, "", hash);
     activateTab(name);
   });
 }
@@ -265,11 +261,12 @@ function openExtensionPanel(id) {
 }
 
 function restoreTabFromHash() {
-  const name = window.location.hash.replace(/^#/, "");
+  const [name, page] = window.location.hash.replace(/^#/, "").split("/"); // "#settings/models": tab and page
   if (!name) return;
   // A hash for a tab that is off (an experimental one, or an extension that is gone) must not stay in the URL.
   if (!activateTab(name)) history.replaceState(null, "", window.location.pathname + window.location.search);
   else if (TAB_ALIASES[name]) history.replaceState(null, "", "#" + TAB_ALIASES[name]);
+  else if (name === "settings" && page) showSettingsPageBySlug(page);
 }
 
 

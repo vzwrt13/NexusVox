@@ -160,7 +160,7 @@ Open the dashboard from the NexusVox tray icon (left-click) while NexusVox is ru
 | Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg); optional speaker detection with Parakeet; optional text cleanup with the local language model; download as TXT, SRT or VTT (subtitles need Parakeet's word timing) |
 | Review | Flag and replay recordings |
 
-*(Screenshot from before the Settings tab was grouped: the compute device selector now sits in the collapsed **Advanced** card, and the language setting was removed.)*
+*(Screenshot from before the Settings tab was grouped: the compute device selector now sits on the **Advanced** page, and the language setting was removed.)*
 
 ![The NexusVox settings tab: a compute device selector resolved to GPU (CUDA), a transcription model selector set to Parakeet TDT 0.6B, and a model overview listing architecture, parameter count, protocol, runtime, supported languages and VRAM.](docs/images/settings.png)
 

@@ -16,15 +16,6 @@
     </div>
     <nav class="tabs">
       <button class="tab active" data-tab="settings">Settings</button>
-      <div class="subtabs" id="settings-submenu" aria-label="Settings sections">
-        <a class="subtab" href="#settings" data-card="settings-card-dictation">Dictation</a>
-        <a class="subtab" href="#settings" data-card="settings-card-vocabulary">Vocabulary</a>
-        <a class="subtab" href="#settings" data-card="settings-card-text-polish">Text &amp; Polish</a>
-        <a class="subtab" href="#settings" data-card="settings-card-models">Models</a>
-        <a class="subtab" href="#settings" data-card="meeting-settings-card">Meetings</a>
-        <a class="subtab" href="#settings" data-card="settings-card-privacy">Privacy</a>
-        <a class="subtab" href="#settings" data-card="settings-advanced">Advanced</a>
-      </div>
       <button class="tab" data-tab="analytics">Analytics</button>
       <button class="tab" data-tab="edit" data-feature="flag_command" hidden>Edit</button>
       <button class="tab" data-tab="recordings">Recordings</button>
@@ -39,12 +30,24 @@
   <main>
     <!-- Settings Tab -->
     <section id="tab-settings" class="tab-content active">
-      <div class="settings-search">
-        <input type="search" id="settings-search" class="dict-input" placeholder="Search settings" aria-label="Search settings" autocomplete="off">
-      </div>
+      <div class="settings-layout">
+        <nav class="settings-nav" id="settings-nav" aria-label="Settings sections">
+          <div class="settings-search">
+            <input type="search" id="settings-search" class="dict-input" placeholder="Search settings" aria-label="Search settings" autocomplete="off">
+          </div>
+          <a class="settings-link active" href="#settings/dictation" data-page="dictation" data-card="settings-card-dictation" aria-current="page">Dictation</a>
+          <a class="settings-link" href="#settings/vocabulary" data-page="vocabulary" data-card="settings-card-vocabulary">Vocabulary</a>
+          <a class="settings-link" href="#settings/text-polish" data-page="text-polish" data-card="settings-card-text-polish">Text &amp; Polish</a>
+          <a class="settings-link" href="#settings/models" data-page="models" data-card="settings-card-models">Models</a>
+          <a class="settings-link" href="#settings/meetings" data-page="meetings" data-card="meeting-settings-card">Meetings</a>
+          <a class="settings-link" href="#settings/privacy" data-page="privacy" data-card="settings-card-privacy">Privacy</a>
+          <a class="settings-link" href="#settings/advanced" data-page="advanced" data-card="settings-advanced">Advanced</a>
+          <button type="button" class="settings-rerun" id="settings-rerun-setup" disabled title="Available with the first-run setup">Run the first-run setup again</button>
+        </nav>
+        <div class="settings-pages" id="settings-pages">
       <p id="settings-no-match" class="settings-hint" hidden>No setting found</p>
 
-      <div class="settings-card" id="settings-card-dictation">
+      <div class="settings-card active" id="settings-card-dictation">
         <h4 class="nexus-section-title">Dictation</h4>
         <p class="settings-hint" style="margin-top: 6px;">The everyday basics: how you start a recording, what you speak and what you see while it runs.</p>
 
@@ -445,8 +448,8 @@
         </div>
       </div>
 
-      <details class="settings-card settings-advanced" id="settings-advanced">
-        <summary>Advanced</summary>
+      <div class="settings-card settings-advanced" id="settings-advanced">
+        <h4 class="nexus-section-title">Advanced</h4>
         <p class="settings-hint" style="margin-top: 6px;">Rarely needed. The defaults work for most people.</p>
 
         <div class="setting-row" style="margin-top: 16px;">
@@ -495,7 +498,9 @@
             <p class="settings-hint">Edit <code>config.toml</code> under <code>[os_commands.apps]</code> to add or remove apps.</p>
           </div>
         </div>
-      </details>
+      </div>
+        </div>
+      </div>
 
     </section>
 

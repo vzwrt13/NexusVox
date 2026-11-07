@@ -533,11 +533,16 @@ llmServerAdd.addEventListener("click", async () => {
 const llmRefresher = createLlmRefresher({
   fetchData: () => api("/api/settings/llm-models"),
   render: renderLlmModels,
-  // On screen: the Settings tab is open, the page is visible and the dropdown is laid out.
+  // On screen: the Settings tab is open, the page is visible and the dropdown is laid out (its Models page is open).
   isActive: () =>
     !document.hidden && document.getElementById("tab-settings").classList.contains("active") && llmModelSelect.offsetParent !== null,
   schedule: (fn, ms) => setInterval(fn, ms),
   cancel: (t) => clearInterval(t),
+});
+
+// The Models page opens: refresh at once, the list may have changed while it was out of sight.
+onSettingsPageOpen((id) => {
+  if (id === "settings-card-models") llmRefresher.wake();
 });
 
 // Draws the card now, whatever changed (after a save, a pull, or when the tab opens).

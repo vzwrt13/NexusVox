@@ -384,9 +384,8 @@ function syncRecordingDevices() {
 // "All meeting settings" link: open the Settings tab, scroll to the Meetings card and flash it.
 document.getElementById("meeting-settings-link").addEventListener("click", (e) => {
   e.preventDefault();
-  history.replaceState(null, "", "#settings");
   activateTab("settings", { keepScroll: true });
-  const card = scrollToSettingsCard("meeting-settings-card");
+  const card = openSettingsPageFromElsewhere("meeting-settings-card");
   card.classList.remove("flash-highlight");
   void card.offsetWidth; // restart the animation when the link is clicked again
   card.classList.add("flash-highlight");

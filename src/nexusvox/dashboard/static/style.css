@@ -184,31 +184,13 @@ body::before {
   padding: 20px 24px;
 }
 
-/* Settings tab: one card per group, sub-blocks inside a group, a collapsed Advanced card at the end. */
-#tab-settings > .settings-card + .settings-card { margin-top: 12px; }
+/* Settings tab: one card per group (one page each), sub-blocks inside a group. */
 .settings-sub {
   margin-top: 20px;
   padding-top: 20px;
   border-top: 1px solid var(--border);
 }
 .settings-hint + .settings-sub { margin-top: 16px; padding-top: 0; border-top: 0; }
-.settings-advanced > summary {
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 500;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.settings-advanced > summary::-webkit-details-marker { display: none; }
-.settings-advanced > summary::before {
-  content: "\25B8";
-  color: var(--text-dim);
-  transition: transform 0.15s;
-}
-.settings-advanced[open] > summary::before { transform: rotate(90deg); }
-.settings-advanced > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 
 .setting-row {
   display: flex;
@@ -1331,27 +1313,62 @@ canvas { width: 100% !important; max-height: 260px; }
 }
 .overview-value .status-line { margin-top: 0; }
 
-/* Settings submenu in the sidebar and the settings search */
-.subtabs { display: none; flex-direction: column; gap: 1px; margin: 2px 0 6px 18px; padding-left: 10px; border-left: 1px solid var(--border); }
-.tab.active[data-tab="settings"] + .subtabs { display: flex; }
-.subtab {
-  display: block;
-  padding: 6px 10px;
+/* Settings: a navigation column next to one page per section. */
+.settings-layout { display: flex; align-items: flex-start; gap: 24px; }
+.settings-nav {
+  flex: 0 0 210px;
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-pages { flex: 1 1 0; min-width: 0; }
+.settings-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
   border-radius: var(--radius-ctl);
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 14px;
   text-decoration: none;
   transition: color 0.15s, background 0.15s;
 }
-.subtab:hover { color: var(--text); background: var(--surface2); }
-.subtab.active { color: var(--text); background: var(--accent-glow); }
-.subtab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.settings-search { margin-bottom: 12px; }
+.settings-link:hover { color: var(--text); background: var(--surface2); }
+.settings-link.active { color: var(--text); background: var(--accent-glow); }
+.settings-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.settings-search { margin-bottom: 10px; }
 .settings-search input { width: 100%; max-width: 100%; box-sizing: border-box; padding: 9px 12px; }
+.settings-rerun {
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-ctl);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-rerun:hover:not(:disabled) { color: var(--text); background: var(--surface2); }
+.settings-rerun:disabled { cursor: not-allowed; opacity: 0.6; }
+.settings-rerun:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .search-hidden { display: none !important; }
-#tab-settings .settings-card { scroll-margin-top: 16px; }
-@media (max-width: 800px) {
-  .subtabs { display: none !important; }
+/* One page at a time; while searching, every card with a match. */
+#settings-pages > .settings-card { display: none; }
+#settings-pages > .settings-card.active, #tab-settings.searching #settings-pages > .settings-card { display: block; }
+#settings-pages { scroll-margin-top: 32px; } /* the main padding: a link click lands the page where it starts */
+#tab-settings.searching #settings-pages > .settings-card:not(.search-hidden) ~ .settings-card:not(.search-hidden) { margin-top: 12px; }
+#tab-settings.searching .settings-link { color: var(--text-dim); background: transparent; }
+/* The sidebar (232px), the main padding and the navigation (210px + gap) leave a page too narrow below ~1000px. */
+@media (max-width: 1000px) {
+  .settings-layout { flex-direction: column; align-items: stretch; gap: 16px; }
+  .settings-nav { position: static; flex: none; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .settings-search { flex: 1 0 100%; }
+  .settings-link { padding: 7px 10px; font-size: 13px; }
+  .settings-rerun { margin-top: 0; }
 }
 
 /* Duotone icons for the built-in tabs, the Settings sub-links and the Settings section headings. Decorative:
@@ -1372,33 +1389,29 @@ canvas { width: 100% !important; max-height: 260px; }
 .tab[data-tab="review"]::before { background-image: url("icons/duotone-review.svg"); }
 .tab[data-tab="dev"]::before { background-image: url("icons/duotone-dev.svg"); }
 .tab[data-tab="feedback"]::before { background-image: url("icons/duotone-feedback.svg"); }
-.subtab[data-card], #tab-settings .settings-card > .nexus-section-title { display: flex; align-items: center; gap: 8px; }
-.subtab[data-card]::before, #tab-settings .settings-card > .nexus-section-title::before {
+.settings-link[data-card], #tab-settings .settings-card > .nexus-section-title { display: flex; align-items: center; gap: 8px; }
+#tab-settings .settings-card > .nexus-section-title { font-size: 15px; font-weight: 600; color: var(--text); text-transform: none; letter-spacing: 0; }
+.settings-link[data-card]::before, #tab-settings .settings-card > .nexus-section-title::before {
   content: "";
   flex-shrink: 0;
   width: 16px;
   height: 16px;
-  background: center / contain no-repeat;
+  /* Longhands: the shorthand would reset the per-section background-image, which has lower specificity. */
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
 }
-.subtab[data-card="settings-card-dictation"]::before { background-image: url("icons/duotone-dictation.svg"); }
+.settings-link[data-card="settings-card-dictation"]::before { background-image: url("icons/duotone-dictation.svg"); }
 #settings-card-dictation > .nexus-section-title::before { background-image: url("icons/duotone-dictation.svg"); }
-.subtab[data-card="settings-card-vocabulary"]::before { background-image: url("icons/duotone-vocabulary.svg"); }
+.settings-link[data-card="settings-card-vocabulary"]::before { background-image: url("icons/duotone-vocabulary.svg"); }
 #settings-card-vocabulary > .nexus-section-title::before { background-image: url("icons/duotone-vocabulary.svg"); }
-.subtab[data-card="settings-card-text-polish"]::before { background-image: url("icons/duotone-text-polish.svg"); }
+.settings-link[data-card="settings-card-text-polish"]::before { background-image: url("icons/duotone-text-polish.svg"); }
 #settings-card-text-polish > .nexus-section-title::before { background-image: url("icons/duotone-text-polish.svg"); }
-.subtab[data-card="settings-card-models"]::before { background-image: url("icons/duotone-models.svg"); }
+.settings-link[data-card="settings-card-models"]::before { background-image: url("icons/duotone-models.svg"); }
 #settings-card-models > .nexus-section-title::before { background-image: url("icons/duotone-models.svg"); }
-.subtab[data-card="meeting-settings-card"]::before { background-image: url("icons/duotone-meeting.svg"); }
+.settings-link[data-card="meeting-settings-card"]::before { background-image: url("icons/duotone-meeting.svg"); }
 #meeting-settings-card > .nexus-section-title::before { background-image: url("icons/duotone-meeting.svg"); }
-.subtab[data-card="settings-card-privacy"]::before { background-image: url("icons/duotone-privacy.svg"); }
+.settings-link[data-card="settings-card-privacy"]::before { background-image: url("icons/duotone-privacy.svg"); }
 #settings-card-privacy > .nexus-section-title::before { background-image: url("icons/duotone-privacy.svg"); }
-.subtab[data-card="settings-advanced"]::before { background-image: url("icons/duotone-advanced.svg"); }
-/* The Advanced heading is a summary that already carries the chevron in ::before: icon goes right after it */
-.settings-advanced > summary::before { order: -2; }
-.settings-advanced > summary::after {
-  content: "";
-  order: -1;
-  width: 16px;
-  height: 16px;
-  background: url("icons/duotone-advanced.svg") center / contain no-repeat;
-}
+.settings-link[data-card="settings-advanced"]::before { background-image: url("icons/duotone-advanced.svg"); }
+#settings-advanced > .nexus-section-title::before { background-image: url("icons/duotone-advanced.svg"); }

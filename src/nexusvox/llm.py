@@ -15,10 +15,12 @@ import json
 import logging
 import re
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 from .config import LLM_E4B_MIN_VRAM_GB, LlmConfig, LlmServer
@@ -37,9 +39,9 @@ _live_requests = 0
 _local = threading.local()
 
 _FENCE_RE = re.compile(r"^```[\w-]*\n(.*)\n```$", re.DOTALL)
-# A reasoning model behind protocol = "openai" has no `think: false` and may put its thinking first. Some chat
-# templates open the block themselves, so the reply then starts inside it and only the closing tag shows.
-_THINK_RE = re.compile(r"^(?:<think>)?.*?</think>", re.DOTALL)
+# A reasoning model behind protocol = "openai" has no `think: false` and may put its thinking first. Only a block that
+# the reply opens itself is cut: a `</think>` in the middle of the text is the user's own (HTML, prompt notes).
+_THINK_RE = re.compile(r"^<think>.*?</think>", re.DOTALL)
 # Servers that answered the request for no thinking (`chat_template_kwargs`) with a client error: not asked again.
 _NO_THINKING_REJECTED: set[str] = set()
 
@@ -101,24 +103,34 @@ def complete(config: LlmConfig, system: str, user: str) -> str:
             _live_lock.notify_all()
 
 
+_GRACE_S = 1.0
+
+
 def _post(request: urllib.request.Request, timeout_s: float) -> dict:
     """The JSON reply to *request*, or `TimeoutError` once *timeout_s* seconds have passed in all.
 
-    The socket timeout only limits each single wait for bytes, so a server that trickles its answer could hold
-    the caller for much longer than `timeout_s`. The request runs in its own thread and the caller stops waiting
-    at the deadline; the thread ends on its own at the socket timeout."""
+    The socket timeout only limits each single wait for bytes. The body is therefore read in pieces and the deadline
+    is checked between them, so a server that trickles its answer is dropped (the connection closes, the server stops
+    generating) and cannot hold the caller on. The request runs in its own thread and the caller gives up a moment
+    after the deadline in any case, for a connect that never returns."""
+    deadline = time.monotonic() + timeout_s
     outcome: dict = {}
 
     def run() -> None:
         try:
             with urllib.request.urlopen(request, timeout=timeout_s) as response:
-                outcome["reply"] = json.load(response)
+                chunks = []
+                while chunk := response.read(65536):
+                    chunks.append(chunk)
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(f"no complete answer within {timeout_s:g} s")
+                outcome["reply"] = json.loads(b"".join(chunks))
         except BaseException as exc:  # noqa: BLE001 - handed to the caller, who raises it there
             outcome["error"] = exc
 
     worker = threading.Thread(target=run, daemon=True, name="llm-request")
     worker.start()
-    worker.join(timeout_s)
+    worker.join(timeout_s + _GRACE_S)
     if worker.is_alive():
         raise TimeoutError(f"no answer within {timeout_s:g} s")
     if "error" in outcome:
@@ -126,22 +138,54 @@ def _post(request: urllib.request.Request, timeout_s: float) -> dict:
     return outcome["reply"]
 
 
+def _rejects_thinking_flag(exc: urllib.error.HTTPError) -> bool:
+    """Whether an HTTP error says the server does not accept `chat_template_kwargs`. Only a 400/422 that names the
+    field counts: a too long prompt or a wrong model name answers 400 as well and says nothing of the sort."""
+    if exc.code not in (400, 422):
+        return False
+    try:
+        detail = exc.read(4096).decode("utf-8", "replace")
+    except (OSError, http.client.HTTPException):
+        return False
+    return "chat_template_kwargs" in detail
+
+
+def _log_request(config: LlmConfig, started: float, outcome: str) -> None:
+    """One INFO line per request to the model server: where, which model, how long and how it ended. Never the text,
+    and never the API key or a password in the address."""
+    parts = urllib.parse.urlsplit(config.url)
+    where = f"{parts.scheme}://{parts.hostname or ''}{f':{parts.port}' if parts.port else ''}{parts.path.rstrip('/')}"
+    logger.info(
+        "LLM request: %s (%s), model %s, %d ms, %s",
+        where,
+        config.protocol,
+        config.model,
+        round((time.monotonic() - started) * 1000),
+        outcome,
+    )
+
+
 def _send(config: LlmConfig, system: str, user: str) -> str:
+    started = time.monotonic()
     headers = {"Content-Type": "application/json"}
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
+    deadline = time.monotonic() + config.timeout_s  # one deadline for the request and a retry together
     try:
         url, body = _request(config, system, user)
         try:
             reply = _post(urllib.request.Request(url, json.dumps(body).encode("utf-8"), headers), config.timeout_s)
         except urllib.error.HTTPError as exc:
-            if config.protocol != "openai" or exc.code not in (400, 422) or "chat_template_kwargs" not in body:
+            if config.protocol != "openai" or "chat_template_kwargs" not in body or not _rejects_thinking_flag(exc):
                 raise
             # A strict server refuses the field it does not know: ask again without it, and remember.
             exc.close()
             _NO_THINKING_REJECTED.add(config.url.rstrip("/"))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"no answer within {config.timeout_s:g} s") from exc
             url, body = _request(config, system, user)
-            reply = _post(urllib.request.Request(url, json.dumps(body).encode("utf-8"), headers), config.timeout_s)
+            reply = _post(urllib.request.Request(url, json.dumps(body).encode("utf-8"), headers), remaining)
         if config.protocol == "openai":
             text = reply["choices"][0]["message"]["content"]
         else:
@@ -157,11 +201,16 @@ def _send(config: LlmConfig, system: str, user: str) -> str:
         TypeError,
     ) as exc:
         timed_out = isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError)
+        _log_request(config, started, "timeout" if timed_out else f"error: {_short_reason(exc)}")
         raise LlmError(f"{type(exc).__name__}: {exc}"[:200], timed_out=timed_out) from exc
+    stripped = False
     if config.protocol == "openai" and isinstance(text, str):
-        text = _THINK_RE.sub("", text.strip())  # thinking that came anyway is not part of the answer
+        answer = _THINK_RE.sub("", text.strip())  # thinking that came anyway is not part of the answer
+        stripped, text = answer != text.strip(), answer
     if not isinstance(text, str) or not text.strip():
+        _log_request(config, started, "error: the model returned no text")
         raise LlmError("the model returned no text")
+    _log_request(config, started, "ok, thinking stripped" if stripped else "ok")
     return text.strip()
 
 
@@ -220,16 +269,8 @@ def installed_models(config: LlmConfig) -> list[dict] | None:
     (server down, or a protocol without Ollama's `/api/tags`)."""
     if config.protocol != "ollama":
         return None
-    try:
-        with urllib.request.urlopen(f"{config.url.rstrip('/')}/api/tags", timeout=_LIST_TIMEOUT_S) as response:
-            models = json.load(response)["models"]
-        return [
-            {"name": str(m["name"]), "size_gb": round(float(m.get("size", 0)) / 1e9, 1)}
-            for m in models
-            if isinstance(m, dict) and m.get("name")
-        ]
-    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError, KeyError, TypeError):
-        return None
+    listing = server_models(LlmServer(config.url, "ollama", api_key=config.api_key))
+    return listing["models"] if listing["reachable"] else None
 
 
 # ── Custom servers: detection and model lists ─────────────────────────────────────────────────────
@@ -303,16 +344,18 @@ def detect_server(url: str, api_key: str = "", timeout_s: float = _LIST_TIMEOUT_
     root = urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/"), "", ""))
     if root.endswith("/v1"):
         base = root[: -len("/v1")]
-        candidates = [("openai", root), ("ollama", base)]
+        # Ollama answers /v1/models too, but it is asked at its own API first: it can then switch thinking off
+        # and keep the model loaded, which the OpenAI-compatible API cannot.
+        candidates = [("ollama", base), ("openai", root)]
     else:
         candidates = [("ollama", root), ("openai", f"{root}/v1"), ("openai", root)]
-    reasons: list[str] = []
-    for protocol, address in candidates:
-        probe = LlmServer(address, protocol, api_key=api_key)
-        result = server_models(probe, timeout_s)
+    probes = [LlmServer(address, protocol, api_key=api_key) for protocol, address in candidates]
+    with ThreadPoolExecutor(max_workers=len(probes)) as pool:  # a dead address costs one timeout, not one per candidate
+        results = list(pool.map(lambda probe: server_models(probe, timeout_s), probes))
+    for probe, result in zip(probes, results, strict=True):
         if result["reachable"]:
             return probe
-        reasons.append(result["error"])
+    reasons = [result["error"] for result in results]
     # Nothing answered at all: say why. Something answered, but with no model list: say that.
     down = [r for r in reasons if r in ("connection refused", "timed out")]
     if len(down) == len(reasons):

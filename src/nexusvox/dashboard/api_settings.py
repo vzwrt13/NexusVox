@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 
@@ -38,6 +39,8 @@ from ..system.logsetup import log_dir
 from .api_base import DashboardState, logger
 
 MAX_SERVER_NAME_CHARS = 60
+# How long a saved server's model list is reused: the Models card asks every 5 s, which is too often for a dead server.
+SERVER_LIST_TTL_S = 20.0
 
 # `[hotkey]` fields that hold a marker key, and how an error message names each.
 _MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
@@ -183,39 +186,60 @@ class SettingsMixin(DashboardState):
         }
 
     def get_llm_models(self) -> dict:
-        """The dropdown's content: recommended models, other installed ones, and the saved value."""
+        """The dropdown's content: recommended models, other installed ones, the saved value and the saved servers."""
         cuda = cuda_available()
-        models = llm_build_model_list(self._config.llm, cuda, gpu_vram_gb() if cuda else None)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            others = pool.submit(self._llm_server_lists)  # while the server in use is asked
+            models = llm_build_model_list(self._config.llm, cuda, gpu_vram_gb() if cuda else None)
+            servers = others.result()
         selected = self._config.llm.model
         known = [*models["recommended"], *models["other"]]
+        for server in servers:
+            if server["active"]:  # already asked above: not again
+                listed = [m for m in known if m["installed"]]
+                server.update(reachable=models["reachable"], models=listed)
+                if not models["reachable"]:
+                    server["error"] = "no answer"
         disk_gb = next((m["size_gb"] for m in known if m["name"] == selected), None)
         return {
             **models,
-            "servers": self._llm_server_lists(),
+            "servers": servers,
             "selected": selected,
             "device": "gpu" if cuda else "cpu",
             "loaded": llm_loaded_model(self._config.llm, selected, disk_gb) if models["reachable"] else None,
             "slow_hint": not llm_runs_fast(),
         }
 
+    def _server_listing(self, server: LlmServer) -> dict:
+        """`server_models(server)`, reused for `SERVER_LIST_TTL_S`."""
+        key = (server.url, server.protocol, server.api_key)
+        held = self._llm_server_cache.get(key)
+        if held is not None and time.monotonic() - held[0] < SERVER_LIST_TTL_S:
+            return held[1]
+        listing = server_models(server)
+        self._llm_server_cache[key] = (time.monotonic(), listing)
+        return listing
+
     def _llm_server_lists(self) -> list[dict]:
         """Every saved server with its models, asked at the same time so a dead one costs one timeout, not one each.
-        `active` marks the one `[llm]` points at (its models are also in the main lists)."""
+        `active` marks the one `[llm]` points at; its models are filled in by the caller from the main list, so it
+        is not asked twice."""
         servers = self._config.llm.servers
         if not servers:
             return []
-        with ThreadPoolExecutor(max_workers=min(len(servers), 8)) as pool:
-            listings = list(pool.map(server_models, servers))
-        active = (self._config.llm.url.rstrip("/"), self._config.llm.protocol)
+        active_url = self._config.llm.url.rstrip("/")
+        todo = [s for s in servers if s.url != active_url]
+        with ThreadPoolExecutor(max_workers=min(max(len(todo), 1), 8)) as pool:
+            listings = dict(zip((s.url for s in todo), pool.map(self._server_listing, todo), strict=True))
         return [
             {
                 "name": server.name or _server_label(server.url),
                 "url": server.url,
                 "protocol": server.protocol,
-                "active": (server.url, server.protocol) == active,
-                **listing,
+                "active": server.url == active_url,
+                **listings.get(server.url, {"reachable": False, "models": []}),
             }
-            for server, listing in zip(servers, listings, strict=True)
+            for server in servers
         ]
 
     def add_llm_server(self, url: object, api_key: object = "", name: object = "") -> dict:
@@ -230,6 +254,7 @@ class SettingsMixin(DashboardState):
             return {"error": "That server is already saved"}
         server.name = str(name or "").strip()[:MAX_SERVER_NAME_CHARS] or _server_label(server.url)
         self._config.llm.servers.append(server)
+        self._llm_server_cache.clear()
         save_config(self._config)
         return {"ok": True, "server": {"name": server.name, "url": server.url, "protocol": server.protocol}}
 
@@ -240,6 +265,7 @@ class SettingsMixin(DashboardState):
         if len(kept) == len(self._config.llm.servers):
             return {"error": "That server is not saved"}
         self._config.llm.servers = kept
+        self._llm_server_cache.clear()
         save_config(self._config)
         return {"ok": True}
 
@@ -254,9 +280,10 @@ class SettingsMixin(DashboardState):
         if not model:
             return {"error": "A model name is required", **self.get_settings()}
         llm = self._config.llm
-        if not any((s.url, s.protocol) == (llm.url.rstrip("/"), llm.protocol) for s in llm.servers):
+        if not any(s.url == llm.url.rstrip("/") for s in llm.servers):  # saved servers are told apart by address
             llm.servers.append(LlmServer(llm.url.rstrip("/"), llm.protocol, _server_label(llm.url), llm.api_key))
         llm.url, llm.protocol, llm.api_key, llm.model = server.url, server.protocol, server.api_key, model
+        self._llm_server_cache.clear()
         save_config(self._config)
         if self._config.cleanup.level != "off":
             llm_warm_up(llm)

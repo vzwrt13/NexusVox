@@ -69,10 +69,33 @@ def test_detects_an_openai_server_without_v1_and_stores_the_address_up_to_v1(mon
 
 
 def test_detects_an_openai_server_given_with_v1(monkeypatch):
-    seen = _serve(monkeypatch, {"http://127.0.0.1:1234/v1/models": OPENAI_MODELS})
+    _serve(monkeypatch, {"http://127.0.0.1:1234/v1/models": OPENAI_MODELS})
     server = detect_server("http://127.0.0.1:1234/v1/")
     assert (server.url, server.protocol) == ("http://127.0.0.1:1234/v1", "openai")
-    assert seen == ["http://127.0.0.1:1234/v1/models"]  # asked first, nothing else needed
+
+
+def test_ollama_entered_with_its_v1_address_is_still_ollama(monkeypatch):
+    # Ollama answers /v1/models as well; it must be saved by its own API (think: false, keep_alive, pull).
+    _serve(
+        monkeypatch,
+        {"http://127.0.0.1:11434/api/tags": TAGS, "http://127.0.0.1:11434/v1/models": OPENAI_MODELS},
+    )
+    server = detect_server("http://127.0.0.1:11434/v1")
+    assert (server.url, server.protocol) == ("http://127.0.0.1:11434", "ollama")
+
+
+def test_the_candidates_are_probed_at_once_so_a_dead_address_costs_one_timeout(monkeypatch):
+    release = threading.Event()
+
+    def slow(request, timeout=None):
+        release.wait(0.4)  # every probe hangs for 0.4 s, then is refused
+        raise urllib.error.URLError(ConnectionRefusedError(10061, "refused"))
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", slow)
+    started = time.monotonic()
+    with pytest.raises(LlmError):
+        detect_server("http://x:1")  # three candidates
+    assert time.monotonic() - started < 1.0  # one after the other would take 1.2 s
 
 
 def test_detects_an_openai_server_that_lists_models_without_the_prefix(monkeypatch):
@@ -89,7 +112,7 @@ def test_detection_passes_the_api_key(monkeypatch):
 
     monkeypatch.setattr(llm.urllib.request, "urlopen", fake)
     server = detect_server("http://x:1/v1", api_key="sk-1")
-    assert keys == ["Bearer sk-1"] and server.api_key == "sk-1"
+    assert set(keys) == {"Bearer sk-1"} and server.api_key == "sk-1"
 
 
 @pytest.mark.parametrize(
@@ -229,8 +252,13 @@ def test_openai_request_asks_the_model_not_to_think(monkeypatch):
     assert server.bodies[0]["chat_template_kwargs"] == {"enable_thinking": False}
 
 
+def _refusal(code: int, message: str) -> urllib.error.HTTPError:
+    body = io.BytesIO(json.dumps({"error": {"message": message}}).encode())
+    return urllib.error.HTTPError("http://o:1/v1/chat/completions", code, "x", {}, body)  # type: ignore[arg-type]
+
+
 def test_a_server_that_refuses_the_field_is_asked_again_without_it_and_remembered(monkeypatch):
-    refuse = _http_error("http://o:1/v1/chat/completions", 400)
+    refuse = _refusal(400, "Unrecognized request argument supplied: chat_template_kwargs")
     server = _Capture(refuse, _chat("fine"), _chat("again"))
     monkeypatch.setattr(llm.urllib.request, "urlopen", server)
     config = LlmConfig(url="http://o:1/v1", protocol="openai", model="m")
@@ -238,6 +266,33 @@ def test_a_server_that_refuses_the_field_is_asked_again_without_it_and_remembere
     assert "chat_template_kwargs" in server.bodies[0] and "chat_template_kwargs" not in server.bodies[1]
     assert complete(config, "s", "u") == "again"
     assert "chat_template_kwargs" not in server.bodies[2]  # not tried again
+
+
+@pytest.mark.parametrize("code", [400, 422])
+def test_a_client_error_that_does_not_name_the_field_is_not_blamed_on_it(monkeypatch, code):
+    # A prompt over the context size or a wrong model name also answers 400: no retry, no blacklist.
+    server = _Capture(_refusal(code, "the request exceeds the available context size"), _chat("later"))
+    monkeypatch.setattr(llm.urllib.request, "urlopen", server)
+    config = LlmConfig(url="http://o:1/v1", protocol="openai", model="m")
+    with pytest.raises(LlmError):
+        complete(config, "s", "u")
+    assert len(server.bodies) == 1 and not llm._NO_THINKING_REJECTED
+    assert complete(config, "s", "u") == "later"
+    assert "chat_template_kwargs" in server.bodies[1]  # still asked to not think
+
+
+def test_the_retry_shares_the_deadline_of_the_first_request(monkeypatch):
+    def slow_then_refuse(request, timeout=None):
+        time.sleep(0.35)
+        raise _refusal(422, "extra fields not permitted: chat_template_kwargs")
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", slow_then_refuse)
+    started = time.monotonic()
+    with pytest.raises(LlmError) as caught:
+        complete(LlmConfig(url="http://o:1/v1", protocol="openai", timeout_s=0.5), "s", "u")
+    # The retry only had the rest of the 0.5 s, so the whole call stays near it, not near 2 x 0.5 s + 0.35 s.
+    assert time.monotonic() - started < 1.2
+    assert caught.value.timed_out is True or "422" in str(caught.value)
 
 
 def test_other_client_errors_are_not_retried(monkeypatch):
@@ -259,7 +314,6 @@ def test_ollama_request_has_no_template_field(monkeypatch):
     "reply",
     [
         "<think>hmm, the user wants\nshort</think>\n\nShort.",
-        "hmm, the template opened the block\n</think>Short.",
         "Short.",
     ],
 )
@@ -411,3 +465,115 @@ def test_dropdown_groups_per_server_and_a_dead_one_cannot_be_picked():
     assert groups[2]["options"] == [
         {"value": "", "label": "No answer: connection refused", "disabled": True, "down": True}
     ]
+
+
+@pytest.mark.parametrize("protocol", ["openai", "ollama"])
+def test_a_closing_tag_in_the_text_is_the_users_own_and_stays(monkeypatch, protocol):
+    text = "Close it with </think> like this."
+    reply = _chat(text) if protocol == "openai" else {"message": {"content": text}}
+    monkeypatch.setattr(llm.urllib.request, "urlopen", _Capture(reply))
+    config = LlmConfig(url="http://o:1/v1", protocol=protocol)
+    assert llm.clean_reply(complete(config, "s", "u")) == text
+
+
+def test_a_server_that_trickles_its_answer_is_dropped_at_the_deadline(monkeypatch):
+    closed = threading.Event()
+
+    class Trickle:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            closed.set()  # the connection is closed, so the server stops generating
+
+        def read(self, size=-1):
+            time.sleep(0.1)  # a byte every 0.1 s keeps a socket timeout from ever firing
+            return b" "
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", lambda request, timeout=None: Trickle())
+    started = time.monotonic()
+    with pytest.raises(LlmError) as caught:
+        complete(LlmConfig(url="http://o:1/v1", protocol="openai", timeout_s=0.5), "s", "u")
+    assert caught.value.timed_out is True and time.monotonic() - started < 1.5
+    assert closed.wait(1)  # no connection is left open behind the timeout
+
+
+# ── the Models card does not hammer saved servers ─────────────────────────────────────────────────
+def test_saved_server_lists_are_reused_between_polls_and_the_server_in_use_is_asked_once(api, monkeypatch):
+    api._config.llm.servers = [
+        LlmServer("http://127.0.0.1:11434", "ollama", "Here"),
+        LlmServer("http://dead:1", "ollama", "Dead"),
+    ]
+    seen = _serve(monkeypatch, {"http://127.0.0.1:11434/api/tags": TAGS})
+    api.get_llm_models()
+    api.get_llm_models()  # the next poll, 5 s later
+    assert seen.count("http://dead:1/api/tags") == 1  # the dead one is not probed on every poll
+    assert seen.count("http://127.0.0.1:11434/api/tags") == 2  # once per poll (the list of the server in use)
+    here = next(s for s in api.get_llm_models()["servers"] if s["active"])
+    assert here["reachable"] is True and [m["name"] for m in here["models"]] == ["gemma4:e4b"]
+
+
+def test_changing_the_saved_servers_drops_the_reused_lists(api, monkeypatch):
+    api._config.llm.servers = [LlmServer("http://dead:1", "ollama", "Dead")]
+    seen = _serve(monkeypatch, {"http://h:1/v1/models": OPENAI_MODELS})
+    api.get_llm_models()
+    api.add_llm_server("http://h:1/v1", "", "")
+    api.get_llm_models()
+    assert seen.count("http://dead:1/api/tags") == 2
+
+
+def test_a_server_is_told_apart_by_its_address_only(api, monkeypatch):
+    # [llm] and a saved entry share an address but not the protocol: it must not be saved a second time.
+    api._config.llm = LlmConfig(url="http://same:1/v1", protocol="ollama", model="m")
+    api._config.llm.servers = [LlmServer("http://same:1/v1", "openai", "Same"), LlmServer("http://b:1", "ollama", "B")]
+    _serve(monkeypatch, {})
+    api.select_llm_server_model("http://b:1", "x")
+    assert [s.url for s in api._config.llm.servers] == ["http://same:1/v1", "http://b:1"]
+
+
+# ── one log line per request ──────────────────────────────────────────────────────────────────────
+def _request_lines(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "nexusvox.llm" and "LLM request" in r.getMessage()]
+
+
+def test_every_request_logs_one_line_with_server_model_duration_and_outcome(monkeypatch, caplog):
+    caplog.set_level("INFO", logger="nexusvox.llm")
+    monkeypatch.setattr(llm.urllib.request, "urlopen", _Capture(_chat("Short.")))
+    config = LlmConfig(url="http://user:pw@127.0.0.1:8081/v1/", protocol="openai", model="qwen", api_key="sk-secret")
+    complete(config, "SYSTEM SECRET", "the dictated sentence")
+    (line,) = _request_lines(caplog)
+    assert line.startswith("LLM request: http://127.0.0.1:8081/v1 (openai), model qwen, ")
+    assert line.endswith(" ms, ok")
+    for secret in ("sk-secret", "pw", "SYSTEM SECRET", "dictated sentence", "Short."):
+        assert secret not in line
+
+
+def test_the_log_line_says_when_thinking_was_stripped(monkeypatch, caplog):
+    caplog.set_level("INFO", logger="nexusvox.llm")
+    monkeypatch.setattr(llm.urllib.request, "urlopen", _Capture(_chat("<think>hm</think>Short.")))
+    complete(LlmConfig(url="http://o:1/v1", protocol="openai"), "s", "u")
+    assert _request_lines(caplog)[0].endswith("ok, thinking stripped")
+
+
+@pytest.mark.parametrize(
+    ("error", "outcome"),
+    [
+        (TimeoutError("slow"), "timeout"),
+        (urllib.error.URLError(ConnectionRefusedError(10061, "refused")), "error: connection refused"),
+        (_http_error("http://o:1/api/chat", 500), "error: HTTP 500"),
+    ],
+)
+def test_the_log_line_names_a_failure_briefly(monkeypatch, caplog, error, outcome):
+    caplog.set_level("INFO", logger="nexusvox.llm")
+    monkeypatch.setattr(llm.urllib.request, "urlopen", _Capture(error))
+    with pytest.raises(LlmError):
+        complete(LlmConfig(), "s", "u")
+    assert _request_lines(caplog)[0].endswith(f"ms, {outcome}")
+
+
+def test_an_empty_reply_is_logged_as_an_error(monkeypatch, caplog):
+    caplog.set_level("INFO", logger="nexusvox.llm")
+    monkeypatch.setattr(llm.urllib.request, "urlopen", _Capture({"message": {"content": "  "}}))
+    with pytest.raises(LlmError):
+        complete(LlmConfig(), "s", "u")
+    assert _request_lines(caplog)[0].endswith("error: the model returned no text")

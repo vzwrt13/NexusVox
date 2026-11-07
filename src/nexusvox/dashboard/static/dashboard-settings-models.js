@@ -312,14 +312,14 @@ function renderLlmModels(data, rebuildOptions) {
       const parent = group.label === null ? llmModelSelect : document.createElement("optgroup");
       if (group.label !== null) {
         parent.label = group.label;
-        if (group.down) parent.className = "llm-option-unreachable";
+        if (group.down) setStatus(parent, "down"); // red through the one helper; the text stays
         parent.disabled = Boolean(group.down);
         llmModelSelect.append(parent);
       }
       for (const o of group.options) {
         const opt = new Option(o.label, o.value);
         if (o.muted) opt.style.color = "var(--text-muted, gray)";
-        if (o.down) opt.className = "llm-option-unreachable";
+        if (o.down) setStatus(opt, "down");
         opt.disabled = Boolean(o.disabled);
         parent.append(opt);
       }

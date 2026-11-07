@@ -67,7 +67,9 @@ class Transcription(Base):
     llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     llm_url: Mapped[str | None] = mapped_column(String(200), nullable=True)
     cleanup_level: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    # Where the transcription ran ("cpu", "gpu" or "remote": a server that is not on this PC); NULL for older rows.
+    # Where the transcription ran: "cpu" (in-process), "gpu" (the Docker server this app starts) or "remote" (a
+    # server it does not run: the custom server wherever it is, or a server address that is not this PC); NULL for
+    # older rows.
     transcribe_device: Mapped[str | None] = mapped_column(String(10), nullable=True)
     # The process file name of the app the text was typed into ("outlook.exe"), read at paste time.
     # Never a window title; NULL for older rows, phone dictations and texts the clipboard refused;

@@ -84,7 +84,7 @@ class CleanupResult:
     ms: int | None = None
     error: str | None = None  # why the dictation is typed unchanged, when the model was asked
     timed_out: bool = False  # the model did not answer within `[cleanup].timeout_s`
-    # Which model was asked, where and at what level; None when it was not asked (off, or too short).
+    # Which model was asked, where and at what level; None when no request was sent (off, too short, reloading).
     llm_model: str | None = None
     llm_url: str | None = None
     level: str | None = None
@@ -133,10 +133,11 @@ def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = M
     """
     if config.level not in PROMPTS or len(_words(text)) < min_words:
         return CleanupResult(text)
-    asked = {"llm_model": llm.model, "llm_url": llm.url, "level": config.level}
     if reload_running(llm):
         # The model is loading: a request now only waits behind the load and times out. Type at once.
-        return CleanupResult(text, error="the model is reloading", **asked)
+        # No request is sent, so the result names no model: it is no pass of that model.
+        return CleanupResult(text, error="the model is reloading")
+    asked = {"llm_model": llm.model, "llm_url": llm.url, "level": config.level}
     started = time.monotonic()
     try:
         reply = complete(

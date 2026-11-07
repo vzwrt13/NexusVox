@@ -114,7 +114,29 @@ def test_the_transcription_device_follows_the_backend():
     far = InferenceConfig(model="parakeet-tdt-0.6b", server_url="http://gpubox:8002/v1/audio/transcriptions")
     assert create_transcriber(far, device="cuda").device == "remote"
     custom = InferenceConfig(model="custom-server", custom=CustomServerConfig(url="http://localhost:9/v1"))
-    assert create_transcriber(custom, device="cuda").device == "remote"
+    assert create_transcriber(custom, device="cuda").device == "remote"  # a server the app does not run
+
+
+def test_the_pc_knows_its_own_host_name():
+    import socket
+
+    from nexusvox.transcription.transcriber import _this_pc_names
+
+    assert socket.gethostname().lower() in _this_pc_names()
+
+
+def test_every_way_of_naming_this_pc_is_local(monkeypatch):
+    from nexusvox.transcription import transcriber as module
+
+    monkeypatch.setattr(
+        module,
+        "_this_pc_names",
+        lambda: frozenset({"localhost", "host.docker.internal", "desktop-abc", "192.168.1.20"}),
+    )
+    for host in ("localhost", "127.0.1.1", "[::1]", "host.docker.internal", "DESKTOP-ABC", "192.168.1.20"):
+        assert module._is_local_url(f"http://{host}:8002/v1/audio/transcriptions"), host
+    for host in ("gpubox", "192.168.1.99", "example.com"):
+        assert not module._is_local_url(f"http://{host}:8002/v1/audio/transcriptions"), host
 
 
 # ---- The table ---------------------------------------------------------------------------------
@@ -142,6 +164,7 @@ def test_groups_by_model_level_and_device(session_factory):
 
     assert rows[0] == {
         "model": "gemma",
+        "server": None,
         "level": "light",
         "device": "gpu",
         "count": 4,
@@ -177,6 +200,54 @@ def test_polish_attempts_are_their_own_level_and_extensions_are_not_counted(sess
     assert (row["level"], row["count"], row["median_ms"], row["timeout_share"]) == ("polish", 2, 800, 0.5)
 
 
+def test_polish_speed_is_not_split_by_the_transcription_device(session_factory):
+    polish = {"cleanup_status": None, "cleanup_ms": None, "cleanup_level": None, "app": COMMAND_APP}
+    _seed(
+        session_factory,
+        [
+            _row(**polish, device=None, polish_status="applied", polish_ms=400),  # a quick tap: no recording
+            _row(**polish, device="gpu", polish_status="applied", polish_ms=800),
+            _row(**polish, device="cpu", polish_status="applied", polish_ms=1200),
+        ],
+    )
+
+    [row] = get_model_speed(session_factory)
+
+    assert (row["level"], row["device"], row["count"], row["median_ms"]) == ("polish", None, 3, 800)
+
+
+def test_one_model_name_on_two_servers_is_two_rows_without_credentials(session_factory):
+    _seed(
+        session_factory,
+        [
+            _row(llm_url="http://localhost:11434", ms=100),
+            _row(llm_url="http://me:secret@gpubox:8080/v1?key=abc", ms=400),
+            _row(llm_url="http://me:secret@gpubox:8080/v1?key=abc", ms=600),
+        ],
+    )
+
+    rows = get_model_speed(session_factory)
+
+    assert [(r["server"], r["count"], r["median_ms"]) for r in rows] == [
+        ("gpubox:8080", 2, 500),
+        ("localhost:11434", 1, 100),
+    ]
+    assert "secret" not in str(rows)
+
+
+def test_a_cleanup_skipped_while_the_model_reloads_is_no_pass(monkeypatch):
+    from nexusvox.dictation import cleanup as module
+
+    monkeypatch.setattr(module, "reload_running", lambda llm: True)
+    called = []
+    monkeypatch.setattr(module, "complete", lambda *a: called.append(a))
+
+    result = cleanup("Ähm ich komme äh heute später", CleanupConfig(level="light"), LlmConfig())
+
+    assert called == []
+    assert (result.status, result.llm_model, result.llm_url, result.level) == ("failed", None, None, None)
+
+
 def test_only_timeouts_leave_no_median(session_factory):
     _seed(session_factory, [_row(status="timeout", ms=None)])
 
@@ -209,5 +280,13 @@ def test_the_endpoint_serves_the_table(flask_client, db):
 
     assert resp.status_code == 200
     assert resp.get_json() == [
-        {"model": "gemma", "level": "light", "device": "gpu", "count": 1, "median_ms": 120, "timeout_share": 0.0}
+        {
+            "model": "gemma",
+            "server": None,
+            "level": "light",
+            "device": "gpu",
+            "count": 1,
+            "median_ms": 120,
+            "timeout_share": 0.0,
+        }
     ]

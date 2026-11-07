@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import io
+import ipaddress
 import json
 import logging
 import math
+import socket
 import wave
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
@@ -151,7 +154,8 @@ class BaseTranscriber(ABC):
     model: str
     needs_docker: bool = True
     # Where the recognition runs, stored with each dictation: "gpu" (the Docker server on this PC), "cpu"
-    # (in-process) or "remote" (a server that is not on this PC, the custom server included).
+    # (in-process) or "remote" (a server the app does not run itself: the custom server wherever it is, or the
+    # Docker server's address when that is not this PC).
     device: str = "gpu"
     # True when the app should call `warm_up()` in the background at start and after a switch to this engine.
     warms_up_at_start: bool = False
@@ -339,9 +343,28 @@ class VoxtralRealtimeTranscriber(BaseTranscriber):
         return self._ws is not None and self._ws.state == State.OPEN
 
 
+@functools.lru_cache(maxsize=1)
+def _this_pc_names() -> frozenset[str]:
+    """Host names and addresses that reach this PC besides the loopback range: its own name and its addresses."""
+    names = {"localhost", "host.docker.internal", "0.0.0.0"}
+    try:
+        host = socket.gethostname()
+        names.add(host.lower())
+        names.update(socket.gethostbyname_ex(host)[2])
+    except OSError:
+        pass  # no name resolution: loopback and the names above still count
+    return frozenset(names)
+
+
 def _is_local_url(url: str) -> bool:
-    """Whether *url* points at this PC."""
-    return (urlsplit(url).hostname or "localhost") in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+    """Whether *url* points at this PC: loopback, `host.docker.internal`, its own host name or one of its addresses."""
+    host = (urlsplit(url).hostname or "localhost").lower()
+    try:
+        if ipaddress.ip_address(host).is_loopback:
+            return True
+    except ValueError:
+        pass  # a name, not an address
+    return host in _this_pc_names()
 
 
 class OpenAIHttpTranscriber(BaseTranscriber):
@@ -516,5 +539,5 @@ def _create_custom_transcriber(config: InferenceConfig) -> BaseTranscriber:
         transcriber = OpenAIHttpTranscriber(server_config)
     transcriber.model = custom.model_name
     transcriber.needs_docker = False
-    transcriber.device = "remote"  # a server the user runs: the app cannot tell what it runs on
+    transcriber.device = "remote"  # a server the user runs, even on this PC: the app cannot tell what it runs on
     return transcriber

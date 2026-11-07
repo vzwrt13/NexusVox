@@ -624,9 +624,9 @@ function renderModelSpeed(rows) {
   body.innerHTML = rows
     .map(
       (r) => `<tr>
-        <td>${escapeHtml(r.model)}</td>
+        <td>${escapeHtml(r.model)}${r.server ? ` <span class="hint">${escapeHtml(r.server)}</span>` : ""}</td>
         <td>${escapeHtml(SPEED_LEVELS[r.level] || r.level)}</td>
-        <td>${escapeHtml(SPEED_DEVICES[r.device] || "--")}</td>
+        <td>${escapeHtml(SPEED_DEVICES[r.device] || r.device || "--")}</td>
         <td>${r.count}</td>
         <td>${r.median_ms != null ? formatDuration(r.median_ms) : "--"}</td>
         <td>${Math.round(r.timeout_share * 100)}%</td>

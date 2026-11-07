@@ -68,6 +68,13 @@ def register(app: Flask, api: DashboardAPI) -> None:
             return jsonify(result)
         return jsonify(result), (404 if result["error"].startswith("Unknown") else 500)
 
+    @app.route("/api/file-transcriptions/<int:tid>/turns")
+    def file_transcription_turns(tid):
+        turns = api.get_speaker_turns(tid)
+        if turns is None:
+            return jsonify({"error": "Unknown file transcription"}), 404
+        return jsonify({"turns": turns})
+
     @app.route("/api/file-transcriptions/<int:tid>/audio")
     def file_transcription_audio(tid):
         path = api.get_file_audio_path(tid)

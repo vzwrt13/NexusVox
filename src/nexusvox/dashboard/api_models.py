@@ -76,7 +76,7 @@ class ModelsMixin(DashboardState):
         # container, so the in-process CPU engine cannot. Without a running app, assume the container.
         transcriber = self._get_transcriber() if self._get_transcriber else None
         engine_can = transcriber.supports_diarization if transcriber else True
-        # `diarization`: the upload tab's speaker detection works with this model; `diarization_models`
+        # `diarization`: the upload dialog's speaker detection works with this model; `diarization_models`
         # names the models it works with, and `diarization_hint` says why it is off for a model that has it.
         return {
             "model": model,

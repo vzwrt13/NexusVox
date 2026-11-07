@@ -612,6 +612,31 @@ def test_a_hook_result_the_json_provider_cannot_sort_becomes_a_note():
     assert len(notes) == 1 and notes[0].startswith("Extension mixed failed")
 
 
+def test_a_panel_lists_its_recording_script_only_when_it_has_one(tmp_path):
+    class Recording(V1Extension):
+        name = "recording"
+
+        def dashboard_panels(self):
+            return [
+                DashboardPanel("with-tabs", "With tabs", tmp_path, recording_script="recording.js"),
+                DashboardPanel("plain", "Plain", tmp_path),
+                DashboardPanel("broken", "Broken", tmp_path, recording_script=""),
+            ]
+
+    reg = ExtensionRegistry()
+    reg.add(Recording)
+
+    assert reg.describe()["panels"] == [
+        {
+            "id": "with-tabs",
+            "title": "With tabs",
+            "script": "/ext/with-tabs/panel.js",
+            "recording_script": "/ext/with-tabs/recording.js",
+        },
+        {"id": "plain", "title": "Plain", "script": "/ext/plain/panel.js"},
+    ]
+
+
 def test_a_relative_or_missing_static_dir_drops_the_panel(tmp_path):
     class Folders(V1Extension):
         name = "folders"

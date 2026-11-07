@@ -58,7 +58,7 @@ that does not declare one is skipped.
 def on_file_transcribed(self, transcript: FileTranscript) -> dict | None: ...
 ```
 
-Called for every upload in the dashboard's Upload tab, and for every transcribed meeting recording, once the transcript is stored, with a read-only
+Called for every file uploaded in the dashboard's Recordings tab, and for every transcribed meeting recording, once the transcript is stored, with a read-only
 `FileTranscript`:
 
 | Field | Meaning |
@@ -93,6 +93,7 @@ def dashboard_panels(self) -> list[DashboardPanel]:
 | `static_dir` | Absolute path of an existing folder, served at `/ext/<id>/` (use `Path(__file__).parent / "static"`; a relative or missing one drops the panel) |
 | `script` | File in `static_dir` the browser loads when the tab is first opened (default `panel.js`) |
 | `blueprint` | Optional Flask `Blueprint`, mounted at `/api/ext/<id>/`: the tab's backend |
+| `recording_script` | Optional file in `static_dir` the browser loads when the Recordings tab first opens, whether or not this tab is ever opened; it registers tabs for the recording detail pane (see below). Keep it light. An empty value drops the panel |
 
 The script draws into its tab by registering a render function:
 
@@ -109,7 +110,36 @@ The dashboard is local-only (127.0.0.1) and has no CDN: ship what the tab needs 
 Blueprint names must be unique across the app; a blueprint that cannot be mounted is logged and the tab
 stays without its backend.
 
-Every tab, an extension's included, opens at the top of the page. A panel that links to a stored transcript (for example from a summary) calls `NexusVoxExt.showTranscript(id)` with the upload id as listed by `GET /api/file-transcriptions`: the dashboard opens the Meetings tab for a meeting and the Upload tab for anything else, scrolls to the card and highlights it. The call returns a promise that resolves with `false` when no such transcript exists.
+Every tab, an extension's included, opens at the top of the page. A panel that links to a stored transcript (for example from a summary) calls `NexusVoxExt.showTranscript(id)` with the upload id as listed by `GET /api/file-transcriptions`: the dashboard opens the Recordings tab with that recording in the detail pane, on its Transcript tab, and highlights its row in the list. The call returns a promise that resolves with `false` when no such recording exists among the 100 newest (deleted, or older); the page then stays where it is.
+
+### Tabs in the Recordings detail pane
+
+The Recordings tab shows one recording (a meeting or an uploaded file) at a time, with a tab row: *Summary*, *Transcript*, *Speakers*, then the tabs extensions add. An extension adds one from its panel script:
+
+```js
+NexusVoxExt.registerRecordingTab("my-notes", {
+  title: "Notes",
+  render(container, recording) {
+    container.textContent = "Notes for " + (recording.title || recording.original_filename);
+  },
+  available: (recording) => recording.kind === "meeting", // optional; without it the tab is on every recording
+});
+```
+
+| Call | What it does |
+|------|--------------|
+| `registerRecordingTab(id, {title, render, available})` | Adds a tab. `id` follows the panel id rules; `transcript` and `speakers` are taken, and so is an id registered before. Returns `false` (and logs why) when the tab was not added. `render(container, recording)` runs once per recording, the first time its tab is shown; `recording` is the row as listed by `GET /api/file-transcriptions`. The container is kept: switching tabs, choosing another recording and coming back, and every redraw of the pane (a list refresh, a rename, a finished upload action) put the same element back with what you drew in it, and the tab stays chosen. The dashboard keeps the containers of the 24 most recently shown recording tabs (the shown recording's always) and drops a recording's as soon as it is no longer listed; a dropped one is drawn again with `render` when it is shown next, so keep no state only in the DOM that you cannot draw again. A `render` that throws shows "This tab failed to load." in the tab |
+| `refreshRecordingTab(id, recordingId)` | Drops what the tab drew for that recording (for all of them without `recordingId`), so the next show calls `render` again; a tab on screen is drawn again at once. Use it when the content changed, for example a summary that has just been generated |
+| `selectRecordingTab(id)` | Switches the detail pane to a tab (`summary`, `transcript`, `speakers` or an extension's id). Returns `false` when the shown recording has no such tab |
+| `showTranscript(id, {mark})` | As above, and `mark` marks a passage on the Transcript tab and scrolls it into view: `{start, end}` in seconds marks the speaker lines whose turn overlaps that span (needs stored word timing), `{text}` marks the first line that holds the text and highlights it. A mark stays until another one is set |
+
+The id `summary` is special: a tab registered under it takes the *Summary* place at the start of the row. Without one, NexusVox shows a short note there that summaries come with NexusVox Pro and links to the Pro page; NexusVox without extensions shows no extension tabs and opens every recording on its Transcript tab.
+
+Register recording tabs from the panel's `recording_script`: the dashboard adds it once, when the Recordings tab first opens. The panel's main `script` is not loaded for this; it still runs only when its own sidebar tab is opened (or an upload action needs its handler), so a panel that polls a server or starts timers stays quiet until then. A main script may call `registerRecordingTab` too, but its tabs appear only after that script has run. These calls and the field are additions: an older NexusVox has no `registerRecordingTab` and ignores `recording_script`, so check for it (`if (NexusVoxExt.registerRecordingTab) ...`) when your extension must run on older releases too.
+
+```python
+DashboardPanel("my-tab", "My Tab", static_dir=Path(__file__).parent / "static", recording_script="recording.js")
+```
 
 ## Hook 3: export targets
 
@@ -118,9 +148,9 @@ def export_targets(self) -> list[ExportTarget]:
     return [ExportTarget("my-csv", "CSV", ".csv", "text/csv", self._to_csv)]
 ```
 
-NexusVox itself ships the targets `txt`, `srt` and `vtt`; they are registered first, so an extension cannot reuse those ids. Each target adds a download link to every stored upload in the Upload tab. `export(transcript)` receives a
+NexusVox itself ships the targets `txt`, `srt` and `vtt`; they are registered first, so an extension cannot reuse those ids. Each target adds an entry to the *Export* menu of every recording in the Recordings tab. `export(transcript)` receives a
 `FileTranscript` and returns `bytes` or `str`; the file is named after the uploaded file plus `extension`.
-`id` follows the same rules as a panel id; `extension` must be a file name suffix such as `.docx` or `.tar.gz` (no slash, no spaces) and `mimetype` a media type, or the target is dropped. The link downloads through the page, so a failing export shows its message in the Upload tab instead of saving an error file. A failing export answers with a 500 and its message; nothing else
+`id` follows the same rules as a panel id; `extension` must be a file name suffix such as `.docx` or `.tar.gz` (no slash, no spaces) and `mimetype` a media type, or the target is dropped. The entry downloads through the page, so a failing export shows its message next to the recording instead of saving an error file. A failing export answers with a 500 and its message; nothing else
 is affected. The link points at `GET /api/file-transcriptions/<id>/export/<target id>`.
 
 ## Listing what is loaded
@@ -136,8 +166,8 @@ and hook are simply ignored or rejected, so guard with the `nexusvox` version if
 ### Marking an export unavailable
 
 `ExportTarget` takes an optional `available(transcription_id) -> bool | str | None`. `True` or `None` offers
-the link as usual; `False` (or any other falsy answer such as `0`) shows it greyed out and not clickable; a
-string does the same and becomes the tooltip (e.g. `"No summary yet"`). The answers come with the upload list (`exports_unavailable`, a
+the entry as usual; `False` (or any other falsy answer such as `0`) shows it greyed out and not clickable, with
+"Not available" under it; a string does the same and is the text shown under it (e.g. `"No summary yet"`). The answers come with the upload list (`exports_unavailable`, a
 `{target id: reason}` object per upload in `GET /api/file-transcriptions`), not one request per link, so keep
 the check cheap: it runs once per listed upload (up to 50) for each target that has one. A check that raises leaves the link on, so the export itself reports the problem.
 
@@ -159,7 +189,7 @@ def upload_actions(self) -> list[UploadAction]:
     return [UploadAction("summarise", "Summarise", endpoint="/api/ext/my-tab/summarise/{id}")]
 ```
 
-Each action adds a button to the result card of every stored upload in the Upload tab.
+Each action adds an entry to the More menu (⋯) of every recording in the Recordings tab.
 
 | `UploadAction` field | Meaning |
 |----------------------|---------|
@@ -172,7 +202,7 @@ Set exactly one of `endpoint` and `panel`; anything else drops the action.
 
 `UploadAction` also takes an optional `available(transcription_id) -> bool | str | None`, with the same answers
 as `ExportTarget.available`: `True` or `None` keeps the button, any other falsy answer greys it out, and a string
-greys it out with that text as the tooltip. The answers come with the upload list (`actions_unavailable`, an
+greys it out with that text shown under it. The answers come with the upload list (`actions_unavailable`, an
 `{action id: reason}` object per upload), so a button never fails on click for a reason you already know. Keep
 the check cheap; one that raises, or does not answer within the 3 second budget of a list, leaves the button on.
 
@@ -192,7 +222,7 @@ Besides the answers above, `available` may return a small dict. It works the sam
 
 | Answer | Shown on the row |
 |---|---|
-| `{"pending": "<label>"}` | The label with a spinner; the export or button stays greyed out. While any row is pending, the dashboard re-fetches the Meetings and Upload lists every few seconds and stops when none is, so a finished export becomes active without a page reload |
+| `{"pending": "<label>"}` | The label with a spinner; the export or button stays greyed out. While any row is pending, the dashboard re-fetches the Recordings list every few seconds and stops when none is, so a finished export becomes active without a page reload |
 | `{"error": "<reason>", "retry": "<action id>"}` | The reason in red and a Retry button that runs the named `UploadAction`. `retry` must be an action your own extension registered; any other id is dropped with a log warning and only the reason is shown. Retry is also hidden while that action is itself greyed out for the row, and disabled while it runs |
 
 ```python

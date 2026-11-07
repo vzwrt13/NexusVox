@@ -144,6 +144,6 @@ def test_wiring_covers_the_triggers_that_make_a_hint_recover():
     source = dashboard_source()
     assert (
         "loadLlmStatus().catch(() => {}); // the cleanup hint must reflect Ollama as it is now" in source
-    )  # Upload tab
-    assert "setInterval(() => {" in source and '"tab-upload"' in source  # own poll, not the model list's
+    )  # upload dialog
+    assert "setInterval(() => {" in source and '"tab-recordings"' in source  # own poll, not the model list's
     assert source.count("refreshLlmHints();") >= 5  # cleanup (before and after save), polish, upload toggle, models

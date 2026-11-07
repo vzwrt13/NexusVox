@@ -42,12 +42,12 @@ max_recording_s = 600
 [meeting]
 # Meeting recording: your microphone and the system output (what the other participants say)
 # are recorded to two tracks and transcribed into one transcript with numbered speakers. Start and stop
-# it from the dashboard's Meetings tab or with this toggle hotkey; dictation keeps working during
+# it from the dashboard's Recordings tab or with this toggle hotkey; dictation keeps working during
 # a meeting. Only record when every participant knows (see docs/MEETINGS.md).
 # The hotkey needs at least one modifier and a key, and must not also be the dictation hotkey.
 modifiers = ["ctrl", "shift"]
 key = "F9"
-# Devices by name (see the dashboard Meetings tab). Empty: the system default devices.
+# Devices by name (see the dashboard's recording options or Settings > Meetings). Empty: the system default devices.
 mic_device = ""
 output_device = ""
 # Show "Inform all participants before you record" before each recording. The dashboard's
@@ -62,7 +62,7 @@ leave_dictation_out = true
 own_voice_label = "Speaker 1"
 # Show a rough live transcript (your voice and "Others"; the stored transcript numbers the speakers) in the dashboard while a meeting records. The audio
 # is sent to the transcription model in windows of about 6 seconds for the whole meeting, which costs GPU or CPU
-# time, so it is off by default; also switchable in the dashboard Meetings tab. The transcript made after Stop
+# time, so it is off by default; also switchable in the dashboard's recording options. The transcript made after Stop
 # is the one that is stored either way.
 live_transcript = false
 # Keep meeting.wav, a playable mix of both tracks, after the meeting is transcribed (the dashboard plays it).

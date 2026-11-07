@@ -33,7 +33,7 @@ To stay on CPU even if you later add a GPU, open the dashboard from the tray ico
 **CPU path** — no additional requirements.
 
 **Optional, both paths — [ffmpeg](https://ffmpeg.org/) on your `PATH`:**
-Only the dashboard's Upload tab needs it, and only for non-WAV formats (MP3, FLAC, OGG, WEBM). Push-to-talk dictation and WAV uploads work without ffmpeg. Without it, a non-WAV upload fails with `Audio conversion failed`.
+Only uploads in the dashboard's Recordings tab need it, and only for non-WAV formats (MP3, FLAC, OGG, WEBM). Push-to-talk dictation and WAV uploads work without ffmpeg. Without it, a non-WAV upload fails with `Audio conversion failed`.
 
 ```powershell
 winget install Gyan.FFmpeg    # or: choco install ffmpeg
@@ -79,7 +79,7 @@ docker compose --profile whisper up --build   # Whisper Large V3 Turbo (HTTP, po
 
 The first start will download the model and cache it in a Docker volume. Subsequent starts are fast.
 
-The Parakeet container also serves speaker detection for the dashboard's Upload tab (*Detect speakers*, up to 4 speakers). Its model downloads on the first upload that uses it, so that upload takes a little longer. A Parakeet image built before speaker detection existed has an older NeMo and must be rebuilt once with `--build`.
+The Parakeet container also serves speaker detection for uploads in the dashboard's Recordings tab (*Detect speakers*, up to 4 speakers). Its model downloads on the first upload that uses it, so that upload takes a little longer. A Parakeet image built before speaker detection existed has an older NeMo and must be rebuilt once with `--build`.
 
 Wait until the server reports it is ready. The default Parakeet endpoint will be available at `http://localhost:8002/v1/audio/transcriptions`.
 
@@ -229,7 +229,7 @@ To paste the last text again, hold `Ctrl + Win`, tap `V`, let go: the recording 
 
 ### Cleanup and Polish need Ollama
 
-Dictation works on its own. Auto Cleanup, Polish and the upload cleanup use a local language model, and NexusVox does not ship one. If Ollama is missing, Settings shows a red hint under *Auto Cleanup* and *Polish Selected Text Key* (only when you turned them on), in the *Models* card, and under *Clean up text* on the Upload tab (only with that option on). If `[llm].url` points to another PC, the hint shows that address instead of an install link:
+Dictation works on its own. Auto Cleanup, Polish and the upload cleanup use a local language model, and NexusVox does not ship one. If Ollama is missing, Settings shows a red hint under *Auto Cleanup* and *Polish Selected Text Key* (only when you turned them on), in the *Models* card, and under *Clean up text* in the upload dialog of the Recordings tab (only with that option on). If `[llm].url` points to another PC, the hint shows that address instead of an install link:
 
 1. Install Ollama from [ollama.com/download](https://ollama.com/download) and start it (it runs in the tray).
 2. Open Settings → Models. If Ollama is running but the chosen model is missing, the hint says so and a *Download* button fetches it after you confirm. You can also pick another model from the list (models that are not installed are greyed out).

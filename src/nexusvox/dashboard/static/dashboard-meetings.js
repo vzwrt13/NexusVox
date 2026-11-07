@@ -1,4 +1,4 @@
-/* NexusVox Dashboard — Meetings tab: recording, live transcript, meeting settings */
+/* NexusVox Dashboard — Meeting recording in the Recordings tab: start/stop, live transcript, meeting settings */
 
 // ── Meetings ─────────────────────────────────────────────────────────
 const meetingToggleBtn = document.getElementById("meeting-toggle");
@@ -25,6 +25,10 @@ const meetingHotkeyStatus = document.getElementById("meeting-hotkey-status");
 const meetingAltHint = document.getElementById("meeting-hotkey-alt-hint");
 const meetingMicSelect = document.getElementById("meeting-mic-select");
 const meetingOutputSelect = document.getElementById("meeting-output-select");
+// The Recordings tab's options popover offers the same two devices; the Settings selects stay the stored ones.
+const recMicSelect = document.getElementById("rec-mic-select");
+const recOutputSelect = document.getElementById("rec-output-select");
+const recRecordingBox = document.getElementById("rec-recording");
 let meetingRecording = false;
 let meetingElapsed = 0;
 let meetingTick = null;
@@ -108,8 +112,10 @@ function renderMeetingState(status) {
   setMeetingLivePolling(meetingRecording);
   meetingElapsed = status.elapsed_s || 0;
   meetingIndicator.classList.toggle("recording", meetingRecording);
+  recRecordingBox.hidden = !meetingRecording;
   meetingTimer.textContent = formatClock(meetingElapsed);
   meetingToggleBtn.textContent = meetingRecording ? "Stop recording" : "Start recording";
+  meetingToggleBtn.classList.toggle("is-recording", meetingRecording);
   if (meetingRecording && !meetingTick) {
     // The server's elapsed time is the truth; between polls the timer counts on its own.
     meetingTick = setInterval(() => {
@@ -151,7 +157,7 @@ async function stopMeeting() {
     if (!result.ok && !result.busy) {
       showMeetingStatus("✕ " + result.error, "down");
     } else if (result.busy) {
-      showMeetingStatus("● " + result.error + ". Transcribe it below once that is done.", "warn");
+      showMeetingStatus("● " + result.error + ". Transcribe it from the list below once that is done.", "warn");
       loadFileTranscriptions();
     } else {
       trackMeetingJob(result.job_id);
@@ -161,7 +167,8 @@ async function stopMeeting() {
   }
 }
 
-// Stop starts the transcription job; its progress is shown here until the meeting appears in the list.
+// Stop starts the transcription job; its progress is shown here until the meeting appears in the list, where
+// it then opens in the detail pane.
 function trackMeetingJob(jobId) {
   clearInterval(meetingJobTimer);
   meetingProgress.style.display = "";
@@ -189,6 +196,8 @@ function trackMeetingJob(jobId) {
       showMeetingStatus(job.message || "Transcribing...", "");
       return;
     }
+    const savedId = job.state === "done" && job.result ? job.result.id : undefined;
+    if (savedId !== undefined && savedId !== null) recSelectedId = String(savedId);
     stop();
     if (job.state === "done") showMeetingStatus("● Meeting transcribed.", "ok");
     else showMeetingStatus("✕ " + (job.error || "Transcription failed"), "down");
@@ -319,10 +328,19 @@ function fillDeviceSelect(select, names, chosen) {
 
 async function saveMeetingDevices() {
   await postSetting("/api/settings/meeting-devices", { mic: meetingMicSelect.value, output: meetingOutputSelect.value });
-  renderMeetingDevicesInfo();
+  syncRecordingDevices();
 }
 meetingMicSelect.addEventListener("change", saveMeetingDevices);
 meetingOutputSelect.addEventListener("change", saveMeetingDevices);
+// A choice in the popover goes through the Settings selects, so both always show the stored device.
+recMicSelect.addEventListener("change", () => {
+  meetingMicSelect.value = recMicSelect.value;
+  saveMeetingDevices();
+});
+recOutputSelect.addEventListener("change", () => {
+  meetingOutputSelect.value = recOutputSelect.value;
+  saveMeetingDevices();
+});
 
 // A meeting toggle that saves on change and shows the stored value (or the one still in force on failure).
 function bindMeetingToggle(toggle, url, key) {
@@ -340,7 +358,7 @@ function bindMeetingToggle(toggle, url, key) {
 bindMeetingToggle(meetingStoreAudioToggle, "/api/settings/meeting-store-audio", "meeting_store_audio");
 bindMeetingToggle(meetingLiveToggle, "/api/settings/meeting-live-transcript", "meeting_live_transcript");
 
-// The meeting settings sit in the Settings tab; the Meetings tab shows the devices as an info line.
+// The meeting settings sit in the Settings tab; the Recordings tab's options popover repeats the devices.
 async function loadMeetingSettings() {
   const [settings, devices] = await Promise.all([
     fetch("/api/settings").then((r) => r.json()),
@@ -354,15 +372,16 @@ async function loadMeetingSettings() {
   renderMeetingHotkey(settings);
   fillDeviceSelect(meetingMicSelect, devices.inputs, devices.mic_device);
   fillDeviceSelect(meetingOutputSelect, devices.outputs, devices.output_device);
-  renderMeetingDevicesInfo();
+  fillDeviceSelect(recMicSelect, devices.inputs, devices.mic_device);
+  fillDeviceSelect(recOutputSelect, devices.outputs, devices.output_device);
 }
 
-function renderMeetingDevicesInfo() {
-  document.getElementById("meeting-info-mic").textContent = meetingMicSelect.value || "System default";
-  document.getElementById("meeting-info-output").textContent = meetingOutputSelect.value || "System default";
+function syncRecordingDevices() {
+  recMicSelect.value = meetingMicSelect.value;
+  recOutputSelect.value = meetingOutputSelect.value;
 }
 
-// "Meeting settings" link: open the Settings tab, scroll to the Meetings card and flash it.
+// "All meeting settings" link: open the Settings tab, scroll to the Meetings card and flash it.
 document.getElementById("meeting-settings-link").addEventListener("click", (e) => {
   e.preventDefault();
   history.replaceState(null, "", "#settings");
@@ -374,13 +393,13 @@ document.getElementById("meeting-settings-link").addEventListener("click", (e) =
   setTimeout(() => card.classList.remove("flash-highlight"), 2000);
 });
 
-async function openMeetingsTab() {
+// The recording half of opening the Recordings tab (the list and the upload job are dashboard-recordings.js).
+async function openMeetingRecording() {
   await loadMeetingSettings();
   await refreshMeetingStatus();
-  loadFileTranscriptions();
   // A meeting started with the hotkey while this tab is open shows up through the poll.
   clearInterval(meetingPoll);
   meetingPoll = setInterval(() => {
-    if (!document.hidden && document.getElementById("tab-meetings").classList.contains("active")) refreshMeetingStatus();
+    if (!document.hidden && document.getElementById("tab-recordings").classList.contains("active")) refreshMeetingStatus();
   }, 3000);
 }

@@ -1,4 +1,4 @@
-"""In-memory registry of file transcription jobs, so the Upload tab can show how far one is."""
+"""In-memory registry of file transcription jobs, so the Recordings tab can show how far one is."""
 
 from __future__ import annotations
 

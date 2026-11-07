@@ -100,7 +100,7 @@ class InputEvents:
 
     def _toggle_meeting(self) -> None:
         """Stop the running meeting, or start one. While the consent hint is on, a start opens the dashboard's
-        Meetings tab instead, where the hint is shown and the recording is started by its button. A press that
+        Recordings tab instead, where the hint is shown and the recording is started by its button. A press that
         arrives while the previous one is still being handled (devices opening) is ignored."""
         if not self._meeting_toggle_lock.acquire(blocking=False):
             return
@@ -108,7 +108,7 @@ class InputEvents:
             api = ensure_dashboard_api(self._db, self._config, self)
             result = api.toggle_meeting(ask_consent=True)
             if result.get("action") == "consent":
-                open_dashboard(self._db, self._config, app=self, tab="meetings")
+                open_dashboard(self._db, self._config, app=self, tab="recordings")
                 return
             # A stop that only found the transcriber busy still ended the recording: that is no error.
             if result.get("ok") or result.get("busy"):

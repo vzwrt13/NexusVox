@@ -42,6 +42,7 @@ class DashboardState:
     _benchmarks_dir: Path
     _file_jobs: FileJobs
     _download_cache: dict[str, tuple[float, dict]]
+    _llm_server_cache: dict[tuple[str, str, str], tuple[float, dict]]
     extensions: ExtensionRegistry
     _meeting: MeetingSession
     _meeting_lock: threading.RLock

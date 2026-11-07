@@ -1351,3 +1351,53 @@ canvas { width: 100% !important; max-height: 260px; }
 @media (max-width: 800px) {
   .subtabs { display: none !important; }
 }
+
+/* Duotone icons for the built-in tabs, the Settings sub-links and the Settings section headings. Decorative:
+   they are CSS backgrounds, so screen readers never see them. Tabs from extensions have no icon and keep the dot. */
+.tab:is([data-tab="settings"],[data-tab="analytics"],[data-tab="edit"],[data-tab="meetings"],[data-tab="upload"],[data-tab="review"],[data-tab="dev"],[data-tab="feedback"])::before {
+  width: 18px;
+  height: 18px;
+  border-radius: 0;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+.tab[data-tab="settings"]::before { background-image: url("icons/duotone-settings.svg"); }
+.tab[data-tab="analytics"]::before { background-image: url("icons/duotone-analytics.svg"); }
+.tab[data-tab="edit"]::before { background-image: url("icons/duotone-edit.svg"); }
+.tab[data-tab="meetings"]::before { background-image: url("icons/duotone-meeting.svg"); }
+.tab[data-tab="upload"]::before { background-image: url("icons/duotone-upload.svg"); }
+.tab[data-tab="review"]::before { background-image: url("icons/duotone-review.svg"); }
+.tab[data-tab="dev"]::before { background-image: url("icons/duotone-dev.svg"); }
+.tab[data-tab="feedback"]::before { background-image: url("icons/duotone-feedback.svg"); }
+.subtab[data-card], #tab-settings .settings-card > .nexus-section-title { display: flex; align-items: center; gap: 8px; }
+.subtab[data-card]::before, #tab-settings .settings-card > .nexus-section-title::before {
+  content: "";
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  background: center / contain no-repeat;
+}
+.subtab[data-card="settings-card-dictation"]::before { background-image: url("icons/duotone-dictation.svg"); }
+#settings-card-dictation > .nexus-section-title::before { background-image: url("icons/duotone-dictation.svg"); }
+.subtab[data-card="settings-card-vocabulary"]::before { background-image: url("icons/duotone-vocabulary.svg"); }
+#settings-card-vocabulary > .nexus-section-title::before { background-image: url("icons/duotone-vocabulary.svg"); }
+.subtab[data-card="settings-card-text-polish"]::before { background-image: url("icons/duotone-text-polish.svg"); }
+#settings-card-text-polish > .nexus-section-title::before { background-image: url("icons/duotone-text-polish.svg"); }
+.subtab[data-card="settings-card-models"]::before { background-image: url("icons/duotone-models.svg"); }
+#settings-card-models > .nexus-section-title::before { background-image: url("icons/duotone-models.svg"); }
+.subtab[data-card="meeting-settings-card"]::before { background-image: url("icons/duotone-meeting.svg"); }
+#meeting-settings-card > .nexus-section-title::before { background-image: url("icons/duotone-meeting.svg"); }
+.subtab[data-card="settings-card-privacy"]::before { background-image: url("icons/duotone-privacy.svg"); }
+#settings-card-privacy > .nexus-section-title::before { background-image: url("icons/duotone-privacy.svg"); }
+.subtab[data-card="settings-advanced"]::before { background-image: url("icons/duotone-advanced.svg"); }
+/* The Advanced heading is a summary that already carries the chevron in ::before: icon goes right after it */
+.settings-advanced > summary::before { order: -2; }
+.settings-advanced > summary::after {
+  content: "";
+  order: -1;
+  width: 16px;
+  height: 16px;
+  background: url("icons/duotone-advanced.svg") center / contain no-repeat;
+}

@@ -27,7 +27,7 @@ def run_js(body: str):
       querySelectorAll: () => [],
     };
     const window = { scrollTo: (x, y) => calls.push(["scrollTo", x, y]) };
-    for (const f of ["loadAnalytics", "loadFlaggedTranscriptions", "openRecordingsTab", "loadMeetingSettings",
+    for (const f of ["openAnalyticsTab", "loadFlaggedTranscriptions", "openRecordingsTab", "loadMeetingSettings",
       "loadReviewTranscriptions", "loadBenchmarks", "openExtensionPanel", "markActiveSubtab", "loadMicrophones"])
       globalThis[f] = (...args) => calls.push([f, ...args]);
     """

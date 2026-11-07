@@ -58,18 +58,21 @@ DEFAULT_OUT = _PROJECT_ROOT / "docs" / "images"
 SEED = 20260101
 VIEWPORT_WIDTH = 1280
 
-# (dashboard tab, file name, CSS selector of the elements to hide or None, window height or None). A tab without
-# a height is photographed in a viewport taller than the tab, and the empty strip below the last card is cut off,
-# so an image ends at the content. Analytics runs on for a long way (charts), so the page is served with the
-# elements after the last card to show hidden: the cut sits at an element, not at a guess. Settings is shot on
-# the page it opens on (Dictation), the one `.active` card; the other pages are not displayed, so nothing needs
-# hiding. The Recordings tab fills the window with its two panes, so it is photographed at a window's height.
+# (dashboard tab, file name, CSS selector of the elements to hide or None, window height or None, page of the tab
+# or ""). A tab without a height is photographed in a viewport taller than the tab, and the empty strip below the
+# last card is cut off, so an image ends at the content. A tab that runs on for a long way is served with the
+# elements after the last card to show hidden (the selector): the cut sits at an element, not at a guess.
+# Settings is shot on the page it opens on (Dictation), the one `.active` card; the other pages are not displayed,
+# so nothing needs hiding. Analytics is shot twice, on the Overview it opens on and on Your week (the tab hash
+# cannot carry a page, so the script switches the served copy of the page to it). The Recordings tab fills the
+# window with its two panes, so it is photographed at a window's height.
 VIEWPORT_HEIGHT = 4000
 SHOTS = (
-    ("home", "dashboard-home.png", None, None),  # the page the dashboard opens on
-    ("analytics", "dashboard-analytics.png", ".chart-card:has(#chart-latency) ~ *", None),  # up to the latency chart
-    ("recordings", "dashboard-recordings.png", None, 860),
-    ("settings", "dashboard-settings.png", None, None),  # the Dictation page, where Settings opens
+    ("home", "dashboard-home.png", None, None, ""),  # the page the dashboard opens on
+    ("analytics", "dashboard-analytics.png", None, None, ""),  # the Overview
+    ("analytics", "dashboard-analytics-week.png", None, None, "week"),
+    ("recordings", "dashboard-recordings.png", None, 860, ""),
+    ("settings", "dashboard-settings.png", None, None, ""),  # the Dictation page, where Settings opens
 )
 # The first-run setup, one image per step: (step name, step index). It is an overlay, so each is photographed with
 # the setup due (`setup_done` false) and the page told to show that step.
@@ -395,6 +398,7 @@ STILL_CSS = "<style>*, *::before, *::after { transition: none !important; animat
 CHART_SCRIPT = '<script src="chart.min.js"></script>'
 STILL_CHARTS = "<script>Chart.defaults.animation = false;</script>"
 _hide_css = ""  # the rule for the tab being photographed; set by `run` before each shot
+_tab_page = ""  # the page of the tab being photographed (Analytics > Your week); set by `run` before each shot
 _setup_step: int | None = None  # the setup step the page is told to show; set by `run` before each setup shot
 # Waits for the setup to open (it asks the server), shows the step and, on the hotkey step, a dictated test phrase.
 SETUP_SCRIPT = """<script>
@@ -413,6 +417,10 @@ document.addEventListener("DOMContentLoaded", () => {{
 </script>"""
 
 
+# Opens the tab's page: the tab reads it from the address when it opens, so it is set before the page runs.
+TAB_PAGE_SCRIPT = '<script>history.replaceState(null, "", location.hash + "/{page}");</script>'
+
+
 def _tab_style(selector: str | None) -> str:
     return f"<style>{selector} {{ display: none !important; }}</style>" if selector else ""
 
@@ -426,6 +434,8 @@ def _serve_still(response):
         html = response.get_data(as_text=True)
         html = html.replace(CHART_SCRIPT, CHART_SCRIPT + STILL_CHARTS, 1)
         html = html.replace("</head>", STILL_CSS + _hide_css + "</head>", 1)
+        if _tab_page:
+            html = html.replace("</head>", TAB_PAGE_SCRIPT.format(page=_tab_page) + "</head>", 1)
         if _setup_step is not None:
             html = html.replace("</body>", SETUP_SCRIPT.format(step=_setup_step) + "</body>", 1)
         response.set_data(html)
@@ -527,7 +537,7 @@ def _crop_to_content(target: Path, scale: float) -> None:
 
 
 def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
-    global _hide_css, _setup_step
+    global _hide_css, _setup_step, _tab_page
     browser_path = _find_browser(browser)
     _check_page_markers()
     out_dir = out_dir.resolve()  # before the working directory moves
@@ -587,15 +597,19 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
             stack.callback(thread.join, 5)
             stack.callback(server.shutdown)
 
-            for tab, filename, hide, height in SHOTS:
+            for tab, filename, hide, height, page in SHOTS:
                 _hide_css = _tab_style(hide)
+                _tab_page = page
                 url = f"http://127.0.0.1:{port}/?launch={guard.new_launch_secret()}&tab={tab}"
-                profile = data_dir / "browser-profile" / tab  # a fresh profile each time: no cookie carries over
+                profile = (
+                    data_dir / "browser-profile" / Path(filename).stem
+                )  # a fresh profile each time: no cookie carries over
                 target = staging / filename
                 _photograph(browser_path, url, target, profile, scale, height or VIEWPORT_HEIGHT)
                 if height is None:
                     _crop_to_content(target, scale)
 
+            _tab_page = ""
             config.setup_done = False  # the setup overlay opens by itself on the dashboard's first page
             _hide_css = ""
             for name, step in SETUP_SHOTS:

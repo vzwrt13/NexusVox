@@ -66,7 +66,7 @@
         <section class="home-panel" aria-labelledby="home-week-title">
           <div class="home-panel-head">
             <h3 id="home-week-title">This week</h3>
-            <a href="#analytics" class="home-link" data-home-go="analytics">Analytics</a>
+            <a href="#analytics/week" class="home-link" data-home-go="analytics/week">Your week</a>
           </div>
           <div class="home-week">
             <div class="home-week-stat">
@@ -621,6 +621,90 @@
 
     <!-- Analytics Tab -->
     <section id="tab-analytics" class="tab-content">
+      <h2 class="visually-hidden">Analytics</h2>
+      <div class="period-selector analytics-views" role="group" aria-label="Analytics view">
+        <button type="button" class="period-btn active" data-analytics-view="overview" aria-pressed="true">Overview</button>
+        <button type="button" class="period-btn" data-analytics-view="week" aria-pressed="false">Your week</button>
+      </div>
+
+      <!-- Overview: a short summary of a time range -->
+      <div id="analytics-overview" class="analytics-view">
+        <div class="filter-bar">
+          <div class="period-selector" role="group" aria-label="Time range">
+            <button type="button" class="period-btn" data-range="7" aria-pressed="false">7 days</button>
+            <button type="button" class="period-btn" data-range="14" aria-pressed="false">14 days</button>
+            <button type="button" class="period-btn active" data-range="30" aria-pressed="true">30 days</button>
+            <button type="button" class="period-btn" data-range="all" aria-pressed="false">All time</button>
+          </div>
+        </div>
+        <div class="stats-row">
+          <div class="stat-card">
+            <span class="stat-value" id="ov-words">--</span>
+            <span class="stat-label">Words dictated</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="ov-dictations">--</span>
+            <span class="stat-label">Dictations</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="ov-wpm">--</span>
+            <span class="stat-label">Words per minute</span>
+          </div>
+          <div class="stat-card accent">
+            <span class="stat-value" id="ov-saved">--</span>
+            <span class="stat-label">Time saved</span>
+          </div>
+        </div>
+        <div class="charts-grid">
+          <div class="chart-card wide">
+            <h3>Words per day</h3>
+            <p class="empty-state" id="ov-words-empty" hidden>No dictation in this time range.</p>
+            <div class="analytics-chart" id="ov-words-box"><canvas id="chart-words-per-day"></canvas></div>
+          </div>
+          <div class="chart-card wide">
+            <h3>Where you dictate</h3>
+            <ul class="app-bars" id="ov-apps" aria-label="Dictations per app"></ul>
+            <p class="empty-state" id="ov-apps-empty" hidden>No dictation in this time range.</p>
+          </div>
+        </div>
+        <p class="analytics-more"><a href="#analytics/charts" class="home-link" id="analytics-more-link">All charts and tables</a></p>
+      </div>
+
+      <!-- Your week: the report of one Monday-to-Sunday week -->
+      <div id="analytics-week" class="analytics-view" hidden>
+        <div class="week-switcher">
+          <button type="button" class="period-btn" id="week-prev" aria-label="Previous week">&#x2039;</button>
+          <span class="week-range" id="week-range" aria-live="polite">--</span>
+          <button type="button" class="period-btn" id="week-next" aria-label="Next week">&#x203a;</button>
+          <button type="button" class="link-btn" id="week-current">This week</button>
+        </div>
+        <p class="week-headline" id="week-headline"></p>
+        <div class="week-days" id="week-days" role="img" aria-label="Words dictated per day"></div>
+        <div class="stats-row">
+          <div class="stat-card">
+            <span class="stat-value" id="week-days-dictated">--</span>
+            <span class="stat-label">Days dictated</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="week-meetings">--</span>
+            <span class="stat-label" id="week-meetings-label">Meetings</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value" id="week-learned">--</span>
+            <span class="stat-label">Learned this week</span>
+          </div>
+        </div>
+        <div class="chart-card">
+          <h3>New in your dictionary</h3>
+          <p class="hint" id="week-learned-summary"></p>
+          <ul class="week-learned" id="week-learned-list"></ul>
+          <p class="empty-state" id="week-learned-empty" hidden>Nothing new in the dictionary this week.</p>
+        </div>
+      </div>
+
+      <!-- All charts and tables -->
+      <div id="analytics-charts" class="analytics-view" hidden>
+      <p class="analytics-more"><a href="#analytics" class="home-link" id="analytics-back-link">&#x2039; Back to overview</a></p>
       <div class="stats-row">
         <div class="stat-card">
           <span class="stat-value" id="stat-total">--</span>
@@ -815,6 +899,7 @@
           <h3>Activity Heatmap</h3>
           <div id="heatmap-container"></div>
         </div>
+      </div>
       </div>
     </section>
 

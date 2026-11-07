@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import date, timedelta
 
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
@@ -26,6 +27,37 @@ def get_transcriptions_over_time(
         rows = _apply_date_filter(query, start, end).group_by("period").order_by("period").all()
 
     return {"labels": [r.period for r in rows], "values": [r.count for r in rows]}
+
+
+def _day(value: str | None) -> date | None:
+    try:
+        return date.fromisoformat(value) if value else None
+    except ValueError:
+        return None
+
+
+def get_words_per_day(session_factory: sessionmaker, start: str | None = None, end: str | None = None) -> dict:
+    """Dictated words per local day, every day from `start` to `end` listed (0 for a day without dictation).
+
+    Without `start` the list begins on the first day with a dictation, without `end` it runs to today; an
+    unreadable bound counts as missing. Command rows are no dictation, so their label text is not counted.
+    """
+    local_day = func.strftime("%Y-%m-%d", Transcription.created_at, "localtime")
+    with session_factory() as session:
+        query = session.query(local_day, Transcription.text)
+        query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
+        rows = _apply_date_filter(query, start, end).all()
+
+    words: Counter[str] = Counter()
+    for day, text in rows:
+        words[day] += len(text.split())
+
+    first = _day(start) or (date.fromisoformat(min(words)) if words else None)
+    last = _day(end) or date.today()
+    if first is None or first > last:
+        return {"labels": [], "values": []}
+    labels = [(first + timedelta(days=n)).isoformat() for n in range((last - first).days + 1)]
+    return {"labels": labels, "values": [words[label] for label in labels]}
 
 
 def get_language_distribution(

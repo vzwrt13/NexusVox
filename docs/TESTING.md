@@ -80,6 +80,8 @@ tests/
 ├── test_db.py                     # Database CRUD operations
 ├── test_analytics.py              # Dashboard analytics queries
 ├── test_analytics_exports.py      # Every name dashboard.analytics has to keep exporting
+├── test_analytics_js.py           # The Analytics views: markup, address, week and date helpers (Node)
+├── test_analytics_week.py         # The weekly report and the words-per-day series
 ├── test_dashboard_api.py          # Flask API endpoint integration tests
 ├── test_dashboard_routes.py       # Every routes_*.py module is registered
 ├── test_transcriber.py            # Transcriber ABC, factory, and implementations
@@ -117,6 +119,8 @@ tests/
 | `test_db.py` | `storage/db.py` | Save, retrieve, flag, correct transcriptions; empty database edge cases |
 | `test_analytics.py` | `dashboard/analytics_*.py` | Overview stats, word counting, time grouping, heatmap shape, date filtering |
 | `test_analytics_exports.py` | `dashboard/analytics.py` | The names `nexusvox.dashboard.analytics` must keep exporting |
+| `test_analytics_week.py` | `dashboard/analytics_week.py`, `analytics_usage.get_words_per_day` | Week boundaries (Monday to Sunday), words per day, meetings, new dictionary entries, the headline, the endpoints |
+| `test_analytics_js.py` | `static/dashboard-analytics.js` | The three Analytics views in the markup, the view in the address, week and date helpers |
 | `test_dashboard_routes.py` | `dashboard/__init__.py`, `dashboard/routes_*.py` | Every topic module's routes reach the app |
 | `test_dashboard_api.py` | `dashboard/routes_*.py` | All `/api/*` HTTP endpoints return correct status codes and JSON shape |
 | `test_transcriber.py` | `transcription/transcriber.py` | BaseTranscriber ABC, factory function, VoxtralRealtimeTranscriber (the custom realtime client), OpenAIHttpTranscriber |

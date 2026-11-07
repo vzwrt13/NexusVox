@@ -1,6 +1,275 @@
-/* NexusVox Dashboard — Analytics tab: period selector, charts, tables */
+/* NexusVox Dashboard — Analytics tab: Overview, Your week, and the page of all charts and tables */
 
-// ── Period Selector ──────────────────────────────────────────────────
+// ── Views ────────────────────────────────────────────────────────────
+// Three views share the tab: the short Overview (the one it opens on), the weekly report "Your week" and the
+// page of every chart and table. The view is kept in the URL (#analytics/week), like the Settings pages.
+const ANALYTICS_VIEWS = ["overview", "week", "charts"];
+let analyticsView = "overview";
+
+function analyticsViewHash() {
+  return "#analytics" + (analyticsView === "overview" ? "" : "/" + analyticsView);
+}
+
+// The view a URL names ("#analytics/week"); "#analytics" alone is the Overview.
+function analyticsViewFromHash() {
+  const [tab, page] = window.location.hash.replace(/^#/, "").split("/");
+  if (tab !== "analytics") return analyticsView;
+  return ANALYTICS_VIEWS.includes(page) ? page : "overview";
+}
+
+function showAnalyticsView(view) {
+  analyticsView = view;
+  for (const name of ANALYTICS_VIEWS) document.getElementById("analytics-" + name).hidden = name !== view;
+  document.querySelectorAll("[data-analytics-view]").forEach((btn) => {
+    const on = btn.dataset.analyticsView === view;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", String(on));
+  });
+  if (view === "overview") loadAnalyticsOverview();
+  if (view === "week") loadWeek();
+  if (view === "charts") loadAnalytics();
+}
+
+function openAnalyticsTab() {
+  showAnalyticsView(analyticsViewFromHash());
+}
+
+function chooseAnalyticsView(view) {
+  showAnalyticsView(view);
+  history.replaceState(null, "", analyticsViewHash());
+  window.scrollTo(0, 0);
+}
+
+document.querySelectorAll("[data-analytics-view]").forEach((btn) => {
+  btn.addEventListener("click", () => chooseAnalyticsView(btn.dataset.analyticsView));
+});
+
+for (const [id, view] of [["analytics-more-link", "charts"], ["analytics-back-link", "overview"]]) {
+  document.getElementById(id).addEventListener("click", (e) => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) return; // the browser opens the href in a new tab
+    e.preventDefault();
+    chooseAnalyticsView(view);
+  });
+}
+
+// ── Overview ─────────────────────────────────────────────────────────
+// localIsoDate and formatSavedMinutes are Home's (dashboard-home.js loads later; they are used only when a
+// view opens).
+let overviewRange = "30"; // "7", "14", "30" or "all"
+let overviewRequest = 0; // a slow answer for an earlier range must not overwrite a later one
+
+function overviewQuery() {
+  if (overviewRange === "all") return "";
+  const end = new Date();
+  const start = new Date(end.getFullYear(), end.getMonth(), end.getDate() - (Number(overviewRange) - 1));
+  return "?" + new URLSearchParams({ start: localIsoDate(start), end: localIsoDate(end) });
+}
+
+document.querySelectorAll("[data-range]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    overviewRange = btn.dataset.range;
+    document.querySelectorAll("[data-range]").forEach((b) => {
+      b.classList.toggle("active", b === btn);
+      b.setAttribute("aria-pressed", String(b === btn));
+    });
+    loadAnalyticsOverview();
+  });
+});
+
+async function loadAnalyticsOverview() {
+  const request = ++overviewRequest;
+  const query = overviewQuery();
+  try {
+    const [overview, perDay, apps] = await Promise.all([
+      fetch("/api/overview" + query).then((r) => r.json()),
+      fetch("/api/words-per-day" + query).then((r) => r.json()),
+      fetch("/api/app-breakdown" + query).then((r) => r.json()),
+    ]);
+    if (request !== overviewRequest) return;
+    renderAnalyticsOverview(overview, perDay, apps);
+  } catch (err) {
+    console.error("Could not load the analytics overview:", err);
+  }
+}
+
+function renderAnalyticsOverview(overview, perDay, apps) {
+  document.getElementById("ov-words").textContent = (overview.total_words || 0).toLocaleString();
+  document.getElementById("ov-dictations").textContent = (overview.total_transcriptions || 0).toLocaleString();
+  document.getElementById("ov-wpm").textContent = overview.avg_wpm ? Math.round(overview.avg_wpm) : "--";
+  document.getElementById("ov-saved").textContent = formatSavedMinutes(overview.time_saved_minutes);
+  renderWordsPerDay(perDay);
+  renderAppBars(apps);
+}
+
+// "2026-11-03" -> a Date on that local day (new Date("2026-11-03") would be UTC midnight).
+function parseIsoDate(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function formatShortDate(iso) {
+  return parseIsoDate(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function renderWordsPerDay(d) {
+  if (charts.wordsPerDay) charts.wordsPerDay.destroy();
+  charts.wordsPerDay = null;
+  const empty = !d.values.some((v) => v > 0);
+  document.getElementById("ov-words-empty").hidden = !empty;
+  document.getElementById("ov-words-box").hidden = empty;
+  if (empty || !window.Chart) return;
+  const ctx = document.getElementById("chart-words-per-day").getContext("2d");
+  charts.wordsPerDay = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: d.labels.map(formatShortDate),
+      datasets: [{ data: d.values, backgroundColor: COLORS.accent, borderRadius: 4 }],
+    },
+    options: {
+      ...chartDefaults,
+      plugins: {
+        ...chartDefaults.plugins,
+        tooltip: { callbacks: { label: (c) => c.parsed.y.toLocaleString() + " words" } },
+      },
+    },
+  });
+}
+
+// The five busiest apps as bars of their dictations. The table of every app is on the charts page.
+const OVERVIEW_APP_ROWS = 5;
+
+function renderAppBars(rows) {
+  const list = document.getElementById("ov-apps");
+  list.replaceChildren();
+  document.getElementById("ov-apps-empty").hidden = rows.length > 0;
+  const shown = rows.slice(0, OVERVIEW_APP_ROWS);
+  const most = Math.max(...shown.map((r) => r.count), 1);
+  for (const row of shown) {
+    const li = document.createElement("li");
+    li.className = "app-bar";
+    const name = document.createElement("span");
+    name.className = "app-bar-name";
+    name.textContent = row.app;
+    const track = document.createElement("span");
+    track.className = "app-bar-track";
+    const fill = document.createElement("span");
+    fill.className = "app-bar-fill";
+    fill.style.width = Math.max((row.count * 100) / most, 2) + "%";
+    track.append(fill);
+    const count = document.createElement("span");
+    count.className = "app-bar-count";
+    count.textContent = row.count.toLocaleString();
+    li.append(name, track, count);
+    list.append(li);
+  }
+}
+
+// ── Your week ────────────────────────────────────────────────────────
+let weekMonday = null; // the shown week's Monday as an ISO date; null is the current week
+let weekRequest = 0;
+
+function addDaysIso(iso, days) {
+  const d = parseIsoDate(iso);
+  d.setDate(d.getDate() + days);
+  return localIsoDate(d);
+}
+
+// The Monday of the week an ISO date is in.
+function mondayOfIso(iso) {
+  return addDaysIso(iso, -((parseIsoDate(iso).getDay() + 6) % 7));
+}
+
+function formatWeekRange(start, end) {
+  return `${formatShortDate(start)} – ${formatShortDate(end)} ${parseIsoDate(end).getFullYear()}`;
+}
+
+async function loadWeek() {
+  const request = ++weekRequest;
+  try {
+    const week = await fetch("/api/week" + (weekMonday ? "?week=" + weekMonday : "")).then((r) => r.json());
+    if (request !== weekRequest) return;
+    weekMonday = week.is_current ? null : week.start;
+    renderWeek(week);
+  } catch (err) {
+    console.error("Could not load the weekly report:", err);
+  }
+}
+
+function renderWeekDays(days) {
+  const box = document.getElementById("week-days");
+  box.replaceChildren();
+  box.setAttribute("aria-label", "Words dictated per day: " + days.map((d) => `${d.weekday} ${d.words}`).join(", "));
+  const most = Math.max(...days.map((d) => d.words), 1);
+  for (const day of days) {
+    const col = document.createElement("div");
+    col.className = "week-day";
+    const value = document.createElement("span");
+    value.className = "week-day-value";
+    value.textContent = day.words ? day.words.toLocaleString() : "";
+    const plot = document.createElement("span");
+    plot.className = "week-day-plot";
+    const bar = document.createElement("span");
+    bar.className = "week-day-bar";
+    bar.style.height = (day.words ? Math.max((day.words * 100) / most, 3) : 0) + "%";
+    plot.append(bar);
+    const name = document.createElement("span");
+    name.className = "week-day-name";
+    name.textContent = day.weekday;
+    col.append(value, plot, name);
+    box.append(col);
+  }
+}
+
+function renderWeek(week) {
+  document.getElementById("week-range").textContent = formatWeekRange(week.start, week.end);
+  document.getElementById("week-prev").disabled = !week.first_week || week.start <= week.first_week;
+  document.getElementById("week-next").disabled = week.is_current;
+  document.getElementById("week-current").hidden = week.is_current;
+  document.getElementById("week-headline").textContent = week.headline;
+  renderWeekDays(week.days);
+
+  document.getElementById("week-days-dictated").textContent = `${week.days_dictated} of ${week.days.length}`;
+  const meetings = week.meetings;
+  document.getElementById("week-meetings").textContent = meetings.count;
+  document.getElementById("week-meetings-label").textContent =
+    "Meetings" + (meetings.count ? ` (${formatSavedMinutes(meetings.minutes)} recorded)` : "");
+
+  const learned = week.learned;
+  document.getElementById("week-learned").textContent = learned.entries_total;
+  const accepted = learned.suggestions_accepted;
+  document.getElementById("week-learned-summary").textContent = accepted
+    ? `${accepted} ${accepted === 1 ? "suggestion" : "suggestions"} from your edits accepted.`
+    : "";
+  document.getElementById("week-learned-empty").hidden = learned.entries_total > 0;
+  const list = document.getElementById("week-learned-list");
+  list.replaceChildren();
+  for (const entry of learned.entries) {
+    const li = document.createElement("li");
+    li.textContent = `${entry.wrong} → ${entry.right}`;
+    list.append(li);
+  }
+  if (learned.entries_total > learned.entries.length) {
+    const li = document.createElement("li");
+    li.className = "week-learned-more";
+    li.textContent = `and ${learned.entries_total - learned.entries.length} more`;
+    list.append(li);
+  }
+}
+
+function showWeek(monday) {
+  weekMonday = monday;
+  loadWeek();
+}
+
+document.getElementById("week-prev").addEventListener("click", () => {
+  showWeek(addDaysIso(weekMonday || mondayOfIso(localIsoDate(new Date())), -7));
+});
+document.getElementById("week-next").addEventListener("click", () => {
+  if (weekMonday) showWeek(addDaysIso(weekMonday, 7));
+});
+document.getElementById("week-current").addEventListener("click", () => showWeek(null));
+
+// ── All charts: period selector ──────────────────────────────────────
 document.querySelectorAll(".period-btn[data-period]").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".period-btn[data-period]").forEach((b) => b.classList.remove("active"));

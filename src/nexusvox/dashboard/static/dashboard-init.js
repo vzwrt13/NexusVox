@@ -26,6 +26,6 @@ document.addEventListener("DOMContentLoaded", () => {
   featuresReady = loadFeatures();
   // Before the tab loaders: extensions and the hash live in core, so a tab file that failed cannot take them along.
   Promise.all([featuresReady, loadExtensions()]).then(restoreTabFromHash);
-  loadSettings();
+  settingsReady = loadSettings();
   loadMeetingSettings();
 });

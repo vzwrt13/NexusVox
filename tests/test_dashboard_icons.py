@@ -11,7 +11,7 @@ STATIC = ROOT / "src" / "nexusvox" / "dashboard" / "static"
 def test_every_icon_in_the_stylesheets_exists():
     css = "".join(path.read_text(encoding="utf-8") for path in STATIC.glob("*.css"))
     icons = set(re.findall(r'url\("(icons/[^"]+\.svg)"\)', css))
-    assert len(icons) == 14
+    assert len(icons) == 15
     for icon in icons:
         assert (STATIC / icon).is_file(), icon
 

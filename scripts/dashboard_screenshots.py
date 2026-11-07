@@ -3,7 +3,7 @@
     python scripts/dashboard_screenshots.py [--out docs/images] [--browser PATH] [--scale 1.5]
 
 The script starts the real dashboard against a temporary data folder that it fills with invented
-dictations, meetings and uploads, and photographs the Analytics, Recordings and Settings tabs
+dictations, meetings and uploads, and photographs the Home, Analytics, Recordings and Settings tabs
 with a headless Chromium browser (Microsoft Edge or Google Chrome, whichever is installed; no extra
 package). The dashboard has one theme, dark, so there is one image per tab.
 
@@ -18,7 +18,7 @@ What stays out of the picture and out of reach:
 * The network. The browser runs with a throwaway profile, no sync or update traffic, and every host
   except 127.0.0.1 unresolvable.
 
-The images are written to a staging folder first and copied into --out only when all four succeeded, so a
+The images are written to a staging folder first and copied into --out only when all of them succeeded, so a
 failed run never leaves a mix of old and new images.
 
 Run twice, the images differ only where the clock shows. The demo data is the same on every day (one fixed
@@ -66,6 +66,7 @@ VIEWPORT_WIDTH = 1280
 # hiding. The Recordings tab fills the window with its two panes, so it is photographed at a window's height.
 VIEWPORT_HEIGHT = 4000
 SHOTS = (
+    ("home", "dashboard-home.png", None, None),  # the page the dashboard opens on
     ("analytics", "dashboard-analytics.png", ".chart-card:has(#chart-latency) ~ *", None),  # up to the latency chart
     ("recordings", "dashboard-recordings.png", None, 860),
     ("settings", "dashboard-settings.png", None, None),  # the Dictation page, where Settings opens

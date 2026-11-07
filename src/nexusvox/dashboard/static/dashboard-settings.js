@@ -66,12 +66,17 @@ function renderHotkeyHint(mode, modifiers, key) {
   );
 }
 
-function renderKeycaps(modifiers, key) {
-  hotkeyKeycaps.replaceChildren();
+// Draws a hotkey as keycaps (Ctrl + Win) into `el`: the Settings and Meetings editors and the Home card share it.
+function renderKeycapsInto(el, modifiers, key) {
+  el.replaceChildren();
   describeHotkey(modifiers, key).split("+").forEach((name, i) => {
-    if (i) hotkeyKeycaps.append(Object.assign(document.createElement("span"), { className: "keycaps-plus", textContent: "+" }));
-    hotkeyKeycaps.append(Object.assign(document.createElement("kbd"), { textContent: name }));
+    if (i) el.append(Object.assign(document.createElement("span"), { className: "keycaps-plus", textContent: "+" }));
+    el.append(Object.assign(document.createElement("kbd"), { textContent: name }));
   });
+}
+
+function renderKeycaps(modifiers, key) {
+  renderKeycapsInto(hotkeyKeycaps, modifiers, key);
 }
 
 function isDefaultHotkey(modifiers, key) {
@@ -303,6 +308,7 @@ hotkeyResetBtn.addEventListener("click", () => {
 
 async function loadSettings() {
   const s = await api("/api/settings");
+  lastSettings = s;
   translateToggle.checked = s.translate_enabled;
   hotkeyModeSelect.value = s.hotkey_mode;
   renderHotkey(s);

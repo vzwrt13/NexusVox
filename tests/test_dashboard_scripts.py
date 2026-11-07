@@ -23,6 +23,7 @@ ORDER = [
     "dashboard-upload.js",
     "dashboard-meetings.js",
     "dashboard-recordings.js",
+    "dashboard-home.js",
     "dashboard-dev.js",
     "dashboard-init.js",
 ]

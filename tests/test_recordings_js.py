@@ -39,6 +39,10 @@ const setStatus = () => {};
 for (const f of ["openExtensionPanel", "loadPendingMeetings", "openMeetingRecording", "refreshDiarizeToggle",
   "resumeUploadJob", "activateTab", "downloadExport", "runUploadAction"]) globalThis[f] = () => {};
 const loadLlmStatus = () => Promise.resolve();
+const pushed = [];
+const pushPage = (hash) => pushed.push(hash);
+const replaceHash = (hash) => pushed.push("replace " + hash);
+const window = { location: { hash: "" } };
 """
 
 ROWS = [
@@ -347,10 +351,28 @@ def test_show_transcript_switches_to_the_transcript_tab_and_marks_the_passage():
         d._editing = true;
         d._lines = transcriptLines(ROWS[0].text, [{start: 750, end: 760}, {start: 764, end: 770}], "meeting");
         showRecording(7, { mark: { start: 765, end: 766 } }).then((found) => {
-          out([found, recChosenTab, recMark.start, recMark.id, opened, recItems.length]);
+          out([found, recChosenTab, recMark.start, recMark.id, opened, recItems.length, pushed]);
         });"""
     )
-    assert result == [True, "transcript", 765, "7", ["recordings"], 2]
+    # Opening a recording from elsewhere is a history step of its own.
+    assert result == [True, "transcript", 765, "7", ["recordings"], 2, ["#recordings/7"]]
+
+
+def test_a_recording_restored_from_history_adds_no_step_and_choosing_one_in_the_list_drops_the_id():
+    result = run_recordings(
+        DETAIL
+        + """replies.set(LIST_URL, ROWS);
+        const opened = []; activateTab = (...args) => opened.push(args[0]);
+        const d = makeDetail(ROWS[0]);
+        d._editing = true; // a pane being edited is kept, so no detail has to be drawn
+        showRecording(7, { push: false }).then((found) => {
+          window.location.hash = "#recordings/7";
+          renderSelectedRecording = () => {}; // the pane is not under test here
+          selectRecording(3);
+          out([found, recSelectedId, pushed]);
+        });"""
+    )
+    assert result == [True, "3", ["replace #recordings"]]
 
 
 def test_show_transcript_of_an_unknown_recording_leaves_the_page_alone():
@@ -358,10 +380,10 @@ def test_show_transcript_of_an_unknown_recording_leaves_the_page_alone():
         DETAIL
         + """replies.set(LIST_URL, ROWS);
         const opened = []; activateTab = (...args) => opened.push(args[0]);
-        let hash = 0; history.replaceState = () => { hash += 1; };
+        pushed.length = 0;
         recChosenTab = "speakers";
         showRecording(42, { mark: { text: "beta" } }).then((found) => {
-          out([found, opened, hash, recChosenTab, recMark, recItems.length]);
+          out([found, opened, pushed.length, recChosenTab, recMark, recItems.length]);
         });"""
     )
     assert result == [False, [], 0, "speakers", None, 0]

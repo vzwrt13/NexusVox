@@ -193,7 +193,8 @@ const byId = { "settings-search": input, "settings-no-match": noMatch, "tab-sett
 allCards.forEach((c) => (byId[c.id] = c));
 const slugs = ["dictation", "vocabulary", "advanced"];
 const links = allCards.map((c, i) => new Node("A", [], { dataset: { card: c.id, page: slugs[i] } }));
-const history = { url: null, replaceState: (a, b, url) => { history.url = url; } };
+const history = { url: null };
+const pushPage = (url) => { history.url = url; }; // the real one is tested in test_dashboard_history_js.py
 const document = { getElementById: (id) => byId[id],
   querySelectorAll: (sel) => (sel === "#settings-nav .settings-link" ? links : allCards) };
 const hiddenState = () => Object.fromEntries(allCards.map((c) => [c.id, c.cls.has("search-hidden")]));

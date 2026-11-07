@@ -127,10 +127,41 @@ async function api(path) {
 // ── Tab Switching ────────────────────────────────────────────────────
 // The active tab is mirrored into the URL hash (e.g. "#analytics") so a page
 // refresh, bookmark, or back/forward navigation lands on the same tab.
+// Every step the user takes (a tab, a Settings page, an Analytics view, a recording opened from elsewhere) adds
+// one history entry through `pushPage`; the hashchange that Back and Forward fire opens the page again
+// (`restoreTabFromHash`). A hash that only corrects itself (an alias, a missing recording) goes through `replaceHash`.
 // Every switch opens the tab at the top; only a deliberate jump (`keepScroll`, e.g. the "Meeting settings"
 // link) scrolls on its own afterwards. The Meetings and Upload tabs became the Recordings tab: their old
 // names (bookmarks, the tray's link) open it.
 const TAB_ALIASES = { meetings: "recordings", upload: "recordings" };
+
+// No hash is the Home tab.
+function samePage(a, b) {
+  return (a || "#home") === (b || "#home");
+}
+
+function replaceHash(hash) {
+  history.replaceState(history.state, "", hash); // keeps the entry's marker, so a reload does not guard again
+}
+
+// Back on the first page would leave the dashboard. Once the user has acted on the page (an entry added without
+// a gesture is skipped by the browser's Back button), the first entry becomes a marker and a copy of it takes its
+// place: Back lands on the marker, and the popstate handler in dashboard-init.js steps forward again. A reload
+// keeps the marker, so it is added once per tab.
+let historyGuarded = false;
+function guardHistory() {
+  if (historyGuarded) return;
+  historyGuarded = true;
+  if (history.state && history.state.nv) return;
+  history.replaceState({ nv: "start" }, "", window.location.href);
+  history.pushState({ nv: "page" }, "", window.location.href);
+}
+
+function pushPage(hash) {
+  if (samePage(window.location.hash, hash)) return;
+  guardHistory();
+  history.pushState({ nv: "page" }, "", hash);
+}
 
 function activateTab(name, { keepScroll = false } = {}) {
   name = TAB_ALIASES[name] || name;
@@ -162,7 +193,7 @@ function bindTab(btn) {
   btn.addEventListener("click", () => {
     const name = btn.dataset.tab;
     const hash = name === "analytics" ? analyticsViewHash() : name === "settings" ? settingsPageHash() : "#" + name;
-    if (window.location.hash !== hash) history.replaceState(null, "", hash);
+    pushPage(hash);
     activateTab(name);
   });
 }
@@ -278,10 +309,16 @@ function restoreTabFromHash() {
   }
   // A hash for a tab that is off (an experimental one, or an extension that is gone) must not stay in the URL.
   if (!activateTab(name)) {
-    history.replaceState(null, "", window.location.pathname + window.location.search);
+    replaceHash(window.location.pathname + window.location.search);
     activateTab("home");
-  } else if (TAB_ALIASES[name]) history.replaceState(null, "", "#" + TAB_ALIASES[name]);
+  } else if (TAB_ALIASES[name]) replaceHash("#" + TAB_ALIASES[name]);
   else if (name === "settings" && page) showSettingsPageBySlug(page);
+  else if (name === "recordings" && page) {
+    // "#recordings/12": that recording, as opened from elsewhere. One that is gone leaves the plain tab.
+    showRecording(decodeURIComponent(page), { push: false }).then((found) => {
+      if (!found) replaceHash("#recordings");
+    });
+  }
 }
 
 

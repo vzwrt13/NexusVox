@@ -21,6 +21,11 @@ async function loadFeatures() {
 // The tabs go live here, not in core: by now every file their handlers call has run.
 document.querySelectorAll(".tab").forEach(bindTab);
 window.addEventListener("hashchange", restoreTabFromHash);
+// Back on the first page: see guardHistory. The marker entry steps forward at once, so the page stays put.
+window.addEventListener("popstate", (e) => {
+  if (e.state && e.state.nv === "start") history.forward();
+});
+for (const type of ["pointerdown", "keydown"]) document.addEventListener(type, guardHistory, { capture: true });
 
 document.addEventListener("DOMContentLoaded", () => {
   featuresReady = loadFeatures();

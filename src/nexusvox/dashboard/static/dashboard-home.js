@@ -182,7 +182,7 @@ function openHomeTab() {
 // ── Actions ──────────────────────────────────────────────────────────
 // `name` may carry a page after the tab ("analytics/week"); the tab reads the page from the URL.
 function goToTab(name) {
-  history.replaceState(null, "", "#" + name);
+  pushPage("#" + name);
   return activateTab(name.split("/")[0]);
 }
 

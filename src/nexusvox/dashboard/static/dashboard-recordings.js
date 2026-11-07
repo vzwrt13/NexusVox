@@ -345,6 +345,8 @@ recSearch.addEventListener("input", () => {
 
 function selectRecording(id) {
   recSelectedId = String(id);
+  // A recording chosen in the list is not what "#recordings/<id>" names any more: a reload must not jump back.
+  if (window.location.hash.startsWith("#recordings/")) replaceHash("#recordings");
   markSelectedRow();
   renderSelectedRecording(false);
 }
@@ -1070,7 +1072,8 @@ async function showRecording(id, options = {}) {
   recSelectedId = String(item.id);
   if (!matchesRecordingSearch(item, recSearch.value.trim().toLowerCase())) recSearch.value = "";
   applyRecordingRows(rows, false);
-  history.replaceState(null, "", "#recordings");
+  // Its own history step; Back and Forward restore it (restoreTabFromHash passes push: false).
+  if (!options || options.push !== false) pushPage("#recordings/" + encodeURIComponent(item.id));
   // Opening the tab starts a load of its own, which makes any load still in flight stale (it drops its answer),
   // and keeps this recording chosen. Until it answers, the rows fetched here are what the tab shows.
   activateTab("recordings", { keepScroll: true });

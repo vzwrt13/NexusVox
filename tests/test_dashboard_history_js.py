@@ -6,8 +6,7 @@ import shutil
 import subprocess
 
 import pytest
-
-from tests.dashboard_js import STATIC, dashboard_source
+from dashboard_js import STATIC, dashboard_source
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
 

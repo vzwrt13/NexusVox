@@ -2,6 +2,10 @@
 
 Dictated and transcribed text is wrapped in `Text` where it is logged. The console prints it in full; the
 file shortens it (first characters plus the length) unless `[general].log_full_text` is on.
+
+Either way the file fences what came from a `Text` between two private-use characters (`TEXT_START`,
+`TEXT_END`), so a log report can cut it out again whether it is shortened or whole. Every start of the app, and
+every rollover, writes `LOG_FORMAT_MARK`: a file part before the last mark may predate the fences and is never sent.
 """
 
 from __future__ import annotations
@@ -17,20 +21,30 @@ from pathlib import Path
 LOG_FILE_NAME = "nexusvox.log"
 KEEP_DAYS = 7
 SHORT_TEXT_CHARS = 20
+TEXT_START = ""
+TEXT_END = ""
+LOG_FORMAT_MARK = "Log started: dictated text is fenced for log reports"
 
 
 class Text(str):
     """Spoken or transcribed text passed as a log argument; the file log shortens it."""
 
 
-class _Shortened(str):
-    """What the file log shows for a `Text`: the same for %s and %r."""
+class _Fenced(str):
+    """What the file log shows for a `Text`, between the fences: the same shape for %s and %r."""
+
+    _repr: str
+
+    def __new__(cls, shown: str, as_repr: str) -> _Fenced:
+        obj = super().__new__(cls, TEXT_START + shown + TEXT_END)
+        obj._repr = TEXT_START + as_repr + TEXT_END
+        return obj
 
     def __str__(self) -> str:
         return str.__str__(self)
 
     def __repr__(self) -> str:
-        return str.__str__(self)
+        return self._repr
 
 
 def shorten(text: str) -> str:
@@ -40,9 +54,9 @@ def shorten(text: str) -> str:
 
 
 class ShortenTextFormatter(logging.Formatter):
-    """Formats a copy of the record with every `Text` argument shortened, unless full text is wanted.
+    """Formats a copy of the record with every `Text` argument fenced, and shortened unless full text is wanted.
 
-    A copy, because the record is shared with the console handler, which keeps the full text.
+    A copy, because the record is shared with the console handler, which keeps the original arguments.
     """
 
     def __init__(self, fmt: str, full_text: Callable[[], bool]) -> None:
@@ -50,18 +64,22 @@ class ShortenTextFormatter(logging.Formatter):
         self._full_text = full_text
 
     def format(self, record: logging.LogRecord) -> str:
-        if self._full_text() or not record.args:
+        if not record.args:
             return super().format(record)
-        shortened = copy.copy(record)
+        full = self._full_text()
+        fenced = copy.copy(record)
         if isinstance(record.args, dict):
-            shortened.args = {k: _short(v) for k, v in record.args.items()}
+            fenced.args = {k: _fence(v, full) for k, v in record.args.items()}
         else:
-            shortened.args = tuple(_short(v) for v in record.args)
-        return super().format(shortened)
+            fenced.args = tuple(_fence(v, full) for v in record.args)
+        return super().format(fenced)
 
 
-def _short(value: object) -> object:
-    return _Shortened(shorten(value)) if isinstance(value, Text) else value
+def _fence(value: object, full: bool) -> object:
+    if not isinstance(value, Text):
+        return value
+    text = str.__str__(value).replace(TEXT_START, "").replace(TEXT_END, "")  # the fences stay unambiguous
+    return _Fenced(text, repr(text)) if full else _Fenced(shorten(text), shorten(text))
 
 
 def log_dir() -> Path:
@@ -96,7 +114,16 @@ class _DailyFileHandler(TimedRotatingFileHandler):
             super().doRollover()
         except OSError:
             self.rolloverAt = self.computeRollover(int(time.time()))
+        else:
+            self.write_format_mark()  # the new file starts with the mark too
         delete_old_logs(Path(self.baseFilename).parent)
+
+    def write_format_mark(self) -> None:
+        self.emit(
+            logging.makeLogRecord(
+                {"name": __name__, "msg": LOG_FORMAT_MARK, "levelno": logging.INFO, "levelname": "INFO"}
+            )
+        )
 
 
 def setup_file_logging(
@@ -113,4 +140,5 @@ def setup_file_logging(
     handler.setLevel(level)
     handler.setFormatter(ShortenTextFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", full_text))
     logging.getLogger().addHandler(handler)
+    handler.write_format_mark()
     return directory / LOG_FILE_NAME

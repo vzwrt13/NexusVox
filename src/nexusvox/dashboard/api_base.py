@@ -48,6 +48,8 @@ class DashboardState:
 
     # Defined by `SettingsMixin`.
     get_settings: Callable[[], dict]
+    # The report the Feedback tab last previewed: (token, (kind, message, include_log), url, report).
+    _feedback_preview: tuple[str, tuple, str, dict[str, str]] | None = None
 
     # Defined by `FilesMixin`.
     _store_file_transcription: Callable[..., dict]

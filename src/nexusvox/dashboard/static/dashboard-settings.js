@@ -11,10 +11,6 @@ const logOpenError = document.getElementById("log-open-error");
 const logDirLabel = document.getElementById("log-dir");
 const feedbackTabButton = document.getElementById("feedback-tab-button");
 const feedbackPanel = document.getElementById("tab-feedback");
-const feedbackLogDirLabel = document.getElementById("feedback-log-dir");
-const feedbackLogError = document.getElementById("feedback-log-error");
-const openLogFolderFeedbackButton = document.getElementById("open-log-folder-feedback");
-const sendFeedbackButton = document.getElementById("send-feedback");
 let feedbackUrl = "";
 const learnFromEditsToggle = document.getElementById("learn-from-edits-toggle");
 const hotkeyModeHint = document.getElementById("hotkey-mode-hint");
@@ -195,9 +191,6 @@ async function loadTranslatorStatus() {
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 storeAudioToggle.addEventListener("change", () => postSetting("/api/settings/store-audio", { enabled: storeAudioToggle.checked }));
 logFullTextToggle.addEventListener("change", () => postSetting("/api/settings/log-full-text", { enabled: logFullTextToggle.checked }));
-sendFeedbackButton.addEventListener("click", () => {
-  if (feedbackUrl) window.open(feedbackUrl, "_blank", "noopener,noreferrer");
-});
 async function openLogFolder(errorLine) {
   errorLine.hidden = true;
   try {
@@ -209,7 +202,6 @@ async function openLogFolder(errorLine) {
   }
 }
 openLogFolderButton.addEventListener("click", () => openLogFolder(logOpenError));
-openLogFolderFeedbackButton.addEventListener("click", () => openLogFolder(feedbackLogError));
 learnFromEditsToggle.addEventListener("change", async () => {
   await postSetting("/api/settings/learn-from-edits", { enabled: learnFromEditsToggle.checked });
   loadLearnStatus();
@@ -333,10 +325,10 @@ async function loadSettings() {
   storeAudioToggle.checked = s.store_audio;
   logFullTextToggle.checked = s.log_full_text;
   logDirLabel.textContent = s.log_dir;
-  feedbackLogDirLabel.textContent = s.log_dir;
   feedbackUrl = s.feedback_url || "";
   feedbackTabButton.hidden = !feedbackUrl;
   feedbackPanel.hidden = !feedbackUrl;
+  applyFeedbackAvailability(s);
   learnFromEditsToggle.checked = s.learn_from_edits;
   loadLearnStatus();
   polishTerminalsToggle.checked = s.polish_in_terminals;

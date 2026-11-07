@@ -10,6 +10,7 @@ import time
 from ctypes import wintypes
 
 from .keyboard import wait_for_physical_release
+from .logsetup import Text
 
 logger = logging.getLogger("nexusvox.window_manager")
 
@@ -269,10 +270,10 @@ def close_app(app_name: str, exe_path: str) -> None:
     """Close an application gracefully via WM_CLOSE, falling back to taskkill."""
     hwnd = find_window(app_name, exe_path)
     if not hwnd:
-        logger.warning("close_app: no window found for '%s'", app_name)
+        logger.warning("close_app: no window found for '%s'", Text(app_name))
         return
 
-    logger.info("Closing '%s' (hwnd=%s) via WM_CLOSE", app_name, hex(hwnd))
+    logger.info("Closing '%s' (hwnd=%s) via WM_CLOSE", Text(app_name), hex(hwnd))
     user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
 
     # Give the app time to close gracefully
@@ -293,7 +294,7 @@ def focus_app(app_name: str, exe_path: str | None = None) -> bool:
     """Bring an app's window to the foreground."""
     hwnd = find_window(app_name, exe_path)
     if not hwnd:
-        logger.warning("focus_app: no window found for '%s'", app_name)
+        logger.warning("focus_app: no window found for '%s'", Text(app_name))
         return False
     return force_foreground(hwnd)
 
@@ -304,17 +305,17 @@ def fullscreen_app(app_name: str, exe_path: str | None = None) -> None:
         return
     time.sleep(0.1)
     _press_release_key(VK_F11, SCAN_F11)
-    logger.info("Sent F11 to '%s'", app_name)
+    logger.info("Sent F11 to '%s'", Text(app_name))
 
 
 def minimize_app(app_name: str, exe_path: str | None = None) -> None:
     """Minimize an app's window."""
     hwnd = find_window(app_name, exe_path)
     if not hwnd:
-        logger.warning("minimize_app: no window found for '%s'", app_name)
+        logger.warning("minimize_app: no window found for '%s'", Text(app_name))
         return
     user32.ShowWindow(hwnd, SW_MINIMIZE)
-    logger.info("Minimized '%s'", app_name)
+    logger.info("Minimized '%s'", Text(app_name))
 
 
 def snap_app(app_name: str, direction: str, exe_path: str | None = None) -> None:
@@ -337,4 +338,4 @@ def snap_app(app_name: str, direction: str, exe_path: str | None = None) -> None
             _make_key_input(VK_LWIN, SCAN_LWIN, KEYEVENTF_KEYUP),  # Win up
         ]
     )
-    logger.info("Snapped '%s' %s", app_name, direction)
+    logger.info("Snapped '%s' %s", Text(app_name), direction)

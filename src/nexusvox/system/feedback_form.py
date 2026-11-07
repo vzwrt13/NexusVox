@@ -1,8 +1,9 @@
 """The "Send feedback" link: the configured form URL plus three prefilled facts.
 
-NexusVox makes no network call for this. The dashboard only hands the browser a URL; the
+The app makes no network call for this link. The dashboard only hands the browser a URL; the
 form (and where its answers go) is not part of the app. Only the app version, the Windows
-version and the hardware tier are added, never a transcript, audio or log content.
+version and the hardware tier are added, never a transcript, audio or log content. Sending a
+report from the app itself, with an optional log, is `feedback_send.py`.
 """
 
 from __future__ import annotations

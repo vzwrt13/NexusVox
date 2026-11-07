@@ -134,6 +134,6 @@ class CommandHandling:
             and self._config.os_commands.enabled
         ):
             await loop.run_in_executor(None, execute_nexus_command, nexus_cmd, self._config.os_commands)
-            logger.info("Nexus command: %s %s", nexus_cmd.action, nexus_cmd.app_name)
+            logger.info("Nexus command: %s %s", nexus_cmd.action, Text(nexus_cmd.app_name))
             return f"[nexus] {nexus_cmd.action} {nexus_cmd.app_name}"
         return None

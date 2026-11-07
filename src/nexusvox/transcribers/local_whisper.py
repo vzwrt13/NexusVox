@@ -31,6 +31,7 @@ class LocalWhisperTranscriber(BaseTranscriber):
     """Transcribe with faster-whisper in-process. No HTTP, no Docker."""
 
     needs_docker = False
+    device = "cpu"
 
     _model_cache: dict[tuple[str, str, str], object] = {}
     _cache_lock = threading.Lock()
@@ -44,6 +45,7 @@ class LocalWhisperTranscriber(BaseTranscriber):
         registry = MODEL_REGISTRY[config.model]
         self._hf_name = str(registry["hf_name"])
         self._device = device
+        self.device = "gpu" if device.startswith("cuda") else "cpu"
         self._compute_type = compute_type
         self._audio_buffer = bytearray()
         self._sample_rate = 16_000

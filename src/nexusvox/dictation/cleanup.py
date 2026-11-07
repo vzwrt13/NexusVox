@@ -34,6 +34,8 @@ MIN_WORDS = 3
 
 # `CleanupResult.error` when the model answered with something that is not the dictation cleaned up.
 IMPLAUSIBLE = "implausible reply"
+# `CleanupResult.error` when no request was sent because the model was still reloading.
+RELOADING = "the model is reloading"
 
 _COMMON = (
     "The dictation is inside <dictation> tags. It will be typed for someone else exactly as the user "
@@ -84,12 +86,19 @@ class CleanupResult:
     ms: int | None = None
     error: str | None = None  # why the dictation is typed unchanged, when the model was asked
     timed_out: bool = False  # the model did not answer within `[cleanup].timeout_s`
+    # Which model was asked, where and at what level; None when no request was sent (off, too short, reloading).
+    llm_model: str | None = None
+    llm_url: str | None = None
+    level: str | None = None
 
     @property
     def status(self) -> str | None:
-        """How the pass ended, for the stats: applied, unchanged, rejected, timeout or failed; None if never asked."""
+        """How the pass ended, for the stats: applied, unchanged, rejected, timeout, failed or skipped (the model was
+        reloading, no request was sent); None if never asked."""
         if self.error == IMPLAUSIBLE:
             return "rejected"
+        if self.error == RELOADING:
+            return "skipped"
         if self.error:
             return "timeout" if self.timed_out else "failed"
         if self.ms is None:
@@ -131,7 +140,9 @@ def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = M
         return CleanupResult(text)
     if reload_running(llm):
         # The model is loading: a request now only waits behind the load and times out. Type at once.
-        return CleanupResult(text, error="the model is reloading")
+        # No request is sent, so the result names no model: it is no pass of that model.
+        return CleanupResult(text, error=RELOADING)
+    asked = {"llm_model": llm.model, "llm_url": llm.url, "level": config.level}
     started = time.monotonic()
     try:
         reply = complete(
@@ -145,17 +156,17 @@ def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = M
             # The model is probably not loaded and a short request cannot load it (the server drops a
             # half-loaded model when the client disconnects): load it in the background for the next one.
             reload_in_background(llm)
-        return CleanupResult(text, error=str(exc), timed_out=exc.timed_out)
+        return CleanupResult(text, error=str(exc), timed_out=exc.timed_out, **asked)
     ms = int((time.monotonic() - started) * 1000)
     # A reasoning model may lead with its thinking; a small model sometimes echoes the tags.
     reply = _TAG_RE.sub("", clean_reply(reply))
     if not plausible(text, reply, config.level):
         logger.warning("Cleanup: the reply does not look like the dictation cleaned up; typing it unchanged")
         logger.debug("Cleanup rejected: %r -> %r", Text(text), Text(reply))
-        return CleanupResult(text, ms=ms, error=IMPLAUSIBLE)
+        return CleanupResult(text, ms=ms, error=IMPLAUSIBLE, **asked)
     # Keep the dictation's own edges: the model trims, a dictation may end in a line break.
     core = text.strip()
     start = text.find(core)
     cleaned = text[:start] + reply.strip() + text[start + len(core) :]
     logger.info("Cleanup (%s, %d ms): %r -> %r", config.level, ms, Text(text), Text(cleaned))
-    return CleanupResult(cleaned, cleaned=cleaned != text, ms=ms)
+    return CleanupResult(cleaned, cleaned=cleaned != text, ms=ms, **asked)

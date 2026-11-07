@@ -231,7 +231,9 @@ class TranscriptionCycle:
             transcribe_ms = int((time.monotonic() - stop_time) * 1000)
             logger.info("Transcript received after %dms", transcribe_ms)
 
-            recording = _Recording(audio_buffer, duration_ms, result.confidence, transcribe_ms)
+            # The engine that made this transcript, read now: an auto engine may switch for the next take meanwhile.
+            device = self._transcriber.device
+            recording = _Recording(audio_buffer, duration_ms, result.confidence, transcribe_ms, device)
 
             if mark == COMMAND:
                 # A command recording (command key pressed during the hold) is never
@@ -335,6 +337,10 @@ class TranscriptionCycle:
                 latency_ms=latency_ms,
                 cleanup_status=processed.cleanup.status,
                 cleanup_ms=processed.cleanup.ms,
+                llm_model=processed.cleanup.llm_model,
+                llm_url=processed.cleanup.llm_url,
+                cleanup_level=processed.cleanup.level,
+                transcribe_device=device,
                 app=target_app,
             )
             record = await loop.run_in_executor(None, save)

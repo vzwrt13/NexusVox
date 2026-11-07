@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import statistics
 from collections import Counter
+from urllib.parse import urlsplit
 
 from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
@@ -126,6 +128,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         "cleanup_rejected": cleanup_counts.get("rejected", 0),
         "cleanup_timeouts": cleanup_counts.get("timeout", 0),
         "cleanup_failed": cleanup_counts.get("failed", 0),
+        "cleanup_skipped": cleanup_counts.get("skipped", 0),
         "avg_cleanup_ms": round(avg_cleanup_ms) if avg_cleanup_ms is not None else None,
         **command_rows,
     }
@@ -137,6 +140,7 @@ _EMPTY_CLEANUP = {
     "cleanup_rejected": 0,
     "cleanup_timeouts": 0,
     "cleanup_failed": 0,
+    "cleanup_skipped": 0,
     "avg_cleanup_ms": None,
 }
 
@@ -210,6 +214,124 @@ def _command_row_stats(session_factory: sessionmaker, start: str | None, end: st
         "command_count": sum(kinds.values()),
         "top_commands": [{"kind": kind, "count": count} for kind, count in ranked],
     }
+
+
+# The `level` of a "Speed by model" row that is polish on selected text, which has no cleanup level.
+POLISH_LEVEL = "polish"
+
+
+def _server_of(url: str | None) -> str | None:
+    """The `host:port` of a stored server URL; never a user name, password, path or query that may be in it."""
+    if not url:
+        return None
+    parts = urlsplit(url if "//" in url else f"//{url}")
+    try:
+        host, port = parts.hostname, parts.port
+    except ValueError:  # an unreadable port
+        return None
+    if not host:
+        return None
+    return f"{host}:{port}" if port else host
+
+
+def get_model_speed(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> list[dict]:
+    """Per language model, server, level and transcription device: passes, the median time, the timeout share.
+
+    From the stored rows only: a dictation whose cleanup sent a request to a model, and a polish attempt that
+    did (an extension handled it: no model; a cleanup skipped while the model reloaded sent nothing and is
+    ignored). Rows from
+    before the model was stored have no `llm_model` and are left out. `level` is "light" / "medium" for cleanup
+    and `POLISH_LEVEL` for polish; `server` is the `host:port` of the model's server, so one model name on two
+    servers stays two rows; `device` is the transcription device ("cpu", "gpu", "remote") or None, and always
+    None for polish, which never touches the transcriber. The time is the model's own, over the passes that got
+    an answer (a timeout has none); `timeout_share` is timeouts over all passes, 0 to 1. Most passes first,
+    ties by model, server, level, device.
+    """
+    with session_factory() as session:
+        query = session.query(
+            Transcription.llm_model,
+            Transcription.llm_url,
+            Transcription.cleanup_level,
+            Transcription.transcribe_device,
+            Transcription.cleanup_status,
+            Transcription.cleanup_ms,
+            Transcription.polish_status,
+            Transcription.polish_ms,
+        )
+        rows = _apply_date_filter(query, start, end, polish=True).filter(Transcription.llm_model.isnot(None)).all()
+    groups: dict[tuple[str, str | None, str, str | None], list] = {}
+    for model, url, level, device, c_status, c_ms, p_status, p_ms in rows:
+        if p_status is not None:
+            level, status, ms, device = POLISH_LEVEL, p_status, p_ms, None
+        elif c_status is not None:
+            status, ms = c_status, c_ms
+        else:
+            continue
+        if level is None or status == "skipped":  # a skipped pass sent no request: it says nothing about the model
+            continue
+        groups.setdefault((model, _server_of(url), level, device), []).append((status, ms))
+    result = []
+    for (model, server, level, device), passes in groups.items():
+        times = [ms for status, ms in passes if ms is not None and status != "timeout"]
+        result.append(
+            {
+                "model": model,
+                "server": server,
+                "level": level,
+                "device": device,
+                "count": len(passes),
+                "median_ms": round(statistics.median(times)) if times else None,
+                "timeout_share": sum(status == "timeout" for status, _ in passes) / len(passes),
+            }
+        )
+    result.sort(key=lambda r: (-r["count"], r["model"], r["server"] or "", r["level"], r["device"] or ""))
+    return result
+
+
+# The device of a "Transcription speed by model" row whose dictation was saved before the device was stored.
+UNKNOWN_DEVICE = "unknown"
+
+
+def get_transcription_speed(
+    session_factory: sessionmaker, *, start: str | None = None, end: str | None = None
+) -> list[dict]:
+    """Per transcription model and device: dictations, the median transcription time, the median real-time factor.
+
+    Dictations only (no command or polish rows), from stored data: a row needs its `model` and its
+    `transcribe_ms`, otherwise it is left out. A row from before the device was stored counts under
+    `UNKNOWN_DEVICE`, so older history shows. The real-time factor is `transcribe_ms / duration_ms` per
+    dictation (below 1 is faster than speaking); a dictation without duration has none and only counts and
+    adds its time. Most dictations first, ties by model, device.
+    """
+    with session_factory() as session:
+        query = session.query(
+            Transcription.model,
+            Transcription.transcribe_device,
+            Transcription.transcribe_ms,
+            Transcription.duration_ms,
+        )
+        rows = (
+            _dictations(query, start, end)
+            .filter(Transcription.model.isnot(None), Transcription.transcribe_ms.isnot(None))
+            .all()
+        )
+    groups: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for model, device, transcribe_ms, duration_ms in rows:
+        groups.setdefault((model, device or UNKNOWN_DEVICE), []).append((transcribe_ms, duration_ms))
+    result = []
+    for (model, device), items in groups.items():
+        factors = [ms / duration for ms, duration in items if duration > 0]
+        result.append(
+            {
+                "model": model,
+                "device": device,
+                "count": len(items),
+                "median_ms": round(statistics.median(ms for ms, _ in items)),
+                "median_rtf": round(statistics.median(factors), 2) if factors else None,
+            }
+        )
+    result.sort(key=lambda r: (-r["count"], r["model"], r["device"]))
+    return result
 
 
 def _speaker_count(words_json: str | None) -> int:

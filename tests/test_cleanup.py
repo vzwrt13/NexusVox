@@ -265,7 +265,11 @@ def test_warm_up_is_the_one_reload_of_a_cold_model(reload_env, monkeypatch):
     assert llm_module.reload_running(config)
     # A dictation during the load types at once, and nothing starts a second load behind the first.
     result = cleanup("this is a rather long dictation", CleanupConfig(level="light"), config)
-    assert result.text == "this is a rather long dictation" and result.error == "the model is reloading"
+    assert (
+        result.text == "this is a rather long dictation"
+        and result.error == "the model is reloading"
+        and result.status == "skipped"
+    )
     assert llm_module.reload_in_background(config) is False
     llm_module.warm_up(config)  # e.g. a second settings change
     assert len(calls) == 1

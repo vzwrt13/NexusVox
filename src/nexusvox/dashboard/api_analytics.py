@@ -41,6 +41,12 @@ class AnalyticsMixin(DashboardState):
     def get_model_breakdown(self, start: str | None = None, end: str | None = None) -> list[dict]:
         return analytics.get_model_breakdown(self._sf, start=start, end=end)
 
+    def get_model_speed(self, start: str | None = None, end: str | None = None) -> list[dict]:
+        return analytics.get_model_speed(self._sf, start=start, end=end)
+
+    def get_transcription_speed(self, start: str | None = None, end: str | None = None) -> list[dict]:
+        return analytics.get_transcription_speed(self._sf, start=start, end=end)
+
     def get_app_breakdown(self, start: str | None = None, end: str | None = None) -> list[dict]:
         return analytics.get_app_breakdown(self._sf, start=start, end=end)
 

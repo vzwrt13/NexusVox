@@ -131,6 +131,7 @@ class AutoParakeetTranscriber(BaseTranscriber):
         self._cycle = GPU
         self._pcm = bytearray()
         self.model = self._gpu.model
+        self.device = self._gpu.device
 
     # ---- Engine choice ------------------------------------------------------
 
@@ -249,6 +250,7 @@ class AutoParakeetTranscriber(BaseTranscriber):
             reachable = await asyncio.get_running_loop().run_in_executor(None, probe_server, self._health_url)
             self._apply(reachable)
         self.model = self._gpu.model if self._engine == GPU else self._cpu_transcriber().model
+        self.device = self._gpu.device if self._engine == GPU else CPU  # the server's: local or remote
 
     # ---- Properties that follow the engine ----------------------------------
 
@@ -296,6 +298,7 @@ class AutoParakeetTranscriber(BaseTranscriber):
         self._cycle = self._engine
         self._pcm = bytearray()
         self.model = self._gpu.model if self._cycle == GPU else self._cpu_transcriber().model
+        self.device = self._gpu.device if self._cycle == GPU else CPU
         await self._cycle_transcriber.connect()
 
     async def send_audio_chunk(self, pcm16_bytes: bytes) -> None:
@@ -316,6 +319,7 @@ class AutoParakeetTranscriber(BaseTranscriber):
         except Exception:
             logger.warning("Parakeet server failed; replaying the take on the CPU", exc_info=True)
         self._apply(False)
+        self.device = CPU  # the take is stored with the engine that produced its text
         cpu = self._cpu_transcriber()
         await cpu.connect()
         await cpu.send_audio_chunk(pcm)

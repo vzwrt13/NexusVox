@@ -328,7 +328,7 @@ document.getElementById("btn-clear-dates").addEventListener("click", () => {
 
 // ── Analytics Loading ────────────────────────────────────────────────
 async function loadAnalytics() {
-  const [overview, lang, hours, words, heatmap, models, apps] = await Promise.all([
+  const [overview, lang, hours, words, heatmap, models, apps, speed, transcription] = await Promise.all([
     api("/api/overview"),
     api("/api/language-distribution"),
     api("/api/peak-usage-hours"),
@@ -336,6 +336,8 @@ async function loadAnalytics() {
     api("/api/activity-heatmap"),
     api("/api/model-breakdown"),
     api("/api/app-breakdown"),
+    api("/api/model-speed"),
+    api("/api/transcription-speed"),
   ]);
 
   renderOverview(overview);
@@ -345,6 +347,8 @@ async function loadAnalytics() {
   renderHeatmap(heatmap);
   renderModelBreakdown(models);
   renderAppBreakdown(apps);
+  renderModelSpeed(speed);
+  renderTranscriptionSpeed(transcription);
   loadTimeline();
 }
 
@@ -390,6 +394,7 @@ function renderOverview(d) {
   if (d.cleanup_timeouts) cleanParts.push(d.cleanup_timeouts + " timed out");
   if (d.cleanup_rejected) cleanParts.push(d.cleanup_rejected + " rejected");
   if (d.cleanup_failed) cleanParts.push(d.cleanup_failed + " failed");
+  if (d.cleanup_skipped) cleanParts.push(d.cleanup_skipped + " skipped");
   document.getElementById("stat-cleaned-label").textContent =
     "Cleaned Up" + (cleanParts.length ? " (" + cleanParts.join(", ") + ")" : "");
 
@@ -604,6 +609,49 @@ function renderModelBreakdown(rows) {
         <td>${m.avg_wpm}</td>
         <td>${formatDuration(m.avg_duration_ms)}</td>
         <td>${m.avg_transcribe_ms != null ? formatDuration(m.avg_transcribe_ms) : "--"}</td>
+      </tr>`
+    )
+    .join("");
+}
+
+// ── Speed By Model ───────────────────────────────────────────────────
+const SPEED_LEVELS = { light: "Cleanup, light", medium: "Cleanup, medium", polish: "Polish" };
+const SPEED_DEVICES = { cpu: "CPU", gpu: "GPU", local: "Local server", remote: "Remote server", unknown: "Unknown" };
+
+function renderModelSpeed(rows) {
+  const body = document.getElementById("model-speed");
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">No language model passes recorded yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows
+    .map(
+      (r) => `<tr>
+        <td>${escapeHtml(r.model)}${r.server ? ` <span class="hint">${escapeHtml(r.server)}</span>` : ""}</td>
+        <td>${escapeHtml(SPEED_LEVELS[r.level] || r.level)}</td>
+        <td>${escapeHtml(SPEED_DEVICES[r.device] || r.device || "--")}</td>
+        <td>${r.count}</td>
+        <td>${r.median_ms != null ? formatDuration(r.median_ms) : "--"}</td>
+        <td>${Math.round(r.timeout_share * 100)}%</td>
+      </tr>`
+    )
+    .join("");
+}
+
+function renderTranscriptionSpeed(rows) {
+  const body = document.getElementById("transcription-speed");
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="5" class="empty-state">No timed dictations yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows
+    .map(
+      (r) => `<tr>
+        <td>${escapeHtml(r.model)}</td>
+        <td>${escapeHtml(SPEED_DEVICES[r.device] || r.device)}</td>
+        <td>${r.count}</td>
+        <td>${formatDuration(r.median_ms)}</td>
+        <td>${r.median_rtf != null ? r.median_rtf.toFixed(2) : "--"}</td>
       </tr>`
     )
     .join("");

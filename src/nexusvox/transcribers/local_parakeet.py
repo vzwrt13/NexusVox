@@ -191,6 +191,7 @@ class LocalParakeetTranscriber(BaseTranscriber):
     """Transcribe with Parakeet TDT 0.6B v3 (ONNX int8) in-process. No HTTP, no Docker, no GPU."""
 
     needs_docker = False
+    device = "cpu"
     supports_word_timestamps = True
     no_diarization_reason = SPEAKERS_NEED_GPU
 

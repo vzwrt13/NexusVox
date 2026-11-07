@@ -24,6 +24,7 @@ class _Recording:
     duration_ms: int
     confidence: float | None
     transcribe_ms: int
+    device: str | None = None  # where the transcript was made ("cpu", "gpu", "remote"), read when it arrived
 
 
 class RecordKeeping:
@@ -81,6 +82,8 @@ class RecordKeeping:
         *,
         polish_status: str | None = None,
         polish_ms: int | None = None,
+        llm_model: str | None = None,
+        llm_url: str | None = None,
     ) -> None:
         """Save a dictation that ran a command instead of being typed, as ``label``.
 
@@ -96,6 +99,9 @@ class RecordKeeping:
             app=COMMAND_APP,
             polish_status=polish_status,
             polish_ms=polish_ms,
+            llm_model=llm_model,
+            llm_url=llm_url,
+            transcribe_device=recording.device if recording else None,
         )
         if recording:
             self._store_audio(recording.audio, record.id)

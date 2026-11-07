@@ -89,6 +89,9 @@ class SelectionPolish:
         if preset:
             logger.info("Polish: preset %r", preset)
         detail = preset or spoken or "default"
+        # The model this request goes to, read now: settings apply live, so a switch while it runs must not
+        # credit the old model's time to the new one.
+        asked = (self._config.llm.model, self._config.llm.url)
         started = time.perf_counter()  # not monotonic(): its tick is ~15 ms on Windows
         try:
             rewritten = await loop.run_in_executor(None, polish, selection, instruction, self._config.llm)
@@ -107,11 +110,21 @@ class SelectionPolish:
                 ok=False,
                 status="timeout" if exc.timed_out else "failed",
                 model_ms=round((time.perf_counter() - started) * 1000),
+                llm=asked,
             )
             return
         model_ms = round((time.perf_counter() - started) * 1000)
         await self._paste_over_selection(
-            rewritten, selection, window, "polish", detail, spoken, recording, status="applied", model_ms=model_ms
+            rewritten,
+            selection,
+            window,
+            "polish",
+            detail,
+            spoken,
+            recording,
+            status="applied",
+            model_ms=model_ms,
+            llm=asked,
         )
 
     async def _paste_over_selection(
@@ -126,10 +139,12 @@ class SelectionPolish:
         *,
         status: str,
         model_ms: int | None,
+        llm: tuple[str, str] | None = None,
     ) -> None:
         """Paste *rewritten* over the still-selected text, unless the focus left *window*; save the outcome.
 
         Nothing pasted (the focus moved, the clipboard refused) is saved as ``failed``, however the reply came.
+        *llm* is the (model, server URL) that was asked; None when no model was (an extension).
         """
         self._last_typed = rewritten
         self._last_typed_rewritten = True
@@ -155,7 +170,14 @@ class SelectionPolish:
                 if changed:
                     (self._edit_watcher.cancel if pasted else self._edit_watcher.resume)()
         await self._save_polish(
-            recording, kind, detail, spoken, ok=pasted, status=status if pasted else "failed", model_ms=model_ms
+            recording,
+            kind,
+            detail,
+            spoken,
+            ok=pasted,
+            status=status if pasted else "failed",
+            model_ms=model_ms,
+            llm=llm,
         )
 
     async def _save_polish(
@@ -168,11 +190,22 @@ class SelectionPolish:
         ok: bool,
         status: str,
         model_ms: int | None,
+        llm: tuple[str, str] | None = None,
     ) -> None:
         """Save a polish (or extension) attempt, off the event loop, as ``[kind] detail`` or ``[kind failed] detail``.
 
         A failed attempt gets its own label so the history does not show it as a polish that happened.
+        *llm* is the (model, server URL) the request went to, taken when it was sent; None stores no model.
         """
         label = f"[{kind}{'' if ok else ' failed'}] {detail}"
-        save = functools.partial(self._save_command, recording, label, spoken, polish_status=status, polish_ms=model_ms)
+        save = functools.partial(
+            self._save_command,
+            recording,
+            label,
+            spoken,
+            polish_status=status,
+            polish_ms=model_ms,
+            llm_model=llm[0] if llm else None,
+            llm_url=llm[1] if llm else None,
+        )
         await asyncio.get_running_loop().run_in_executor(None, save)

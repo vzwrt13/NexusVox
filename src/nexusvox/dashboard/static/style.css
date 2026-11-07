@@ -1359,9 +1359,11 @@ canvas { width: 100% !important; max-height: 260px; }
 /* One page at a time; while searching, every card with a match. */
 #settings-pages > .settings-card { display: none; }
 #settings-pages > .settings-card.active, #tab-settings.searching #settings-pages > .settings-card { display: block; }
-#tab-settings.searching #settings-pages > .settings-card + .settings-card { margin-top: 12px; }
+#settings-pages { scroll-margin-top: 32px; } /* the main padding: a link click lands the page where it starts */
+#tab-settings.searching #settings-pages > .settings-card:not(.search-hidden) ~ .settings-card:not(.search-hidden) { margin-top: 12px; }
 #tab-settings.searching .settings-link { color: var(--text-dim); background: transparent; }
-@media (max-width: 800px) {
+/* The sidebar (232px), the main padding and the navigation (210px + gap) leave a page too narrow below ~1000px. */
+@media (max-width: 1000px) {
   .settings-layout { flex-direction: column; align-items: stretch; gap: 16px; }
   .settings-nav { position: static; flex: none; flex-direction: row; flex-wrap: wrap; gap: 4px; }
   .settings-search { flex: 1 0 100%; }

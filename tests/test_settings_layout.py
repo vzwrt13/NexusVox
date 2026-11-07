@@ -116,11 +116,22 @@ SECTIONS = ["Dictation", "Vocabulary", "Text &amp; Polish", "Models", "Meetings"
 def test_nav_has_one_link_per_page_in_page_order():
     section = _settings_section()
     nav = re.search(r'<nav class="settings-nav" id="settings-nav"[^>]*>(.*?)</nav>', section, re.S).group(1)
-    links = re.findall(r'<a class="settings-link" href="#settings" data-card="([^"]+)">([^<]+)</a>', nav)
-    assert [t for _, t in links] == SECTIONS
+    link = (
+        r'<a class="settings-link(?: active)?" href="#settings/(?P<slug>[^"]+)" data-page="(?P=slug)"'
+        r' data-card="(?P<card>[^"]+)"(?: aria-current="page")?>(?P<title>[^<]+)</a>'
+    )
+    links = [(m["slug"], m["card"], m["title"]) for m in re.finditer(link, nav)]
+    assert [t for _, _, t in links] == SECTIONS
+    first_link = re.search(r'<a class="settings-link active" href="#settings/dictation"[^>]*aria-current="page"', nav)
+    assert first_link, "Dictation must be the open page in the markup"
+    assert re.search(r'<div class="settings-card active" id="settings-card-dictation">', section)
+    assert section.count("settings-card active") == 1
+    assert [slug for slug, _, _ in links] == [
+        "dictation", "vocabulary", "text-polish", "models", "meetings", "privacy", "advanced",
+    ]  # fmt: skip
     pages = section.split('id="settings-pages"', 1)[1]
     positions = []
-    for card_id, _ in links:
+    for _, card_id, _ in links:
         assert f'id="{card_id}"' in pages, card_id
         positions.append(pages.index(f'id="{card_id}"'))
     assert positions == sorted(positions)
@@ -151,12 +162,14 @@ class Node {
     this.nodeType = 1; this.tagName = tag; this.childNodes = kids; this.id = attrs.id || "";
     this.children = kids.filter((k) => k.nodeType === 1);
     this.hidden = !!attrs.hidden; this.cls = new Set(attrs.cls || []); this.scrolled = 0;
-    this.dataset = attrs.dataset || {};
+    this.dataset = attrs.dataset || {}; this.attrs = {};
     this.classList = { add: (c) => this.cls.add(c), remove: (c) => this.cls.delete(c),
       contains: (c) => this.cls.has(c), toggle: (c, on) => (on ? this.cls.add(c) : this.cls.delete(c)) };
   }
   get textContent() { return this.childNodes.map((k) => (k.nodeType === 3 ? k.data : k.textContent)).join(" "); }
   querySelector() { return this.children[0]; }
+  setAttribute(k, v) { this.attrs[k] = v; }
+  removeAttribute(k) { delete this.attrs[k]; }
   scrollIntoView() { this.scrolled++; }
 }
 const T = (data) => ({ nodeType: 3, data });
@@ -176,7 +189,9 @@ const input = { value: "" };
 const tab = new Node("SECTION", [], { cls: ["active"] });
 const byId = { "settings-search": input, "settings-no-match": noMatch, "tab-settings": tab };
 allCards.forEach((c) => (byId[c.id] = c));
-const links = allCards.map((c) => new Node("A", [], { dataset: { card: c.id } }));
+const slugs = ["dictation", "vocabulary", "advanced"];
+const links = allCards.map((c, i) => new Node("A", [], { dataset: { card: c.id, page: slugs[i] } }));
+const history = { url: null, replaceState: (a, b, url) => { history.url = url; } };
 const document = { getElementById: (id) => byId[id],
   querySelectorAll: (sel) => (sel === "#settings-nav .settings-link" ? links : allCards) };
 const hiddenState = () => Object.fromEntries(allCards.map((c) => [c.id, c.cls.has("search-hidden")]));
@@ -265,6 +280,69 @@ def test_opening_a_page_lifts_a_filter_that_hides_it():
     assert r[0] == "" and r[1] == ["c0"] and not any(r[2].values()) and r[3] is False
 
 
-def test_scroll_to_card_opens_its_page_and_scrolls():
-    r = _run_js('scrollToSettingsCard("c1"); console.log(JSON.stringify([openPages(), voc.scrolled]));')
-    assert r == [["c1"], 1]
+def test_the_open_link_is_announced_with_aria_current():
+    r = _run_js(
+        """
+        showSettingsPage("c1");
+        const marks = () => links.map((l) => l.attrs["aria-current"] || null);
+        const first = marks(); showSettingsPage("c2");
+        console.log(JSON.stringify([first, marks()]));
+        """
+    )
+    assert r == [[None, "page", None], [None, None, "page"]]
+
+
+def test_page_listeners_run_with_the_id_of_the_opened_page():
+    r = _run_js(
+        """
+        const seen = []; onSettingsPageOpen((id) => seen.push(id));
+        showSettingsPage("c1"); showSettingsPage("c0");
+        console.log(JSON.stringify(seen));
+        """
+    )
+    assert r == ["c1", "c0"]
+
+
+def test_open_page_is_kept_in_the_hash_and_opened_from_it():
+    r = _run_js(
+        """
+        showSettingsPage("c2"); const advanced = settingsPageHash();
+        showSettingsPageBySlug("vocabulary"); const vocabulary = [settingsPageHash(), openPages()];
+        showSettingsPageBySlug("nope"); const unknown = openPages();
+        console.log(JSON.stringify([advanced, vocabulary, unknown]));
+        """
+    )
+    assert r == ["#settings/advanced", ["#settings/vocabulary", ["c1"]], ["c1"]]
+
+
+def test_opening_a_page_from_another_tab_shows_it_sets_the_hash_and_scrolls():
+    r = _run_js(
+        'openSettingsPageFromElsewhere("c1"); console.log(JSON.stringify([openPages(), history.url, voc.scrolled]));'
+    )
+    assert r == [["c1"], "#settings/vocabulary", 1]
+
+
+def test_pollers_of_a_page_wait_for_their_page():
+    # The learn-from-edits line and the language-model list are drawn when their page opens and polled only while
+    # on screen, since the Settings tab no longer shows every control.
+    assert "learnStatus.offsetParent !== null" in JS
+    assert re.search(
+        r'onSettingsPageOpen\(\(id\) => \{\s*if \(id === "settings-card-models"\) llmRefresher\.wake\(\)', JS
+    )
+    assert re.search(
+        r'onSettingsPageOpen\(\(id\) => \{\s*if \(id === "settings-card-vocabulary"\) loadLearnStatus\(\)', JS
+    )
+
+
+def test_hash_carries_the_page_through_tab_clicks_and_reloads():
+    assert 'name === "settings" ? settingsPageHash() : "#" + name' in JS
+    assert 'name === "settings" && page) showSettingsPageBySlug(page)' in JS
+
+
+def test_navigation_stacks_before_the_page_gets_too_narrow():
+    assert re.search(r"@media \(max-width: 1000px\) \{\s*\.settings-layout \{ flex-direction: column", CSS)
+
+
+def test_search_gap_ignores_hidden_cards():
+    rule = re.search(r"#tab-settings\.searching #settings-pages > ([^{]+)\{ margin-top: 12px; \}", CSS)
+    assert rule and rule.group(1).strip() == ".settings-card:not(.search-hidden) ~ .settings-card:not(.search-hidden)"

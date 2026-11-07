@@ -35,19 +35,19 @@
           <div class="settings-search">
             <input type="search" id="settings-search" class="dict-input" placeholder="Search settings" aria-label="Search settings" autocomplete="off">
           </div>
-          <a class="settings-link" href="#settings" data-card="settings-card-dictation">Dictation</a>
-          <a class="settings-link" href="#settings" data-card="settings-card-vocabulary">Vocabulary</a>
-          <a class="settings-link" href="#settings" data-card="settings-card-text-polish">Text &amp; Polish</a>
-          <a class="settings-link" href="#settings" data-card="settings-card-models">Models</a>
-          <a class="settings-link" href="#settings" data-card="meeting-settings-card">Meetings</a>
-          <a class="settings-link" href="#settings" data-card="settings-card-privacy">Privacy</a>
-          <a class="settings-link" href="#settings" data-card="settings-advanced">Advanced</a>
+          <a class="settings-link active" href="#settings/dictation" data-page="dictation" data-card="settings-card-dictation" aria-current="page">Dictation</a>
+          <a class="settings-link" href="#settings/vocabulary" data-page="vocabulary" data-card="settings-card-vocabulary">Vocabulary</a>
+          <a class="settings-link" href="#settings/text-polish" data-page="text-polish" data-card="settings-card-text-polish">Text &amp; Polish</a>
+          <a class="settings-link" href="#settings/models" data-page="models" data-card="settings-card-models">Models</a>
+          <a class="settings-link" href="#settings/meetings" data-page="meetings" data-card="meeting-settings-card">Meetings</a>
+          <a class="settings-link" href="#settings/privacy" data-page="privacy" data-card="settings-card-privacy">Privacy</a>
+          <a class="settings-link" href="#settings/advanced" data-page="advanced" data-card="settings-advanced">Advanced</a>
           <button type="button" class="settings-rerun" id="settings-rerun-setup" disabled title="Available with the first-run setup">Run the first-run setup again</button>
         </nav>
         <div class="settings-pages" id="settings-pages">
       <p id="settings-no-match" class="settings-hint" hidden>No setting found</p>
 
-      <div class="settings-card" id="settings-card-dictation">
+      <div class="settings-card active" id="settings-card-dictation">
         <h4 class="nexus-section-title">Dictation</h4>
         <p class="settings-hint" style="margin-top: 6px;">The everyday basics: how you start a recording, what you speak and what you see while it runs.</p>
 

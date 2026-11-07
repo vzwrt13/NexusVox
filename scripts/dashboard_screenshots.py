@@ -60,15 +60,15 @@ VIEWPORT_WIDTH = 1280
 
 # (dashboard tab, file name, CSS selector of the elements to hide or None, window height or None). A tab without
 # a height is photographed in a viewport taller than the tab, and the empty strip below the last card is cut off,
-# so an image ends at the content. Analytics runs on for a long way (charts) and Settings shows one page of a
-# longer list, so the page is served with the elements after the last card to show hidden: the cut sits at an
-# element, not at a guess. The Recordings tab fills the window with its two panes, so it is photographed at a
-# window's height.
+# so an image ends at the content. Analytics runs on for a long way (charts), so the page is served with the
+# elements after the last card to show hidden: the cut sits at an element, not at a guess. Settings is shot on
+# the page it opens on (Dictation), the one `.active` card; the other pages are not displayed, so nothing needs
+# hiding. The Recordings tab fills the window with its two panes, so it is photographed at a window's height.
 VIEWPORT_HEIGHT = 4000
 SHOTS = (
     ("analytics", "dashboard-analytics.png", ".chart-card:has(#chart-latency) ~ *", None),  # up to the latency chart
     ("recordings", "dashboard-recordings.png", None, 860),
-    ("settings", "dashboard-settings.png", "#settings-card-dictation ~ *", None),  # the Dictation page
+    ("settings", "dashboard-settings.png", None, None),  # the Dictation page, where Settings opens
 )
 CROP_PADDING = 32  # CSS pixels of page background kept below the last card
 

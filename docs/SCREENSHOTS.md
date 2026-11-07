@@ -19,7 +19,8 @@ The Recordings tab fills one window with its two panes and is photographed at a 
 Analytics tab runs on for a long way. The script serves its own copy of the page with
 the elements after the last card to show hidden (the selectors are in `SHOTS`), photographs it in a tall
 viewport and cuts the empty strip below the last card, so each image ends at an element and follows the
-dashboard when its layout changes. If a selector stops matching, the image simply gets longer: look at the
+dashboard when its layout changes. Settings is photographed on the page it opens on (Dictation); its other pages are
+not displayed, so nothing is hidden there. If a selector stops matching, the image simply gets longer: look at the
 result before committing.
 
 The dashboard has a single (dark) theme, so there is one image per tab. The older `dashboard.png`,

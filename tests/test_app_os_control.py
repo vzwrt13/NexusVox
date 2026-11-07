@@ -212,7 +212,7 @@ def test_a_polish_timeout_starts_the_background_reload(monkeypatch):
 
     reloads = []
     app, calls = _polish_app(monkeypatch, "hi leute", LlmError("slow", timed_out=True))
-    patch_app(monkeypatch, "reload_in_background", reloads.append)
+    patch_app(monkeypatch, "reload_unless_loaded", reloads.append)
     asyncio.run(app._polish_selection("", MagicMock()))
     assert reloads == [app._config.llm]
     assert calls["pasted"] == []  # the timed-out polish leaves the text unchanged
@@ -223,7 +223,7 @@ def test_a_polish_failure_other_than_a_timeout_starts_no_reload(monkeypatch):
 
     reloads = []
     app, _calls = _polish_app(monkeypatch, "hi leute", LlmError("refused"))
-    patch_app(monkeypatch, "reload_in_background", reloads.append)
+    patch_app(monkeypatch, "reload_unless_loaded", reloads.append)
     asyncio.run(app._polish_selection("", MagicMock()))
     assert reloads == []
 

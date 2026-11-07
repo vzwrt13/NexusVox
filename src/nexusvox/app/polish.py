@@ -13,7 +13,7 @@ from ..dictation.overlay import ERROR
 from ..dictation.polish import polish, read_selection
 from ..dictation.polish_presets import resolve_instruction
 from ..extensions import loaded_extensions
-from ..llm import LlmError, reload_in_background
+from ..llm import LlmError, reload_unless_loaded
 from ..system.logsetup import Text
 from .common import logger
 from .records import _Recording
@@ -96,8 +96,9 @@ class SelectionPolish:
             logger.warning("Polish: model at %s failed (%s); the selection stays as it was", self._config.llm.url, exc)
             self._cue(beep_error, ERROR)
             if exc.timed_out:
-                # Probably not loaded: a short request cannot load it, so load it for the next one.
-                reload_in_background(self._config.llm)
+                # Not loaded (Ollama restarted or unloaded it): a short request cannot load it, so load it for the
+                # next one. A model that is loaded and only slow is left alone.
+                await loop.run_in_executor(None, reload_unless_loaded, self._config.llm)
             await self._save_polish(
                 recording,
                 "polish",

@@ -255,10 +255,38 @@ def test_other_protocols_start_no_reload(reload_env):
     assert calls == []
 
 
-def test_a_polish_timeout_and_a_cleanup_timeout_share_one_reload(reload_env):
+def test_warm_up_is_the_one_reload_of_a_cold_model(reload_env, monkeypatch):
     llm_module, started, release, calls = reload_env
-    config = LlmConfig()
-    assert llm_module.reload_in_background(config) is True  # e.g. started by a cleanup timeout
+    monkeypatch.setattr(cleanup_module, "reload_running", llm_module.reload_running)  # the autouse stub is off here
+    config = LlmConfig(timeout_s=8.0)
+    llm_module.warm_up(config)
     assert started.wait(5)
-    assert llm_module.reload_in_background(config) is False  # a polish timeout meanwhile starts no second one
+    assert calls[0] == (config.model, llm_module.RELOAD_DEADLINE_S, True)  # long deadline, as a background request
+    assert llm_module.reload_running(config)
+    # A dictation during the load types at once, and nothing starts a second load behind the first.
+    result = cleanup("this is a rather long dictation", CleanupConfig(level="light"), config)
+    assert result.text == "this is a rather long dictation" and result.error == "the model is reloading"
+    assert llm_module.reload_in_background(config) is False
+    llm_module.warm_up(config)  # e.g. a second settings change
     assert len(calls) == 1
+
+
+def test_a_non_ollama_warm_up_keeps_the_plain_request(reload_env):
+    llm_module, started, release, calls = reload_env
+    llm_module.warm_up(LlmConfig(protocol="openai", timeout_s=8.0))
+    assert started.wait(5)
+    assert calls[0][1] == 8.0 and not llm_module._reloading
+
+
+def test_no_reload_when_ollama_holds_the_model(reload_env, monkeypatch):
+    llm_module, started, release, calls = reload_env
+    monkeypatch.setattr(llm_module, "loaded_model", lambda config, name: {"plausible": True})
+    assert llm_module.reload_unless_loaded(LlmConfig()) is False
+    assert calls == []
+
+
+def test_reload_when_the_model_is_not_loaded_or_unknown(reload_env, monkeypatch):
+    llm_module, started, release, calls = reload_env
+    monkeypatch.setattr(llm_module, "loaded_model", lambda config, name: None)
+    assert llm_module.reload_unless_loaded(LlmConfig()) is True
+    assert started.wait(5)

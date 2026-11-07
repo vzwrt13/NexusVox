@@ -222,21 +222,12 @@ def test_warm_up_loads_the_model_in_the_background_and_never_raises(monkeypatch)
     monkeypatch.setattr(llm, "complete", fake_complete)
     started = []
     monkeypatch.setattr(llm.threading, "Thread", lambda target, **kw: started.append(target) or _Started(target))
-    llm.warm_up(LlmConfig(model="gemma4:e4b"))
-    started[0]()  # run the thread body here; it must swallow the error
-    assert calls == ["gemma4:e4b"]
-
-
-def test_warm_up_uses_the_long_reload_deadline(monkeypatch):
-    seen = []
-    monkeypatch.setattr(llm, "complete", lambda config, system, user: seen.append(config.timeout_s) or "OK")
-    started = []
-    monkeypatch.setattr(llm.threading, "Thread", lambda target, **kw: started.append(target) or _Started(target))
-    llm.warm_up(LlmConfig(timeout_s=8.0))
-    llm.warm_up(LlmConfig(timeout_s=300.0))
-    for run in started:
-        run()
-    assert seen == [llm.RELOAD_DEADLINE_S, 300.0]  # never shorter than the configured timeout
+    try:
+        llm.warm_up(LlmConfig(model="gemma4:e4b"))
+        started[0]()  # run the thread body here; it must swallow the error
+        assert calls == ["gemma4:e4b"]
+    finally:
+        llm._reloading.clear()
 
 
 class _Started:

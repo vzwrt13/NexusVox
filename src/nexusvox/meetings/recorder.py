@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..audio import state as audio_state
+from ..audio.devices import find_input_device, input_open_lock, list_input_names
 
 logger = logging.getLogger("nexusvox.meeting_recorder")
 
@@ -63,32 +64,6 @@ class AudioSource(Protocol):
     # `meeting.json`; the transcript lines the tracks up with it when it cannot measure the offset from the audio).
 
 
-_refresh_lock = threading.Lock()
-
-
-def _refresh_devices(sd) -> None:
-    """Make PortAudio notice devices plugged in since it started: it lists them once, at initialisation.
-
-    Re-initialising invalidates open streams, so it only happens while none is open here or in dictation.
-    """
-    with _refresh_lock:
-        if audio_state.streams_open():
-            return
-        try:
-            sd._terminate()
-            sd._initialize()
-        except Exception:
-            logger.exception("Refreshing the audio device list failed")
-
-
-def _wasapi_index(sd) -> int | None:
-    """Index of the Windows WASAPI host API, whose names are the full ones (MME cuts them at 31 characters)."""
-    for index, api in enumerate(sd.query_hostapis()):
-        if "WASAPI" in api["name"]:
-            return index
-    return None
-
-
 def list_devices() -> dict[str, list[str]]:
     """Names of the input and the output devices a meeting can use: `{"inputs": [...], "outputs": [...]}`.
 
@@ -99,12 +74,7 @@ def list_devices() -> dict[str, list[str]]:
     try:
         import sounddevice as sd
 
-        _refresh_devices(sd)
-        wasapi = _wasapi_index(sd)
-        for dev in sd.query_devices():
-            if dev["max_input_channels"] > 0 and (wasapi is None or dev["hostapi"] == wasapi):
-                if dev["name"] not in inputs:
-                    inputs.append(dev["name"])
+        inputs = list_input_names(sd)
     except Exception:
         logger.exception("Listing the input devices failed")
     try:
@@ -135,25 +105,18 @@ class MicSource:
         self._name = device
         self._stream = None
         self._device: int | None = None
+        self._device_name = ""
         self._fmt: AudioFormat | None = None
 
     def _find(self, sd) -> dict:
-        """The named input device (on WASAPI when there is one); the default input when unnamed or gone."""
-        if self._name:
-            _refresh_devices(sd)
-            wasapi = _wasapi_index(sd)
-            for dev in sd.query_devices():
-                if dev["name"] == self._name and dev["max_input_channels"] > 0:
-                    if wasapi is None or dev["hostapi"] == wasapi:
-                        return dev
-            logger.warning("Meeting microphone %r not found; using the default input", self._name)
-        return sd.query_devices(kind="input")
+        return find_input_device(sd, self._name, "Meeting microphone")
 
     def describe(self) -> AudioFormat:
         import sounddevice as sd
 
         dev = self._find(sd)
         self._device = int(dev["index"])
+        self._device_name = str(dev["name"])
         self._fmt = AudioFormat(int(dev["default_samplerate"]), 1)
         return self._fmt
 
@@ -167,11 +130,24 @@ class MicSource:
                 logger.warning("Meeting mic status: %s", status)
             sink(bytes(indata))
 
-        self._stream = sd.RawInputStream(
-            device=self._device, samplerate=fmt.sample_rate, channels=fmt.channels, dtype="int16", callback=callback
-        )
-        self._stream.start()
-        audio_state.stream_opened()
+        with input_open_lock:
+            # A device list refreshed since describe() (a headset plugged in, the Settings tab) may have renumbered
+            # the devices: open the one describe() saw, never whatever holds its old index now.
+            if self._device_name and sd.query_devices(self._device)["name"] != self._device_name:
+                dev = find_input_device(sd, self._device_name, "Meeting microphone")
+                if dev["name"] != self._device_name:
+                    raise OSError(f"The meeting microphone {self._device_name!r} is no longer available")
+                self._device = int(dev["index"])
+            stream = sd.RawInputStream(
+                device=self._device, samplerate=fmt.sample_rate, channels=fmt.channels, dtype="int16", callback=callback
+            )
+            try:
+                stream.start()
+            except Exception:
+                stream.close()
+                raise
+            self._stream = stream
+            audio_state.stream_opened()
 
     def latency(self) -> float:
         return float(self._stream.latency) if self._stream is not None else 0.0

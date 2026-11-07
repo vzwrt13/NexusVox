@@ -1,0 +1,130 @@
+/* NexusVox Dashboard — First-run setup overlay (dashboard-setup.js). Uses only the tokens of style.css. */
+
+.setup {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  overflow-y: auto;
+  padding: 32px 16px 48px;
+  background: var(--bg);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.setup[hidden] { display: none; }
+.setup-shell { width: 100%; max-width: 640px; margin: 0 auto; }
+
+.setup-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; }
+.setup-brand-name { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+
+/* Progress: four labelled steps, the current one lit, finished ones marked. */
+.setup-steps { display: flex; flex-wrap: wrap; gap: 8px 20px; list-style: none; margin: 0 0 28px; padding: 0; counter-reset: setup-step; }
+.setup-steps li {
+  counter-increment: setup-step;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+.setup-steps li::before {
+  content: counter(setup-step);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+}
+.setup-steps li[aria-current="step"] { color: var(--text); font-weight: 600; }
+.setup-steps li[aria-current="step"]::before { color: var(--text); background: var(--accent); border-color: var(--accent); }
+.setup-steps li.done { color: var(--text-dim); }
+.setup-steps li.done::before { content: "\2713"; color: var(--green); border-color: var(--green); }
+
+.setup-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.setup-panel[hidden] { display: none; }
+.setup-heading { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+.setup-heading:focus { outline: none; }
+.setup-lead { margin: 0; font-size: 16px; line-height: 1.5; }
+.setup-text { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-dim); }
+.setup-panel .status-line { margin-top: 0; font-size: 13px; }
+
+.setup-field { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.setup-label { font-size: 13px; font-weight: 600; }
+.setup-field .select-input { width: 100%; }
+
+.setup-meter {
+  height: 10px;
+  overflow: hidden;
+  background: var(--surface3);
+  border-radius: 999px;
+}
+.setup-meter-bar {
+  width: 0;
+  height: 100%;
+  background: var(--green);
+  border-radius: 999px;
+  transition: width 0.1s linear;
+}
+
+.setup-hotkey { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+.setup-hotkey .keycaps kbd { font-size: 14px; padding: 5px 12px; }
+
+.setup-choice { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; padding: 0; border: none; }
+.setup-choice legend { margin-bottom: 8px; padding: 0; font-size: 13px; font-weight: 600; }
+.setup-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-ctl);
+  cursor: pointer;
+}
+.setup-option input { margin-top: 2px; accent-color: var(--accent); flex-shrink: 0; }
+.setup-option:has(input:checked) { border-color: var(--accent-light); background: var(--accent-glow); }
+.setup-option:has(input:focus-visible) { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+.setup-option-text { color: var(--text-dim); }
+
+.setup-test { width: 100%; max-width: 100%; height: 84px; min-height: 60px; resize: vertical; }
+
+.setup-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px 20px; margin: 0; font-size: 14px; }
+.setup-summary dt { color: var(--text-dim); }
+.setup-summary dd { margin: 0; }
+
+.setup-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.setup-btn {
+  padding: 10px 18px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-ctl);
+  cursor: pointer;
+}
+.setup-btn:hover { background: var(--surface2); }
+.setup-btn.primary { font-weight: 600; background: var(--accent); border-color: var(--accent); }
+.setup-btn.primary:hover { background: var(--accent-light); border-color: var(--accent-light); color: var(--bg); }
+.setup-btn:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+
+.setup-skip { margin: 20px 0 0; text-align: center; }
+
+@media (max-width: 480px) {
+  .setup { padding: 20px 16px 32px; }
+  .setup-panel { padding: 20px; }
+  .setup-summary { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .setup-summary dd { margin-bottom: 10px; }
+}

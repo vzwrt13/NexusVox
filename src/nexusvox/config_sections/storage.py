@@ -9,6 +9,8 @@ from dataclasses import dataclass
 class AudioConfig:
     sample_rate: int = 16_000
     chunk_size: int = 4096
+    # Name of the microphone dictation records from; empty is the system default input. Read at every recording.
+    device: str = ""
 
 
 @dataclass

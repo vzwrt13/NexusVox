@@ -12,6 +12,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import sessionmaker
 
+from ..audio.meter import LevelMeter
 from ..config import Config
 from ..extensions import ExtensionRegistry
 from ..meetings.live import LiveTranscriber, WindowTranscriber
@@ -26,6 +27,7 @@ from .api_meetings import MeetingsMixin
 from .api_models import ModelsMixin
 from .api_review import ReviewMixin
 from .api_settings import SettingsMixin
+from .api_setup import SetupMixin
 from .api_vocabulary import VocabularyMixin
 from .file_jobs import FileJobs
 
@@ -33,6 +35,7 @@ from .file_jobs import FileJobs
 class DashboardAPI(
     ModelsMixin,
     SettingsMixin,
+    SetupMixin,
     CommandsMixin,
     AnalyticsMixin,
     ReviewMixin,
@@ -67,6 +70,7 @@ class DashboardAPI(
         self._on_feedback_mode = on_feedback_mode
         self._benchmarks_dir = benchmarks_dir or Path("benchmarks")
         self._file_jobs = FileJobs()
+        self._level_meter = LevelMeter()
         self._download_cache: dict[str, tuple[float, dict]] = {}
         self._llm_server_cache: dict[tuple[str, str, str], tuple[float, dict]] = {}
         self.extensions = extensions if extensions is not None else ExtensionRegistry()

@@ -40,7 +40,7 @@ def _declared() -> set[str]:
 
 
 def test_every_topic_module_is_a_mixin_of_the_api():
-    assert len(MIXINS) == 9
+    assert len(MIXINS) == 10
     assert all(issubclass(cls, DashboardState) for cls in MIXINS)
 
 

@@ -71,6 +71,9 @@ SHOTS = (
     ("recordings", "dashboard-recordings.png", None, 860),
     ("settings", "dashboard-settings.png", None, None),  # the Dictation page, where Settings opens
 )
+# The first-run setup, one image per step: (step name, step index). It is an overlay, so each is photographed with
+# the setup due (`setup_done` false) and the page told to show that step.
+SETUP_SHOTS = (("welcome", 0), ("microphone", 1), ("hotkey", 2), ("ready", 3))
 CROP_PADDING = 32  # CSS pixels of page background kept below the last card
 
 # ── Demo data ─────────────────────────────────────────────────────────────────────────────────────
@@ -382,6 +385,9 @@ def _demo_patches() -> list[mock._patch]:
         mock.patch("nexusvox.dashboard.api_settings.llm_loaded_model", return_value=None),
         mock.patch("nexusvox.llm.installed_models", return_value=llm_models),
         mock.patch("nexusvox.dashboard.api_meetings.list_devices", return_value=devices),
+        # The setup's microphone step: demo names, and a level as if someone were speaking.
+        mock.patch("nexusvox.dashboard.api_setup.input_device_names", return_value=devices["inputs"]),
+        mock.patch("nexusvox.audio.meter.LevelMeter.read", return_value={"level": 0.62}),
     ]
 
 
@@ -389,6 +395,22 @@ STILL_CSS = "<style>*, *::before, *::after { transition: none !important; animat
 CHART_SCRIPT = '<script src="chart.min.js"></script>'
 STILL_CHARTS = "<script>Chart.defaults.animation = false;</script>"
 _hide_css = ""  # the rule for the tab being photographed; set by `run` before each shot
+_setup_step: int | None = None  # the setup step the page is told to show; set by `run` before each setup shot
+# Waits for the setup to open (it asks the server), shows the step and, on the hotkey step, a dictated test phrase.
+SETUP_SCRIPT = """<script>
+document.addEventListener("DOMContentLoaded", () => {{
+  const wait = setInterval(() => {{
+    if (document.getElementById("setup").hidden) return;
+    clearInterval(wait);
+    showSetupStep({step});
+    if ({step} === 2) {{
+      const box = document.getElementById("setup-test");
+      box.value = "Hello world";
+      box.dispatchEvent(new Event("input"));
+    }}
+  }}, 50);
+}});
+</script>"""
 
 
 def _tab_style(selector: str | None) -> str:
@@ -404,6 +426,8 @@ def _serve_still(response):
         html = response.get_data(as_text=True)
         html = html.replace(CHART_SCRIPT, CHART_SCRIPT + STILL_CHARTS, 1)
         html = html.replace("</head>", STILL_CSS + _hide_css + "</head>", 1)
+        if _setup_step is not None:
+            html = html.replace("</body>", SETUP_SCRIPT.format(step=_setup_step) + "</body>", 1)
         response.set_data(html)
         response.headers.pop("ETag", None)
     return response
@@ -503,7 +527,7 @@ def _crop_to_content(target: Path, scale: float) -> None:
 
 
 def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
-    global _hide_css
+    global _hide_css, _setup_step
     browser_path = _find_browser(browser)
     _check_page_markers()
     out_dir = out_dir.resolve()  # before the working directory moves
@@ -534,6 +558,7 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
             config.database.path = str(data_dir / "demo.db")
             config.database.audio_dir = "audio"
             config.hotkey.mode = "hold"
+            config.feedback.mode = "visual"  # what a fresh install starts on (the config template)
             config.llm.model = "gemma4:e4b"
             config.cleanup.level = "light"
             config.meeting.own_voice_label = OWN_VOICE_LABEL
@@ -571,8 +596,26 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
                 if height is None:
                     _crop_to_content(target, scale)
 
+            config.setup_done = False  # the setup overlay opens by itself on the dashboard's first page
+            _hide_css = ""
+            for name, step in SETUP_SHOTS:
+                _setup_step = step
+                guard_url = f"http://127.0.0.1:{port}/?launch={guard.new_launch_secret()}"
+                target = staging / f"dashboard-setup-{name}.png"
+                _photograph(
+                    browser_path,
+                    guard_url,
+                    target,
+                    data_dir / "browser-profile" / f"setup-{name}",
+                    scale,
+                    VIEWPORT_HEIGHT,
+                )
+                _crop_to_content(target, scale)
+            _setup_step = None
+            config.setup_done = True
+
         written = []
-        for _tab, filename, _hide, _height in SHOTS:
+        for filename in [s[1] for s in SHOTS] + [f"dashboard-setup-{name}.png" for name, _step in SETUP_SHOTS]:
             destination = out_dir / filename
             shutil.copyfile(staging / filename, destination)
             written.append(destination)

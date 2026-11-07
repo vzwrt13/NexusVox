@@ -154,6 +154,14 @@ class NexusVoxApp(
         """Open the dashboard window."""
         open_dashboard(self._db, self._config, app=self)
 
+    def _open_dashboard_logged(self) -> None:
+        """`_open_dashboard` for a thread nobody waits for: a failure (the port is taken, no browser) is logged,
+        not left on a future that is never read."""
+        try:
+            self._open_dashboard()
+        except Exception:
+            logger.exception("The dashboard could not be opened for the first-run setup")
+
     def open_dashboard_from_second_start(self) -> None:
         """A second start of NexusVox rang the doorbell: show the dashboard of this instance."""
         logger.info("A second NexusVox start was detected; opening the dashboard of this instance")
@@ -200,6 +208,11 @@ class NexusVoxApp(
             "Press" if self._config.hotkey.mode == "toggle" else "Hold",
             describe_hotkey(self._config.hotkey),
         )
+
+        if not self._config.setup_done:
+            # A fresh install: the tray icon is easy to miss, so the dashboard opens by itself, on the first-run setup.
+            logger.info("First start: opening the dashboard for the first-run setup")
+            self._loop.run_in_executor(None, self._open_dashboard_logged)
 
         if self._mic_guard is not None:
             # Repair what a killed previous run left muted, even if the guard has been

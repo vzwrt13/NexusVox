@@ -29,6 +29,7 @@ from . import (
     routes_models,
     routes_review,
     routes_settings,
+    routes_setup,
     routes_vocabulary,
 )
 from .api import DashboardAPI
@@ -52,6 +53,7 @@ _lock = threading.Lock()
 _ROUTE_MODULES = (
     routes_models,
     routes_settings,
+    routes_setup,
     routes_meetings,
     routes_commands,
     routes_analytics,

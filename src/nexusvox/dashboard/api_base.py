@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from sqlalchemy.orm import sessionmaker
 
+    from ..audio.meter import LevelMeter
     from ..config import Config
     from ..extensions import ExtensionRegistry
     from ..meetings.session import MeetingSession
@@ -41,6 +42,7 @@ class DashboardState:
     _on_feedback_mode: Callable[[str], None] | None
     _benchmarks_dir: Path
     _file_jobs: FileJobs
+    _level_meter: LevelMeter
     _download_cache: dict[str, tuple[float, dict]]
     _llm_server_cache: dict[tuple[str, str, str], tuple[float, dict]]
     extensions: ExtensionRegistry

@@ -10,6 +10,12 @@ A route reads its JSON body through `_json_object` in `routes_base.py`: valid JS
 | POST | `/api/settings/hotkey` | Set the binding `{modifiers, key}` (400 on an unusable one, or on a key the paste, polish or enabled os-control command key uses: the listener would drop that marker silently) |
 | POST | `/api/settings/hotkey-mode` | Set `hold` or `toggle` (400 on anything else) |
 | POST | `/api/settings/feedback-mode` | Set dictation feedback `{mode}`: `sound`, `visual`, `both` (400 otherwise) |
+| GET | `/api/setup` | `{needed}`: whether the first-run setup is due (`[general].setup_done` is false). The page asks at start |
+| GET | `/api/setup/microphones` | `{inputs, device}`: the input devices to choose from (WASAPI names where there is that host API) and the chosen one (`[audio].device`, empty: the system default) |
+| POST | `/api/setup/microphone` | Choose the dictation microphone `{device}` (400 on a name over 200 characters); returns the settings (`audio_device`). Read at every recording, so it is live |
+| GET | `/api/setup/mic-level` | `{level}` 0..1 (dB scale) of the chosen microphone, the loudest chunk since the last read, or `{level: 0, error}`. The first read opens an input stream; it closes by itself 3 s after the last read |
+| POST | `/api/setup/mic-level/stop` | Closes the level stream at once |
+| POST | `/api/setup/complete` | Finished or skipped: sets `[general].setup_done` to true and returns the settings |
 | POST | `/api/settings/mic-guard` | Toggle muting other apps' microphone sessions while recording |
 | POST | `/api/settings/log-full-text` | Toggle full dictated text in the file log `{enabled}` (`[general].log_full_text`, live) |
 | POST | `/api/feedback/preview` | The report the Feedback tab would send, as text: `{kind, message, include_log}` -> `{ok, preview, log_included}`; sends nothing; the reply has a `token` for this report. Errors (`{error, message}`): 400 `invalid` (unknown kind, message under 3 characters), 413 `too_large` (message over 5,000), 404 `disabled` (`[support].feedback_form_url` empty, not https, or not on `nexusvox.app`) |

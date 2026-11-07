@@ -113,7 +113,7 @@ starting it (details in [docs/EXTENSIONS.md](docs/EXTENSIONS.md)).
 
 ## 3. Configure
 
-On first run a `config.toml` is created automatically from the example template. You can also copy it manually:
+On first run a `config.toml` is created automatically from the example template, and the dashboard opens on a four-step setup (Welcome, Microphone, Hotkey, Ready); it can be skipped, and Settings can run it again. You can also copy the template manually:
 
 ```bash
 cp src/nexusvox/config.example.toml config.toml

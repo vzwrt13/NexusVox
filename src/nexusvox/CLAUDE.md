@@ -6,7 +6,7 @@ Rules and pointers only. How a module works is in `docs/internals/` (table at th
 
 - Top level: `__main__.py`, `config.py`, `extensions.py`, `llm.py`, `snippets.py`, `file_cleanup.py`. `nexusvox-pro` imports these, so they stay real modules: no shim, because a patch such as `nexusvox.llm.urllib.request.urlopen` has to reach the module that does the work.
 - `app/` - `NexusVoxApp` and its mixins (`core`, `events`, `cycle`, `commands`, `polish`, `models`, `records`, `feedback`, `common`).
-- `audio/` - `capture.py` (microphone), `state.py`, `mic_guard.py`, `remote_mic.py`.
+- `audio/` - `capture.py` (microphone), `devices.py` (which input device: shared by dictation, meetings and the setup's meter), `meter.py` (the setup's level meter), `state.py`, `mic_guard.py`, `remote_mic.py`.
 - `dictation/` - one dictation from hotkey to typed text: `hotkey.py`, `pipeline.py` and its steps (`dictionary.py`, `voice_commands.py`, `cleanup.py`, `translator.py`), `polish.py`, `polish_presets.py`, `injector.py`, `clipboard.py`, `edit_watch.py`, `lang_detect.py`, `assistant.py`, `os_commands.py`, `feedback.py`, `overlay.py`.
 - `meetings/` - `recorder.py`, `session.py`, `live.py`, `transcribe.py`.
 - `storage/` - `db.py`, `models.py`, `vocabulary.py`.

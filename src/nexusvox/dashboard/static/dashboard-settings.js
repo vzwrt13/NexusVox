@@ -328,6 +328,7 @@ async function loadSettings() {
   feedbackUrl = s.feedback_url || "";
   feedbackTabButton.hidden = !feedbackUrl;
   feedbackPanel.hidden = !feedbackUrl;
+  applyFeedbackAvailability(s);
   learnFromEditsToggle.checked = s.learn_from_edits;
   loadLearnStatus();
   polishTerminalsToggle.checked = s.polish_in_terminals;

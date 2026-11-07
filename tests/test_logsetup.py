@@ -187,7 +187,7 @@ def test_open_log_folder_says_so_where_startfile_does_not_exist(db, session_fact
 # in Text, or the full dictation lands in the file log.
 _SPOKEN_NAMES = {
     "text", "raw", "corrected", "typed", "_last_typed", "delta", "target", "command", "cleaned", "translated",
-    "reply", "assistant_text", "spoken", "instruction",
+    "reply", "assistant_text", "spoken", "instruction", "app_name",
 }  # fmt: skip
 
 

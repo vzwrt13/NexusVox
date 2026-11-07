@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 
 from ..config import (
     CLEANUP_LEVELS,
@@ -76,6 +77,7 @@ class SettingsMixin(DashboardState):
             "feedback_url": build_feedback_url(
                 self._config.support.feedback_form_url, device=self._config.inference.device
             ),
+            "feedback_app_send": bool(app_feedback_url(self._config.support.feedback_form_url)),
         }
 
     def get_translator_status(self) -> dict:
@@ -253,26 +255,38 @@ class SettingsMixin(DashboardState):
         return self.get_settings()
 
     def preview_feedback(self, kind: object, message: object, include_log: bool) -> dict:
-        """What a report would send, as text; sends nothing."""
+        """What a report would send, as text; sends nothing. The reply carries a token for exactly this report."""
         try:
             url, report = self._feedback_report(kind, message, include_log)
         except FeedbackError as exc:
             return exc.as_dict()
-        return {"ok": True, "preview": render_preview(url, report), "log_included": "log" in report}
+        token = secrets.token_hex(8)
+        self._feedback_preview = (token, (kind, message, include_log), url, report)
+        return {"ok": True, "preview": render_preview(url, report), "token": token, "log_included": "log" in report}
 
-    def send_feedback(self, kind: object, message: object, include_log: bool) -> dict:
-        """Posts the report to the Worker. Only the Send click calls this; nothing is sent at any other time."""
+    def send_feedback(self, kind: object, message: object, include_log: bool, token: object = None) -> dict:
+        """Posts the report to the Worker. Only the Send click calls this; nothing is sent at any other time.
+
+        With the token of a preview the user saw, that very report goes out, not a new one built from a log that
+        has grown since. A token that no longer matches the inputs sends nothing (`stale`)."""
         try:
-            url, report = self._feedback_report(kind, message, include_log)
+            if token is None:
+                url, report = self._feedback_report(kind, message, include_log)
+            else:
+                held = self._feedback_preview
+                if held is None or held[0] != token or held[1] != (kind, message, include_log):
+                    raise FeedbackError("stale", "The report changed since the preview. Check it and click Send again.")
+                _, _, url, report = held
             send_report(url, report)
         except FeedbackError as exc:
             return exc.as_dict()
+        self._feedback_preview = None
         return {"ok": True, "log_included": "log" in report}
 
     def _feedback_report(self, kind: object, message: object, include_log: bool) -> tuple[str, dict[str, str]]:
         url = app_feedback_url(self._config.support.feedback_form_url)
         if not url:
-            raise FeedbackError("disabled", "Sending feedback from the app is switched off.")
+            raise FeedbackError("disabled", "Sending from the app is not available here. Use the web form.")
         return url, build_report(kind, message, include_log, device=self._config.inference.device)
 
     def open_log_folder(self) -> dict:

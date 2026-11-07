@@ -34,7 +34,7 @@ Rules and pointers only. How a module works is in `docs/internals/` (table at th
 - **Polish and cleanup:** never write the word "polish" in a prompt (small models read it as the language). The language line comes from the selected text, never from the spoken instruction. Hooks of extensions run under `extensions.HOOK_TIMEOUT_S`; a failing hook is skipped.
 - **Mic guard:** nothing may stay muted (`release()` is idempotent and runs on every exit path). Discord ignores session mute; user-facing text must point to Discord's Push to Mute.
 - **Streaming:** `App._stream_audio` reads the recording to its end marker even when sending fails, so a failed take never leaks into the next.
-- **Logging:** spoken text in a log call is wrapped in `Text(...)`; `tests/test_logsetup.py` scans for it. The Feedback tab's log report relies on it: spoken text outside `Text` would be sent.
+- **Logging:** spoken text in a log call is wrapped in `Text(...)`; `tests/test_logsetup.py` scans for it. The Feedback tab's log report relies on it, app names of spoken commands included: spoken text outside `Text` would be sent.
 - **Learn from edits:** suggestions only; nothing enters the dictionary without the user accepting it in the dashboard.
 
 ## Contracts To Keep In Sync

@@ -80,15 +80,54 @@ def test_a_text_that_holds_the_fence_characters_cannot_break_out(file_log):
     assert "LEAK" not in log and "after" in log
 
 
-def test_lines_before_the_last_start_are_not_sent(file_log):
+def test_lines_before_the_first_start_are_not_sent_but_a_restart_keeps_the_session_before_it(file_log):
     directory, _ = file_log
     path = directory / "nexusvox.log"
     old = "2026-01-01 [INFO] nexusvox: Transcription done: 'old version shortened' (30 chars)\n"
     path.write_text(old + path.read_text(encoding="utf-8"), encoding="utf-8")
-    log = _log(directory, "new line")
-    assert "old version" not in log and "new line" in log
+    log = _log(directory, "before the crash")
+    assert "old version" not in log and "before the crash" in log
+    setup_file_logging(lambda: False, directory=directory)  # the app was restarted
+    log = _log(directory, "after the restart")
+    assert "before the crash" in log and "after the restart" in log and "old version" not in log
     path.write_text(old, encoding="utf-8")  # a file without the start mark: nothing is known to be safe
     assert report_log(directory) == ""
+
+
+def test_a_big_log_is_read_from_its_end_without_leaking_a_cut_fence(file_log, monkeypatch):
+    directory, _ = file_log
+    monkeypatch.setattr(feedback_send, "_READ_LIMIT", 600)
+    _log(
+        directory, ("said: %s", Text("first line\nSECRET second line\nthird")), *[f"filler {i:03d}" for i in range(60)]
+    )
+    log = _log(directory, "last line")
+    assert "SECRET" not in log and "third" not in log and "last line" in log and "filler 059" in log
+    assert not {"\ue000", "\ue001"} & set(log)
+
+
+def test_a_big_log_without_a_mark_in_its_end_still_counts_when_the_mark_is_at_the_start(file_log, monkeypatch):
+    directory, _ = file_log
+    monkeypatch.setattr(feedback_send, "_READ_LIMIT", 300)
+    log = _log(directory, *[f"filler {i:03d}" for i in range(80)])
+    assert log.endswith("filler 079") and LOG_FORMAT_MARK not in log
+    path = directory / "nexusvox.log"
+    path.write_text(path.read_text(encoding="utf-8").replace(LOG_FORMAT_MARK, "other"), encoding="utf-8")
+    assert report_log(directory) == ""
+
+
+def test_the_log_is_read_again_only_when_the_file_changed(file_log, monkeypatch):
+    directory, _ = file_log
+    _log(directory, "one")
+    opened = []
+    real_open = feedback_send.Path.open
+
+    def counting_open(self, *args, **kwargs):
+        opened.append(self)
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(feedback_send.Path, "open", counting_open)
+    assert report_log(directory) == report_log(directory) and opened == []
+    assert "two" in _log(directory, "two") and len(opened) == 1
 
 
 def test_the_log_is_the_last_300_lines_within_the_limit(file_log):
@@ -101,10 +140,21 @@ def test_the_log_is_the_last_300_lines_within_the_limit(file_log):
     assert " 0299 " in big.splitlines()[-1]
 
 
-def test_the_windows_user_name_in_paths_is_removed(file_log):
+@pytest.mark.parametrize(
+    "path",
+    [
+        r"C:\Users\Jane Doe\AppData\Local\NexusVox",
+        "c:/users/Jane Doe/AppData",
+        r"\\server\Users\Jane Doe\x.log",
+        "/c/Users/Jane Doe/x.log",
+        r"C:\Users\Jane",
+        "Opened 'C:\\Users\\Jane Doe'",
+    ],
+)
+def test_the_windows_user_name_in_paths_is_removed(file_log, path):
     directory, _ = file_log
-    log = _log(directory, r"Model cache: C:\Users\Jane Doe\AppData\Local\NexusVox")
-    assert "Jane" not in log and r"C:\Users\<user>" in log
+    log = _log(directory, f"Model cache: {path}")
+    assert "Jane" not in log and "Doe" not in log and "<user>" in log
 
 
 def test_no_log_file_means_no_log(tmp_path):
@@ -150,7 +200,24 @@ def test_the_preview_shows_every_field_that_is_sent(file_log):
 
 def test_the_url_is_the_worker_path_on_the_form_host():
     assert app_feedback_url("https://nexusvox.app/feedback?x=1") == URL
+    assert app_feedback_url(" https://WWW.nexusvox.app/feedback ") == "https://www.nexusvox.app/api/app-feedback"
     assert app_feedback_url("") == "" and app_feedback_url("file:///C:/x") == ""
+
+
+@pytest.mark.parametrize(
+    "form_url",
+    [
+        "http://nexusvox.app/feedback",  # not encrypted
+        "https://forms.example/r/abc",  # a third party never offered this endpoint
+        "https://nexusvox.app.evil.example/feedback",
+        "https://nexusvox.app@evil.example/feedback",
+        "https://user:pw@nexusvox.app/feedback",
+        "https://nexusvox.app:8443/feedback",
+        "https://nexusvox.app:notaport/feedback",
+    ],
+)
+def test_a_report_never_goes_to_another_host_or_over_plain_http(form_url):
+    assert app_feedback_url(form_url) == ""
 
 
 class _Response:
@@ -216,6 +283,25 @@ def client(db, session_factory):
     return make
 
 
+def test_a_lone_surrogate_from_the_page_is_replaced_before_it_is_shown_or_sent(monkeypatch):
+    report = build_report("bug", "half an emoji \ud83d here", False)
+    assert "\ud83d" not in report["message"] and "half an emoji" in report["message"]
+    seen = {}
+    monkeypatch.setattr(feedback_send.httpx, "post", lambda url, **kw: seen.update(kw) or _Response(200, {}))
+    send_report(URL, {"kind": "bug", "message": "x \ud83d y"})  # a report built elsewhere still encodes
+    assert b"x " in seen["content"]
+
+
+def test_a_malformed_address_is_reported_not_raised(monkeypatch):
+    def post(*a, **k):
+        raise httpx.InvalidURL("bad port")
+
+    monkeypatch.setattr(feedback_send.httpx, "post", post)
+    with pytest.raises(FeedbackError) as caught:
+        send_report("https://nexusvox.app:x/api", {})
+    assert caught.value.code == "disabled"
+
+
 def test_the_routes_preview_without_sending_and_send_on_post(client, monkeypatch):
     sent = []
     monkeypatch.setattr("nexusvox.dashboard.api_settings.send_report", lambda url, report: sent.append((url, report)))
@@ -249,13 +335,49 @@ def test_the_log_is_only_included_for_a_true_flag(client, monkeypatch):
         assert c.post("/api/feedback/send", json={**body, "include_log": True}).get_json()["log_included"] is True
 
 
-def test_an_empty_form_url_switches_sending_off(client, monkeypatch):
+@pytest.mark.parametrize("form_url", ["", "https://forms.example/r/abc", "http://nexusvox.app/feedback"])
+def test_sending_is_off_without_a_trusted_form_url(client, monkeypatch, form_url):
     called = []
     monkeypatch.setattr("nexusvox.dashboard.api_settings.send_report", lambda *a: called.append(a))
-    with client("") as c:
-        reply = c.post("/api/feedback/send", json={"kind": "bug", "message": "It crashes"})
-        assert c.get("/api/settings").get_json()["feedback_url"] == ""
-    assert reply.status_code == 404 and called == []
+    with client(form_url) as c:
+        body = {"kind": "bug", "message": "It crashes"}
+        sent = c.post("/api/feedback/send", json=body)
+        previewed = c.post("/api/feedback/preview", json=body)
+        settings = c.get("/api/settings").get_json()
+    assert sent.status_code == previewed.status_code == 404 and called == []
+    assert settings["feedback_app_send"] is False
+    assert bool(settings["feedback_url"]) is bool(form_url)  # the web form link stays whenever a URL is set
+
+
+def test_the_default_form_url_offers_sending(client):
+    with client() as c:
+        assert c.get("/api/settings").get_json()["feedback_app_send"] is True
+
+
+def test_send_posts_exactly_the_previewed_report_even_when_the_log_grew(client, monkeypatch):
+    sent = []
+    logs = iter(["log as previewed", "log after more lines"])
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.send_report", lambda url, report: sent.append(report))
+    monkeypatch.setattr("nexusvox.system.feedback_send.report_log", lambda directory=None: next(logs))
+    body = {"kind": "bug", "message": "It crashes", "include_log": True}
+    with client() as c:
+        token = c.post("/api/feedback/preview", json=body).get_json()["token"]
+        assert c.post("/api/feedback/send", json={**body, "token": token}).get_json()["ok"] is True
+        assert [r["log"] for r in sent] == ["log as previewed"]
+        again = c.post("/api/feedback/send", json={**body, "token": token})  # one preview, one send
+    assert again.status_code == 409 and len(sent) == 1
+
+
+@pytest.mark.parametrize("change", [{"message": "Something else"}, {"kind": "wish"}, {"include_log": False}])
+def test_a_send_after_the_inputs_changed_sends_nothing(client, monkeypatch, change):
+    sent = []
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.send_report", lambda url, report: sent.append(report))
+    body = {"kind": "bug", "message": "It crashes", "include_log": True}
+    with client() as c:
+        token = c.post("/api/feedback/preview", json=body).get_json()["token"]
+        reply = c.post("/api/feedback/send", json={**body, **change, "token": token})
+        wrong = c.post("/api/feedback/send", json={**body, "token": "nope"})
+    assert reply.status_code == wrong.status_code == 409 and reply.get_json()["error"] == "stale" and sent == []
 
 
 def test_the_log_marks_a_start_and_each_rollover(file_log):

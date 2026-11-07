@@ -59,9 +59,16 @@ operation involves capabilities that look alarming out of context:
   user. Everything you have ever dictated is in there.
 - **Optional inference containers.** The GPU backends listen on `localhost` ports
   8000–8003 and are likewise unauthenticated.
-- **Network.** No telemetry, no accounts, no cloud transcription. The only
-  outbound traffic is downloading model weights from Hugging Face on first use,
-  and whatever Docker does when building images.
+- **Network.** No telemetry, no accounts, no cloud transcription. The outbound
+  traffic is downloading model weights from Hugging Face on first use, whatever
+  Docker does when building images, and one more thing you start yourself: the
+  *Send* button of the dashboard's Feedback tab posts your message, the NexusVox
+  and Windows versions and the hardware tier to `nexusvox.app` over https, and
+  your log only if you tick *Include log*. Dictated text and the Windows user name
+  are removed from that log first; audio and transcripts are never sent. Nothing
+  is sent until you click, and the tab shows the exact report beforehand. The app
+  posts only to `nexusvox.app` (`APP_FEEDBACK_HOSTS` in `system/feedback_send.py`),
+  whatever `[support].feedback_form_url` says.
 
 ## Trust boundary
 

@@ -6,7 +6,8 @@ body (`build_report`), shows it as text (`render_preview`) and posts it (`send_r
 itself: the dashboard calls it from a click on *Preview* or *Send*.
 
 The log leaves the PC only after `report_log` has cut out everything `logsetup` fenced as dictated text, with
-full-text logging on or off, and only the part written since the app last started.
+full-text logging on or off, and only from the first start mark on. A report goes only over https to
+`APP_FEEDBACK_HOSTS`.
 """
 
 from __future__ import annotations
@@ -37,7 +38,9 @@ TIMEOUT_S = 15.0
 
 _READ_LIMIT = 16 * 1024 * 1024  # of a day's log, only this much from the end is read
 _FENCED = re.compile(f"{TEXT_START}.*?(?:{TEXT_END}|\\Z)", re.DOTALL)
-_USER_DIR = re.compile(r"(?i)([a-z]:[\\/]+users[\\/]+)[^\\/\s'\"<>|:*?]+")
+# The folder after `Users`, spaces included, up to the next separator: drive, UNC and /c/Users forms alike.
+_USER_DIR = re.compile(r"(?i)([\\/]users[\\/]+)[^\\/\r\n'\"<>|:*?]+")
+APP_FEEDBACK_HOSTS = ("nexusvox.app", "www.nexusvox.app")  # the only hosts a report and log are ever posted to
 
 
 class FeedbackError(Exception):
@@ -57,11 +60,18 @@ class FeedbackError(Exception):
 
 
 def app_feedback_url(form_url: str) -> str:
-    """The Worker's text path on the host of the web form, or "" when no (usable) form URL is set."""
-    parts = urlsplit(form_url.strip())
-    if parts.scheme not in ("http", "https") or not parts.netloc:
+    """The Worker's text path on the web form's host, or "" when sending from the app is not available.
+
+    A message and a log leave the PC only over https and only to a host in `APP_FEEDBACK_HOSTS`: a form URL
+    that points to another site (a hosted form service, say) keeps its web form and gets no in-app Send."""
+    try:
+        parts = urlsplit(form_url.strip())
+        host, port = parts.hostname, parts.port
+    except ValueError:
         return ""
-    return urlunsplit((parts.scheme, parts.netloc, APP_FEEDBACK_PATH, "", ""))
+    if parts.scheme != "https" or host not in APP_FEEDBACK_HOSTS or port not in (None, 443) or parts.username:
+        return ""
+    return urlunsplit(("https", host, APP_FEEDBACK_PATH, "", ""))
 
 
 def strip_dictated_text(log: str) -> str:
@@ -71,28 +81,67 @@ def strip_dictated_text(log: str) -> str:
     return _USER_DIR.sub(r"\1<user>", log)
 
 
+def _mark_before(handle, end: int) -> bool:
+    """Whether `LOG_FORMAT_MARK` appears in the file before byte offset `end`, read in chunks from the start."""
+    needle = LOG_FORMAT_MARK.encode()
+    handle.seek(0)
+    carry = b""
+    read = 0
+    while read < end:
+        chunk = handle.read(min(1024 * 1024, end - read))
+        if not chunk:
+            return False
+        read += len(chunk)
+        if needle in carry + chunk:
+            return True
+        carry = chunk[-len(needle) :]
+    return False
+
+
+def _drop_cut_fence(text: str) -> str:
+    """A read that starts mid-file may start inside a fenced text: drop up to its closing fence."""
+    end = text.find(TEXT_END)
+    start = text.find(TEXT_START)
+    if end >= 0 and (start < 0 or end < start):
+        return text[end + 1 :]
+    return text
+
+
+_cache: tuple[tuple, str] | None = None
+
+
 def report_log(directory: Path | None = None) -> str:
     """The last `LOG_LINES` lines (at most `LOG_MAX_CHARS` characters) of today's log, dictated text removed.
 
-    Only the part after the app's last start mark counts, because earlier lines may come from a version that did
-    not fence dictated text. "" when there is no log or no such mark."""
+    Everything from the file's first start mark on was written by a version that fences dictated text, restarts
+    included, so a report after a restart still holds the session that went wrong. Lines before that mark may
+    not be fenced and are never sent. "" when there is no log or no such mark. The result is kept until the file
+    changes, so a preview that refreshes while the user types does not read the log again."""
+    global _cache
     path = (directory or log_dir()) / LOG_FILE_NAME
     try:
+        info = path.stat()
+        key = (str(path), info.st_size, info.st_mtime_ns)
+        if _cache and _cache[0] == key:
+            return _cache[1]
         with path.open("rb") as handle:
             size = handle.seek(0, 2)
-            handle.seek(max(0, size - _READ_LIMIT))
-            raw = handle.read()
+            offset = max(0, size - _READ_LIMIT)
+            handle.seek(offset)
+            text = handle.read().decode("utf-8", errors="replace")
+            if not (offset and _mark_before(handle, offset)):  # else the whole window follows a mark
+                start = text.find(LOG_FORMAT_MARK)
+                text = text[text.rfind("\n", 0, start) + 1 :] if start >= 0 else ""
     except OSError:
         return ""
-    text = raw.decode("utf-8", errors="replace")
-    start = text.rfind(LOG_FORMAT_MARK)
-    if start < 0:
-        return ""
-    text = text[text.rfind("\n", 0, start) + 1 :]
+    if offset:
+        text = _drop_cut_fence(text)
     lines = strip_dictated_text(text).splitlines()[-LOG_LINES:]
     while len(lines) > 1 and sum(len(line) + 1 for line in lines) > LOG_MAX_CHARS:
         lines.pop(0)
-    return "\n".join(lines)[-LOG_MAX_CHARS:]
+    log = "\n".join(lines)[-LOG_MAX_CHARS:]
+    _cache = (key, log)
+    return log
 
 
 def build_report(
@@ -106,7 +155,7 @@ def build_report(
     """The JSON body for `/api/app-feedback`; raises `FeedbackError` for a kind or message the Worker would refuse."""
     if kind not in KINDS:
         raise FeedbackError("invalid", "Choose what the report is about.")
-    text = message.strip() if isinstance(message, str) else ""
+    text = _encodable(message).strip() if isinstance(message, str) else ""
     if len(text) < MESSAGE_MIN_CHARS:
         raise FeedbackError("invalid", f"Write at least {MESSAGE_MIN_CHARS} characters.")
     if len(text) > MESSAGE_MAX_CHARS:
@@ -119,10 +168,15 @@ def build_report(
         "hardware": hardware_tier(device),
     }
     if include_log:
-        log = report_log(log_directory)
+        log = _encodable(report_log(log_directory))
         if log:
             report["log"] = log
     return report
+
+
+def _encodable(text: str) -> str:
+    """`text` with a lone surrogate (half an emoji from the page) replaced, so it can be encoded and shown as sent."""
+    return text.encode("utf-8", errors="replace").decode("utf-8")
 
 
 def render_preview(url: str, report: Mapping[str, str]) -> str:
@@ -182,13 +236,11 @@ def _error_for(response: httpx.Response) -> FeedbackError:
 def send_report(url: str, report: Mapping[str, str]) -> None:
     """Posts the report as JSON. Raises `FeedbackError`: `offline` when the server cannot be reached."""
     headers = {"User-Agent": f"NexusVox/{__version__}", "Content-Type": "application/json; charset=utf-8"}
+    body = json.dumps({key: _encodable(value) for key, value in report.items()}, ensure_ascii=False)
     try:
-        response = httpx.post(
-            url,
-            content=json.dumps(dict(report), ensure_ascii=False).encode("utf-8"),
-            headers=headers,
-            timeout=TIMEOUT_S,
-        )
+        response = httpx.post(url, content=body.encode("utf-8"), headers=headers, timeout=TIMEOUT_S)
+    except httpx.InvalidURL as exc:
+        raise FeedbackError("disabled", "The feedback address in config.toml is not valid.") from exc
     except httpx.HTTPError as exc:
         logger.info("Feedback not sent: %s", exc.__class__.__name__)
         raise FeedbackError(

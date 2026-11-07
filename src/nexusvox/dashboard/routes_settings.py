@@ -12,7 +12,15 @@ if TYPE_CHECKING:
     from .api import DashboardAPI
 
 
-_FEEDBACK_STATUS = {"invalid": 400, "too_large": 413, "disabled": 404, "rate": 429, "daily_cap": 429, "offline": 503}
+_FEEDBACK_STATUS = {
+    "invalid": 400,
+    "too_large": 413,
+    "disabled": 404,
+    "stale": 409,
+    "rate": 429,
+    "daily_cap": 429,
+    "offline": 503,
+}
 
 
 def _feedback_status(resp: dict) -> int:
@@ -122,7 +130,9 @@ def register(app: Flask, api: DashboardAPI) -> None:
     @app.route("/api/feedback/send", methods=["POST"])
     def send_feedback():
         data = _json_object()
-        resp = api.send_feedback(data.get("kind"), data.get("message"), data.get("include_log") is True)
+        resp = api.send_feedback(
+            data.get("kind"), data.get("message"), data.get("include_log") is True, data.get("token")
+        )
         return jsonify(resp), _feedback_status(resp)
 
     @app.route("/api/log-folder/open", methods=["POST"])

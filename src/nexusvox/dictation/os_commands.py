@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 
 from ..config import OSCommandsConfig
+from ..system.logsetup import Text
 
 logger = logging.getLogger("nexusvox.os_commands")
 
@@ -67,10 +68,10 @@ def execute_nexus_command(command: NexusCommand, config: OSCommandsConfig) -> bo
 
     exe_path = config.apps.get(command.app_name)
     if exe_path is None:
-        logger.warning("Nexus command: unknown app '%s'", command.app_name)
+        logger.warning("Nexus command: unknown app '%s'", Text(command.app_name))
         return False
 
-    logger.info("Nexus command: %s %s (exe=%s)", command.action, command.app_name, exe_path)
+    logger.info("Nexus command: %s %s (exe=%s)", command.action, Text(command.app_name), exe_path)
 
     match command.action:
         case "open":

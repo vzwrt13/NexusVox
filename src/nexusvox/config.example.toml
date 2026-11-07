@@ -300,8 +300,9 @@ token = ""
 [support]
 # The feedback page of the dashboard's Feedback tab. "Open the web form" opens it in your
 # browser with three URL parameters (app_version, windows_version, hardware = "CPU-only" or
-# "NVIDIA GPU"). The tab's own Send button posts a text report to /api/app-feedback on the same
-# host, only when you click it; the log goes along only if you tick "Include log", with dictated
-# text removed. Audio and transcripts are never sent. The default is the live form on
-# nexusvox.app; set an empty value ("") to hide the Feedback tab, or your own site's URL.
+# "NVIDIA GPU"). The tab's own Send button posts a text report to /api/app-feedback on
+# nexusvox.app, only when you click it; the log goes along only if you tick "Include log", with
+# dictated text removed. Audio and transcripts are never sent. The default is the live form on
+# nexusvox.app; set an empty value ("") to hide the Feedback tab. A URL on another site keeps
+# the web form but gets no in-app Send: the app never posts a report anywhere else.
 feedback_form_url = "https://nexusvox.app/feedback"

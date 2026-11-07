@@ -36,7 +36,7 @@ def _messages(caplog, level: int) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.name == "nexusvox.audio" and r.levelno == level]
 
 
-def test_the_per_second_level_line_is_debug_only(monkeypatch, caplog):
+async def test_the_per_second_level_line_is_debug_only(monkeypatch, caplog):
     capture = _recording(monkeypatch)
     with caplog.at_level(logging.DEBUG, logger="nexusvox.audio"):
         _feed(capture, 0.01, 40)
@@ -45,7 +45,7 @@ def test_the_per_second_level_line_is_debug_only(monkeypatch, caplog):
     capture.stop()
 
 
-def test_stopping_logs_one_summary_line_with_length_levels_and_silent_share(monkeypatch, caplog):
+async def test_stopping_logs_one_summary_line_with_length_levels_and_silent_share(monkeypatch, caplog):
     capture = _recording(monkeypatch)
     with caplog.at_level(logging.INFO, logger="nexusvox.audio"):
         _feed(capture, 0.0001, 2)  # -80 dB: silent
@@ -61,7 +61,7 @@ def test_stopping_logs_one_summary_line_with_length_levels_and_silent_share(monk
     assert not _messages(caplog, logging.WARNING)  # speech was there
 
 
-def test_a_recording_silent_throughout_warns_with_the_device_name(monkeypatch, caplog):
+async def test_a_recording_silent_throughout_warns_with_the_device_name(monkeypatch, caplog):
     capture = _recording(monkeypatch, device="USB Headset")
     with caplog.at_level(logging.INFO, logger="nexusvox.audio"):
         _feed(capture, 0.0, 10)
@@ -72,7 +72,7 @@ def test_a_recording_silent_throughout_warns_with_the_device_name(monkeypatch, c
     assert "100% silent" in _messages(caplog, logging.INFO)[-1]
 
 
-def test_a_short_silent_tap_does_not_warn(monkeypatch, caplog):
+async def test_a_short_silent_tap_does_not_warn(monkeypatch, caplog):
     capture = _recording(monkeypatch)
     with caplog.at_level(logging.INFO, logger="nexusvox.audio"):
         _feed(capture, 0.0, 2)
@@ -80,7 +80,7 @@ def test_a_short_silent_tap_does_not_warn(monkeypatch, caplog):
     assert not _messages(caplog, logging.WARNING)
 
 
-def test_each_recording_counts_from_zero_and_a_second_stop_logs_nothing(monkeypatch, caplog):
+async def test_each_recording_counts_from_zero_and_a_second_stop_logs_nothing(monkeypatch, caplog):
     capture = _recording(monkeypatch)
     _feed(capture, 0.0, 10)
     capture.stop()

@@ -73,9 +73,18 @@ def _request(config: LlmConfig, system: str, user: str) -> tuple[str, dict]:
         "messages": messages,
         "stream": False,
         "think": False,
-        "keep_alive": config.keep_alive,
+        "keep_alive": _keep_alive_value(config.keep_alive),
         "options": {"temperature": 0.2},
     }
+
+
+def _keep_alive_value(keep_alive: str) -> str | int:
+    """Ollama reads a bare number as seconds (`-1`: never unload, `0`: unload now) but rejects the string "-1"
+    (a duration needs a unit), so a numeric setting goes out as a number and "10m" stays a string."""
+    try:
+        return int(keep_alive.strip())
+    except ValueError:
+        return keep_alive
 
 
 @contextmanager
@@ -253,6 +262,10 @@ def warm_up(config: LlmConfig) -> None:
 
 _reload_lock = threading.Lock()
 _reloading: set[tuple[str, str]] = set()  # (url, model) with a reload in flight
+# (url, model) the app loaded itself at start (or on a model switch): the only ones it unloads again on quit.
+# A model the user already had loaded in Ollama is theirs and stays.
+_warmed: set[tuple[str, str]] = set()
+_UNLOAD_TIMEOUT_S = 3.0
 
 
 def _reload_key(config: LlmConfig) -> tuple[str, str]:
@@ -285,8 +298,12 @@ def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_
 
     def run() -> None:
         try:
+            ours = reason == "warm-up" and loaded_model(config, config.model) is None
             with background():  # nobody waits for this answer: live requests go first
                 complete(request_config, "Reply with OK.", "OK")
+            if ours:
+                with _reload_lock:
+                    _warmed.add(key)
             logger.info("Language model %s loaded (%s)", config.model, reason)
         except LlmError as exc:
             logger.info("Language model reload at %s failed (%s)", config.url, exc)
@@ -295,6 +312,29 @@ def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_
                 _reloading.discard(key)
 
     threading.Thread(target=run, daemon=True, name="llm-reload").start()
+    return True
+
+
+def unload(config: LlmConfig) -> bool:
+    """Tell Ollama to drop the model now (`keep_alive: 0`), but only one this app loaded itself at start or on a
+    model switch (`_warmed`); True if the request went out. Only the Ollama protocol is asked. Blocking, at most
+    `_UNLOAD_TIMEOUT_S`; never raises, the outcome is only logged."""
+    key = _reload_key(config)
+    with _reload_lock:
+        if config.protocol != "ollama" or key not in _warmed:
+            return False
+        _warmed.discard(key)
+    body = json.dumps({"model": config.model, "keep_alive": 0}).encode()
+    headers = {"Content-Type": "application/json"}
+    if config.api_key:
+        headers["Authorization"] = f"Bearer {config.api_key}"
+    request = urllib.request.Request(f"{key[0]}/api/chat", data=body, headers=headers, method="POST")
+    try:
+        _post(request, _UNLOAD_TIMEOUT_S)
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError) as exc:
+        logger.info("Language model %s could not be unloaded (%s)", config.model, exc)
+        return False
+    logger.info("Language model %s unloaded", config.model)
     return True
 
 

@@ -33,7 +33,8 @@ class LlmServer:
 class LlmConfig:
     """The language model server polish talks to. Not part of NexusVox: Ollama (default)
     or any OpenAI-compatible server. `keep_alive` (Ollama only) is how long the model
-    stays loaded after a request; shorter frees the VRAM sooner, longer avoids reloads.
+    stays loaded after a request: "-1" (default) keeps it loaded while NexusVox runs, which unloads it on quit;
+    a duration such as "10m" frees the VRAM sooner but makes the first request after a pause wait for a reload.
     `servers` are the extra servers saved in the dashboard; their models fill the dropdown too."""
 
     url: str = OLLAMA_URL
@@ -41,7 +42,7 @@ class LlmConfig:
     model: str = "gemma4:e4b"  # without a CUDA GPU and with no choice made: LLM_MODEL_CPU
     api_key: str = ""
     timeout_s: float = 60.0
-    keep_alive: str = "10m"
+    keep_alive: str = "-1"
     servers: list[LlmServer] = field(default_factory=list)
 
 

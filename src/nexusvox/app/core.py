@@ -20,6 +20,7 @@ from ..dictation.edit_watch import EditWatcher
 from ..dictation.hotkey import HotkeyListener, MeetingHotkey, describe_hotkey
 from ..dictation.overlay import Overlay
 from ..extensions import load_extensions
+from ..llm import unload as llm_unload
 from ..llm import warm_up as llm_warm_up
 from ..storage.db import Database
 from ..system.tray import SystemTray
@@ -281,6 +282,8 @@ class NexusVoxApp(
         if self._mic_guard is not None:
             self._mic_guard.release()
         await self._transcriber.disconnect()
+        # The model stays loaded while the app runs ([llm].keep_alive = -1); give its memory back on quit.
+        await asyncio.get_running_loop().run_in_executor(None, llm_unload, self._config.llm)
 
     def run(self) -> None:
         """Start the application."""

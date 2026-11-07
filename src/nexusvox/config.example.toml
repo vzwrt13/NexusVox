@@ -259,9 +259,11 @@ protocol = "ollama"
 # Sent as a Bearer token when set (cloud or protected servers). Leave empty for local ones.
 api_key = ""
 timeout_s = 60.0
-# Ollama only: how long the model stays loaded after a request. Shorter frees the VRAM
-# sooner (the speech model needs its share); the first request after unloading takes 10-50 s.
-keep_alive = "10m"
+# Ollama only: how long the model stays loaded after a request. "-1" keeps it loaded while NexusVox
+# runs, so no dictation loses its cleanup after a pause; NexusVox unloads the model it loaded itself
+# when you quit. A duration such as "10m" frees the VRAM sooner (the speech model needs its share),
+# but the first request after unloading takes 10-50 s.
+keep_alive = "-1"
 
 # Extra servers you saved in the dashboard (Settings > Models > Add custom server). Their models are listed in
 # the language model dropdown, grouped by server; picking one copies that server's url, protocol and api_key
@@ -281,7 +283,7 @@ keep_alive = "10m"
 # does not look like the dictation cleaned up (an answer, a translation, or a lost line break) is ignored, and dictations under 3 words are not sent. Also in the dashboard.
 # Without a CUDA GPU it runs on the CPU and adds about 2-6 s per dictation (the dashboard says so).
 level = "off"
-# A model still loading (10-50 s after [llm].keep_alive ran out) must not hold the dictation
+# A model still loading (10-50 s after Ollama unloaded it) must not hold the dictation
 # up: after this many seconds it is typed unchanged. Not set: 3 s with a CUDA GPU, 10 s without. NexusVox loads the model at start and
 # when cleanup is switched on; a longer keep_alive keeps it loaded (and its VRAM in use).
 # timeout_s = 3.0

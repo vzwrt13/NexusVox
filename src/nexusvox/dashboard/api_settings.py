@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import secrets
+import threading
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -35,6 +37,7 @@ from ..llm import loaded_model as llm_loaded_model
 from ..llm import model_pull as llm_pull
 from ..llm import model_status as llm_model_status
 from ..llm import start_ollama as llm_start_ollama
+from ..llm import unload as llm_unload
 from ..llm import warm_up as llm_warm_up
 from ..system.feedback_form import build_feedback_url
 from ..system.feedback_send import FeedbackError, app_feedback_url, build_report, render_preview, send_report
@@ -176,6 +179,11 @@ class SettingsMixin(DashboardState):
         model = str(model or "").strip()
         if not model:
             return {"error": "A model name is required", **self.get_settings()}
+        if model != self._config.llm.model:
+            # The old model has nothing to do any more: free its memory (only if the app loaded it itself).
+            threading.Thread(
+                target=llm_unload, args=(dataclasses.replace(self._config.llm),), daemon=True, name="llm-unload"
+            ).start()
         self._config.llm.model = model
         save_config(self._config)
         if self._config.cleanup.level != "off":

@@ -146,7 +146,10 @@ def test_a_named_microphone_is_found_on_wasapi_and_unnamed_means_the_default():
 
 
 def test_dictation_records_from_the_chosen_microphone(monkeypatch):
-    capture_module = pytest.importorskip("nexusvox.audio.capture")
+    try:
+        import nexusvox.audio.capture as capture_module
+    except Exception:  # sounddevice raises OSError without the PortAudio library (Linux CI)
+        pytest.skip("nexusvox.audio.capture needs PortAudio")
     opened: list[dict] = []
     monkeypatch.setattr(
         capture_module,

@@ -222,9 +222,12 @@ def test_warm_up_loads_the_model_in_the_background_and_never_raises(monkeypatch)
     monkeypatch.setattr(llm, "complete", fake_complete)
     started = []
     monkeypatch.setattr(llm.threading, "Thread", lambda target, **kw: started.append(target) or _Started(target))
-    llm.warm_up(LlmConfig(model="gemma4:e4b"))
-    started[0]()  # run the thread body here; it must swallow the error
-    assert calls == ["gemma4:e4b"]
+    try:
+        llm.warm_up(LlmConfig(model="gemma4:e4b"))
+        started[0]()  # run the thread body here; it must swallow the error
+        assert calls == ["gemma4:e4b"]
+    finally:
+        llm._reloading.clear()
 
 
 class _Started:

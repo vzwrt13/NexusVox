@@ -226,9 +226,20 @@ def clean_reply(reply: str) -> str:
     return m.group(1).strip() if m else reply
 
 
+# How long a load or recovery warm-up may take: loading a model into memory can need a minute or more.
+RELOAD_DEADLINE_S = 180.0
+
+
 def warm_up(config: LlmConfig) -> None:
     """Load the model in the background, so the first real request does not wait 10-50 s for
-    it - auto cleanup gives up after a few seconds. Never raises; a failure is only logged."""
+    it - auto cleanup gives up after a few seconds. Never raises; a failure is only logged.
+
+    Ollama gets `reload_in_background`: the long deadline (Ollama aborts a load whose client gave up), one load
+    per server and model, and `reload_running()` is true meanwhile, so a dictation does not queue a second load.
+    Other protocols load nothing that a short request cannot, so they keep a plain warm-up request."""
+    if config.protocol == "ollama":
+        reload_in_background(config, reason="warm-up")
+        return
 
     def run() -> None:
         try:
@@ -240,8 +251,6 @@ def warm_up(config: LlmConfig) -> None:
     threading.Thread(target=run, daemon=True, name="llm-warm-up").start()
 
 
-# How long a recovery warm-up may take: loading a model into memory can need a minute or more.
-RELOAD_DEADLINE_S = 180.0
 _reload_lock = threading.Lock()
 _reloading: set[tuple[str, str]] = set()  # (url, model) with a reload in flight
 
@@ -256,8 +265,8 @@ def reload_running(config: LlmConfig) -> bool:
         return _reload_key(config) in _reloading
 
 
-def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_S) -> bool:
-    """Load the model after a request timed out, with a long deadline; True if a load was started.
+def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_S, reason: str = "timeout") -> bool:
+    """Load the model after a request timed out (or at start), with a long deadline; True if a load was started.
 
     Ollama aborts a half-loaded model when the client closes the connection, so short requests
     (auto cleanup gives up after a few seconds) can never load it. This keeps one connection open
@@ -278,7 +287,7 @@ def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_
         try:
             with background():  # nobody waits for this answer: live requests go first
                 complete(request_config, "Reply with OK.", "OK")
-            logger.info("Language model %s reloaded after a timeout", config.model)
+            logger.info("Language model %s loaded (%s)", config.model, reason)
         except LlmError as exc:
             logger.info("Language model reload at %s failed (%s)", config.url, exc)
         finally:
@@ -287,6 +296,15 @@ def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_
 
     threading.Thread(target=run, daemon=True, name="llm-reload").start()
     return True
+
+
+def reload_unless_loaded(config: LlmConfig) -> bool:
+    """`reload_in_background`, but only when Ollama does not hold the model right now (`/api/ps`; a server that
+    cannot say counts as not loaded). A request that timed out on a loaded model was only too slow: a reload
+    would add a second long request and switch auto cleanup off while it runs. Blocking (one short probe)."""
+    if config.protocol == "ollama" and loaded_model(config, config.model) is not None:
+        return False
+    return reload_in_background(config)
 
 
 def is_reachable(config: LlmConfig) -> bool:

@@ -207,6 +207,27 @@ def test_polish_with_a_slow_model_is_saved_as_a_timeout(monkeypatch):
     assert app._save_command.call_args.kwargs["polish_status"] == "timeout"
 
 
+def test_a_polish_timeout_starts_the_background_reload(monkeypatch):
+    from nexusvox.llm import LlmError
+
+    reloads = []
+    app, calls = _polish_app(monkeypatch, "hi leute", LlmError("slow", timed_out=True))
+    patch_app(monkeypatch, "reload_unless_loaded", reloads.append)
+    asyncio.run(app._polish_selection("", MagicMock()))
+    assert reloads == [app._config.llm]
+    assert calls["pasted"] == []  # the timed-out polish leaves the text unchanged
+
+
+def test_a_polish_failure_other_than_a_timeout_starts_no_reload(monkeypatch):
+    from nexusvox.llm import LlmError
+
+    reloads = []
+    app, _calls = _polish_app(monkeypatch, "hi leute", LlmError("refused"))
+    patch_app(monkeypatch, "reload_unless_loaded", reloads.append)
+    asyncio.run(app._polish_selection("", MagicMock()))
+    assert reloads == []
+
+
 def test_polish_tap_with_nothing_spoken_is_saved_without_a_recording(monkeypatch):
     app, _calls = _polish_app(monkeypatch, "hi leute", "Hi Leute")
     asyncio.run(app._polish_selection("", None))

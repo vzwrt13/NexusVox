@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..audio import state as audio_state
-from ..audio.devices import find_input_device, list_input_names
+from ..audio.devices import find_input_device, input_open_lock, list_input_names
 
 logger = logging.getLogger("nexusvox.meeting_recorder")
 
@@ -105,6 +105,7 @@ class MicSource:
         self._name = device
         self._stream = None
         self._device: int | None = None
+        self._device_name = ""
         self._fmt: AudioFormat | None = None
 
     def _find(self, sd) -> dict:
@@ -115,6 +116,7 @@ class MicSource:
 
         dev = self._find(sd)
         self._device = int(dev["index"])
+        self._device_name = str(dev["name"])
         self._fmt = AudioFormat(int(dev["default_samplerate"]), 1)
         return self._fmt
 
@@ -128,11 +130,24 @@ class MicSource:
                 logger.warning("Meeting mic status: %s", status)
             sink(bytes(indata))
 
-        self._stream = sd.RawInputStream(
-            device=self._device, samplerate=fmt.sample_rate, channels=fmt.channels, dtype="int16", callback=callback
-        )
-        self._stream.start()
-        audio_state.stream_opened()
+        with input_open_lock:
+            # A device list refreshed since describe() (a headset plugged in, the Settings tab) may have renumbered
+            # the devices: open the one describe() saw, never whatever holds its old index now.
+            if self._device_name and sd.query_devices(self._device)["name"] != self._device_name:
+                dev = find_input_device(sd, self._device_name, "Meeting microphone")
+                if dev["name"] != self._device_name:
+                    raise OSError(f"The meeting microphone {self._device_name!r} is no longer available")
+                self._device = int(dev["index"])
+            stream = sd.RawInputStream(
+                device=self._device, samplerate=fmt.sample_rate, channels=fmt.channels, dtype="int16", callback=callback
+            )
+            try:
+                stream.start()
+            except Exception:
+                stream.close()
+                raise
+            self._stream = stream
+            audio_state.stream_opened()
 
     def latency(self) -> float:
         return float(self._stream.latency) if self._stream is not None else 0.0

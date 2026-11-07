@@ -820,6 +820,7 @@ def test_portaudio_is_only_refreshed_while_no_stream_is_open():
     from nexusvox.audio import devices
     from nexusvox.audio import state as audio_state
 
+    devices._last_refresh = 0.0  # no restart just happened
     calls: list[str] = []
 
     class FakeSd:

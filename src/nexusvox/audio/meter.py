@@ -13,7 +13,7 @@ import threading
 import numpy as np
 
 from . import state as audio_state
-from .devices import find_input_device
+from .devices import find_input_device, input_open_lock
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,9 @@ class LevelMeter:
         self._stream = None
         self._device_name: str | None = None
         self._timer: threading.Timer | None = None
+        # Which poll armed the idle timer: a timer that has already fired and waits for the lock must not close
+        # a stream a newer poll has just renewed.
+        self._generation = 0
         self._peak = 0.0
 
     def _callback(self, indata, frames, time_info, status) -> None:
@@ -46,18 +49,23 @@ class LevelMeter:
     def _open(self, name: str) -> None:
         import sounddevice as sd
 
-        dev = find_input_device(sd, name)
-        stream = sd.InputStream(
-            device=int(dev["index"]),
-            samplerate=int(dev["default_samplerate"]),
-            channels=1,
-            dtype="float32",
-            callback=self._callback,
-        )
-        stream.start()
-        audio_state.stream_opened()
-        self._stream = stream
-        self._device_name = name
+        with input_open_lock:  # finding the device, opening and counting the stream: no device refresh in between
+            dev = find_input_device(sd, name)
+            stream = sd.InputStream(
+                device=int(dev["index"]),
+                samplerate=int(dev["default_samplerate"]),
+                channels=1,
+                dtype="float32",
+                callback=self._callback,
+            )
+            try:
+                stream.start()
+            except Exception:
+                stream.close()  # opened but not started: self._stream is still None, so nothing else would close it
+                raise
+            audio_state.stream_opened()
+            self._stream = stream
+            self._device_name = name
 
     def _close_locked(self) -> None:
         if self._timer is not None:
@@ -77,6 +85,11 @@ class LevelMeter:
         with self._lock:
             self._close_locked()
 
+    def _close_if_idle(self, generation: int) -> None:
+        with self._lock:
+            if generation == self._generation:
+                self._close_locked()
+
     def read(self, name: str) -> dict:
         """The loudest level since the last read, as `{"level": 0..1}` or `{"level": 0, "error": text}`."""
         with self._lock:
@@ -91,7 +104,8 @@ class LevelMeter:
                 return {"level": 0.0, "error": "This microphone could not be opened."}
             if self._timer is not None:
                 self._timer.cancel()
-            self._timer = threading.Timer(IDLE_CLOSE_S, self.close)
+            self._generation += 1
+            self._timer = threading.Timer(IDLE_CLOSE_S, self._close_if_idle, args=(self._generation,))
             self._timer.daemon = True
             self._timer.start()
             peak, self._peak = self._peak, 0.0

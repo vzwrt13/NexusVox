@@ -937,10 +937,10 @@ def test_polish_key_equal_to_the_paste_key_is_dropped(tmp_path):
     assert load_config(path).hotkey.polish_key == ""
 
 
-def test_feedback_mode_defaults_to_sound_and_round_trips(tmp_path):
+def test_feedback_mode_round_trips_and_the_template_starts_on_visual(tmp_path):
     path = tmp_path / "config.toml"
-    cfg = load_config(path)
-    assert cfg.feedback.mode == "sound"
+    cfg = load_config(path)  # created from the template: a fresh install
+    assert cfg.feedback.mode == "visual"
     cfg.feedback.mode = "both"
     save_config(cfg, path)
     assert load_config(path).feedback.mode == "both"

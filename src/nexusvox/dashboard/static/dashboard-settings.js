@@ -136,6 +136,7 @@ function hotkeyKeyFromEvent(e) {
 // is taken when the first modifier is released, because no key completes it. The first-run setup records through
 // the same code with its own button and status line; `onSaved(settings)` runs once the new binding is stored.
 function startHotkeyRecording({ button = hotkeyRecordBtn, report = showHotkeyStatus, onSaved = null } = {}) {
+  if (button.classList.contains("recording")) return; // a second click while listening starts nothing new
   const idleLabel = button.textContent;
   button.textContent = "Press keys\u2026";
   button.classList.add("recording");

@@ -239,7 +239,9 @@ watchdog_s = 30.0
 # chimes), "visual" (a small live waveform at the bottom centre of the screen, which
 # never takes focus and ignores the mouse) or "both". Also switchable in the dashboard
 # Settings tab, without a restart. Meeting recordings never show the waveform.
-mode = "sound"
+# This template (a fresh install) starts on "visual"; a config without this key keeps "sound", so existing installs
+# are unchanged.
+mode = "visual"
 
 [llm]
 # The language model server polish uses. NexusVox does not ship a model: run Ollama

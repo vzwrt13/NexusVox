@@ -558,6 +558,7 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
             config.database.path = str(data_dir / "demo.db")
             config.database.audio_dir = "audio"
             config.hotkey.mode = "hold"
+            config.feedback.mode = "visual"  # what a fresh install starts on (the config template)
             config.llm.model = "gemma4:e4b"
             config.cleanup.level = "light"
             config.meeting.own_voice_label = OWN_VOICE_LABEL

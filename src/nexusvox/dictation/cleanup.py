@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 
 from ..config import CleanupConfig, LlmConfig
-from ..llm import LlmError, clean_reply, complete, reload_in_background
+from ..llm import LlmError, clean_reply, complete, reload_in_background, reload_running
 from ..system.logsetup import Text
 
 logger = logging.getLogger("nexusvox.cleanup")
@@ -129,6 +129,9 @@ def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = M
     """
     if config.level not in PROMPTS or len(_words(text)) < min_words:
         return CleanupResult(text)
+    if reload_running(llm):
+        # The model is loading: a request now only waits behind the load and times out. Type at once.
+        return CleanupResult(text, error="the model is reloading")
     started = time.monotonic()
     try:
         reply = complete(

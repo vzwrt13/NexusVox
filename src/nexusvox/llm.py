@@ -10,6 +10,7 @@ Callers decide what to do on failure; `LlmError` covers every way it can fail.
 
 from __future__ import annotations
 
+import dataclasses
 import http.client
 import json
 import logging
@@ -237,6 +238,55 @@ def warm_up(config: LlmConfig) -> None:
             logger.info("Language model warm-up at %s failed (%s)", config.url, exc)
 
     threading.Thread(target=run, daemon=True, name="llm-warm-up").start()
+
+
+# How long a recovery warm-up may take: loading a model into memory can need a minute or more.
+RELOAD_DEADLINE_S = 180.0
+_reload_lock = threading.Lock()
+_reloading: set[tuple[str, str]] = set()  # (url, model) with a reload in flight
+
+
+def _reload_key(config: LlmConfig) -> tuple[str, str]:
+    return config.url.rstrip("/"), config.model
+
+
+def reload_running(config: LlmConfig) -> bool:
+    """Whether a reload of this server's model is in flight (a request now would only queue behind it)."""
+    with _reload_lock:
+        return _reload_key(config) in _reloading
+
+
+def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_S) -> bool:
+    """Load the model after a request timed out, with a long deadline; True if a load was started.
+
+    Ollama aborts a half-loaded model when the client closes the connection, so short requests
+    (auto cleanup gives up after a few seconds) can never load it. This keeps one connection open
+    until the model answers. Only Ollama does this, so other protocols start nothing. At most one
+    reload runs per server and model; a second call starts none. The deadline is never shorter than
+    the configured `timeout_s`. Never raises; the outcome is only logged.
+    """
+    key = _reload_key(config)
+    if config.protocol != "ollama":
+        return False
+    with _reload_lock:
+        if key in _reloading:
+            return False
+        _reloading.add(key)
+    request_config = dataclasses.replace(config, timeout_s=max(config.timeout_s, deadline_s))
+
+    def run() -> None:
+        try:
+            with background():  # nobody waits for this answer: live requests go first
+                complete(request_config, "Reply with OK.", "OK")
+            logger.info("Language model %s reloaded after a timeout", config.model)
+        except LlmError as exc:
+            logger.info("Language model reload at %s failed (%s)", config.url, exc)
+        finally:
+            with _reload_lock:
+                _reloading.discard(key)
+
+    threading.Thread(target=run, daemon=True, name="llm-reload").start()
+    return True
 
 
 def is_reachable(config: LlmConfig) -> bool:

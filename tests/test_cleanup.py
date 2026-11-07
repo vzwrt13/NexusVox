@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from nexusvox.config import CLEANUP_LEVELS, CleanupConfig, LlmConfig
@@ -152,3 +154,102 @@ def test_cuda_available_is_false_when_the_probe_fails(monkeypatch):
 
     monkeypatch.setattr(config, "resolve_device", boom)
     assert config.cuda_available() is False
+
+
+# ── Background reload after a timeout ─────────────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)  # no test may start a real load against a server
+def reload_calls(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cleanup_module, "reload_in_background", lambda llm: calls.append(llm))
+    monkeypatch.setattr(cleanup_module, "reload_running", lambda llm: False)
+    return calls
+
+
+def test_a_timeout_starts_a_background_reload(model, reload_calls):
+    model.reply = LlmError("TimeoutError: timed out", timed_out=True)
+    llm = LlmConfig()
+    result = cleanup("Ähm ich komme äh heute später", LIGHT, llm)
+    assert result.text == "Ähm ich komme äh heute später"
+    assert reload_calls == [llm]
+
+
+def test_another_failure_starts_no_reload(model, reload_calls):
+    model.reply = LlmError("connection refused")
+    cleanup("Ähm ich komme äh heute später", LIGHT, LlmConfig())
+    assert reload_calls == []
+
+
+def test_a_successful_cleanup_starts_no_reload(model, reload_calls):
+    model.reply = "So, I think we should ship it."
+    cleanup("um so I think we should ship it", LIGHT, LlmConfig())
+    assert reload_calls == []
+
+
+def test_no_model_call_while_a_reload_runs(model, monkeypatch):
+    monkeypatch.setattr(cleanup_module, "reload_running", lambda llm: True)
+    result = cleanup("um so I think we should ship it", LIGHT, LlmConfig())
+    assert (result.text, result.cleaned) == ("um so I think we should ship it", False)
+    assert model.calls == []
+
+
+# ── reload_in_background itself ───────────────────────────────────────────────────────────────────
+@pytest.fixture
+def reload_env(monkeypatch):
+    """A fake `complete` that blocks until released; every reload thread is joined and the state reset."""
+    import threading
+
+    from nexusvox import llm as llm_module
+
+    started, release, calls = threading.Event(), threading.Event(), []
+
+    def slow_complete(config, system, user):
+        calls.append((config.model, config.timeout_s, getattr(llm_module._local, "background", False)))
+        started.set()
+        release.wait(5)
+        return "OK"
+
+    monkeypatch.setattr(llm_module, "complete", slow_complete)
+    yield llm_module, started, release, calls
+    release.set()
+    for t in threading.enumerate():
+        if t.name == "llm-reload":
+            t.join(5)
+    llm_module._reloading.clear()
+
+
+def test_only_one_reload_runs_per_model(reload_env):
+    llm_module, started, release, calls = reload_env
+    config = LlmConfig()
+    assert llm_module.reload_in_background(config) is True
+    assert started.wait(5)
+    assert llm_module.reload_running(config)
+    assert llm_module.reload_in_background(config) is False  # one is running
+    release.set()
+    for _ in range(100):  # the entry clears once the thread is done
+        if not llm_module.reload_running(config):
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("the reload never finished")
+    assert llm_module.reload_in_background(config) is True  # a new one may start again
+    assert calls[0] == (config.model, llm_module.RELOAD_DEADLINE_S, True)  # long deadline, as a background request
+
+
+def test_a_reload_of_another_model_is_not_blocked(reload_env):
+    llm_module, started, release, calls = reload_env
+    assert llm_module.reload_in_background(LlmConfig(model="a")) is True
+    assert started.wait(5)
+    assert llm_module.reload_in_background(LlmConfig(model="b")) is True
+
+
+def test_a_longer_configured_timeout_is_kept(reload_env):
+    llm_module, started, release, calls = reload_env
+    llm_module.reload_in_background(LlmConfig(timeout_s=300.0))
+    assert started.wait(5)
+    assert calls[0][1] == 300.0
+
+
+def test_other_protocols_start_no_reload(reload_env):
+    llm_module, started, release, calls = reload_env
+    assert llm_module.reload_in_background(LlmConfig(protocol="openai")) is False
+    assert calls == []

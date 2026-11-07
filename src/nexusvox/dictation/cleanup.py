@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 
 from ..config import CleanupConfig, LlmConfig
-from ..llm import LlmError, clean_reply, complete
+from ..llm import LlmError, clean_reply, complete, reload_in_background, reload_running
 from ..system.logsetup import Text
 
 logger = logging.getLogger("nexusvox.cleanup")
@@ -129,6 +129,9 @@ def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = M
     """
     if config.level not in PROMPTS or len(_words(text)) < min_words:
         return CleanupResult(text)
+    if reload_running(llm):
+        # The model is loading: a request now only waits behind the load and times out. Type at once.
+        return CleanupResult(text, error="the model is reloading")
     started = time.monotonic()
     try:
         reply = complete(
@@ -138,6 +141,10 @@ def cleanup(text: str, config: CleanupConfig, llm: LlmConfig, min_words: int = M
         )
     except LlmError as exc:
         logger.warning("Cleanup: model at %s failed (%s); typing the dictation unchanged", llm.url, exc)
+        if exc.timed_out:
+            # The model is probably not loaded and a short request cannot load it (the server drops a
+            # half-loaded model when the client disconnects): load it in the background for the next one.
+            reload_in_background(llm)
         return CleanupResult(text, error=str(exc), timed_out=exc.timed_out)
     ms = int((time.monotonic() - started) * 1000)
     # A reasoning model may lead with its thinking; a small model sometimes echoes the tags.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import logging
 import time
 
 from ..audio.capture import AudioCapture
@@ -410,7 +411,12 @@ class TranscriptionCycle:
             except Exception as exc:
                 logger.exception("Error streaming audio")
                 failure = exc
-        logger.info("Streamed %d audio chunks to server", count)
+        # The microphone's recording summary says as much; a phone recording has none, so this is its only line.
+        logger.log(
+            logging.DEBUG if isinstance(audio, AudioCapture) else logging.INFO,
+            "Streamed %d audio chunks to server",
+            count,
+        )
         if failure is not None:
             raise failure
         return buffer

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -117,3 +118,13 @@ async def test_a_failed_cycle_ends_its_stream_task_and_closes_the_microphone():
     audio.reset_mock()
     await app._abort_recording(audio, None, recording_stopped=True)
     audio.stop.assert_not_called()  # already stopped: a second end marker would leak into the next recording
+
+
+async def test_a_phone_recording_keeps_its_chunk_count_at_info(caplog):
+    # The microphone's summary line covers its recording; a phone recording has no other audio line.
+    app = _app(RecordingTranscriber())
+    audio = QueueAudio()
+    audio.record(_chunks(1, 4))
+    with caplog.at_level(logging.INFO, logger="nexusvox.app"):
+        await app._stream_audio(audio)
+    assert any(r.levelno == logging.INFO and "Streamed 4 audio chunks" in r.getMessage() for r in caplog.records)

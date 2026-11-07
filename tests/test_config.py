@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import tomllib
 from pathlib import Path
 
@@ -1134,3 +1135,20 @@ def test_plain_values_are_saved_as_before(tmp_path):
 
     text = path.read_text(encoding="utf-8")
     assert 'notepad = "notepad.exe"\n' in text and 'key = ""\n' in text and 'mode = "hold"\n' in text
+
+
+def test_save_config_logs_the_names_of_the_settings_it_changed(tmp_path, caplog):
+    config_path = tmp_path / "config.toml"
+    config = Config()
+    with caplog.at_level(logging.INFO, logger="nexusvox.config"):
+        save_config(config, config_path)
+        assert "Settings file created" in caplog.text
+        caplog.clear()
+
+        save_config(config, config_path)  # nothing changed: no line
+        assert "Settings saved" not in caplog.text
+
+        config.llm.model = "a-secret-model-name"
+        save_config(config, config_path)
+    assert "Settings saved: llm.model" in caplog.text
+    assert "a-secret-model-name" not in caplog.text  # names only, never values

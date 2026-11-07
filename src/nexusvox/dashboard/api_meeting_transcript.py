@@ -57,6 +57,7 @@ class MeetingTranscriptMixin(DashboardState):
         """
         folder = Path(folder)
         progress = job.update if job else None
+        logger.info("Meeting transcription started: %s", folder.name)
         if progress:
             progress("converting")
         try:

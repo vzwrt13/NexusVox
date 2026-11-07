@@ -26,7 +26,10 @@ function showAnalyticsView(view) {
     btn.setAttribute("aria-pressed", String(on));
   });
   if (view === "overview") loadAnalyticsOverview();
-  if (view === "week") loadWeek();
+  if (view === "week") {
+    weekMonday = null; // opened from Home, the tab or the view button: this week, not the one browsed last
+    loadWeek();
+  }
   if (view === "charts") loadAnalytics();
 }
 
@@ -107,8 +110,9 @@ function parseIsoDate(iso) {
   return new Date(y, m - 1, d);
 }
 
-function formatShortDate(iso) {
-  return parseIsoDate(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+function formatShortDate(iso, withYear = false) {
+  const options = withYear ? { day: "numeric", month: "short", year: "numeric" } : { day: "numeric", month: "short" };
+  return parseIsoDate(iso).toLocaleDateString(undefined, options);
 }
 
 function renderWordsPerDay(d) {
@@ -118,11 +122,13 @@ function renderWordsPerDay(d) {
   document.getElementById("ov-words-empty").hidden = !empty;
   document.getElementById("ov-words-box").hidden = empty;
   if (empty || !window.Chart) return;
+  // "5 Nov" would stand for two bars when the range reaches back more than a year.
+  const spansYears = d.labels[0].slice(0, 4) !== d.labels[d.labels.length - 1].slice(0, 4);
   const ctx = document.getElementById("chart-words-per-day").getContext("2d");
   charts.wordsPerDay = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: d.labels.map(formatShortDate),
+      labels: d.labels.map((iso) => formatShortDate(iso, spansYears)),
       datasets: [{ data: d.values, backgroundColor: COLORS.accent, borderRadius: 4 }],
     },
     options: {
@@ -195,6 +201,39 @@ async function loadWeek() {
   }
 }
 
+function pluralize(count, noun) {
+  return count === 1 ? `${count} ${noun}` : `${count} ${noun}s`;
+}
+
+// One sentence for the week: what was dictated, what it saved and how it compares with the week before.
+// Numbers go through toLocaleString like every other number on the page.
+function weekHeadline(week) {
+  const words = week.words;
+  if (!words) {
+    return week.meetings.count
+      ? `No dictation, but ${pluralize(week.meetings.count, "meeting")} recorded.`
+      : "No dictation in this week.";
+  }
+  let sentence = `You dictated ${words.toLocaleString()} words on ${pluralize(week.days_dictated, "day")}`;
+  if (week.time_saved_minutes >= 1) sentence += `, saving about ${formatSavedMinutes(week.time_saved_minutes)} of typing`;
+  sentence += ".";
+  if (week.previous_words) {
+    const change = Math.round(((words - week.previous_words) * 100) / week.previous_words);
+    if (change >= WEEK_SAME_AS_BEFORE_PCT) sentence += ` That is ${change}% more than the week before.`;
+    else if (change <= -WEEK_SAME_AS_BEFORE_PCT) sentence += ` That is ${-change}% less than the week before.`;
+    else sentence += " That is about the same as the week before.";
+  }
+  return sentence;
+}
+
+// A change against the week before below this share (percent) reads as "about the same".
+const WEEK_SAME_AS_BEFORE_PCT = 5;
+
+// Whole minutes, "under 1 min" for a recording shorter than that (a rounded 0 min would read as nothing).
+function formatRecordedTime(seconds) {
+  return seconds < 60 ? "under 1 min" : formatSavedMinutes(Math.round(seconds / 60));
+}
+
 function renderWeekDays(days) {
   const box = document.getElementById("week-days");
   box.replaceChildren();
@@ -225,22 +264,22 @@ function renderWeek(week) {
   document.getElementById("week-prev").disabled = !week.first_week || week.start <= week.first_week;
   document.getElementById("week-next").disabled = week.is_current;
   document.getElementById("week-current").hidden = week.is_current;
-  document.getElementById("week-headline").textContent = week.headline;
+  document.getElementById("week-headline").textContent = weekHeadline(week);
   renderWeekDays(week.days);
 
   document.getElementById("week-days-dictated").textContent = `${week.days_dictated} of ${week.days.length}`;
   const meetings = week.meetings;
   document.getElementById("week-meetings").textContent = meetings.count;
   document.getElementById("week-meetings-label").textContent =
-    "Meetings" + (meetings.count ? ` (${formatSavedMinutes(meetings.minutes)} recorded)` : "");
+    "Meetings" + (meetings.count ? ` (${formatRecordedTime(meetings.seconds)} recorded)` : "");
 
   const learned = week.learned;
-  document.getElementById("week-learned").textContent = learned.entries_total;
+  document.getElementById("week-learned").textContent = learned.total;
   const accepted = learned.suggestions_accepted;
   document.getElementById("week-learned-summary").textContent = accepted
-    ? `${accepted} ${accepted === 1 ? "suggestion" : "suggestions"} from your edits accepted.`
+    ? `${pluralize(accepted, "suggestion")} from your edits accepted.`
     : "";
-  document.getElementById("week-learned-empty").hidden = learned.entries_total > 0;
+  document.getElementById("week-learned-empty").hidden = learned.total > 0;
   const list = document.getElementById("week-learned-list");
   list.replaceChildren();
   for (const entry of learned.entries) {

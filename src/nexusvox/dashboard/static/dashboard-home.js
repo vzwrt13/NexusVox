@@ -152,18 +152,15 @@ function formatSavedMinutes(minutes) {
   return Math.floor(m / 60) + " h " + (m % 60) + " min";
 }
 
-function renderHomeWeek(overview) {
-  document.getElementById("home-week-words").textContent = (overview.total_words || 0).toLocaleString();
-  document.getElementById("home-week-saved").textContent = formatSavedMinutes(overview.time_saved_minutes);
+function renderHomeWeek(week) {
+  document.getElementById("home-week-words").textContent = (week.words || 0).toLocaleString();
+  document.getElementById("home-week-saved").textContent = formatSavedMinutes(week.time_saved_minutes);
 }
 
 async function loadHomeWeek() {
-  // The seven local days up to today, not the Analytics date filter.
-  const end = new Date();
-  const start = new Date(end.getFullYear(), end.getMonth(), end.getDate() - 6);
-  const query = new URLSearchParams({ start: localIsoDate(start), end: localIsoDate(end) });
+  // The report Your week opens (Monday to Sunday of this week), so the numbers beside its link are its numbers.
   try {
-    renderHomeWeek(await fetch("/api/overview?" + query).then((r) => r.json()));
+    renderHomeWeek(await fetch("/api/week").then((r) => r.json()));
   } catch (err) {
     console.error("Could not load this week's numbers:", err);
   }

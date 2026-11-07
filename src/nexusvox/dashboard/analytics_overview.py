@@ -16,6 +16,11 @@ from .analytics_common import _apply_date_filter
 _TYPING_WPM = 40
 
 
+def time_saved_minutes(words: int, duration_ms: int) -> float:
+    """Minutes typing `words` would have taken, minus the time spent speaking; never negative."""
+    return max(words / _TYPING_WPM - duration_ms / 60_000, 0)
+
+
 def _dictations(query, start: str | None, end: str | None):
     """The date-filtered query without command rows: a command is no dictation, so no total counts it."""
     return _apply_date_filter(query, start, end).filter(
@@ -58,8 +63,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
 
     avg_duration_ms = total_duration_ms / total
     avg_wpm = (total_words / (total_duration_ms / 60_000)) if total_duration_ms > 0 else 0
-    # Time it would take to type those words minus time spent recording.
-    time_saved_min = (total_words / _TYPING_WPM) - (total_duration_ms / 60_000)
+    time_saved_min = time_saved_minutes(total_words, total_duration_ms)
 
     # Per-transcription WPM for min/max.
     per_wpm = []
@@ -110,7 +114,7 @@ def get_overview(session_factory: sessionmaker, *, start: str | None = None, end
         "avg_wpm": round(avg_wpm, 1),
         "min_wpm": round(min(per_wpm), 1) if per_wpm else 0,
         "max_wpm": round(max(per_wpm), 1) if per_wpm else 0,
-        "time_saved_minutes": round(max(time_saved_min, 0), 1),
+        "time_saved_minutes": round(time_saved_min, 1),
         "avg_transcribe_ms": round(avg_transcribe_ms) if avg_transcribe_ms is not None else None,
         "avg_latency_ms": round(avg_latency_ms) if avg_latency_ms is not None else None,
         "avg_rtf": round(avg_rtf, 2) if avg_rtf is not None else None,

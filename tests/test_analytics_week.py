@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from nexusvox.dashboard.analytics import get_week, get_words_per_day
-from nexusvox.dashboard.analytics_week import _headline, format_minutes
+import pytest
+
+from nexusvox.dashboard.analytics import get_overview, get_week, get_words_per_day
+from nexusvox.dashboard.analytics_common import parse_day
 from nexusvox.storage.models import (
     ACCEPTED_EVENT,
     COMMAND_APP,
@@ -87,6 +89,24 @@ def test_words_per_day_without_a_start_begins_with_the_first_dictation(session_f
     assert got["values"] == [2, 0, 0]
 
 
+def test_words_per_day_reads_only_plain_iso_dates(session_factory):
+    _dictation(session_factory, 3, 6)
+
+    # "20261101" is a date to fromisoformat but would match no row as a string: it is read as missing instead.
+    got = get_words_per_day(session_factory, "20261101", "2026-11-04")
+
+    assert got["labels"] == ["2026-11-03", "2026-11-04"] and got["values"] == [6, 0]
+
+
+@pytest.mark.parametrize("value", ["20261101", "2026-W45-1", "2026-11-1", "garbage", "", None, "2026-13-01"])
+def test_parse_day_rejects_everything_but_a_plain_iso_date(value):
+    assert parse_day(value) is None
+
+
+def test_parse_day_reads_a_plain_iso_date():
+    assert parse_day("2026-11-05") == date(2026, 11, 5)
+
+
 def test_words_per_day_of_an_empty_database_is_empty(session_factory):
     assert get_words_per_day(session_factory) == {"labels": [], "values": []}
 
@@ -103,11 +123,10 @@ def test_week_of_an_empty_database(session_factory):
 
     assert (got["start"], got["end"], got["is_current"]) == (WEEK, "2026-11-08", True)
     assert got["first_week"] is None
-    assert got["headline"] == "No dictation in this week."
     assert [d["words"] for d in got["days"]] == [0] * 7
     assert [d["weekday"] for d in got["days"]] == ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    assert got["meetings"] == {"count": 0, "minutes": 0}
-    assert got["learned"] == {"entries": [], "entries_total": 0, "suggestions_accepted": 0}
+    assert got["meetings"] == {"count": 0, "seconds": 0}
+    assert got["learned"] == {"total": 0, "entries": [], "entries_total": 0, "suggestions_accepted": 0}
 
 
 def test_week_counts_words_days_and_time_saved(session_factory):
@@ -136,7 +155,7 @@ def test_week_counts_meetings_but_not_uploads(session_factory):
 
     got = get_week(session_factory, WEEK, today=date(2026, 11, 20))
 
-    assert got["meetings"] == {"count": 2, "minutes": 45}
+    assert got["meetings"] == {"count": 2, "seconds": 2700}
 
 
 def test_week_lists_the_newest_dictionary_entries_and_accepted_suggestions(session_factory):
@@ -151,6 +170,32 @@ def test_week_lists_the_newest_dictionary_entries_and_accepted_suggestions(sessi
     assert got["entries_total"] == 7
     assert [e["wrong"] for e in got["entries"]] == ["wrong2", "wrong3", "wrong4", "wrong5", "wrong6"]
     assert got["suggestions_accepted"] == 1
+    assert got["total"] == 7
+
+
+def test_a_short_meeting_keeps_its_seconds(session_factory):
+    _add(
+        session_factory,
+        FileTranscription(
+            text="x",
+            language="en",
+            duration_ms=25_000,
+            original_filename="m.wav",
+            kind="meeting",
+            created_at=_noon(3),
+        ),
+    )
+
+    assert get_week(session_factory, WEEK, today=THURSDAY)["meetings"] == {"count": 1, "seconds": 25}
+
+
+def test_an_accepted_suggestion_that_updated_an_older_entry_still_counts_as_learned(session_factory):
+    _add(session_factory, DictionaryEntryRow(wrong="teh", right="the", created_at=_noon(20, 10)))  # an earlier week
+    _add(session_factory, LearnEventRow(outcome=ACCEPTED_EVENT, created_at=_noon(4)))
+
+    got = get_week(session_factory, WEEK, today=THURSDAY)["learned"]
+
+    assert (got["entries_total"], got["suggestions_accepted"], got["total"]) == (0, 1, 1)
 
 
 def test_a_future_week_is_read_as_this_week(session_factory):
@@ -169,6 +214,28 @@ def test_a_past_week_is_not_current(session_factory):
     assert (got["start"], got["end"], got["is_current"]) == ("2026-10-26", "2026-11-01", False)
 
 
+def test_first_week_ignores_voice_commands_like_the_rest_of_the_report(session_factory):
+    _dictation(session_factory, 22, 30, month=10, app=COMMAND_APP)  # a command three weeks before the dictation
+    _dictation(session_factory, 6, 5)
+
+    assert get_week(session_factory, WEEK, today=THURSDAY)["first_week"] == WEEK
+
+
+def test_week_numbers_match_the_overview_of_the_same_days(session_factory):
+    _dictation(session_factory, 2, 40)
+    _dictation(session_factory, 5, 60)
+    _dictation(session_factory, 5, 500, app=COMMAND_APP)
+
+    got = get_week(session_factory, WEEK, today=THURSDAY)
+    overview = get_overview(session_factory, start=WEEK, end="2026-11-08")
+
+    assert (got["words"], got["dictations"], got["time_saved_minutes"]) == (
+        overview["total_words"],
+        overview["total_transcriptions"],
+        overview["time_saved_minutes"],
+    )
+
+
 def test_first_week_is_the_monday_of_the_oldest_dictation_or_meeting(session_factory):
     _dictation(session_factory, 6, 5)
     assert get_week(session_factory, WEEK, today=THURSDAY)["first_week"] == WEEK
@@ -176,24 +243,6 @@ def test_first_week_is_the_monday_of_the_oldest_dictation_or_meeting(session_fac
     _meeting(session_factory, 22, 10, month=10)  # Thursday 2026-10-22, in the week of 2026-10-19
 
     assert get_week(session_factory, WEEK, today=THURSDAY)["first_week"] == "2026-10-19"
-
-
-def test_headline_compares_with_the_week_before():
-    assert _headline(1200, 4, 22, 1000, 0) == (
-        "You dictated 1,200 words on 4 days, saving about 22 min of typing. That is 20% more than the week before."
-    )
-    assert _headline(800, 1, 0.4, 1000, 0) == "You dictated 800 words on 1 day. That is 20% less than the week before."
-    assert _headline(1020, 2, 65, 1000, 0).endswith("That is about the same as the week before.")
-    assert "week before" not in _headline(500, 2, 5, 0, 0)
-
-
-def test_headline_without_dictation_mentions_meetings():
-    assert _headline(0, 0, 0, 900, 2) == "No dictation, but 2 meetings recorded."
-    assert _headline(0, 0, 0, 900, 1) == "No dictation, but 1 meeting recorded."
-
-
-def test_format_minutes():
-    assert [format_minutes(m) for m in (0, 44.6, 60, 125)] == ["0 min", "45 min", "1 h 0 min", "2 h 5 min"]
 
 
 # ---- routes ----------------------------------------------------------------

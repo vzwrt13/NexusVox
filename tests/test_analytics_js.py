@@ -95,7 +95,17 @@ def run_js(body: str, hash_: str = ""):
             "mondayOfIso",
             "formatShortDate",
             "formatWeekRange",
+            "pluralize",
+            "weekHeadline",
+            "formatRecordedTime",
         )
+    )
+    helpers = fn(home, "formatSavedMinutes") + helpers
+    helpers = re.search(r"^const WEEK_SAME_AS_BEFORE_PCT = \d+;$", analytics, re.M).group(0) + helpers
+    # The headline formats numbers like the browser; Node's own locale would make the expected text machine-dependent.
+    helpers = (
+        "Number.prototype.toLocaleString = function () { return new Intl.NumberFormat('en-US').format(this); };"
+        + helpers
     )
     consts = 'const ANALYTICS_VIEWS = ["overview", "week", "charts"]; let analyticsView = "overview";'
     window = f"const window = {{ location: {{ hash: {json.dumps(hash_)} }} }};"
@@ -153,3 +163,70 @@ def test_the_view_comes_from_the_address(hash_, view):
 def test_the_address_names_the_view():
     assert run_js('analyticsView = "week"; console.log(JSON.stringify(analyticsViewHash()))') == "#analytics/week"
     assert run_js("console.log(JSON.stringify(analyticsViewHash()))") == "#analytics"
+
+
+def _week(**changes):
+    week = {
+        "words": 1200,
+        "days_dictated": 4,
+        "time_saved_minutes": 22,
+        "previous_words": 1000,
+        "meetings": {"count": 0, "seconds": 0},
+    }
+    return {**week, **changes}
+
+
+@needs_node
+def test_headline_compares_with_the_week_before():
+    def headline(**changes):
+        return run_js(f"console.log(JSON.stringify(weekHeadline({json.dumps(_week(**changes))})))")
+
+    assert headline() == (
+        "You dictated 1,200 words on 4 days, saving about 22 min of typing. That is 20% more than the week before."
+    )
+    assert headline(words=800, days_dictated=1, time_saved_minutes=0.4) == (
+        "You dictated 800 words on 1 day. That is 20% less than the week before."
+    )
+    assert headline(words=1020).endswith("That is about the same as the week before.")
+    assert "week before" not in headline(previous_words=0)
+
+
+@needs_node
+def test_headline_without_dictation_mentions_meetings():
+    def headline(count):
+        week = _week(words=0, meetings={"count": count, "seconds": 600})
+        return run_js(f"console.log(JSON.stringify(weekHeadline({json.dumps(week)})))")
+
+    assert headline(2) == "No dictation, but 2 meetings recorded."
+    assert headline(1) == "No dictation, but 1 meeting recorded."
+    assert run_js(f"console.log(JSON.stringify(weekHeadline({json.dumps(_week(words=0))})))") == (
+        "No dictation in this week."
+    )
+
+
+@needs_node
+def test_a_meeting_under_a_minute_is_not_shown_as_zero_minutes():
+    got = run_js("console.log(JSON.stringify([25, 59, 60, 90, 3600, 5400].map(formatRecordedTime)))")
+    assert got == ["under 1 min", "under 1 min", "1 min", "2 min", "1 h 0 min", "1 h 30 min"]
+
+
+def test_the_headline_is_built_in_the_page_not_sent_by_the_server():
+    source = (STATIC / "dashboard-analytics.js").read_text(encoding="utf-8")
+    assert "weekHeadline(week)" in source and "week.headline" not in source
+
+
+def test_opening_the_week_view_starts_at_this_week():
+    source = (STATIC / "dashboard-analytics.js").read_text(encoding="utf-8")
+    block = re.search(r'if \(view === "week"\) \{(.*?)\n  \}', source, re.S).group(1)
+    assert "weekMonday = null;" in block and block.index("weekMonday = null;") < block.index("loadWeek()")
+
+
+def test_the_words_chart_names_the_year_when_the_range_spans_years():
+    source = (STATIC / "dashboard-analytics.js").read_text(encoding="utf-8")
+    assert "formatShortDate(iso, spansYears)" in source
+    assert "d.labels[0].slice(0, 4) !== d.labels[d.labels.length - 1].slice(0, 4)" in source
+
+
+def test_home_shows_the_week_that_its_link_opens():
+    home = (STATIC / "dashboard-home.js").read_text(encoding="utf-8")
+    assert 'fetch("/api/week")' in home and "/api/overview" not in home

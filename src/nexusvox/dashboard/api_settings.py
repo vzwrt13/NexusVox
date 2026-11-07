@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import secrets
+import threading
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -16,6 +18,7 @@ from ..config import (
     HOTKEY_MODIFIERS,
     OLLAMA_URL,
     HotkeyConfig,
+    LlmConfig,
     LlmServer,
     MeetingConfig,
     cuda_available,
@@ -35,6 +38,7 @@ from ..llm import loaded_model as llm_loaded_model
 from ..llm import model_pull as llm_pull
 from ..llm import model_status as llm_model_status
 from ..llm import start_ollama as llm_start_ollama
+from ..llm import unload as llm_unload
 from ..llm import warm_up as llm_warm_up
 from ..system.feedback_form import build_feedback_url
 from ..system.feedback_send import FeedbackError, app_feedback_url, build_report, render_preview, send_report
@@ -171,11 +175,18 @@ class SettingsMixin(DashboardState):
     def set_polish_key(self, key: str) -> dict:
         return self._set_marker_key("polish_key", key)
 
+    @staticmethod
+    def _unload_in_background(llm: LlmConfig) -> None:
+        """The model `[llm]` points at is about to change: release the old one (it has nothing to do any more)."""
+        threading.Thread(target=llm_unload, args=(dataclasses.replace(llm),), daemon=True, name="llm-unload").start()
+
     def set_llm_model(self, model: str) -> dict:
         """The model name polish asks the [llm] server for (e.g. "qwen3.5:9b"). Read per request, so live."""
         model = str(model or "").strip()
         if not model:
             return {"error": "A model name is required", **self.get_settings()}
+        if model != self._config.llm.model:
+            self._unload_in_background(self._config.llm)
         self._config.llm.model = model
         save_config(self._config)
         if self._config.cleanup.level != "off":
@@ -334,6 +345,8 @@ class SettingsMixin(DashboardState):
         if not model:
             return {"error": "A model name is required", **self.get_settings()}
         llm = self._config.llm
+        if (server.url, model) != (llm.url.rstrip("/"), llm.model):
+            self._unload_in_background(llm)
         llm.url, llm.protocol, llm.api_key, llm.model = server.url, server.protocol, server.api_key, model
         self._llm_server_cache.clear()
         save_config(self._config)

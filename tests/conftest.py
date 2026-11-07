@@ -229,3 +229,12 @@ def sample_wav_bytes():
         wf.setframerate(16_000)
         wf.writeframes(b"\x00\x00" * 8_000)  # 0.5s
     return buf.getvalue()
+
+
+@pytest.fixture(autouse=True)
+def _no_pin_probe(monkeypatch):
+    """A never-expire request first asks Ollama's /api/ps who loaded the model; tests that fake `urlopen` for the
+    chat call must not see that second request. tests/test_llm_keep_alive.py puts the real one back."""
+    from nexusvox import llm
+
+    monkeypatch.setattr(llm, "_note_pinned", lambda config: None)

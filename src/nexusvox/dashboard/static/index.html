@@ -7,6 +7,7 @@
   <link rel="icon" type="image/svg+xml" href="logo.svg">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="recordings.css">
+  <link rel="stylesheet" href="setup.css">
 </head>
 <body>
   <header>
@@ -99,7 +100,7 @@
           <a class="settings-link" href="#settings/meetings" data-page="meetings" data-card="meeting-settings-card">Meetings</a>
           <a class="settings-link" href="#settings/privacy" data-page="privacy" data-card="settings-card-privacy">Privacy</a>
           <a class="settings-link" href="#settings/advanced" data-page="advanced" data-card="settings-advanced">Advanced</a>
-          <button type="button" class="settings-rerun" id="settings-rerun-setup" disabled title="Available with the first-run setup">Run the first-run setup again</button>
+          <button type="button" class="settings-rerun" id="settings-rerun-setup">Run the first-run setup again</button>
         </nav>
         <div class="settings-pages" id="settings-pages">
       <p id="settings-no-match" class="settings-hint" hidden>No setting found</p>
@@ -143,6 +144,14 @@
             <option value="hold">Hold (push-to-talk)</option>
             <option value="toggle">Toggle</option>
           </select>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
+            <h3>Microphone</h3>
+            <p>The microphone dictation records from. Applies from the next recording. Meetings have their own microphone under Meetings.</p>
+          </div>
+          <select id="audio-device-select" class="select-input" aria-label="Dictation microphone"></select>
         </div>
 
         <div class="setting-row" style="margin-top: 16px;">
@@ -1041,6 +1050,107 @@
     </section>
   </main>
 
+  <!-- First-run setup: a full-page overlay over the dashboard (dashboard-setup.js). It opens by itself while
+       [general].setup_done is false and from Settings > "Run the first-run setup again". -->
+  <div id="setup" class="setup" hidden role="dialog" aria-modal="true" aria-labelledby="setup-title">
+    <div class="setup-shell">
+      <div class="setup-brand">
+        <img class="brand-mark" src="logo.svg" alt="" width="26" height="26">
+        <span class="setup-brand-name">Nexus<span class="brand-vox">Vox</span></span>
+      </div>
+      <h2 id="setup-title" class="visually-hidden">First-run setup</h2>
+      <ol class="setup-steps" id="setup-steps" aria-label="Setup steps">
+        <li data-step="0">Welcome</li>
+        <li data-step="1">Microphone</li>
+        <li data-step="2">Hotkey</li>
+        <li data-step="3">Ready</li>
+      </ol>
+
+      <section class="setup-panel" data-step="0" aria-labelledby="setup-h-0">
+        <h3 class="setup-heading" id="setup-h-0" tabindex="-1">Welcome to NexusVox</h3>
+        <p class="setup-lead">Hold a key, speak, let go: your words are typed into whatever app you are in. The speech is recognised on this computer.</p>
+        <p class="setup-text">Setting up takes about a minute: pick your microphone, check your hotkey and say hello.</p>
+        <div class="setup-actions">
+          <button type="button" class="setup-btn primary" data-setup-next>Get started</button>
+        </div>
+      </section>
+
+      <section class="setup-panel" data-step="1" aria-labelledby="setup-h-1" hidden>
+        <h3 class="setup-heading" id="setup-h-1" tabindex="-1">Choose your microphone</h3>
+        <p class="setup-text">Pick the microphone you dictate with, then say something: the bar should move.</p>
+        <label class="setup-field">
+          <span class="setup-label">Microphone</span>
+          <select id="setup-mic-select" class="select-input"></select>
+        </label>
+        <div class="setup-meter" id="setup-meter" role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="setup-meter-bar" id="setup-meter-bar"></div>
+        </div>
+        <p class="status-line" id="setup-mic-status" role="status">Checking the microphone...</p>
+        <div class="setup-actions">
+          <button type="button" class="setup-btn" data-setup-back>Back</button>
+          <button type="button" class="setup-btn primary" data-setup-next>Continue</button>
+        </div>
+      </section>
+
+      <section class="setup-panel" data-step="2" aria-labelledby="setup-h-2" hidden>
+        <h3 class="setup-heading" id="setup-h-2" tabindex="-1">Your hotkey</h3>
+        <div class="setup-hotkey">
+          <span class="keycaps" id="setup-hotkey-keycaps" aria-label="Your dictation hotkey"></span>
+          <button type="button" class="period-btn" id="setup-hotkey-record">Use other keys</button>
+        </div>
+        <p class="status-line" id="setup-hotkey-status" role="status" hidden></p>
+        <p class="status-line warn" id="setup-hotkey-alt-hint" hidden></p>
+
+        <fieldset class="setup-choice">
+          <legend>How it works</legend>
+          <label class="setup-option"><input type="radio" name="setup-mode" value="hold">
+            <span><strong>Hold</strong> <span class="setup-option-text">Record while you hold the keys, like a walkie-talkie.</span></span></label>
+          <label class="setup-option"><input type="radio" name="setup-mode" value="toggle">
+            <span><strong>Toggle</strong> <span class="setup-option-text">Press once to start, press again to stop.</span></span></label>
+        </fieldset>
+
+        <fieldset class="setup-choice">
+          <legend>While you record</legend>
+          <label class="setup-option"><input type="radio" name="setup-feedback" value="visual">
+            <span><strong>Visual</strong> <span class="setup-option-text">A small waveform at the bottom of the screen.</span></span></label>
+          <label class="setup-option"><input type="radio" name="setup-feedback" value="sound">
+            <span><strong>Audio</strong> <span class="setup-option-text">A chime when recording starts and stops.</span></span></label>
+          <label class="setup-option"><input type="radio" name="setup-feedback" value="both">
+            <span><strong>Both</strong> <span class="setup-option-text">The waveform and the chimes.</span></span></label>
+        </fieldset>
+
+        <label class="setup-field">
+          <span class="setup-label">Try it</span>
+          <span class="setup-text" id="setup-test-hint">Click into the box, hold your hotkey, say "Hello world" and let go.</span>
+          <textarea id="setup-test" class="dict-input setup-test" rows="3" placeholder="Your words appear here"></textarea>
+        </label>
+        <p class="status-line" id="setup-test-status" role="status">Waiting for your words...</p>
+        <p class="status-line" id="setup-model-status" role="status"></p>
+        <div class="setup-actions">
+          <button type="button" class="setup-btn" data-setup-back>Back</button>
+          <button type="button" class="setup-btn primary" data-setup-next>Continue</button>
+        </div>
+      </section>
+
+      <section class="setup-panel" data-step="3" aria-labelledby="setup-h-3" hidden>
+        <h3 class="setup-heading" id="setup-h-3" tabindex="-1">You are ready</h3>
+        <dl class="setup-summary">
+          <dt>Microphone</dt><dd id="setup-sum-mic"></dd>
+          <dt>Hotkey</dt><dd><span class="keycaps" id="setup-sum-keycaps"></span></dd>
+          <dt>How it works</dt><dd id="setup-sum-mode"></dd>
+          <dt>While you record</dt><dd id="setup-sum-feedback"></dd>
+        </dl>
+        <p class="setup-text">Everything here can be changed later under Settings, and you can run this setup again from there.</p>
+        <div class="setup-actions">
+          <button type="button" class="setup-btn" data-setup-back>Back</button>
+          <button type="button" class="setup-btn primary" id="setup-finish">Open Home</button>
+        </div>
+      </section>
+
+      <p class="setup-skip"><button type="button" class="link-btn" id="setup-skip">Skip setup</button></p>
+    </div>
+  </div>
+
   <script src="chart.min.js"></script>
   <!-- Fixed order: every script shares one global scope and runs its top-level code as it loads, so a file may
        only use what an earlier file defines at that moment. Init stays last: it makes the tabs live. -->
@@ -1056,6 +1166,7 @@
   <script src="dashboard-meetings.js"></script>
   <script src="dashboard-recordings.js"></script>
   <script src="dashboard-home.js"></script>
+  <script src="dashboard-setup.js"></script>
   <script src="dashboard-dev.js"></script>
   <script src="dashboard-init.js"></script>
 </body>

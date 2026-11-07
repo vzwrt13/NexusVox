@@ -201,6 +201,11 @@ class NexusVoxApp(
             describe_hotkey(self._config.hotkey),
         )
 
+        if not self._config.setup_done:
+            # A fresh install: the tray icon is easy to miss, so the dashboard opens by itself, on the first-run setup.
+            logger.info("First start: opening the dashboard for the first-run setup")
+            self._loop.run_in_executor(None, self._open_dashboard)
+
         if self._mic_guard is not None:
             # Repair what a killed previous run left muted, even if the guard has been
             # switched off since. The warm-up (one-off COM wrapper cost, otherwise paid

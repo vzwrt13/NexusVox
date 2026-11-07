@@ -144,9 +144,11 @@ def test_every_page_has_an_icon_on_its_link_and_its_title():
         assert f"#{card_id} > .nexus-section-title::before" in CSS, card_id
 
 
-def test_rerun_setup_entry_exists_and_waits_for_the_setup():
+def test_rerun_setup_entry_is_enabled_and_the_setup_listens_for_its_event():
     button = re.search(r'<button[^>]*id="settings-rerun-setup"[^>]*>([^<]*)</button>', _settings_section())
-    assert button and " disabled" in button.group(0) and "first-run setup" in button.group(1)
+    assert button and " disabled" not in button.group(0) and "first-run setup" in button.group(1)
+    setup = (STATIC / "dashboard-setup.js").read_text(encoding="utf-8")
+    assert 'addEventListener("nexusvox:rerun-setup", openSetup)' in setup
 
 
 def test_search_field_sits_in_the_nav_and_no_match_message_exists():

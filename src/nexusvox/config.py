@@ -244,6 +244,9 @@ class Config:
     log_level: str = "INFO"
     # Dictated text goes into the log file in full; off shortens it there (the console always shows it).
     log_full_text: bool = False
+    # False only in the config a fresh install creates from the template: the dashboard then opens the first-run
+    # setup. A config without the key (every existing install) counts as set up.
+    setup_done: bool = True
     hotkey: HotkeyConfig = field(default_factory=HotkeyConfig)
     meeting: MeetingConfig = field(default_factory=MeetingConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
@@ -427,6 +430,7 @@ def load_config(path: Path | None = None) -> Config:
         injection_delay_ms=general.get("injection_delay_ms", 500),
         log_level=_log_level(general.get("log_level", "INFO")),
         log_full_text=bool(general.get("log_full_text", False)),
+        setup_done=bool(general.get("setup_done", True)),
         hotkey=HotkeyConfig(
             modifiers=hotkey_modifiers,
             key=normalize_hotkey_key(hotkey_key) or "",
@@ -449,6 +453,7 @@ def load_config(path: Path | None = None) -> Config:
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
             chunk_size=audio_data.get("chunk_size", 4096),
+            device=str(audio_data.get("device", "")),
         ),
         inference=InferenceConfig(
             server_url=server_url,
@@ -651,6 +656,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
                 ("injection_delay_ms", config.injection_delay_ms),
                 ("log_level", config.log_level),
                 ("log_full_text", config.log_full_text),
+                ("setup_done", config.setup_done),
             ),
             *_section(
                 "hotkey",
@@ -677,6 +683,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
                 "audio",
                 ("sample_rate", config.audio.sample_rate),
                 ("chunk_size", config.audio.chunk_size),
+                ("device", config.audio.device),
             ),
             *_section(
                 "inference",

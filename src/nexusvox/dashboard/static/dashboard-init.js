@@ -28,4 +28,5 @@ document.addEventListener("DOMContentLoaded", () => {
   Promise.all([featuresReady, loadExtensions()]).then(restoreTabFromHash);
   settingsReady = loadSettings();
   loadMeetingSettings();
+  openSetupOnFreshInstall();
 });

@@ -78,6 +78,8 @@ class SettingsMixin(DashboardState):
             "feedback_modes": list(FEEDBACK_MODES),
             "store_audio": self._config.database.store_audio,
             "log_full_text": self._config.log_full_text,
+            "setup_done": self._config.setup_done,
+            "audio_device": self._config.audio.device,
             "log_dir": str(log_dir()),
             "learn_from_edits": self._config.learn_from_edits.enabled,
             "polish_in_terminals": self._config.polish.in_terminals,

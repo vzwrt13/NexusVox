@@ -107,13 +107,15 @@ function showHotkeyStatus(text, cls) {
   setStatus(hotkeyStatus, cls, text);
 }
 
-async function saveHotkey() {
+// `report(text, state)` shows the outcome; the first-run setup passes its own line. Resolves with the settings.
+async function saveHotkey(report = showHotkeyStatus) {
   const modifiers = hotkeyMods.filter((cb) => cb.checked).map((cb) => cb.value);
   const resp = await postSetting("/api/settings/hotkey", { modifiers, key: hotkeyKeySelect.value });
   const s = await resp.json();
   renderHotkey(s);
-  if (s.error) showHotkeyStatus("\u2715 " + s.error, "down");
-  else showHotkeyStatus("\u25CF Hotkey is now " + describeHotkey(s.hotkey_modifiers, s.hotkey_key), "ok");
+  if (s.error) report("\u2715 " + s.error, "down");
+  else report("\u25CF Hotkey is now " + describeHotkey(s.hotkey_modifiers, s.hotkey_key), "ok");
+  return s;
 }
 
 // Maps a browser KeyboardEvent to a key name the server knows: "" for a modifier
@@ -131,20 +133,22 @@ function hotkeyKeyFromEvent(e) {
 }
 
 // "Record": the next key-down in this page becomes the binding. A modifier-only combo
-// is taken when the first modifier is released, because no key completes it.
-function startHotkeyRecording() {
-  hotkeyRecordBtn.textContent = "Press keys\u2026";
-  hotkeyRecordBtn.classList.add("recording");
+// is taken when the first modifier is released, because no key completes it. The first-run setup records through
+// the same code with its own button and status line; `onSaved(settings)` runs once the new binding is stored.
+function startHotkeyRecording({ button = hotkeyRecordBtn, report = showHotkeyStatus, onSaved = null } = {}) {
+  const idleLabel = button.textContent;
+  button.textContent = "Press keys\u2026";
+  button.classList.add("recording");
   let held = { ctrl: false, shift: false, alt: false, win: false };
   const finish = (key) => {
     document.removeEventListener("keydown", onDown, true);
     document.removeEventListener("keyup", onUp, true);
-    hotkeyRecordBtn.textContent = "Record";
-    hotkeyRecordBtn.classList.remove("recording");
+    button.textContent = idleLabel;
+    button.classList.remove("recording");
     if (key === null) return;
     for (const cb of hotkeyMods) cb.checked = held[cb.value];
     hotkeyKeySelect.value = key;
-    saveHotkey();
+    saveHotkey(report).then((s) => onSaved && onSaved(s));
   };
   const onDown = (e) => {
     e.preventDefault();
@@ -153,7 +157,7 @@ function startHotkeyRecording() {
     held = { ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, win: e.metaKey };
     const key = hotkeyKeyFromEvent(e);
     if (key === null) {
-      showHotkeyStatus("\u2715 That key cannot be bound; use a letter, digit, F-key or Space", "down");
+      report("\u2715 That key cannot be bound; use a letter, digit, F-key or Space", "down");
       return;
     }
     if (key !== "") finish(key);
@@ -259,8 +263,8 @@ hotkeyModeSelect.addEventListener("change", async () => {
   hotkeyModeSelect.value = s.hotkey_mode;
   renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers, s.hotkey_key);
 });
-for (const cb of hotkeyMods) cb.addEventListener("change", saveHotkey);
-hotkeyKeySelect.addEventListener("change", saveHotkey);
+for (const cb of hotkeyMods) cb.addEventListener("change", () => saveHotkey());
+hotkeyKeySelect.addEventListener("change", () => saveHotkey());
 polishKeySelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/polish-key", { key: polishKeySelect.value });
   const s = await resp.json();
@@ -299,12 +303,52 @@ pasteKeySelect.addEventListener("change", async () => {
   if (s.error) alert(s.error);
   pasteKeySelect.value = s.paste_key;
 });
-hotkeyRecordBtn.addEventListener("click", startHotkeyRecording);
+hotkeyRecordBtn.addEventListener("click", () => startHotkeyRecording());
 hotkeyResetBtn.addEventListener("click", () => {
   for (const cb of hotkeyMods) cb.checked = hotkeyDefault.modifiers.includes(cb.value);
   hotkeyKeySelect.value = hotkeyDefault.key;
   saveHotkey();
 });
+
+// ── Dictation microphone ─────────────────────────────────────────────
+// The Settings select and the first-run setup's select show the same choice, so each change updates both.
+const microphoneSelects = [document.getElementById("audio-device-select"), document.getElementById("setup-mic-select")];
+
+function fillMicrophoneSelect(select, data) {
+  select.replaceChildren(new Option("System default", ""));
+  for (const name of data.inputs || []) select.append(new Option(name, name));
+  // A chosen microphone that is unplugged stays visible instead of silently showing the default.
+  if (data.device && !(data.inputs || []).includes(data.device)) {
+    select.append(new Option(data.device + " (not connected)", data.device));
+  }
+  select.value = data.device || "";
+}
+
+async function loadMicrophones() {
+  try {
+    const data = await fetch("/api/setup/microphones").then((r) => r.json());
+    for (const select of microphoneSelects) fillMicrophoneSelect(select, data);
+  } catch (err) {
+    console.error("Could not list the microphones:", err);
+  }
+}
+
+// Saves the choice of `select` and shows it in the other select too. Resolves with false when it was refused.
+async function saveMicrophone(select) {
+  try {
+    const resp = await postSetting("/api/setup/microphone", { device: select.value });
+    const s = await resp.json();
+    if (s.error) throw new Error(s.error);
+    for (const other of microphoneSelects) other.value = s.audio_device;
+    return true;
+  } catch (err) {
+    console.error("The microphone could not be saved:", err);
+    loadMicrophones();
+    return false;
+  }
+}
+
+microphoneSelects[0].addEventListener("change", () => saveMicrophone(microphoneSelects[0]));
 
 async function loadSettings() {
   const s = await api("/api/settings");

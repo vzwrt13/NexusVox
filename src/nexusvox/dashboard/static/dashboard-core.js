@@ -148,7 +148,10 @@ function activateTab(name, { keepScroll = false } = {}) {
   if (name === "analytics") loadAnalytics();
   if (name === "edit") loadFlaggedTranscriptions();
   if (name === "recordings") openRecordingsTab();
-  if (name === "settings") loadMeetingSettings();
+  if (name === "settings") {
+    loadMeetingSettings();
+    loadMicrophones();
+  }
   if (name === "review") loadReviewTranscriptions();
   if (name === "dev") loadBenchmarks();
   if (name.startsWith("ext-")) openExtensionPanel(name.slice(4));

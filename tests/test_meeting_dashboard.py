@@ -817,8 +817,8 @@ def test_an_output_named_like_another_one_gets_its_own_loopback():
 
 
 def test_portaudio_is_only_refreshed_while_no_stream_is_open():
+    from nexusvox.audio import devices
     from nexusvox.audio import state as audio_state
-    from nexusvox.meetings import recorder as meeting_recorder
 
     calls: list[str] = []
 
@@ -831,13 +831,13 @@ def test_portaudio_is_only_refreshed_while_no_stream_is_open():
         def _initialize():
             calls.append("initialize")
 
-    meeting_recorder._refresh_devices(FakeSd)
+    devices.refresh_devices(FakeSd)
     assert calls == ["terminate", "initialize"]
 
     calls.clear()
     audio_state.stream_opened()  # a dictation or meeting stream is open
     try:
-        meeting_recorder._refresh_devices(FakeSd)
+        devices.refresh_devices(FakeSd)
     finally:
         audio_state.stream_closed()
     assert calls == []

@@ -12,6 +12,7 @@ import sounddevice as sd
 
 from ..config import AudioConfig
 from . import state as audio_state
+from .devices import find_input_device, wasapi_index
 
 logger = logging.getLogger("nexusvox.audio")
 
@@ -20,6 +21,7 @@ class AudioCapture:
     """Captures microphone audio and yields PCM16 chunks for streaming."""
 
     def __init__(self, config: AudioConfig) -> None:
+        self._config = config
         self._sample_rate = config.sample_rate
         self._chunk_size = config.chunk_size
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
@@ -62,7 +64,7 @@ class AudioCapture:
             self._loop.call_soon_threadsafe(self._queue.put_nowait, pcm_bytes)
 
     def start(self) -> None:
-        """Start capturing audio from the default microphone."""
+        """Start capturing audio from the microphone chosen in `[audio].device`, else the default one."""
         self._loop = asyncio.get_event_loop()
         # A recording starts with an empty queue: chunks or an end marker an earlier one left behind
         # (a stream that stopped reading early) would otherwise come out as this recording's audio.
@@ -74,14 +76,25 @@ class AudioCapture:
         # Log audio level roughly every second
         self._log_interval = max(1, self._sample_rate // frames_per_chunk)
 
-        # Log selected device
+        # Read now, not at start-up: the dashboard changes the microphone while the app runs.
+        device: int | None = None
+        extra: dict = {}
         try:
-            dev = sd.query_devices(kind="input")
+            if self._config.device:
+                dev = find_input_device(sd, self._config.device)
+                device = int(dev["index"])
+                if dev["hostapi"] == wasapi_index(sd):
+                    # WASAPI shared mode only opens at the device's own rate unless Windows converts to ours.
+                    extra["extra_settings"] = sd.WasapiSettings(auto_convert=True)
+            else:
+                dev = sd.query_devices(kind="input")
             logger.info("Audio device: %s, %d Hz", dev["name"], self._sample_rate)
         except Exception:
             logger.warning("Could not query input device")
 
         self._stream = sd.InputStream(
+            device=device,
+            **extra,
             samplerate=self._sample_rate,
             channels=1,
             dtype="float32",

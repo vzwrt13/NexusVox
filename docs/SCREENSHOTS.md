@@ -7,7 +7,7 @@ invented data. One command, no setup beyond the usual `pip install -e ".[dev]"`:
 python scripts/dashboard_screenshots.py
 ```
 
-It writes four PNGs to `docs/images/`:
+It writes eight PNGs to `docs/images/`: one per tab, and one per step of the first-run setup:
 
 | File | Tab | Image ends |
 |---|---|---|
@@ -15,6 +15,11 @@ It writes four PNGs to `docs/images/`:
 | `dashboard-analytics.png` | Analytics | below the Latency Trend chart |
 | `dashboard-recordings.png` | Recordings | one window (1280 x 860): list and detail pane |
 | `dashboard-settings.png` | Settings | the Dictation page (the page Settings opens on) |
+| `dashboard-setup-welcome.png`, `-microphone.png`, `-hotkey.png`, `-ready.png` | First-run setup | one image per step, ending at the step's card and the *Skip setup* link |
+
+The setup is an overlay that opens while `[general].setup_done` is false, so those four are photographed with the
+setup due; the script tells the page which step to show (`SETUP_SCRIPT`), fills the test box on the hotkey step and
+replaces the microphone list and level with demo values (the real audio devices are never probed).
 
 The Recordings tab fills one window with its two panes and is photographed at a window's height. The
 Analytics tab runs on for a long way. The script serves its own copy of the page with

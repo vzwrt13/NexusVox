@@ -48,13 +48,17 @@ function describeHomeStatus(model, device, status) {
   return { state, text: parts.join(" · ") };
 }
 
-let homeStatusTimer = null;
+const homeStatusTimers = new Map(); // element -> timer of its next poll
 let homeFirstOpen = true;
 
-// While a model downloads or loads the line is asked again, until it settles or Home is left.
-async function loadHomeStatus(settingsAlreadyKnown) {
-  clearTimeout(homeStatusTimer);
-  const el = document.getElementById("home-status");
+// While a model downloads or loads the line is asked again, until it settles or its page is left. The first-run
+// setup shows the same line (`el`), and says whether it is still on screen (`shown`).
+async function loadHomeStatus(
+  settingsAlreadyKnown,
+  el = document.getElementById("home-status"),
+  shown = () => document.getElementById("tab-home").classList.contains("active"),
+) {
+  clearTimeout(homeStatusTimers.get(el));
   try {
     const [current, device, status] = await Promise.all([
       fetch("/api/models/current").then((r) => r.json()),
@@ -67,9 +71,12 @@ async function loadHomeStatus(settingsAlreadyKnown) {
     const { state, text } = describeHomeStatus(model, device.resolved, status);
     setStatus(el, state, text);
     if (status && HOME_BUSY_PHASES.includes(status.status)) {
-      homeStatusTimer = setTimeout(() => {
-        if (document.getElementById("tab-home").classList.contains("active")) loadHomeStatus(settingsAlreadyKnown);
-      }, 3000);
+      homeStatusTimers.set(
+        el,
+        setTimeout(() => {
+          if (shown()) loadHomeStatus(settingsAlreadyKnown, el, shown);
+        }, 3000),
+      );
     }
   } catch (err) {
     console.error("Could not load the model status:", err);

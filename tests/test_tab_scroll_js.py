@@ -28,7 +28,7 @@ def run_js(body: str):
     };
     const window = { scrollTo: (x, y) => calls.push(["scrollTo", x, y]) };
     for (const f of ["loadAnalytics", "loadFlaggedTranscriptions", "openRecordingsTab", "loadMeetingSettings",
-      "loadReviewTranscriptions", "loadBenchmarks", "openExtensionPanel", "markActiveSubtab"])
+      "loadReviewTranscriptions", "loadBenchmarks", "openExtensionPanel", "markActiveSubtab", "loadMicrophones"])
       globalThis[f] = (...args) => calls.push([f, ...args]);
     """
     script = f"{stubs}\n{aliases.group(0)}{match.group(0)}\n{body}"

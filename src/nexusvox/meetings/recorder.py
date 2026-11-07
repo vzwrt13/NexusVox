@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..audio import state as audio_state
+from ..audio.devices import find_input_device, list_input_names
 
 logger = logging.getLogger("nexusvox.meeting_recorder")
 
@@ -63,32 +64,6 @@ class AudioSource(Protocol):
     # `meeting.json`; the transcript lines the tracks up with it when it cannot measure the offset from the audio).
 
 
-_refresh_lock = threading.Lock()
-
-
-def _refresh_devices(sd) -> None:
-    """Make PortAudio notice devices plugged in since it started: it lists them once, at initialisation.
-
-    Re-initialising invalidates open streams, so it only happens while none is open here or in dictation.
-    """
-    with _refresh_lock:
-        if audio_state.streams_open():
-            return
-        try:
-            sd._terminate()
-            sd._initialize()
-        except Exception:
-            logger.exception("Refreshing the audio device list failed")
-
-
-def _wasapi_index(sd) -> int | None:
-    """Index of the Windows WASAPI host API, whose names are the full ones (MME cuts them at 31 characters)."""
-    for index, api in enumerate(sd.query_hostapis()):
-        if "WASAPI" in api["name"]:
-            return index
-    return None
-
-
 def list_devices() -> dict[str, list[str]]:
     """Names of the input and the output devices a meeting can use: `{"inputs": [...], "outputs": [...]}`.
 
@@ -99,12 +74,7 @@ def list_devices() -> dict[str, list[str]]:
     try:
         import sounddevice as sd
 
-        _refresh_devices(sd)
-        wasapi = _wasapi_index(sd)
-        for dev in sd.query_devices():
-            if dev["max_input_channels"] > 0 and (wasapi is None or dev["hostapi"] == wasapi):
-                if dev["name"] not in inputs:
-                    inputs.append(dev["name"])
+        inputs = list_input_names(sd)
     except Exception:
         logger.exception("Listing the input devices failed")
     try:
@@ -138,16 +108,7 @@ class MicSource:
         self._fmt: AudioFormat | None = None
 
     def _find(self, sd) -> dict:
-        """The named input device (on WASAPI when there is one); the default input when unnamed or gone."""
-        if self._name:
-            _refresh_devices(sd)
-            wasapi = _wasapi_index(sd)
-            for dev in sd.query_devices():
-                if dev["name"] == self._name and dev["max_input_channels"] > 0:
-                    if wasapi is None or dev["hostapi"] == wasapi:
-                        return dev
-            logger.warning("Meeting microphone %r not found; using the default input", self._name)
-        return sd.query_devices(kind="input")
+        return find_input_device(sd, self._name, "Meeting microphone")
 
     def describe(self) -> AudioFormat:
         import sounddevice as sd

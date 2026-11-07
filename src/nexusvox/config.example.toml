@@ -10,6 +10,10 @@ log_level = "INFO"
 # Dictated text appears there shortened (first 20 characters and the length). true logs it in full,
 # for debugging; the log may then contain what you said. The console always shows full text.
 log_full_text = false
+# true once the first-run setup (Welcome, Microphone, Hotkey, Ready) has been finished or skipped. This template is
+# the only place it is false: a fresh install shows the setup in the dashboard once, a config without this key
+# (an existing install) never does. Settings > "Run the first-run setup again" opens it again.
+setup_done = false
 [hotkey]
 # Press all listed modifiers simultaneously to record
 # Modifier options: ctrl, shift, alt, win (may be empty when a key is set)
@@ -75,6 +79,9 @@ store_audio = true
 sample_rate = 16000
 # Audio chunk size in bytes for WebSocket streaming
 chunk_size = 4096
+# Name of the microphone dictation records from (as listed in Settings > Dictation). Empty: the system default.
+# Takes effect at the next recording.
+device = ""
 
 [inference]
 # Inference server URL (automatically set when switching GPU-backed models).

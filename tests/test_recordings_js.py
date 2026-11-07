@@ -17,7 +17,19 @@ FAKE_DOM = (Path(__file__).with_name("fake_dom.js")).read_text(encoding="utf-8")
 # Helpers the Recordings script takes from earlier files; the pending-state helpers are the real ones.
 RECORDINGS_STUBS = r"""
 page([["rec-list", "ul"], ["rec-detail", "section"], ["rec-search", "input"], ["rec-options"],
-  ["rec-options-toggle", "button"], ["rec-detail-empty", "p"], ["tab-recordings", "section"]]);
+  ["rec-options-toggle", "button"], ["rec-detail-empty", "p"], ["tab-recordings", "section"], ["rec-layout"],
+  ["rec-list-pane", "section"], ["rec-resizer"]]);
+// localStorage, filled from STORAGE_PRESET (a test's prelude) before the script reads the saved list width.
+const storage = new Map(globalThis.STORAGE_PRESET || []);
+globalThis.localStorage = { getItem: (k) => (storage.has(k) ? storage.get(k) : null),
+  setItem: (k, v) => storage.set(k, String(v)), removeItem: (k) => storage.delete(k) };
+// The list pane is as wide as the layout's --rec-list-width, clamped as recordings.css does, else 340px.
+document.getElementById("rec-layout").width = 1000;
+document.getElementById("rec-list-pane").getBoundingClientRect = () => {
+  const layout = document.getElementById("rec-layout");
+  const set = parseFloat(layout.style.getPropertyValue("--rec-list-width")) || 340;
+  return { width: Math.min(Math.max(set, 240), Math.max(240, layout.width / 2)) };
+};
 let extensionExports = [{ id: "txt", label: "Text" }];
 let extensionUploadActions = [];
 const runningUploadActions = new Set();
@@ -64,11 +76,12 @@ def _section(source: str, start: str, end: str) -> str:
     return source[source.index(start) : source.index(end)]
 
 
-def run_recordings(body: str):
+def run_recordings(body: str, prelude: str = ""):
     source = dashboard_source()
     pending = _section(source, "// ── Pending and failed states", "// ── end of pending and failed states")
     recordings = (STATIC / "dashboard-recordings.js").read_text(encoding="utf-8")
-    script = "\n".join([FAKE_DOM, RECORDINGS_STUBS, pending, recordings, f"const ROWS = {json.dumps(ROWS)};", body])
+    parts = [prelude, FAKE_DOM, RECORDINGS_STUBS, pending, recordings, f"const ROWS = {json.dumps(ROWS)};", body]
+    script = "\n".join(parts)
     out = _node(script)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout.strip().splitlines()[-1])
@@ -481,3 +494,88 @@ def test_a_drop_while_a_file_is_transcribing_says_so_instead():
         out([document.getElementById("upload-dialog").open, error.style.display, said]);"""
     )
     assert result == [False, "block", True]
+
+
+# -- the resizable list pane ------------------------------------------------------------------------
+
+RESIZE = r"""
+const layout = document.getElementById("rec-layout");
+const handle = document.getElementById("rec-resizer");
+const widthSet = () => layout.style.getPropertyValue("--rec-list-width");
+const key = (k, shiftKey = false) => handle.dispatch("keydown", { key: k, shiftKey });
+const pointer = (type, clientX, extra = {}) => handle.dispatch(type, { pointerId: 1, button: 0, clientX, ...extra });
+"""
+
+
+def test_dragging_the_handle_sets_the_width_within_the_limits_and_keeps_it():
+    result = run_recordings(
+        RESIZE
+        + """pointer("pointerdown", 500);
+        const resizing = layout.classList.contains("resizing");
+        pointer("pointermove", 600);
+        const during = [widthSet(), storage.has("recordings-list-width")];  // only the end of a drag is stored
+        pointer("pointermove", 2000);                                        // past half the tab
+        const wide = widthSet();
+        pointer("pointermove", -500);                                        // past the minimum
+        pointer("pointerup", -500);
+        out([resizing, during, wide, widthSet(), storage.get("recordings-list-width"),
+          layout.classList.contains("resizing"), handle.getAttribute("aria-valuenow")]);"""
+    )
+    assert result == [True, ["440px", False], "500px", "240px", "240", False, "240"]
+
+
+def test_a_right_click_or_another_pointer_does_not_drag():
+    result = run_recordings(
+        RESIZE
+        + """pointer("pointerdown", 500, { button: 2 });
+        pointer("pointermove", 600);
+        pointer("pointerdown", 500);
+        pointer("pointermove", 700, { pointerId: 2 });
+        pointer("pointerup", 700, { pointerId: 2 });
+        out([widthSet(), layout.classList.contains("resizing")]);"""
+    )
+    assert result == ["", True]
+
+
+def test_the_arrow_keys_move_the_handle_and_home_and_end_go_to_the_limits():
+    result = run_recordings(
+        RESIZE
+        + """const seen = [];
+        for (const [k, shift] of [["ArrowRight"], ["ArrowLeft", true], ["End"], ["ArrowRight"], ["Home"],
+          ["ArrowLeft"], ["Enter"]]) { key(k, shift); seen.push(widthSet()); }
+        handle.dispatch("focus");
+        out([seen, storage.get("recordings-list-width"), handle.getAttribute("aria-valuemax")]);"""
+    )
+    assert result == [["356px", "292px", "500px", "500px", "240px", "240px", "240px"], "240", "500"]
+
+
+def test_a_double_click_resets_the_width_and_forgets_it():
+    result = run_recordings(
+        RESIZE
+        + """key("ArrowRight");
+        const before = [widthSet(), storage.get("recordings-list-width")];
+        handle.dispatch("dblclick");
+        out([before, widthSet(), storage.has("recordings-list-width"), handle.getAttribute("aria-valuenow")]);"""
+    )
+    assert result == [["356px", "356"], "", False, "340"]
+
+
+def test_the_saved_width_is_restored_when_the_page_loads():
+    restored = run_recordings(
+        RESIZE + "out(widthSet());", prelude='globalThis.STORAGE_PRESET = [["recordings-list-width", "420"]];'
+    )
+    garbage = run_recordings(
+        RESIZE + "out(widthSet());", prelude='globalThis.STORAGE_PRESET = [["recordings-list-width", "wide"]];'
+    )
+    assert [restored, garbage] == ["420px", ""]
+
+
+def test_without_storage_the_handle_still_works():
+    result = run_recordings(
+        RESIZE
+        + """globalThis.localStorage = { getItem() { throw new Error("off"); }, setItem() { throw new Error("off"); },
+          removeItem() { throw new Error("off"); } };
+        key("ArrowRight"); handle.dispatch("dblclick"); key("End");
+        out([widthSet(), storedRecListWidth()]);"""
+    )
+    assert result == ["500px", None]

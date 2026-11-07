@@ -22,6 +22,8 @@
   --surface: #0d0d10;
   --surface2: #121216;
   --surface3: #1c1c22;
+  --scrollbar-thumb: #2a2a32;
+  --scrollbar-thumb-hover: #3a3a44;
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.14);
   --text: #f5f5f7;

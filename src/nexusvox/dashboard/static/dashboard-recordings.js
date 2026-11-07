@@ -52,6 +52,97 @@ document.addEventListener("click", (e) => {
   });
 });
 
+// ── Resizable list pane ──────────────────────────────────────────────
+// The border between the panes is a handle (#rec-resizer): drag it, or focus it and use the arrow keys (Shift for
+// bigger steps, Home and End for the limits), to set the list's width between REC_LIST_MIN and half the tab; a
+// double click goes back to the default. The width is kept in the browser's localStorage, so it survives a reload
+// and a restart of the app. recordings.css clamps it again, so a width chosen in a wide window fits a narrow one.
+const recLayout = document.getElementById("rec-layout");
+const recListPane = document.getElementById("rec-list-pane");
+const recResizer = document.getElementById("rec-resizer");
+const REC_LIST_MIN = 240;
+const REC_LIST_STEP = 16;
+const REC_LIST_WIDTH_KEY = "recordings-list-width";
+let recDrag = null; // {pointerId, startX, startWidth, max, width} while the handle is dragged
+
+function recListMax() {
+  return Math.max(REC_LIST_MIN, Math.floor(recLayout.getBoundingClientRect().width / 2));
+}
+
+function clampRecListWidth(width, max) {
+  return Math.round(Math.min(Math.max(width, REC_LIST_MIN), Math.max(REC_LIST_MIN, max)));
+}
+
+function shownRecListWidth() {
+  return Math.round(recListPane.getBoundingClientRect().width);
+}
+
+function storedRecListWidth() {
+  try {
+    const width = Number(localStorage.getItem(REC_LIST_WIDTH_KEY));
+    return Number.isFinite(width) && width > 0 ? width : null;
+  } catch {
+    return null; // storage switched off: the default width
+  }
+}
+
+// `width` null is the default. `save` stores it; while dragging only the end of the drag is stored.
+function setRecListWidth(width, save) {
+  if (width === null) recLayout.style.removeProperty("--rec-list-width");
+  else recLayout.style.setProperty("--rec-list-width", `${width}px`);
+  if (save) {
+    try {
+      if (width === null) localStorage.removeItem(REC_LIST_WIDTH_KEY);
+      else localStorage.setItem(REC_LIST_WIDTH_KEY, String(width));
+    } catch {
+      // storage switched off: the width holds until the page is reloaded
+    }
+  }
+  syncRecResizer();
+}
+
+function syncRecResizer() {
+  recResizer.setAttribute("aria-valuemax", String(recListMax()));
+  recResizer.setAttribute("aria-valuenow", String(shownRecListWidth()));
+}
+
+recResizer.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const startWidth = shownRecListWidth();
+  recDrag = { pointerId: e.pointerId, startX: e.clientX, startWidth, max: recListMax(), width: startWidth };
+  recResizer.setPointerCapture?.(e.pointerId);
+  recLayout.classList.add("resizing");
+});
+recResizer.addEventListener("pointermove", (e) => {
+  if (!recDrag || e.pointerId !== recDrag.pointerId) return;
+  recDrag.width = clampRecListWidth(recDrag.startWidth + e.clientX - recDrag.startX, recDrag.max);
+  setRecListWidth(recDrag.width, false);
+});
+function endRecDrag(e) {
+  if (!recDrag || e.pointerId !== recDrag.pointerId) return;
+  const { width, startWidth } = recDrag;
+  recDrag = null;
+  recLayout.classList.remove("resizing");
+  if (width !== startWidth) setRecListWidth(width, true);
+}
+recResizer.addEventListener("pointerup", endRecDrag);
+recResizer.addEventListener("pointercancel", endRecDrag);
+recResizer.addEventListener("dblclick", () => setRecListWidth(null, true));
+recResizer.addEventListener("focus", syncRecResizer);
+recResizer.addEventListener("keydown", (e) => {
+  const step = e.shiftKey ? REC_LIST_STEP * 4 : REC_LIST_STEP;
+  const max = recListMax();
+  const now = shownRecListWidth();
+  const target = { ArrowLeft: now - step, ArrowRight: now + step, Home: REC_LIST_MIN, End: max }[e.key];
+  if (target === undefined) return;
+  e.preventDefault();
+  setRecListWidth(clampRecListWidth(target, max), true);
+});
+
+const savedRecListWidth = storedRecListWidth();
+if (savedRecListWidth !== null) recLayout.style.setProperty("--rec-list-width", `${savedRecListWidth}px`);
+
 // ── Opening the tab, loading the list ────────────────────────────────
 function recordingsShown() {
   return document.getElementById("tab-recordings").classList.contains("active");

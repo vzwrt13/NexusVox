@@ -7,7 +7,10 @@ class El {
   constructor(tag) {
     this.tagName = String(tag).toUpperCase(); this.children = []; this.parent = null; this.attrs = {};
     this.dataset = {}; this.listeners = {}; this.hidden = false; this._text = ""; this._html = "";
-    this.style = { setProperty() {}, display: "" }; this.value = ""; this.checked = false; this.disabled = false;
+    const props = {};
+    this.style = { props, display: "", setProperty: (k, v) => { props[k] = String(v); }, removeProperty: (k) => { delete props[k]; },
+      getPropertyValue: (k) => props[k] || "" };
+    this.value = ""; this.checked = false; this.disabled = false; this.width = 0;
     this.open = false; this.files = [];
     const cls = new Set();
     this.classList = { add: (...c) => c.forEach((x) => cls.add(x)), remove: (...c) => c.forEach((x) => cls.delete(x)),
@@ -40,6 +43,7 @@ class El {
   focus() { activeElement = this; }
   scrollIntoView() {}
   get offsetWidth() { return 0; }
+  getBoundingClientRect() { return { width: this.width }; }
   closest(sel) { for (let x = this; x; x = x.parent) if (matches(x, sel)) return x; return null; }
   showModal() { this.open = true; }
   close() { this.open = false; }

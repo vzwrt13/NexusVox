@@ -1,5 +1,22 @@
-/* NexusVox Dashboard - Recordings tab: list pane, detail pane, upload dialog.
-   Kept apart from style.css; every colour is one of its :root tokens. */
+/* NexusVox Dashboard - Recordings tab: list pane, resize handle, detail pane, upload dialog; plus the dark
+   scrollbars of the whole dashboard. Kept apart from style.css; every colour is one of its :root tokens. */
+
+/* ── Scrollbars, dashboard-wide: thin and dark, no light track ─────── */
+/* Chromium styles them through the ::-webkit-scrollbar rules (they allow a hover colour and rounded ends) and
+   ignores those rules once scrollbar-color is set, so the standard properties are for the other engines only. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--scrollbar-thumb-hover); }
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+}
 
 .visually-hidden {
   position: absolute;
@@ -15,7 +32,11 @@ main:has(#tab-recordings.active) { max-width: none; padding-top: 24px; padding-b
 
 .rec-layout {
   display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  /* The list pane's width: the one the user dragged to (--rec-list-width, set by dashboard-recordings.js), at
+     least 240px and at most half the tab, so a width chosen in a wide window still fits a narrower one. */
+  --rec-list-shown: clamp(240px, var(--rec-list-width, 340px), 50%);
+  position: relative;
+  grid-template-columns: var(--rec-list-shown) minmax(0, 1fr);
   gap: 0;
   min-height: calc(100vh - 48px);
   border: 1px solid var(--border);
@@ -42,6 +63,37 @@ main:has(#tab-recordings.active) { max-width: none; padding-top: 24px; padding-b
   border-right: 1px solid var(--border);
 }
 .rec-detail-pane { padding: 24px 32px 32px; }
+
+/* The border between the panes is a handle: drag it, or focus it and use the arrow keys; a double click resets.
+   Its hit area is wider than the 1px line it draws over the list pane's border. */
+.rec-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--rec-list-shown);
+  width: 12px;
+  margin-left: -6px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.rec-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  background: transparent;
+  transition: background-color 0.15s;
+}
+.rec-resizer:hover::after,
+.rec-layout.resizing .rec-resizer::after { background: var(--accent-soft); }
+.rec-resizer:focus-visible { outline: none; }
+.rec-resizer:focus-visible::after { background: var(--accent-light); }
+.rec-layout.resizing { cursor: col-resize; user-select: none; }
+.rec-layout.resizing .rec-list-pane,
+.rec-layout.resizing .rec-detail-pane { pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .rec-list-pane, .rec-detail-pane { scroll-behavior: auto; }
 }
@@ -403,6 +455,7 @@ button.rec-time:hover { color: var(--accent-light); text-decoration: underline; 
 /* ── Narrow windows: the panes stack and the page scrolls as a whole ─ */
 @media (max-width: 900px) {
   .rec-layout { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .rec-resizer { display: none; }
   .rec-list-pane, .rec-detail-pane { position: static; max-height: none; overflow: visible; }
   .rec-list-pane { border-right: 0; border-bottom: 1px solid var(--border); }
   .rec-list { max-height: 360px; overflow-y: auto; }

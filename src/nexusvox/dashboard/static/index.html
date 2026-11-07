@@ -756,8 +756,8 @@
     <!-- Recordings Tab: meetings and uploaded files in one list, the chosen one in the detail pane -->
     <section id="tab-recordings" class="tab-content">
       <h2 class="visually-hidden">Recordings</h2>
-      <div class="rec-layout">
-        <section class="rec-list-pane" aria-label="Recordings list">
+      <div class="rec-layout" id="rec-layout">
+        <section class="rec-list-pane" id="rec-list-pane" aria-label="Recordings list">
           <div class="rec-actions">
             <div class="rec-split">
               <button type="button" class="rec-split-main" id="meeting-toggle">Start recording</button>
@@ -831,6 +831,8 @@
           </label>
           <ul id="rec-list" class="rec-list" aria-label="Recordings"></ul>
         </section>
+
+        <div class="rec-resizer" id="rec-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the recordings list" aria-controls="rec-list-pane" aria-valuemin="240" tabindex="0" title="Drag to resize, double-click to reset"></div>
 
         <section class="rec-detail-pane" id="rec-detail" aria-label="Recording">
           <p class="empty-state" id="rec-detail-empty">No recordings yet. Start a recording or upload an audio file.</p>

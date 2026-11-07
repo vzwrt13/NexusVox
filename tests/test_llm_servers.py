@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import shutil
 import subprocess
 import threading
 import time
 import urllib.error
+from pathlib import Path
 
 import pytest
 from dashboard_js import dashboard_source
@@ -552,6 +554,7 @@ def test_ollama_that_answers_is_a_fixed_entry_with_its_models(api, monkeypatch):
         "active": False,
         "reachable": True,
         "models": [{"name": "gemma4:e4b", "size_gb": 6.6}],
+        "state": "running",
     }
     assert [s["name"] for s in data["servers"]] == ["Live"]  # Ollama is never in the custom list
 
@@ -689,3 +692,202 @@ def test_dropdown_shows_the_built_in_ollama_and_never_in_red(ollama, expected):
         assert group["options"][0]["value"].startswith("@@") and group["options"][0]["label"] == "gemma4:e4b"
     else:
         assert group["options"][0]["disabled"] is True  # nothing to pick yet
+
+
+# ── Ollama: running, installed but stopped, not installed ─────────────────────────────────────────
+def _fake_ollama_install(tmp_path, monkeypatch, *, tray_app=True):
+    folder = tmp_path / "Programs" / "Ollama"
+    folder.mkdir(parents=True)
+    (folder / "ollama.exe").write_bytes(b"")
+    if tray_app:
+        (folder / "ollama app.exe").write_bytes(b"")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(llm.shutil, "which", lambda name: None)
+    return folder
+
+
+def test_ollama_is_found_in_its_default_install_folder(tmp_path, monkeypatch):
+    folder = _fake_ollama_install(tmp_path, monkeypatch)
+    assert llm.ollama_executable() == folder / "ollama.exe"
+
+
+def test_ollama_is_found_on_the_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "empty"))
+    monkeypatch.setattr(llm.shutil, "which", lambda name: r"D:\tools\ollama.exe")
+    assert "tools" in str(llm.ollama_executable())
+
+
+def test_ollama_that_is_not_installed_is_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "empty"))
+    monkeypatch.setattr(llm.shutil, "which", lambda name: None)
+    assert llm.ollama_executable() is None
+    with pytest.raises(LlmError, match="not installed"):
+        llm.start_ollama()
+
+
+class _Popen:
+    started: list = []
+
+    def __init__(self, command, **kwargs):
+        _Popen.started.append((command, kwargs))
+
+
+def test_starting_ollama_opens_its_tray_app_like_the_start_menu(tmp_path, monkeypatch):
+    folder = _fake_ollama_install(tmp_path, monkeypatch)
+    _Popen.started = []
+    monkeypatch.setattr(llm.subprocess, "Popen", _Popen)
+    llm.start_ollama()
+    ((command, kwargs),) = _Popen.started
+    assert command == [str(folder / "ollama app.exe")]
+    assert kwargs["stdin"] is llm.subprocess.DEVNULL and kwargs["close_fds"] is True  # detached, no console
+
+
+def test_without_the_tray_app_ollama_serve_is_started(tmp_path, monkeypatch):
+    folder = _fake_ollama_install(tmp_path, monkeypatch, tray_app=False)
+    _Popen.started = []
+    monkeypatch.setattr(llm.subprocess, "Popen", _Popen)
+    llm.start_ollama()
+    assert _Popen.started[0][0] == [str(folder / "ollama.exe"), "serve"]
+
+
+def test_a_start_that_fails_is_an_llm_error(tmp_path, monkeypatch):
+    _fake_ollama_install(tmp_path, monkeypatch)
+
+    def refuse(command, **kwargs):
+        raise OSError("access denied")
+
+    monkeypatch.setattr(llm.subprocess, "Popen", refuse)
+    with pytest.raises(LlmError, match="could not start Ollama"):
+        llm.start_ollama()
+
+
+@pytest.mark.parametrize(
+    ("answers", "installed", "state"),
+    [
+        (True, True, "running"),
+        (False, True, "stopped"),
+        (False, False, "not_installed"),
+    ],
+)
+def test_the_ollama_entry_tells_running_stopped_and_not_installed_apart(api, monkeypatch, answers, installed, state):
+    api._config.llm = LlmConfig(url="http://live:1/v1", protocol="openai", model="qwen-27b")
+    routes = {"http://live:1/v1/models": OPENAI_MODELS}
+    if answers:
+        routes["http://127.0.0.1:11434/api/tags"] = TAGS
+    _serve(monkeypatch, routes)
+    monkeypatch.setattr(
+        "nexusvox.dashboard.api_settings.ollama_executable", lambda: Path("ollama.exe") if installed else None
+    )
+    ollama = api.get_llm_models()["ollama"]
+    assert ollama["state"] == state and ollama["reachable"] is answers and "error" not in ollama
+
+
+class _Answers:
+    """urlopen for Ollama that starts answering after *after* calls; records the URLs asked."""
+
+    def __init__(self, after):
+        self.after, self.calls, self.urls = after, 0, []
+
+    def __call__(self, request, timeout=None):
+        self.calls += 1
+        self.urls.append(request.full_url)
+        if self.calls <= self.after:
+            raise urllib.error.URLError(ConnectionRefusedError(10061, "refused"))
+        return _Resp(json.dumps(TAGS).encode())
+
+
+@pytest.fixture
+def quick_start(monkeypatch):
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.OLLAMA_START_WAIT_S", 0.4)
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.OLLAMA_START_POLL_S", 0.02)
+    started = []
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.llm_start_ollama", lambda: started.append(True))
+    return started
+
+
+def test_start_ollama_starts_it_waits_for_the_server_and_reports_running(api, monkeypatch, quick_start):
+    server = _Answers(after=4)  # the check before the start, then a few polls without an answer
+    monkeypatch.setattr(llm.urllib.request, "urlopen", server)
+    assert api.start_ollama() == {"ok": True, "running": True}
+    assert quick_start == [True] and server.calls == 5
+    assert all(url.endswith("/api/tags") for url in server.urls)  # it only asks; nothing is pulled or downloaded
+
+
+def test_start_ollama_does_not_start_a_second_one(api, monkeypatch, quick_start):
+    monkeypatch.setattr(llm.urllib.request, "urlopen", _Answers(after=0))
+    assert api.start_ollama() == {"ok": True, "running": True} and quick_start == []
+
+
+def test_start_ollama_gives_a_hint_when_it_does_not_answer_in_time(api, monkeypatch, quick_start):
+    monkeypatch.setattr(llm.urllib.request, "urlopen", _Answers(after=10_000))
+    resp = api.start_ollama()
+    assert resp["running"] is False and "does not answer yet" in resp["hint"] and "error" not in resp
+
+
+def test_start_ollama_says_when_it_is_not_installed(api, monkeypatch):
+    monkeypatch.setattr(llm.urllib.request, "urlopen", _Answers(after=10_000))
+    monkeypatch.setattr(llm, "ollama_executable", lambda: None)
+    assert api.start_ollama() == {"error": "Ollama is not installed"}
+
+
+def test_start_ollama_route(flask_client, monkeypatch):
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.llm_start_ollama", lambda: None)
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.OLLAMA_START_WAIT_S", 0.1)
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.OLLAMA_START_POLL_S", 0.02)
+    monkeypatch.setattr(llm.urllib.request, "urlopen", _Answers(after=10_000))
+    resp = flask_client.post("/api/settings/ollama-start", json={})
+    assert resp.status_code == 200 and resp.get_json()["running"] is False
+    monkeypatch.setattr(llm.urllib.request, "urlopen", _Answers(after=0))
+    assert flask_client.post("/api/settings/ollama-start", json={}).get_json() == {"ok": True, "running": True}
+
+
+_FAKE_DOM = """
+function el() {
+  const e = {hidden: true, children: [], _t: '', _c: new Set(),
+    append(c) { this.children.push(c); },
+    classList: {add(c) { e._c.add(c); }, remove(...c) { c.forEach((x) => e._c.delete(x)); }}};
+  Object.defineProperty(e, 'textContent', {get() { return e._t; }, set(v) { e._t = v; e.children = []; }});
+  return e;
+}
+const document = {createElement: () => ({})};
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
+def test_the_page_offers_start_for_a_stopped_ollama_and_install_for_a_missing_one():
+    source = dashboard_source()
+    status = re.search(r"const STATUS_STATES.*?\n\}\n", source, re.S).group(0)
+    hint = source[source.index("// ── Ollama install hint") : source.index("// ── end of Ollama install hint")]
+    helpers = source[source.index(START) : source.index(END)]
+    script = (
+        _FAKE_DOM
+        + status
+        + hint
+        + helpers
+        + """
+        let started = null;
+        function startOllama(button) { started = button; }
+        const s = {reachable: false, protocol: 'ollama', url: 'http://127.0.0.1:11434', model: 'm'};
+        const stopped = el(), missing = el();
+        renderModelsHint(stopped, s, {reachable: false, protocol: 'ollama', ollama: {state: 'stopped'}});
+        renderModelsHint(missing, s, {reachable: false, protocol: 'ollama', ollama: {state: 'not_installed'}});
+        const button = stopped.children[0];
+        button.onclick();
+        const groups = llmOptionGroups({reachable: true, protocol: 'openai', selected: 'm', recommended: [],
+          other: [], servers: [], ollama: {url: 'x', active: false, reachable: false, state: 'stopped', models: []}});
+        console.log(JSON.stringify({
+          stopped: [stopped.textContent, button.textContent, stopped._c.has('down'), stopped._c.has('warn')],
+          started: started === button,
+          missing: [missing.textContent.slice(0, 13), missing.children[0].textContent],
+          group: groups[0].label,
+        }));
+        """
+    )
+    out = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, encoding="utf-8", check=True, timeout=30
+    ).stdout
+    result = json.loads(out)
+    assert result["stopped"] == ["Ollama is installed but not running. ", "Start Ollama", False, False]
+    assert result["started"] is True
+    assert result["missing"] == ["Not installed", "Install Ollama"]
+    assert result["group"] == "Ollama — installed, not running"

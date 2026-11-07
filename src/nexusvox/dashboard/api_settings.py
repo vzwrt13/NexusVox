@@ -29,11 +29,12 @@ from ..config import (
 )
 from ..dictation.edit_watch import WATCHED_KEYS
 from ..dictation.translator import is_reachable
-from ..llm import LlmError, detect_server, server_models
+from ..llm import LlmError, detect_server, ollama_executable, server_models
 from ..llm import build_model_list as llm_build_model_list
 from ..llm import loaded_model as llm_loaded_model
 from ..llm import model_pull as llm_pull
 from ..llm import model_status as llm_model_status
+from ..llm import start_ollama as llm_start_ollama
 from ..llm import warm_up as llm_warm_up
 from ..system.feedback_form import build_feedback_url
 from ..system.feedback_send import FeedbackError, app_feedback_url, build_report, render_preview, send_report
@@ -43,6 +44,9 @@ from .api_base import DashboardState, logger
 MAX_SERVER_NAME_CHARS = 60
 # How long a saved server's model list is reused: the Models card asks every 5 s, which is too often for a dead server.
 SERVER_LIST_TTL_S = 20.0
+# How long "Start Ollama" waits for the server to answer, and how often it asks.
+OLLAMA_START_WAIT_S = 15.0
+OLLAMA_START_POLL_S = 0.5
 
 # `[hotkey]` fields that hold a marker key, and how an error message names each.
 _MARKER_KEY_FIELDS = {"paste_key": "paste", "polish_key": "polish"}
@@ -202,6 +206,8 @@ class SettingsMixin(DashboardState):
                 entry.update(reachable=models["reachable"], models=[m for m in known if m["installed"]])
                 if not models["reachable"]:
                     entry["error"] = "no answer"
+        # running; installed but not running; or not installed (the page then offers to install it)
+        ollama["state"] = "running" if ollama["reachable"] else "stopped" if ollama_executable() else "not_installed"
         disk_gb = next((m["size_gb"] for m in known if m["name"] == selected), None)
         return {
             **models,
@@ -256,6 +262,32 @@ class SettingsMixin(DashboardState):
             for server in llm.servers
         ]
         return ollama, servers
+
+    def start_ollama(self) -> dict:
+        """Start the installed Ollama and wait up to `OLLAMA_START_WAIT_S` for its server to answer, so the page can
+        reload the model list. `running: False` with a `hint` when it did not answer in time. Downloads nothing."""
+        builtin = LlmServer(OLLAMA_URL, "ollama", "Ollama")
+        if server_models(builtin)["reachable"]:
+            return {"ok": True, "running": True}
+        try:
+            llm_start_ollama()
+        except LlmError as exc:
+            return {"error": str(exc).capitalize()}
+        deadline = time.monotonic() + OLLAMA_START_WAIT_S
+        while True:
+            if server_models(builtin, 1.0)["reachable"]:
+                self._llm_server_cache.clear()
+                return {"ok": True, "running": True}
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(OLLAMA_START_POLL_S)
+        self._llm_server_cache.clear()
+        return {
+            "ok": True,
+            "running": False,
+            "hint": "Ollama was started but does not answer yet. Wait a moment and check again, "
+            "or open it from the Start menu.",
+        }
 
     def add_llm_server(self, url: object, api_key: object = "", name: object = "") -> dict:
         """Save a custom server: find out which API it speaks (Ollama, or OpenAI-compatible with or without `/v1`)

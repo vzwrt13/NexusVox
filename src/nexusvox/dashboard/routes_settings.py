@@ -107,6 +107,12 @@ def register(app: Flask, api: DashboardAPI) -> None:
             resp = api.add_llm_server(data.get("url", ""), data.get("api_key", ""), data.get("name", ""))
         return jsonify(resp), (400 if "error" in resp else 200)
 
+    @app.route("/api/settings/ollama-start", methods=["POST"])
+    def start_ollama():
+        _json_object()
+        resp = api.start_ollama()
+        return jsonify(resp), (400 if "error" in resp else 200)
+
     @app.route("/api/settings/llm-select", methods=["POST"])
     def select_llm_server_model():
         data = _json_object()

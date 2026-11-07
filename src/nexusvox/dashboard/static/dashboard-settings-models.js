@@ -10,6 +10,17 @@ const OLLAMA_SITE_URL = "https://ollama.com";
 const OLLAMA_DEFAULT_URL = "http://127.0.0.1:11434";
 const OLLAMA_NOT_INSTALLED =
   "Not installed yet. Ollama is a free app that runs AI language models on your own PC. Cleanup and Polish stay off until it is installed and running; everything else works without it.";
+// Installed but stopped: neutral too, with a button that starts it (`onStart(button)` does the work).
+function renderOllamaNotRunning(el, onStart) {
+  setStatus(el, undefined, "Ollama is installed but not running. ");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn";
+  button.textContent = "Start Ollama";
+  button.onclick = () => onStart(button);
+  el.append(button);
+  el.hidden = false;
+}
 function isDefaultOllamaUrl(url) {
   return String(url || "").replace(/\/+$/, "") === OLLAMA_DEFAULT_URL;
 }
@@ -86,6 +97,7 @@ function renderModelsHint(el, s, data) {
   if (!data) return hideHint(el);
   if (data.reachable) return renderOllamaHint(el, s, true, { here: true });
   if (!s.reachable && s.protocol === "ollama" && isDefaultOllamaUrl(s.url)) {
+    if (data.ollama && data.ollama.state === "stopped") return renderOllamaNotRunning(el, startOllama);
     return renderOllamaNotInstalled(el);
   }
   if (s.reachable) {
@@ -238,9 +250,16 @@ function llmOptionGroups(data) {
   if (ollama && !ollama.active) {
     // Not red when it does not answer: it is simply not installed yet.
     if (!ollama.reachable) {
+      const stopped = ollama.state === "stopped";
       groups.push({
-        label: "Ollama — not installed yet",
-        options: [{ value: "", label: "Install Ollama (ollama.com) to use models on this PC", disabled: true }],
+        label: stopped ? "Ollama — installed, not running" : "Ollama — not installed yet",
+        options: [
+          {
+            value: "",
+            label: stopped ? "Start Ollama below to use models on this PC" : "Install Ollama (ollama.com) to use models on this PC",
+            disabled: true,
+          },
+        ],
       });
     } else {
       groups.push({
@@ -431,12 +450,31 @@ function ollamaRow(ollama) {
   if (ollama.reachable) {
     const count = ollama.models.length;
     setStatus(state, "ok", `● ${ollama.url} · ${count} model${count === 1 ? "" : "s"}`);
+  } else if (ollama.state === "stopped") {
+    renderOllamaNotRunning(state, startOllama);
   } else {
     renderOllamaNotInstalled(state);
   }
   value.append(state);
   row.append(label, value);
   return row;
+}
+
+// Starts the installed Ollama, waits for it on the server side (about 15 s), then reloads the model list.
+async function startOllama(button) {
+  button.disabled = true;
+  button.textContent = "Starting Ollama...";
+  try {
+    const resp = await postSetting("/api/settings/ollama-start", {});
+    const data = await resp.json();
+    if (data.error) setStatus(llmServerStatus, "down", data.error);
+    else if (!data.running) setStatus(llmServerStatus, "warn", data.hint);
+    else setStatus(llmServerStatus, "ok", "Ollama is running.");
+  } catch {
+    setStatus(llmServerStatus, "down", "The dashboard could not reach the app. Try again.");
+  }
+  await loadLlmModels();
+  loadLlmStatus();
 }
 
 let removeArmed = null;

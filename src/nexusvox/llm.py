@@ -13,7 +13,10 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import os
 import re
+import shutil
+import subprocess
 import threading
 import time
 import urllib.error
@@ -22,6 +25,7 @@ import urllib.request
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from pathlib import Path
 
 from .config import LLM_E4B_MIN_VRAM_GB, LlmConfig, LlmServer
 
@@ -441,6 +445,45 @@ def model_status(config: LlmConfig) -> dict:
     if installed is None:
         return {"state": "unknown"}
     return {"state": "ok" if model_is_installed(config.model, installed) else "missing"}
+
+
+# ── Installing and starting Ollama ────────────────────────────────────────────────────────────────
+def ollama_executable() -> Path | None:
+    """`ollama.exe` of an installed Ollama: the default install folder (`%LOCALAPPDATA%\\Programs\\Ollama`), else
+    whatever is on PATH. None when Ollama is not installed. Looks at the disk only; asks no server."""
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        default = Path(local) / "Programs" / "Ollama" / "ollama.exe"
+        if default.is_file():
+            return default
+    found = shutil.which("ollama")
+    return Path(found) if found else None
+
+
+def start_ollama() -> None:
+    """Start the installed Ollama the way the Start menu does (its tray app, which runs the server), or
+    `ollama serve` when there is no app next to `ollama.exe`. Returns at once; the caller waits for the server.
+    Never downloads or pulls anything. Raises `LlmError` when Ollama is not installed or cannot be started."""
+    exe = ollama_executable()
+    if exe is None:
+        raise LlmError("Ollama is not installed")
+    tray_app = exe.with_name("ollama app.exe")
+    command = [str(tray_app)] if tray_app.is_file() else [str(exe), "serve"]
+    flags = sum(
+        getattr(subprocess, name, 0) for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW")
+    )
+    try:
+        subprocess.Popen(  # noqa: S603 - a fixed program found on this PC, no user input in the command
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
+            close_fds=True,
+        )
+    except OSError as exc:
+        raise LlmError(f"could not start Ollama: {exc}"[:200]) from exc
+    logger.info("Started Ollama (%s)", command[0])
 
 
 # ── Pulling a model ───────────────────────────────────────────────────────────────────────────────

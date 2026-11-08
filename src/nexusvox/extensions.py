@@ -246,6 +246,18 @@ class Extension:
         """
         return None
 
+    def expand_instruction(self, instruction: str, app: ActiveApp) -> str | None:
+        """Rewrite the polish instruction just before it goes to the language model.
+
+        *instruction* is what the model would be told: the spoken words, or the preset's instruction once a preset
+        name is resolved (`polish_presets.resolve_instruction`). Return the instruction to send instead, or None
+        to leave it (an empty answer is ignored). Runs only when no `on_selection_command` extension handled the
+        command. Several extensions run in entry-point order, each seeing the previous result; one that raises,
+        answers with something that is not a string or is too slow is logged and skipped, and the polish runs with
+        the instruction as it was.
+        """
+        return None
+
     def display_text(self, transcript: FileTranscript, text: str) -> str | None:
         """Change a transcript text the core shows or exports for a stored upload or meeting.
 
@@ -698,15 +710,51 @@ class ExtensionRegistry:
             out.append(text)
         return out
 
-    def selection_command(self, selection: str, command: str, app: ActiveApp) -> str | None:
-        """The replacement for *selection* from the first extension that handles *command*, else None."""
-        deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
+    def selection_command(
+        self, selection: str, command: str, app: ActiveApp, *, deadline: float | None = None
+    ) -> str | None:
+        """The replacement for *selection* from the first extension that handles *command*, else None.
+
+        *deadline* (a `time.monotonic()` value) lets the caller share one budget with `expand_instruction`.
+        """
+        if deadline is None:
+            deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
         for extension in self.extensions:
             result = self._text_hook(extension, "on_selection_command", deadline, selection, command, app)
             if result is not None:
                 logger.info("Extension %s handled the selection command %r", extension.name, Text(command))
                 return result
         return None
+
+    @staticmethod
+    def selection_deadline() -> float:
+        """A `time.monotonic()` deadline `SELECTION_COMMAND_TIMEOUT_S` from now, for the polish hooks to share."""
+        return time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
+
+    def has_expand_instruction_hook(self) -> bool:
+        """True when any loaded extension overrides `expand_instruction`; with none, asking costs nothing."""
+        return any(type(e).expand_instruction is not Extension.expand_instruction for e in self.extensions)
+
+    def expand_instruction(self, instruction: str, app: ActiveApp, *, deadline: float | None = None) -> str:
+        """*instruction* as every extension's `expand_instruction` leaves it, in load order; unchanged with none.
+
+        An answer that is empty or whitespace is ignored (the spoken command is never thrown away for the
+        default). *deadline* is a `time.monotonic()` value shared with `selection_command`; by default
+        `SELECTION_COMMAND_TIMEOUT_S` from now.
+        """
+        if deadline is None:
+            deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
+        for extension in self.extensions:
+            if type(extension).expand_instruction is Extension.expand_instruction:
+                continue
+            result = self._text_hook(extension, "expand_instruction", deadline, instruction, app)
+            if result is not None and result.strip():
+                instruction = result
+            elif result is not None:
+                logger.warning(
+                    "Extension %s returned an empty instruction from expand_instruction; ignored", extension.name
+                )
+        return instruction
 
     def _text_hook(self, extension: Extension, hook: str, deadline: float, *args: Any) -> str | None:
         """What one extension's text hook answered, or None: nothing to say, or it failed (logged)."""

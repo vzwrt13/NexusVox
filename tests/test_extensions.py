@@ -1345,3 +1345,49 @@ def test_protect_and_restore_each_take_the_budget_the_caller_passes():
     _, restore = registry.protect("my address", APP, budget_s=1.0)
     assert restore("⟦1⟧", budget_s=0) is None and one.restored == []
     assert restore("⟦1⟧", budget_s=1.0) == "Hauptstrasse 1"
+
+
+class Expander(V1Extension):
+    def __init__(self, name, old, new):
+        self.name = name
+        self.old, self.new = old, new
+
+    def expand_instruction(self, instruction, app):
+        return instruction.replace(self.old, self.new)
+
+
+def test_expand_instruction_is_unchanged_without_an_extension():
+    assert ExtensionRegistry().expand_instruction("make it shorter", APP) == "make it shorter"
+    assert _registry(Suffix("a", "!")).expand_instruction("make it shorter", APP) == "make it shorter"
+
+
+def test_expand_instruction_chains_extensions_in_order():
+    registry = _registry(Expander("one", "sig", "signature"), Expander("two", "signature", "full signature"))
+    assert registry.expand_instruction("add sig", APP) == "add full signature"
+
+
+def test_a_failing_expand_instruction_hook_is_skipped():
+    class Boom(V1Extension):
+        name = "boom"
+
+        def expand_instruction(self, instruction, app):
+            raise RuntimeError("nope")
+
+    class NotText(V1Extension):
+        name = "not-text"
+
+        def expand_instruction(self, instruction, app):
+            return ["x"]
+
+    registry = _registry(Boom(), NotText(), Expander("ok", "a", "b"))
+    assert registry.expand_instruction("a", APP) == "b"
+
+
+def test_has_expand_instruction_hook_only_for_an_override():
+    assert not ExtensionRegistry().has_expand_instruction_hook()
+    assert not _registry(Suffix("a", "!")).has_expand_instruction_hook()
+    assert _registry(Suffix("a", "!"), Expander("e", "a", "b")).has_expand_instruction_hook()
+
+
+def test_expand_instruction_ignores_an_empty_answer():
+    assert _registry(Expander("e", "sig", "")).expand_instruction("sig", APP) == "sig"

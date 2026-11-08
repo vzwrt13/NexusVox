@@ -445,6 +445,27 @@ class Snippets(Extension):
         return marked, lambda out: expand_snippets(out, expansions) if placeholders_intact(out, expansions) else None
 ```
 
+## Hook 10: rewrite the polish instruction
+
+```python
+def expand_instruction(self, instruction: str, app: ActiveApp) -> str | None: ...
+```
+
+Runs on the polish key after the core has resolved the spoken words (a preset name becomes the preset's
+instruction; nothing said, with no default preset, becomes the built-in default instruction) and before the language model is called. Return the instruction to
+send instead, or `None` to leave it. An extension can use it to expand a spoken trigger into a longer text.
+
+- **When.** Only when no extension's `on_selection_command` (Hook 6) handled the command. The hook sees the
+  instruction the model would get, not the selection.
+- **Order and fallback.** Extensions run in entry-point order, each seeing the previous result, within the 15 seconds
+  of `SELECTION_COMMAND_TIMEOUT_S`, one budget shared with `on_selection_command`. An extension that raises, answers something that is not a string, answers empty or is too slow is
+  logged and skipped; the polish still runs with the instruction as it was. An extension that does not override the
+  hook is not called.
+- **Unchanged without it.** With no extension the instruction and the polish result are exactly as before. The
+  saved recording keeps the spoken words or preset name; only the model request sees the rewrite.
+- **Speech.** Matching spoken phrases must work in English and German; that is the extension's job.
+- Added without an `API_VERSION` change.
+
 ## Snippet matching helpers
 
 The core no longer stores or expands snippets; that is an extension's job (the Pro extension does it). The pure

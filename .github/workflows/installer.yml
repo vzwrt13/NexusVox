@@ -142,7 +142,7 @@ jobs:
             if (-not (Test-Path "$target\$file")) { throw "$file was not installed" }
           }
           $value = (Get-ItemProperty $run).NexusVox
-          if ($value -ne "`"$target\NexusVox.exe`"") { throw "Unexpected autostart value: $value" }
+          if ($value -ne "`"$target\NexusVox.exe`" --autostart") { throw "Unexpected autostart value: $value" }
 
           # --- The installed app starts and stays up (the frozen build is the part that breaks quietly).
           $app = Start-Process "$target\NexusVox.exe" -PassThru

@@ -17,6 +17,8 @@ _SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "benchmark.py"
 def bench():
     """Load the script as a module; heavy third-party imports it only needs for real runs are stubbed if absent."""
     for name, attrs in {
+        "numpy": {},
+        "requests": {"post": None, "exceptions": types.SimpleNamespace(Timeout=TimeoutError, ConnectionError=OSError)},
         "datasets": {"load_dataset": None},
         "jiwer": {"wer": None},
     }.items():

@@ -52,15 +52,17 @@ First run downloads the model (~200 MB–1.5 GB depending on size) to `~/.cache/
 
 ### 3. Your own server (`custom-server`)
 
-For a backend you run yourself, such as Qwen3-ASR on llama-server (see `docs/CUSTOM_SERVER.md`). The benchmark POSTs WAVs to the URL you give and strips the `language <Name><asr_text>` marker Qwen3-ASR puts before the text, exactly as the app does. It never starts or stops the server; it only probes `/health` on the URL's host and aborts if nothing answers.
+For a backend you run yourself, such as Qwen3-ASR on llama-server (see `docs/CUSTOM_SERVER.md`). The benchmark POSTs WAVs to the URL you give and strips the `language <Name><asr_text>` marker Qwen3-ASR puts before the text, exactly as the app does. It never starts or stops the server; it probes `/health` on the URL's host and aborts if nothing answers or the server reports that it is still loading (HTTP 503). `--url` must be an `http://` or `https://` URL.
 
 ```bash
 python scripts/benchmark.py --model custom-server     --url http://127.0.0.1:8008/v1/audio/transcriptions     --model-name qwen3-asr-1.7b --lang both --limit 200
 ```
 
-`--model-name` is sent to the server and used as the model name in the results (default `custom-server`). Result files are named `custom-server_<lang>_<timestamp>.json`.
+`--model-name` is sent to the server and used as the model name in the results (default `custom-server`). Result files are named `<model-name>_<lang>_<timestamp>.json`.
 
-**VRAM.** Every run reads the GPU memory in use once through `nvidia-smi` before the first sample, then polls it every 0.5 s. The summary holds `vram_start_mib`, `vram_peak_mib` and `vram_peak_increase_mib` (peak minus start). The reading covers the whole GPU: if the server already holds another model (an LLM, say), the start value contains it and the increase shows only what the run added. Do not send other requests to that server during the run, or their memory lands in the peak. Without `nvidia-smi` the three fields are `null`.
+**VRAM.** A GPU run (not `--device cpu`) reads the memory in use per GPU through `nvidia-smi` once before the first sample, then polls it every 0.5 s. The summary reports the GPU whose memory grew most: `vram_gpu_index`, `vram_start_mib`, `vram_peak_mib` and `vram_peak_increase_mib` (peak minus start). The reading covers whole GPUs, so other processes show up in it. Do not send other requests to that server during the run, or their memory lands in the peak. Without `nvidia-smi` the fields are `null`.
+
+The server has usually loaded its model before the benchmark starts, so by default the start value already contains the weights and the increase shows only what the requests added. To get the model's share, read the memory in use *before* you start the server and pass it as `--vram-baseline-mib`: the increase is then measured against that value (`vram_start_mib`), and `vram_run_start_mib` keeps the reading at the start of the run.
 
 ## Common invocations
 
@@ -98,7 +100,8 @@ python scripts/benchmark.py --model whisper-large-v3-turbo --lang both --limit 1
 | `--device` | `gpu` | `gpu` (HTTP) or `cpu` (in-process) |
 | `--compute-type` | `int8` on CPU, `float16` on GPU | CT2 quantization: `int8`, `int8_float16`, `float16`, `float32` |
 | `--url` | model's default | Override the HTTP endpoint (GPU mode only); required for `custom-server` |
-| `--model-name` | `custom-server` | Name sent to the server and stored in the results (`custom-server` only) |
+| `--model-name` | `custom-server` | Name sent to the server, stored in the results and used in the result file name (`custom-server` only) |
+| `--vram-baseline-mib` | none | GPU memory in use before the server loaded its model; the VRAM increase is measured against it |
 | `--split` | `test` | HuggingFace dataset split |
 | `--timeout` | `120.0` | Per-sample timeout in seconds |
 | `--list-models` | — | Print registry and exit |

@@ -89,20 +89,26 @@ VRAM_POLL_INTERVAL_S = 0.5
 class VramMonitor:
     """Reads the GPU memory in use through nvidia-smi: once at the start, then the peak while a run is going.
 
-    The reading covers the whole GPU, so other processes show up in it. Without nvidia-smi (or a GPU) every value
-    stays ``None`` and the run goes on.
+    Every GPU is tracked on its own; the summary reports the one whose memory grew most, so a second GPU with an
+    unrelated model on it cannot hide or fake the growth. The reading covers whole GPUs, so other processes show up
+    in it. Without nvidia-smi (or a GPU) every value stays ``None`` and the run goes on.
+
+    ``baseline_mib`` is a reading the user took before the server loaded its model. When given, the increase is
+    measured against it, so the model's weights are part of it; without it the start is the reading when the run
+    begins, which already contains a model that is loaded.
     """
 
-    def __init__(self, interval_s: float = VRAM_POLL_INTERVAL_S) -> None:
+    def __init__(self, interval_s: float = VRAM_POLL_INTERVAL_S, baseline_mib: int | None = None) -> None:
         self._interval_s = interval_s
+        self._baseline_mib = baseline_mib
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self.start_mib: int | None = None
-        self.peak_mib: int | None = None
+        self.start_mib: list[int] | None = None
+        self.peak_mib: list[int] | None = None
 
     @staticmethod
-    def read_mib() -> int | None:
-        """Memory in use on the busiest GPU in MiB, or ``None`` when it cannot be read."""
+    def read_mib() -> list[int] | None:
+        """Memory in use per GPU in MiB, or ``None`` when it cannot be read."""
         try:
             out = subprocess.run(
                 ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
@@ -111,13 +117,16 @@ class VramMonitor:
                 timeout=5,
                 check=True,
             ).stdout
-            return max(int(line) for line in out.split() if line.strip().isdigit())
+            values = [int(line) for line in out.split() if line.strip().isdigit()]
+            return values or None
         except (OSError, subprocess.SubprocessError, ValueError):
             return None
 
     def start(self) -> None:
-        self.start_mib = self.peak_mib = self.read_mib()
-        if self.start_mib is None:
+        reading = self.read_mib()
+        self.start_mib = reading
+        self.peak_mib = list(reading) if reading else None
+        if reading is None:
             return
         self._thread = threading.Thread(target=self._poll, daemon=True)
         self._thread.start()
@@ -127,9 +136,10 @@ class VramMonitor:
             self.sample()
 
     def sample(self) -> None:
-        value = self.read_mib()
-        if value is not None and (self.peak_mib is None or value > self.peak_mib):
-            self.peak_mib = value
+        reading = self.read_mib()
+        if reading is None or self.peak_mib is None or len(reading) != len(self.peak_mib):
+            return
+        self.peak_mib = [max(a, b) for a, b in zip(self.peak_mib, reading, strict=True)]
 
     def stop(self) -> None:
         self._stop.set()
@@ -138,14 +148,31 @@ class VramMonitor:
             self.sample()
 
     def summary(self) -> dict:
-        """Start value, peak, and the peak's increase over the start, all in MiB."""
-        increase = None if self.start_mib is None or self.peak_mib is None else self.peak_mib - self.start_mib
-        return {"vram_start_mib": self.start_mib, "vram_peak_mib": self.peak_mib, "vram_peak_increase_mib": increase}
+        """GPU index, start, peak and increase in MiB for the GPU that grew most (all ``None`` without a reading)."""
+        empty = {
+            "vram_gpu_index": None,
+            "vram_start_mib": None,
+            "vram_peak_mib": None,
+            "vram_peak_increase_mib": None,
+            "vram_run_start_mib": None,
+        }
+        if self.start_mib is None or self.peak_mib is None:
+            return empty
+        growth = [peak - start for start, peak in zip(self.start_mib, self.peak_mib, strict=True)]
+        gpu = max(range(len(growth)), key=growth.__getitem__)
+        start = self._baseline_mib if self._baseline_mib is not None else self.start_mib[gpu]
+        return {
+            "vram_gpu_index": gpu,
+            "vram_start_mib": start,
+            "vram_peak_mib": self.peak_mib[gpu],
+            "vram_peak_increase_mib": self.peak_mib[gpu] - start,
+            "vram_run_start_mib": self.start_mib[gpu],
+        }
 
 
-def clean_hypothesis(text: str, model_key: str) -> str:
-    """Remove the ``language <Name><asr_text>`` marker Qwen3-ASR behind llama-server puts before a transcript."""
-    return strip_asr_text_prefix(text) if model_key == CUSTOM_MODEL else text
+def valid_http_url(url: str) -> bool:
+    parts = urlsplit(url)
+    return parts.scheme in ("http", "https") and bool(parts.netloc)
 
 
 def list_models() -> None:
@@ -163,7 +190,7 @@ def list_models() -> None:
         print(f"    {info['description']}")
         print()
     print(f"\nYour own server (HTTP): {CUSTOM_MODEL}, with --url and --model-name\n")
-    ws_models = [k for k, v in MODEL_REGISTRY.items() if v["protocol"] != "openai_http"]
+    ws_models = [k for k, v in MODEL_REGISTRY.items() if v["protocol"] != "openai_http" and k != CUSTOM_MODEL]
     if ws_models:
         print(f"Not supported (WebSocket streaming): {', '.join(ws_models)}")
 
@@ -182,6 +209,14 @@ def parse_args() -> argparse.Namespace:
         "--url",
         default=None,
         help="Override transcription endpoint URL (required for --model custom-server)",
+    )
+    parser.add_argument(
+        "--vram-baseline-mib",
+        type=int,
+        default=None,
+        metavar="MIB",
+        help="GPU memory in use before the server loaded its model (nvidia-smi); the VRAM increase is "
+        "measured against it. Without it the increase starts at the reading when the run begins.",
     )
     parser.add_argument(
         "--model-name",
@@ -211,9 +246,16 @@ def parse_args() -> argparse.Namespace:
     if args.model is None:
         parser.error("--model is required (use --list-models to see options)")
 
+    if args.model != CUSTOM_MODEL and args.model_name is not None:
+        parser.error("--model-name only applies to --model custom-server")
+
     if args.model == CUSTOM_MODEL:
         if not args.url:
             parser.error("--model custom-server needs --url, e.g. http://127.0.0.1:8008/v1/audio/transcriptions")
+        if not valid_http_url(args.url):
+            parser.error(
+                f"--url {args.url!r} is not an http(s) URL, e.g. http://127.0.0.1:8008/v1/audio/transcriptions"
+            )
         if args.device == "cpu":
             parser.error("--model custom-server is a server you run yourself; drop --device cpu")
         args.model_info = None
@@ -270,8 +312,10 @@ def custom_health_check(url: str, timeout: float = 5.0) -> None:
     try:
         with urlopen(health_url, timeout=timeout):
             pass
-    except HTTPError:
-        pass  # the host answered; the server may have no /health route, the first sample will tell
+    except HTTPError as exc:
+        if exc.code == 503:
+            sys.exit(f"The custom server is still loading its model. Try again in a moment. ({health_url})")
+        # any other status: the host answered, and the server may have no /health route; the first sample will tell
     except (URLError, OSError) as exc:
         sys.exit(f"Cannot reach the custom server at {health_url}: {getattr(exc, 'reason', exc)}\nIs it running?")
 
@@ -290,7 +334,7 @@ def float32_to_wav_bytes(audio_array: np.ndarray, sample_rate: int) -> bytes:
 
 
 def transcribe(
-    wav_bytes: bytes, url: str, model_hf_name: str, timeout: float, model_key: str = ""
+    wav_bytes: bytes, url: str, model_hf_name: str, timeout: float
 ) -> tuple[str | None, float | None, str | None]:
     """POST WAV to transcription endpoint, return (hypothesis, latency_s, error)."""
     t0 = time.monotonic()
@@ -304,7 +348,7 @@ def transcribe(
         latency = time.monotonic() - t0
         if not resp.ok:
             return None, None, f"HTTP {resp.status_code}: {resp.text[:200]}"
-        text = clean_hypothesis(resp.json().get("text", ""), model_key).strip()
+        text = strip_asr_text_prefix(resp.json().get("text", "")).strip()
         return text, latency, None
     except requests.exceptions.Timeout:
         return None, None, f"Timeout after {timeout}s"
@@ -362,8 +406,10 @@ def run_benchmark(lang: str, args: argparse.Namespace, inproc_model=None) -> tup
     ds = load_dataset("google/fleurs", lang, split=args.split, streaming=True, trust_remote_code=True)
     samples_iter = islice(ds, args.limit)
 
-    vram = VramMonitor()
-    vram.start()
+    # nvidia-smi polling would compete with an in-process CPU model, and its numbers mean nothing there.
+    vram = VramMonitor(baseline_mib=args.vram_baseline_mib)
+    if args.device == "gpu":
+        vram.start()
     results: list[dict] = []
     wer_values: list[float] = []
     total_audio_s = 0.0
@@ -387,7 +433,7 @@ def run_benchmark(lang: str, args: argparse.Namespace, inproc_model=None) -> tup
         if args.device == "cpu":
             hypothesis, latency_s, error = transcribe_inprocess(inproc_model, wav_bytes, lang_hint, args.timeout)
         else:
-            hypothesis, latency_s, error = transcribe(wav_bytes, args.url, args.model_hf_name, args.timeout, args.model)
+            hypothesis, latency_s, error = transcribe(wav_bytes, args.url, args.model_hf_name, args.timeout)
 
         sample_wer: float | None = None
         if error is None:
@@ -511,7 +557,8 @@ def main() -> None:
 
     for lang in args.langs:
         results, summary = run_benchmark(lang, args, inproc_model=inproc_model)
-        out_path = save_results(args.model, lang, results, summary)
+        file_key = re.sub(r"[^\w.-]+", "_", args.model_hf_name) if args.model == CUSTOM_MODEL else args.model
+        out_path = save_results(file_key, lang, results, summary)
         wer_str = f"{summary['wer_mean']:.4f}" if summary["wer_mean"] is not None else "n/a"
         rtf_str = f"{summary['rtf']:.3f}" if summary["rtf"] is not None else "n/a"
         server_rtf_str = f"{summary['rtf_server']:.3f}" if summary["rtf_server"] is not None else "n/a"
@@ -521,8 +568,8 @@ def main() -> None:
         )
         if summary["vram_peak_mib"] is not None:
             print(
-                f"VRAM: start {summary['vram_start_mib']} MiB, peak {summary['vram_peak_mib']} MiB "
-                f"(+{summary['vram_peak_increase_mib']} MiB over the start)"
+                f"VRAM (GPU {summary['vram_gpu_index']}): start {summary['vram_start_mib']} MiB, "
+                f"peak {summary['vram_peak_mib']} MiB (+{summary['vram_peak_increase_mib']} MiB over the start)"
             )
         print(f"Results: {out_path}")
 

@@ -1216,6 +1216,42 @@ def test_upload_whose_fallback_failed_shows_only_the_container_notice(flask_clie
     assert data["notes"] == [notice]
 
 
+@pytest.mark.parametrize("asked", ["1", ""])
+def test_every_upload_goes_through_the_speaker_fallback_decision(
+    flask_client, sample_wav_bytes, monkeypatch, caplog, asked
+):
+    """The one upload path asks `speaker_detection_job` whether speakers are wanted; without them it says so."""
+    import logging
+    from contextlib import contextmanager
+
+    from nexusvox.transcription.speaker_fallback import SpeakerJob
+    from nexusvox.transcription.transcriber import TranscriptionResult
+
+    wanted: list[bool] = []
+
+    @contextmanager
+    def spy(config, *, wanted: bool, **kwargs):
+        spy.calls.append(wanted)
+        yield SpeakerJob(config)
+
+    spy.calls = wanted
+
+    async def fake_transcribe(wav_chunks, cfg, **kwargs):
+        result = TranscriptionResult()
+        result.finalize(text="hello")
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api_files.speaker_detection_job", spy)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
+
+    with caplog.at_level(logging.INFO):
+        data = upload_file(flask_client, sample_wav_bytes, "meeting.wav", **({"diarize": asked} if asked else {}))
+    assert data["result"]["ok"] is True
+
+    assert wanted == [bool(asked)]
+    assert ("Speaker detection was not requested" in caplog.text) is (not asked)
+
+
 def _fake_transcription(monkeypatch, text):
     from nexusvox.transcription.transcriber import TranscriptionResult, Word
 

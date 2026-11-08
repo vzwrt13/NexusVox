@@ -108,6 +108,8 @@ class FilesMixin(DashboardState):
         started = time.monotonic()
         progress = job.update if job else None
         logger.info("File transcription started: %d KB", len(file_bytes) // 1024)
+        if not diarize:
+            logger.info("Speaker detection was not requested for this upload (the Detect speakers switch was off)")
         if progress:
             progress("converting")
 

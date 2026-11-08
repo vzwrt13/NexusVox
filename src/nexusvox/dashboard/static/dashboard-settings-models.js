@@ -290,14 +290,7 @@ function llmOptionGroups(data) {
   return groups;
 }
 
-// Models per task (Advanced). The name of the main model's server: Ollama, a saved server's name, or its address.
-function llmMainServerName(data) {
-  if (data.ollama && data.ollama.active) return "Ollama";
-  const saved = (data.servers || []).find((s) => s.active);
-  return saved ? saved.name : String(data.url || "").replace(/^https?:\/\//, "");
-}
-
-// The value of the saved fast model in its dropdown, "" when none is picked.
+// Models per task (Advanced). The value of the saved fast model in its dropdown, "" when none is picked.
 function llmFastValue(data) {
   const fast = data.roles && data.roles.fast;
   return fast ? llmServerValue(fast.url.replace(/\/+$/, ""), fast.model) : "";
@@ -307,7 +300,7 @@ function llmFastValue(data) {
 // another server than the main one). A model that is not installed cannot be picked here; nothing downloads.
 function llmFastOptionGroups(data) {
   const mainUrl = String(data.url || "").replace(/\/+$/, "");
-  const mainName = llmMainServerName(data);
+  const mainName = data.roles.main_server; // named by the server, the same rule as every other server name
   const groups = llmOptionGroups(data).map((g) => {
     const own = g.options.some((o) => o.value && !llmServerChoice(o.value));
     return {
@@ -435,6 +428,7 @@ const llmRolesDetails = document.getElementById("llm-roles-details");
 const llmFastSelect = document.getElementById("llm-fast-select");
 const llmFastStatus = document.getElementById("llm-fast-status");
 const llmTaskRoles = document.getElementById("llm-task-roles");
+const llmRolesError = document.getElementById("llm-roles-error");
 
 function renderLlmRoles(data, rebuildOptions) {
   const roles = data.roles;
@@ -449,6 +443,7 @@ function renderLlmRoles(data, rebuildOptions) {
   }
   if (!roles.fast) setStatus(llmFastStatus, "warn", "No fast model picked yet: the main model does its tasks.");
   else setStatus(llmFastStatus, undefined, `Fast model: ${roles.fast.model} on ${roles.fast.server}`);
+  if (!rebuildOptions) return; // the task selects change only with the roles: an open one stays open
   llmTaskRoles.replaceChildren();
   for (const task of roles.tasks) {
     const row = document.createElement("div");
@@ -470,37 +465,35 @@ function renderLlmRoles(data, rebuildOptions) {
   }
 }
 
-async function saveLlmTaskRole(task, role) {
+// Posts one change of the Advanced section and redraws the card. A failure is shown on a line of its own, outside
+// the details (they may be hidden) and never touched by the redraw, until the next change.
+async function saveLlmRoles(url, body) {
+  llmRolesError.hidden = true;
   try {
-    const resp = await postSetting("/api/settings/llm-task-role", { task, role });
+    const resp = await postSetting(url, body);
     const data = await resp.json();
-    if (data.error) setStatus(llmFastStatus, "down", data.error);
+    if (data.error) {
+      setStatus(llmRolesError, "down", data.error);
+      llmRolesError.hidden = false;
+    }
   } catch {
-    setStatus(llmFastStatus, "down", "The dashboard could not reach the app. Try again.");
+    setStatus(llmRolesError, "down", "The dashboard could not reach the app. Try again.");
+    llmRolesError.hidden = false;
   }
   await loadLlmModels();
 }
 
-llmPerTaskToggle.addEventListener("change", async () => {
-  try {
-    await postSetting("/api/settings/llm-per-task", { enabled: llmPerTaskToggle.checked });
-  } catch {
-    setStatus(llmFastStatus, "down", "The dashboard could not reach the app. Try again.");
-  }
-  await loadLlmModels();
-});
+function saveLlmTaskRole(task, role) {
+  return saveLlmRoles("/api/settings/llm-task-role", { task, role });
+}
 
-llmFastSelect.addEventListener("change", async () => {
+llmPerTaskToggle.addEventListener("change", () =>
+  saveLlmRoles("/api/settings/llm-per-task", { enabled: llmPerTaskToggle.checked }),
+);
+
+llmFastSelect.addEventListener("change", () => {
   const choice = llmServerChoice(llmFastSelect.value);
-  if (!choice) return;
-  try {
-    const resp = await postSetting("/api/settings/llm-select", { url: choice[0], model: choice[1], role: "fast" });
-    const s = await resp.json();
-    if (s.error) setStatus(llmFastStatus, "down", s.error);
-  } catch {
-    setStatus(llmFastStatus, "down", "The dashboard could not reach the app. Try again.");
-  }
-  await loadLlmModels();
+  if (choice) saveLlmRoles("/api/settings/llm-select", { url: choice[0], model: choice[1], role: "fast" });
 });
 // ── end of the Advanced section ──
 

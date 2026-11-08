@@ -130,7 +130,7 @@ _TWO_SERVERS = """
                  models: [{name: "gemma4:e2b"}]},
         servers: [{active: true, name: "llama", url: "http://127.0.0.1:8083/v1", reachable: true,
                    models: [{name: "big.gguf"}]}],
-        roles: {enabled: true, fast: null, tasks: [
+        roles: {enabled: true, main_server: "llama", fast: null, tasks: [
             {id: "dictation_cleanup", label: "Dictation cleanup", role: "fast"},
             {id: "polish", label: "Polish", role: "main"},
             {id: "file_cleanup", label: "Cleanup of uploaded files", role: "main"}]}};
@@ -169,7 +169,8 @@ def test_a_model_that_is_not_installed_cannot_be_the_fast_model():
         """
         const data = {reachable: true, protocol: "ollama", url: "http://127.0.0.1:11434", selected: "gemma4:e4b",
             recommended: [{name: "gemma4:e2b", size_gb: 4.6, installed: false}], other: [],
-            ollama: {active: true}, servers: [], roles: {enabled: true, fast: null, tasks: []}};
+            ollama: {active: true}, servers: [],
+            roles: {enabled: true, main_server: "Ollama", fast: null, tasks: []}};
         console.log(JSON.stringify(llmFastOptionGroups(data)[1]));"""
     )
     assert out["label"] == "Ollama — Recommended"

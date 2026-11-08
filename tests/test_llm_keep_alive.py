@@ -137,7 +137,7 @@ def test_a_failed_release_is_kept_for_the_next_try(server, monkeypatch):
 
     monkeypatch.setattr(llm.urllib.request, "urlopen", refuse)
     assert llm.unload(config) is False
-    assert llm._reload_key(config) in llm._pinned
+    assert llm.model_key(config) in llm._pinned
 
 
 def test_nothing_is_unloaded_for_other_protocols(server):

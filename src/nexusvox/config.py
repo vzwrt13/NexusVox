@@ -308,16 +308,21 @@ class Config:
     database_path_configured: str | None = field(default=None, repr=False, compare=False)
 
 
-def _experimental_flag(section: dict, key: str) -> bool:
-    """An `[experimental]` switch: only a real TOML `true` turns a feature on.
+def _strict_flag(section: dict, key: str, where: str) -> bool:
+    """A switch that only a real TOML `true` turns on.
 
     `"false"` or `1` must not count as on (a non-empty string is truthy), so anything but a bool means off.
     """
     value = section.get(key, False)
     if isinstance(value, bool):
         return value
-    logging.getLogger(__name__).warning("[experimental].%s must be true or false, got %r; keeping it off", key, value)
+    logging.getLogger(__name__).warning("[%s].%s must be true or false, got %r; keeping it off", where, key, value)
     return False
+
+
+def _experimental_flag(section: dict, key: str) -> bool:
+    """An `[experimental]` switch (`_strict_flag`)."""
+    return _strict_flag(section, key, "experimental")
 
 
 def _log_level(value: object) -> str:
@@ -551,7 +556,7 @@ def load_config(path: Path | None = None) -> Config:
             timeout_s=float(llm_data.get("timeout_s", LlmConfig.timeout_s)),
             keep_alive=_llm_keep_alive(llm_data),
             servers=_llm_servers(llm_data.get("servers")),
-            per_task=bool(llm_data.get("per_task", False)),
+            per_task=_strict_flag(llm_data, "per_task", "llm"),
             fast=_llm_fast(llm_data.get("fast")),
             fast_tasks=_llm_fast_tasks(llm_data.get("fast_tasks")),
         ),

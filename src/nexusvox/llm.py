@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
-from .config import LLM_E4B_MIN_VRAM_GB, LLM_TASKS, LlmConfig, LlmServer
+from .config import LLM_E4B_MIN_VRAM_GB, LLM_TASKS, LlmConfig, LlmFastModel, LlmServer
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ def active_models(config: LlmConfig) -> list[LlmConfig]:
     models = [config]
     fast = _fast_config(config)
     if fast is not None and any(task in config.fast_tasks for task in LLM_TASKS):
-        if _reload_key(fast) != _reload_key(config):
+        if model_key(fast) != model_key(config):
             models.append(fast)
     return models
 
@@ -243,9 +243,30 @@ def _log_request(config: LlmConfig, started: float, outcome: str) -> None:
 
 def _send(config: LlmConfig, system: str, user: str) -> str:
     started = time.monotonic()
-    headers = _headers(config)
-    if config.protocol == "ollama" and _keep_alive_value(config.keep_alive) != 0:
+    if config.protocol != "ollama" or _keep_alive_value(config.keep_alive) == 0:
+        return _exchange(config, system, user, started)
+    # A keep-loaded request: counted in `_in_flight` from before its probe until it ended, so a release that lands
+    # meanwhile is queued and sent once the last such request of the model is done (it would pin the model again).
+    key = model_key(config)
+    with _reload_lock:
+        _in_flight[key] = _in_flight.get(key, 0) + 1
+    try:
         _note_pinned(config)
+        return _exchange(config, system, user, started)
+    finally:
+        with _reload_lock:
+            left = _in_flight.pop(key) - 1
+            if left:
+                _in_flight[key] = left
+            release = not left and key in _release_after_load
+            if release:
+                _release_after_load.discard(key)
+        if release:
+            unload(config)
+
+
+def _exchange(config: LlmConfig, system: str, user: str, started: float) -> str:
+    headers = _headers(config)
     deadline = time.monotonic() + config.timeout_s  # one deadline for the request and a retry together
     try:
         url, body = _request(config, system, user)
@@ -324,8 +345,11 @@ def warm_up(config: LlmConfig) -> None:
 
 _reload_lock = threading.Lock()
 _reloading: set[tuple[str, str]] = set()  # (url, model) with a reload in flight
-# Models released while their load was still in flight: the load would pin them again when it ends, so they are
-# released once more then.
+# Keep-loaded requests in flight per (url, model): a load, a warm-up or a live request. Each pins its model when it
+# ends, so a release while one runs is queued in `_release_after_load` and sent again once the last has ended.
+_in_flight: dict[tuple[str, str], int] = {}
+# Models released while a keep-loaded request of theirs was still in flight. A model that comes back into use
+# before then (`keep_in_use`, a new warm-up) is taken out again, so its release is not sent after all.
 _release_after_load: set[tuple[str, str]] = set()
 # Every (url, model) this app sent a keep-loaded request to (keep_alive other than 0), noted before the first
 # one goes out so that a load still in flight is covered too. The value says who loaded it: True when it was not
@@ -337,7 +361,7 @@ _OLLAMA_DEFAULT_KEEP_ALIVE = "5m"
 
 
 def _note_pinned(config: LlmConfig) -> None:
-    key = _reload_key(config)
+    key = model_key(config)
     with _reload_lock:
         if key in _pinned:
             return
@@ -346,14 +370,23 @@ def _note_pinned(config: LlmConfig) -> None:
         _pinned.setdefault(key, ours)
 
 
-def _reload_key(config: LlmConfig) -> tuple[str, str]:
+def model_key(config: LlmConfig | LlmFastModel) -> tuple[str, str]:
+    """What tells two models apart: server address and model name. The one rule for "the same model" (pinning,
+    reloads, `active_models`, the dashboard's switch)."""
     return config.url.rstrip("/"), config.model
+
+
+def keep_in_use(config: LlmConfig) -> None:
+    """The model is in use (again): a release queued for after its load (`unload` while a request was in flight) is
+    dropped, so switching away and back while it loads does not unload the model in use."""
+    with _reload_lock:
+        _release_after_load.discard(model_key(config))
 
 
 def reload_running(config: LlmConfig) -> bool:
     """Whether a reload of this server's model is in flight (a request now would only queue behind it)."""
     with _reload_lock:
-        return _reload_key(config) in _reloading
+        return model_key(config) in _reloading
 
 
 def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_S, reason: str = "timeout") -> bool:
@@ -365,10 +398,11 @@ def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_
     reload runs per server and model; a second call starts none. The deadline is never shorter than
     the configured `timeout_s`. Never raises; the outcome is only logged.
     """
-    key = _reload_key(config)
+    key = model_key(config)
     if config.protocol != "ollama":
         return False
     with _reload_lock:
+        _release_after_load.discard(key)  # asked to load it: it is in use, whatever was queued for it
         if key in _reloading:
             return False
         _reloading.add(key)
@@ -384,10 +418,6 @@ def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_
         finally:
             with _reload_lock:
                 _reloading.discard(key)
-                release = key in _release_after_load
-                _release_after_load.discard(key)
-            if release:
-                unload(config)
 
     threading.Thread(target=run, daemon=True, name="llm-reload").start()
     return True
@@ -398,11 +428,12 @@ def unload(config: LlmConfig) -> bool:
     went out. A model the app loaded itself is unloaded (`keep_alive: 0`); one the user already had loaded goes back
     to Ollama's own expiry. Only the Ollama protocol is asked. Blocking, at most `_UNLOAD_TIMEOUT_S`; never raises,
     the outcome is only logged. The model stays noted until the server took the request, so a later call can retry.
-    A load of the model still in flight would pin it again when it ends, so it is released once more then."""
-    key = _reload_key(config)
+    A keep-loaded request of the model still in flight (`_in_flight`, its probe included) would pin it again when it
+    ends, so the release is queued and sent once more then, unless the model came back into use (`keep_in_use`)."""
+    key = model_key(config)
     with _reload_lock:
         ours = _pinned.get(key)
-        if config.protocol == "ollama" and ours is not None and key in _reloading:
+        if config.protocol == "ollama" and _in_flight.get(key):
             _release_after_load.add(key)
     if config.protocol != "ollama" or ours is None:
         return False
@@ -423,11 +454,12 @@ def unload(config: LlmConfig) -> bool:
 
 
 def _api_key_for(config: LlmConfig, url: str) -> str:
-    """The API key the config holds for the server at *url*: of a model in use, else of a saved server."""
-    for model in active_models(config):
-        if model.url.rstrip("/") == url:
-            return model.api_key
-    return next((server.api_key for server in config.servers if server.url.rstrip("/") == url), "")
+    """The API key the config holds for the server at *url*: of the main model, the fast model (in use or not), or
+    a saved server."""
+    for owner in (config, config.fast, *config.servers):
+        if owner.url and owner.url.rstrip("/") == url:
+            return owner.api_key
+    return ""
 
 
 def unload_all(config: LlmConfig) -> None:
@@ -466,7 +498,7 @@ def renew_once(config: LlmConfig) -> int:
         pinned = set(_pinned)
     renewed = 0
     for target in active_models(config):
-        url, model = _reload_key(target)
+        url, model = model_key(target)
         if target.protocol != "ollama" or (url, model) not in pinned:
             continue
         if loaded_model(target, model) is None:

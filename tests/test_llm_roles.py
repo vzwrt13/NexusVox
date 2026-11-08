@@ -3,6 +3,7 @@ warm-up, renewal and release of both models, and a release across servers and pr
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import json
 import threading
@@ -163,6 +164,7 @@ def server(monkeypatch):
     llm._pinned.clear()
     llm._reloading.clear()
     llm._release_after_load.clear()
+    llm._in_flight.clear()
     monkeypatch.setattr(llm, "_note_pinned", _real_note_pinned)
     fake = Server()
     monkeypatch.setattr(llm.urllib.request, "urlopen", fake)
@@ -170,6 +172,7 @@ def server(monkeypatch):
     llm._pinned.clear()
     llm._reloading.clear()
     llm._release_after_load.clear()
+    llm._in_flight.clear()
 
 
 def _released(server, model):
@@ -355,3 +358,124 @@ def test_the_routes(flask_client, monkeypatch):
     assert picked.status_code == 200
     roles = flask_client.get("/api/settings/llm-models").get_json()["roles"]
     assert roles["fast"]["model"] == "gemma4:e2b" and roles["fast"]["server"] == "Ollama"
+
+
+# -- review follow-ups ------------------------------------------------------------------------------
+
+
+def _join_loads():
+    for thread in threading.enumerate():
+        if thread.name == "llm-reload":
+            thread.join(5)
+
+
+def _slow_chat(server, monkeypatch):
+    """`urlopen` whose chat requests wait for the returned gate; `started` is set when one arrives."""
+    gate, started = threading.Event(), threading.Event()
+    real = server.__call__
+
+    def slow(request, timeout=None):
+        if not isinstance(request, str) and "messages" in json.loads(request.data):
+            started.set()
+            gate.wait(5)
+        return real(request, timeout)
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", slow)
+    return gate, started
+
+
+def test_a_model_back_in_use_before_its_load_ends_is_not_released(server, monkeypatch):
+    """Per-task models on, off, on again while the fast model still loads: it stays loaded and noted."""
+    monkeypatch.setattr(llm, "loaded_model", lambda cfg, name: None)
+    config = LlmConfig(model="gemma4:e2b")
+    gate, started = _slow_chat(server, monkeypatch)
+    assert llm.reload_in_background(config, reason="warm-up")
+    assert started.wait(5)
+    llm.unload(config)  # switched off: released now, and queued for after the load
+    assert llm.reload_in_background(config, reason="warm-up") is False  # switched on again: the load still runs
+    gate.set()
+    _join_loads()
+    releases = [body for _, body in server.posts if body == {"model": "gemma4:e2b", "keep_alive": 0}]
+    assert len(releases) == 1  # the queued one was dropped
+    assert llm.model_key(config) in llm._pinned
+
+
+def test_the_dashboard_drops_a_queued_release_of_a_model_back_in_use(settings, monkeypatch):
+    """Main model A -> B -> A with cleanup off (no warm-up): A's release queued during its load is dropped."""
+    a = dataclasses.replace(settings._config.llm)
+    llm._release_after_load.add(llm.model_key(a))
+    settings.set_llm_model("gemma4:e4b")
+    settings.set_llm_model("gemma4:e2b")
+    assert llm.model_key(a) not in llm._release_after_load
+
+
+def test_a_release_during_the_probe_before_a_load_is_sent_after_the_load(server, monkeypatch):
+    """A release while the load still asks whether the model is loaded (not noted yet) is not lost."""
+    probing, go = threading.Event(), threading.Event()
+
+    def slow_probe(cfg, name):
+        probing.set()
+        go.wait(5)
+
+    monkeypatch.setattr(llm, "loaded_model", slow_probe)
+    config = LlmConfig(model="gemma4:e2b")
+    assert llm.reload_in_background(config, reason="warm-up")
+    assert probing.wait(5)
+    assert llm.unload(config) is False  # nothing to release yet, but queued
+    go.set()
+    _join_loads()
+    assert (f"{OLLAMA}/api/chat", {"model": "gemma4:e2b", "keep_alive": 0}) in server.posts
+    assert not llm._pinned and not llm._release_after_load and not llm._in_flight
+
+
+def test_turning_cleanup_on_warms_the_fast_model_too(settings):
+    settings._config.llm.per_task = True
+    settings.select_llm_server_model(LLAMA_SERVER, "small.gguf", "fast")
+    settings.set_cleanup_level("off")
+    settings.warmed.clear()
+    settings.set_cleanup_level("light")
+    assert settings.warmed == [(OLLAMA, "gemma4:e2b"), (LLAMA_SERVER, "small.gguf")]
+
+
+def test_picking_the_same_model_again_warms_it_up(settings):
+    settings.set_llm_model("gemma4:e2b")  # e.g. after Ollama restarted and dropped it
+    assert settings.warmed == [(OLLAMA, "gemma4:e2b")] and settings.released == []
+    settings._config.llm.per_task = True
+    settings.select_llm_server_model(LLAMA_SERVER, "small.gguf", "fast")
+    settings.warmed.clear()
+    settings.select_llm_server_model(LLAMA_SERVER, "small.gguf", "fast")
+    assert settings.warmed == [(LLAMA_SERVER, "small.gguf")]  # the main model is not touched
+
+
+def test_a_fast_model_from_an_unsaved_server_stays_selectable_after_the_main_model_moves(settings):
+    unsaved = "http://10.0.0.5:8080/v1"
+    llm_config = settings._config.llm
+    llm_config.per_task = True
+    llm_config.url, llm_config.protocol, llm_config.api_key = unsaved, "openai", "secret"
+    assert "error" not in settings.select_llm_server_model(unsaved, "small.gguf", "fast")
+    assert "error" not in settings.select_llm_server_model(OLLAMA, "gemma4:e4b")  # the main model moves away
+    picked = settings.select_llm_server_model(unsaved, "other.gguf", "fast")
+    assert "error" not in picked
+    assert llm_config.fast == LlmFastModel(unsaved, "openai", "other.gguf", "secret")
+    llm_config.per_task = False  # not in use: its key is still known for a release at quit
+    assert llm._api_key_for(llm_config, unsaved) == "secret"
+
+
+def test_per_task_is_on_only_for_a_real_true(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    for raw, expected in (('"false"', False), ('"true"', False), ("1", False), ("true", True)):
+        (tmp_path / "config.toml").write_text(f"[llm]\nper_task = {raw}\n", encoding="utf-8")
+        assert load_config().llm.per_task is expected, raw
+
+
+def test_servers_are_named_by_one_rule(settings, monkeypatch):
+    import nexusvox.dashboard.api_settings as api_module
+
+    monkeypatch.setattr(api_module, "server_models", lambda *a, **k: {"reachable": False, "models": []})
+    settings._config.llm.per_task = True
+    settings.select_llm_server_model(LLAMA_SERVER, "small.gguf")
+    _, servers = settings._llm_server_lists()
+    roles = settings._llm_roles()
+    assert roles["main_server"] == servers[0]["name"] == "llama"
+    settings._config.llm.servers[0].name = ""
+    assert settings._llm_roles()["main_server"] == settings._llm_server_lists()[1][0]["name"] == "127.0.0.1:8083"

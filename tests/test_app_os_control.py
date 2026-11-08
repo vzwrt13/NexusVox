@@ -1000,23 +1000,31 @@ def test_a_slow_instruction_hook_is_skipped_and_the_budget_is_shared(monkeypatch
     asyncio.run(app._polish_selection("go", MagicMock()))
     assert calls["instruction"] == "go"
 
+    # The selection hook holds the whole budget; "Quick" needs 0.15 s, far more than the join may return early by
+    # (one Windows clock tick, about 16 ms), so it only runs if the budget were fresh instead of shared.
+    release = threading.Event()
+
     class SlowSelection(Extension):
         name = "slow-selection"
         api_version = API_VERSION
 
         def on_selection_command(self, selection, command, app):
-            time.sleep(0.2)
+            release.wait(5)
 
     class Quick(Extension):
         name = "quick"
         api_version = API_VERSION
 
         def expand_instruction(self, instruction, app):
+            time.sleep(0.15)
             return "never"
 
-    monkeypatch.setattr("nexusvox.extensions.SELECTION_COMMAND_TIMEOUT_S", 0.1)
+    monkeypatch.setattr("nexusvox.extensions.SELECTION_COMMAND_TIMEOUT_S", 0.3)
     app, calls = _expander_app(monkeypatch, Quick, selection_ext=SlowSelection())
-    asyncio.run(app._polish_selection("go", MagicMock()))
+    try:
+        asyncio.run(app._polish_selection("go", MagicMock()))
+    finally:
+        release.set()
     assert calls["instruction"] == "go"  # the selection hook used the budget, none left
 
 

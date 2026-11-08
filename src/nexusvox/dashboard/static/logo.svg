@@ -1,4 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <circle cx="32" cy="32" r="22" fill="none" stroke="#6c5ce7" stroke-width="7" stroke-linecap="round" stroke-dasharray="108 30" transform="rotate(-70 32 32)"/>
-  <circle cx="32" cy="32" r="8" fill="#00d2a0"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img"><title>NexusVox mark</title><g><path fill="#6c5ce7" d="M33.125 213.4L33.125 99.55A54.625 54.625 0 0 1 142.375 99.55L142.375 104.15A14.375 14.375 0 0 1 113.625 104.15L113.625 99.55A25.875 25.875 0 0 0 61.875 99.55L61.875 213.4A14.375 14.375 0 0 1 33.125 213.4Z"/><path fill="#00d2a0" d="M222.875 38.6L222.875 152.45A54.625 54.625 0 0 1 113.625 152.45L113.625 147.85A14.375 14.375 0 0 1 142.375 147.85L142.375 152.45A25.875 25.875 0 0 0 194.125 152.45L194.125 38.6A14.375 14.375 0 0 1 222.875 38.6Z"/></g></svg>

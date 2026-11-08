@@ -68,7 +68,7 @@ exe = EXE(
     exclude_binaries=True,  # one-folder: the binaries go next to the exe, not inside it
     name="NexusVox",
     console=False,
-    icon=str(HERE / "nexusvox.ico"),  # made by make_icon.py from the logo in dashboard/static/logo.svg
+    icon=str(HERE / "nexusvox.ico"),  # made by make_icon.py from the logo kit
     upx=False,  # UPX-packed binaries raise antivirus flags
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="NexusVox", upx=False)

@@ -1,53 +1,37 @@
-"""Render the NexusVox logo into packaging/nexusvox.ico (16 to 256 px).
+"""Build packaging/nexusvox.ico (16 to 256 px) from the NexusVox logo kit.
 
-    python packaging/make_icon.py
+    python packaging/make_icon.py <path to the logo kit>
 
-The geometry mirrors src/nexusvox/dashboard/static/logo.svg (64 px grid: ring r=22, stroke 7, round caps,
-~78 degree gap, dot r=8), the same drawing the tray uses. The .ico is committed so a build needs no rendering step.
+The frames sit on the kit's dark #0d0d10 tile, so the icon reads on a light and a dark Explorer: 16 to 48 px come from
+``tray/png/tile-N.png`` (the pixel-fitted small drawing), 64 to 256 px from ``png/app-icon/nexusvox-app-icon-N.png``.
+The .ico is committed so a build needs no kit and no rendering step.
 """
 
 from __future__ import annotations
 
 import argparse
-import io
-import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 ICON = Path(__file__).resolve().parent / "nexusvox.ico"
-SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
-RING = "#6c5ce7"
-DOT = "#00d2a0"
+SMALL = (16, 24, 32, 48)
+LARGE = (64, 128, 256)
 
 
-def render(size: int = 1024) -> Image.Image:
-    unit = size / 64
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    c = size / 2
-    ring_r, stroke, dot_r = 22 * unit, round(7 * unit), 8 * unit
-    start, end = -70, 211
-    draw.arc([c - ring_r, c - ring_r, c + ring_r, c + ring_r], start=start, end=end, fill=RING, width=stroke)
-    for angle in (start, end):
-        x = c + ring_r * math.cos(math.radians(angle))
-        y = c + ring_r * math.sin(math.radians(angle))
-        draw.ellipse([x - stroke / 2, y - stroke / 2, x + stroke / 2, y + stroke / 2], fill=RING)
-    draw.ellipse([c - dot_r, c - dot_r, c + dot_r, c + dot_r], fill=DOT)
-    return img
-
-
-def build() -> bytes:
-    buffer = io.BytesIO()
-    render().save(buffer, format="ICO", sizes=SIZES)
-    return buffer.getvalue()
+def build(kit: Path) -> None:
+    frames = [Image.open(kit / "tray" / "png" / f"tile-{n}.png").convert("RGBA") for n in SMALL]
+    frames += [Image.open(kit / "png" / "app-icon" / f"nexusvox-app-icon-{n}.png").convert("RGBA") for n in LARGE]
+    frames.sort(key=lambda frame: frame.width)
+    # Pillow stores each frame given in ``append_images``; the first one is the base image.
+    frames[-1].save(ICON, format="ICO", sizes=[frame.size for frame in frames], append_images=frames[:-1])
 
 
 def main() -> int:
-    argparse.ArgumentParser(description=__doc__).parse_args()
-    data = build()
-    ICON.write_bytes(data)
-    print(f"Wrote {ICON} ({len(data)} bytes)")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("kit", type=Path, help="folder of the NexusVox logo kit")
+    build(parser.parse_args().kit)
+    print(f"Wrote {ICON} ({ICON.stat().st_size} bytes)")
     return 0
 
 

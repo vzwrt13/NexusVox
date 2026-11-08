@@ -86,13 +86,13 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Add-Type -AssemblyName System.Drawing
-          # The centre of the logo is its green dot (#00d2a0); a generic icon has no such pixel there.
+          # The left stem of the mark is violet (#6c5ce7); a generic icon has no such pixel there.
           foreach ($file in "dist\NexusVox\NexusVox.exe", "dist\installer\NexusVox-Setup.exe") {
             $icon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path $file).Path)
             $bitmap = $icon.ToBitmap()
-            $pixel = $bitmap.GetPixel([int]($bitmap.Width / 2), [int]($bitmap.Height / 2))
+            $pixel = $bitmap.GetPixel([int]($bitmap.Width * 0.25), [int]($bitmap.Height * 0.72))
             Write-Host "$file centre pixel: $pixel"
-            if ($pixel.R -gt 12 -or [math]::Abs($pixel.G - 210) -gt 12 -or [math]::Abs($pixel.B - 160) -gt 12) {
+            if ([math]::Abs($pixel.R - 108) -gt 12 -or [math]::Abs($pixel.G - 92) -gt 12 -or [math]::Abs($pixel.B - 231) -gt 12) {
               throw "$file does not carry the NexusVox icon"
             }
           }

@@ -54,8 +54,10 @@ class NexusVoxApp(
     _overlay: Overlay | None = None  # the visual feedback window; a test App built without __init__ has none
     _main_task: asyncio.Task | None = None  # what Quit cancels; set in `_run`
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, autostart: bool = False) -> None:
         self._config = config
+        # True when Windows started us at sign-in (`--autostart`): stay in the tray instead of opening the dashboard.
+        self._autostart = autostart
         self._loop: asyncio.AbstractEventLoop | None = None
         self._running = False
 
@@ -216,6 +218,10 @@ class NexusVoxApp(
         if not self._config.setup_done:
             # A fresh install: the tray icon is easy to miss, so the dashboard opens by itself, on the first-run setup.
             logger.info("First start: opening the dashboard for the first-run setup")
+            self._loop.run_in_executor(None, self._open_dashboard_logged)
+        elif not self._autostart:
+            # Start menu or shortcut start: the user wants the window. Only the autostart stays in the tray.
+            logger.info("Manual start: opening the dashboard")
             self._loop.run_in_executor(None, self._open_dashboard_logged)
 
         if self._mic_guard is not None:

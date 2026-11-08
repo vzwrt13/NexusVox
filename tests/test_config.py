@@ -613,7 +613,7 @@ def test_main_applies_the_configured_log_level(monkeypatch):
     import types
 
     class App:
-        def __init__(self, config):
+        def __init__(self, config, autostart=False):
             pass
 
         def run(self):

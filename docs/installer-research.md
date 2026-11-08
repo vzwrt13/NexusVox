@@ -380,7 +380,7 @@ Behaviours worth knowing: `AppMutex` (the app's single-instance mutex, created w
 user open it with SYNCHRONIZE, so an elevated NexusVox is seen as well) makes Setup and the uninstaller refuse while
 NexusVox runs, because the tray app cannot be closed from outside. An upgrade moves the old `{app}\_internal` aside,
 deletes it once the new files are in and moves it back if Setup is cancelled or fails, so no file of the old build
-survives and a failed upgrade leaves a working app. Unticking the autostart task on an upgrade removes the Run value.
+survives and a failed upgrade leaves a working app. Unticking the autostart task on an upgrade removes the Run value. The Run value carries `--autostart` (tray only); the Start menu entry and the optional desktop shortcut start without it and open the dashboard.
 The uninstaller also removes `{app}\extensions` (add-ons run inside the app); the delete-data question covers the
 default folders only, and "delete the models" also removes the Hugging Face xet cache, which the app keeps next to the
 models (`HF_XET_CACHE`). `MinVersion` is Windows 11. CI installs, starts the installed app, tries to install over

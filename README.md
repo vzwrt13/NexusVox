@@ -149,7 +149,7 @@ Reproduce with `python scripts/benchmark.py` — see [docs/BENCHMARK_GUIDE.md](d
 
 ## Dashboard
 
-Open the dashboard from the NexusVox tray icon (left-click) while NexusVox is running. Typing `http://localhost:47392` into the browser does not work: the dashboard only answers the page the tray opens, which carries a one-time key.
+Starting NexusVox from the Start menu or a shortcut opens the dashboard; the Windows autostart keeps it in the tray. Otherwise open it from the NexusVox tray icon (left-click) while NexusVox is running. Typing `http://localhost:47392` into the browser does not work: the dashboard only answers the page the tray opens, which carries a one-time key.
 
 
 | Tab | Description |

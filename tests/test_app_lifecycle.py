@@ -34,6 +34,7 @@ def _running_app(monkeypatch) -> tuple[NexusVoxApp, MagicMock]:
     patch_app(monkeypatch, "running_dashboard_api", lambda: api)
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._config = Config()
+    app._autostart = True  # the dashboard is not opened: no browser in a test
     app._loop = None
     app._running = False
     app._hotkey = MagicMock()
@@ -78,6 +79,49 @@ def test_quit_while_idle_runs_the_shutdown_and_raises_nothing(monkeypatch):
     app.run()
     thread.join(5)
     _assert_shut_down(app, api)
+
+
+def _start_and_quit(monkeypatch, *, autostart: bool, setup_done: bool) -> MagicMock:
+    """Run the app to its first idle moment and return the mock that stands in for opening the dashboard."""
+    app, _ = _running_app(monkeypatch)
+    app._autostart = autostart
+    app._config = Config(setup_done=setup_done)
+    opened = MagicMock()
+    app._open_dashboard = opened
+    ready = threading.Event()
+    app._tray.start.side_effect = ready.set
+    thread = _quit_once(app, ready)
+    app.run()
+    thread.join(5)
+    return opened
+
+
+def test_a_manual_start_opens_the_dashboard(monkeypatch):
+    _start_and_quit(monkeypatch, autostart=False, setup_done=True).assert_called_once()
+
+
+def test_the_autostart_stays_in_the_tray(monkeypatch):
+    _start_and_quit(monkeypatch, autostart=True, setup_done=True).assert_not_called()
+
+
+def test_the_autostart_still_opens_the_first_run_setup(monkeypatch):
+    _start_and_quit(monkeypatch, autostart=True, setup_done=False).assert_called_once()
+
+
+def test_only_the_autostart_marker_means_autostart():
+    from nexusvox.__main__ import is_autostart
+
+    assert is_autostart(["--autostart"]) and not is_autostart([])
+    assert not is_autostart(["--other"])
+
+
+def test_the_installer_registers_the_marker_and_a_desktop_shortcut():
+    from pathlib import Path
+
+    iss = (Path(__file__).parent.parent / "packaging" / "nexusvox.iss").read_text(encoding="utf-8")
+    run_line = next(line for line in iss.splitlines() if "ValueType: string" in line and r"CurrentVersion\Run" in line)
+    assert '--autostart"' in run_line
+    assert "{autodesktop}" in iss and "{autoprograms}" in iss
 
 
 def test_quit_during_a_recording_ends_it_at_once_and_runs_the_shutdown(monkeypatch):

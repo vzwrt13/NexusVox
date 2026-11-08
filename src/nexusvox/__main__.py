@@ -34,6 +34,14 @@ def _git_revision() -> str:
         return "(not a git checkout)"
 
 
+AUTOSTART_FLAG = "--autostart"
+
+
+def is_autostart(argv: list[str]) -> bool:
+    """True when the Windows autostart entry started us: the app then stays in the tray without a window."""
+    return AUTOSTART_FLAG in argv
+
+
 def main() -> None:
     # Before anything heavy: a second start must not build a second tray icon or hotkey hook.
     instance = SingleInstance()
@@ -70,7 +78,7 @@ def main() -> None:
         # Which code runs: a retest against the wrong checkout is otherwise only noticed as a fix that does nothing.
         logging.getLogger(__name__).info("Code: %s, %s", Path(__file__).resolve().parent, _git_revision())
 
-        app = NexusVoxApp(config)
+        app = NexusVoxApp(config, autostart=is_autostart(sys.argv[1:]))
         instance.watch(app.open_dashboard_from_second_start)
 
         try:

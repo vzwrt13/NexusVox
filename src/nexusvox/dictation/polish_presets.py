@@ -3,7 +3,7 @@
 Saying a preset's name as the polish instruction ("prompt engineer") uses its stored
 instruction; words after the name are added to it ("prompt engineer, and keep it
 short"). The default preset applies when the polish key is tapped without a word.
-A spoken instruction in a script nobody here writes is a mishearing (`unexpected_script`).
+A spoken instruction in a script nobody here writes is a mishearing (`unexpected_script`), unless it names a preset.
 Names are the user's own, in their own language, so the bilingual rule is met by the
 user, as with snippets.
 """
@@ -11,39 +11,46 @@ user, as with snippets.
 from __future__ import annotations
 
 import unicodedata
+from collections import Counter
 
 from ..snippets import SnippetOption, best_option
 from ..storage.vocabulary import PolishPreset
 
 
 def _script(ch: str) -> str:
-    """The script of a letter: the first word of its Unicode name ("LATIN", "CYRILLIC", "CJK", ...)."""
+    """The script of a letter: "LATIN", "CYRILLIC", "CJK", "KATAKANA", ...
+
+    Latin-1 and Latin Extended-A/B (up to U+024F) are Latin without a lookup: their names are not
+    script names (``ª`` is "FEMININE ORDINAL INDICATOR", ``µ`` "MICRO SIGN"). Compatibility forms
+    (Kelvin sign, fullwidth letters) are folded first. Anything else is the first word of its Unicode
+    name, with the Katakana-Hiragana mark counted as Katakana.
+    """
+    if ord(ch) < 0x250:
+        return "LATIN"
+    ch = unicodedata.normalize("NFKC", ch)[:1]
+    if ord(ch) < 0x250:
+        return "LATIN"
     try:
-        return unicodedata.name(ch).split()[0]
+        word = unicodedata.name(ch).split()[0]
     except ValueError:
         return "UNKNOWN"
-
-
-def _letter_scripts(text: str) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for ch in text:
-        if ch.isalpha():
-            counts[_script(ch)] = counts.get(_script(ch), 0) + 1
-    return counts
+    return "KATAKANA" if word.startswith("KATAKANA") else word
 
 
 def unexpected_script(spoken: str, presets: list[PolishPreset]) -> str | None:
-    """The script of *spoken* when most of its letters are in one nobody here writes, else ``None``.
+    """The script of *spoken* when most of its letters are in one that is neither Latin nor a preset's, else ``None``.
 
     The speech model detects the language itself and no language is sent to it, so a short
     instruction ("Brief") can come back in another script ("Бриф."). NexusVox speaks English and
-    German, so Latin is expected, and so is any script the saved preset names use (they are the
-    user's own words). Anything else is a mishearing, not an instruction.
+    German, so Latin is expected. A foreign script is accepted only when the words are a saved
+    preset's name (`resolve_instruction` finds it): the names are the user's own words, but a
+    Cyrillic preset does not make every other Cyrillic text an instruction.
     """
-    counts = _letter_scripts(spoken)
-    expected = {"LATIN"}.union(*(_letter_scripts(p.name).keys() for p in presets))
-    foreign = {script: n for script, n in counts.items() if script not in expected}
+    counts = Counter(_script(ch) for ch in spoken if ch.isalpha())
+    foreign = {script: n for script, n in counts.items() if script != "LATIN"}
     if sum(foreign.values()) * 2 <= sum(counts.values()):
+        return None
+    if resolve_instruction(spoken, presets)[1] is not None:
         return None
     return max(foreign, key=lambda script: foreign[script])
 

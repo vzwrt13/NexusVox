@@ -65,10 +65,25 @@ def test_a_few_foreign_letters_in_latin_text_are_tolerated():
     assert unexpected_script("make it shorter, Привет", PRESETS) is None
 
 
-def test_a_script_a_preset_name_uses_is_expected():
+def test_a_preset_name_in_another_script_is_accepted_when_it_is_said():
     russian = PolishPreset("Бриф", "Сделай короче.")
     assert unexpected_script("Бриф.", [*PRESETS, russian]) is None
+    assert unexpected_script("Бриф, и вежливо", [*PRESETS, russian]) is None
     assert unexpected_script("Бриф.", PRESETS) == "CYRILLIC"
+
+
+def test_one_preset_in_a_script_does_not_open_that_script_for_other_text():
+    russian = PolishPreset("Бриф", "Сделай короче.")
+    assert unexpected_script("Сделай короче", [*PRESETS, russian]) == "CYRILLIC"
+
+
+def test_latin_letters_whose_unicode_name_is_not_a_script_count_as_latin():
+    for text in ("2ª", "µs", "Å", "K", "Ｂｒｉｅｆ", "Straße", "łódź"):  # Kelvin sign, Angstrom sign, fullwidth
+        assert unexpected_script(text, PRESETS) is None, text
+
+
+def test_japanese_text_is_one_script_including_the_prolonged_sound_mark():
+    assert unexpected_script("コーヒー", PRESETS) == "KATAKANA"
 
 
 # -- storage ----------------------------------------------------------------------

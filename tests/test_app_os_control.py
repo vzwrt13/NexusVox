@@ -185,7 +185,23 @@ def test_polish_ignores_an_instruction_in_an_unexpected_script(monkeypatch, capl
     assert calls == {"pasted": [], "beeps": ["error"]}  # the model is never asked, the selection stays
     assert "instruction" not in calls
     assert "CYRILLIC" in caplog.text and "Бриф" not in caplog.text
-    app._save_command.assert_not_called()
+    # The attempt is kept like every other failed polish, with its audio.
+    assert app._save_command.call_args.args[1:] == ("[polish failed] Бриф.", "Бриф.")
+    assert app._save_command.call_args.kwargs["polish_status"] == "failed"
+
+
+def test_an_instruction_in_an_unexpected_script_is_rejected_before_the_selection_is_read_or_an_extension_runs(
+    monkeypatch,
+):
+    app, calls = _polish_app(monkeypatch, "hi leute", "unused")
+    reads = []
+    patch_app(monkeypatch, "read_selection", lambda delay, in_terminals: reads.append(1) or "hi leute")
+    handled = []
+    registry = MagicMock(extensions=[object()])
+    registry.selection_command.side_effect = lambda *args, **kwargs: handled.append(1)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
+    asyncio.run(app._polish_selection("Бриф.", MagicMock()))
+    assert (reads, handled, calls["beeps"]) == ([], [], ["error"])
 
 
 def test_polish_with_a_misheard_preset_name_picks_the_preset(monkeypatch):

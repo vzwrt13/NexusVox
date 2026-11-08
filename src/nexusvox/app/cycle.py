@@ -218,6 +218,16 @@ class TranscriptionCycle:
                 await self._paste_last_text()
                 return
 
+            if not audio_buffer:
+                # No audio frames (a WAV of only its header): there is nothing to send, whatever the model.
+                logger.info("Recording has no audio frames, nothing to transcribe")
+                await self._transcriber.disconnect()
+                if mark == POLISH:
+                    await self._polish_selection("", None)  # as a tap: the default instruction
+                elif mark == COMMAND:
+                    await self._hide_os_control()
+                return
+
             # Finalize transcription
             try:
                 result = await self._transcriber.finish()

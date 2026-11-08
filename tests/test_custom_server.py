@@ -203,3 +203,55 @@ def test_custom_server_without_url_starts_on_parakeet_on_cpu():
 
 def test_custom_server_with_url_is_kept():
     assert _fallback(_custom(), "cuda").model == "custom-server"
+
+
+# ---- Qwen3-ASR language prefix ---------------------------------------------
+
+_SENTENCE = (
+    "Also Proxy brauchen wir wahrscheinlich nicht. Mein anderer Hub ist ja gerade schon dabei, den Server zu erweitern."
+)
+_QWEN_REPLY = {
+    "type": "transcript.text.done",
+    "text": "language German<asr_text>" + _SENTENCE,
+    "usage": {"type": "tokens", "input_tokens": 189, "output_tokens": 31, "total_tokens": 220},
+}
+
+
+def _transcribe(monkeypatch, reply: dict) -> str:
+    import httpx
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kw: real(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=reply)), **kw),
+    )
+
+    async def run() -> str:
+        transcriber = create_transcriber(_custom("http://127.0.0.1:8008/v1/audio/transcriptions"), device="cuda")
+        await transcriber.connect()
+        await transcriber.send_audio_chunk(b"\x00\x01" * 100)
+        return (await transcriber.finish()).text
+
+    return asyncio.run(run())
+
+
+def test_qwen3_asr_language_prefix_is_stripped(monkeypatch):
+    assert _transcribe(monkeypatch, _QWEN_REPLY) == _SENTENCE
+
+
+def test_text_without_the_prefix_is_unchanged(monkeypatch):
+    assert _transcribe(monkeypatch, {"text": "Hello there."}) == "Hello there."
+
+
+@pytest.mark.parametrize("name", ["English", "German", "Chinese", "Portuguese (Brazil)"])
+def test_prefix_is_stripped_for_any_language_name(name):
+    from nexusvox.transcription.transcriber import strip_asr_text_prefix
+
+    assert strip_asr_text_prefix(f"language {name}<asr_text>Hi.") == "Hi."
+
+
+def test_empty_utterance_with_prefix_gives_empty_text():
+    from nexusvox.transcription.transcriber import strip_asr_text_prefix
+
+    assert strip_asr_text_prefix("language None<asr_text>") == ""

@@ -1043,3 +1043,125 @@ def test_the_active_app_is_read_once_and_only_when_a_hook_needs_it(monkeypatch):
     patch_app(monkeypatch, "loaded_extensions", lambda: registry)
     asyncio.run(app._polish_selection("go", MagicMock()))
     assert len(reads) == 1
+
+
+def _result_app(monkeypatch, *extensions, reply="Thanks [sig]"):
+    app, calls = _polish_app(monkeypatch, "hi leute", reply)
+    registry = ExtensionRegistry()
+    for extension in extensions:
+        registry.add(extension)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
+    return app, calls
+
+
+class _ResultHook(Extension):
+    api_version = API_VERSION
+
+    def __init__(self, name, answer):
+        self.name = name
+        self.answer = answer
+        self.seen: list = []
+
+    def polish_result(self, result, app, model):
+        self.seen.append((result, app, model))
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer(result) if callable(self.answer) else self.answer
+
+
+def test_polish_hands_the_result_to_extensions_before_pasting(monkeypatch):
+    hook = _ResultHook("snippets", lambda text: text.replace("[sig]", "Best regards, Vincent"))
+    app, calls = _result_app(monkeypatch, hook)
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["Thanks Best regards, Vincent"]
+    assert hook.seen == [("Thanks [sig]", ActiveApp("Code.exe", "main.py"), LlmConfig().model)]
+
+
+def test_polish_without_a_result_hook_pastes_the_model_answer(monkeypatch):
+    app, calls = _result_app(monkeypatch)
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["Thanks [sig]"]
+
+
+def test_polish_survives_a_result_hook_that_raises(monkeypatch):
+    app, calls = _result_app(monkeypatch, _ResultHook("boom", RuntimeError("nope")))
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["Thanks [sig]"]
+
+
+@pytest.mark.parametrize("answer", ["", "   ", None, ["x"]])
+def test_polish_ignores_an_empty_or_non_string_result_answer(monkeypatch, answer):
+    app, calls = _result_app(monkeypatch, _ResultHook("odd", answer))
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["Thanks [sig]"]
+
+
+def test_polish_chains_result_hooks_in_load_order(monkeypatch):
+    first = _ResultHook("first", lambda text: text + " one")
+    second = _ResultHook("second", lambda text: text + " two")
+    app, calls = _result_app(monkeypatch, first, second)
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["Thanks [sig] one two"]
+    assert second.seen[0][0] == "Thanks [sig] one"
+
+
+def test_the_result_hook_gets_the_model_of_the_polish_task(monkeypatch):
+    from dataclasses import replace
+
+    hook = _ResultHook("spy", None)
+    app, _ = _result_app(monkeypatch, hook)
+    patch_app(monkeypatch, "config_for", lambda llm, task: replace(llm, model="fast-model"))
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert hook.seen[0][2] == "fast-model"
+
+
+def test_a_slow_result_hook_is_skipped(monkeypatch):
+    class Slow(_ResultHook):
+        def polish_result(self, result, app, model):
+            time.sleep(0.3)
+            return "late"
+
+    monkeypatch.setattr("nexusvox.extensions.SELECTION_COMMAND_TIMEOUT_S", 0.05)
+    app, calls = _result_app(monkeypatch, Slow("slow", None))
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["Thanks [sig]"]
+
+
+def test_the_models_time_does_not_use_up_the_result_hooks_budget(monkeypatch):
+    hook = _ResultHook("fast", lambda text: text.replace("[sig]", "Best"))
+    app, calls = _result_app(monkeypatch, hook)
+
+    def slow_model(sel, instruction, cfg):
+        time.sleep(0.3)  # longer than the whole hook budget below
+        return "Thanks [sig]"
+
+    patch_app(monkeypatch, "polish", slow_model)
+    monkeypatch.setattr("nexusvox.extensions.SELECTION_COMMAND_TIMEOUT_S", 0.2)
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["Thanks Best"]
+
+
+def test_the_result_hook_sees_the_bare_answer_and_the_selections_whitespace_is_kept(monkeypatch):
+    hook = _ResultHook("strip", lambda text: text.strip().replace("[sig]", "Best"))
+    app, calls = _polish_app(monkeypatch, "  hi leute\n", "unused")
+    registry = ExtensionRegistry()
+    registry.add(hook)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
+    patch_app(monkeypatch, "polish", lambda sel, instruction, cfg: "  Thanks [sig]\n")  # polish() keeps the whitespace
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert hook.seen[0][0] == "Thanks [sig]"
+    assert calls["pasted"] == ["  Thanks Best\n"]
+
+
+def test_an_extension_selection_command_skips_the_result_hook(monkeypatch):
+    class Handles(Extension):
+        name = "handles"
+        api_version = API_VERSION
+
+        def on_selection_command(self, selection, command, app):
+            return "handled"
+
+    hook = _ResultHook("spy", "never")
+    app, calls = _result_app(monkeypatch, Handles(), hook)
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["handled"] and hook.seen == []

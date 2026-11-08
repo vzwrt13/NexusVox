@@ -742,53 +742,52 @@ class ExtensionRegistry:
         """A `time.monotonic()` deadline `SELECTION_COMMAND_TIMEOUT_S` from now, for the polish hooks to share."""
         return time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
 
+    def _overrides(self, hook: str) -> bool:
+        """True when any loaded extension overrides *hook*; with none, asking costs nothing."""
+        return any(getattr(type(e), hook) is not getattr(Extension, hook) for e in self.extensions)
+
+    def _chain_text(self, hook: str, text: str, *args: Any, deadline: float | None) -> str:
+        """*text* as every overriding extension's *hook* leaves it, in load order; *args* follow the text.
+
+        An answer that is empty or whitespace is ignored (the text is never thrown away for nothing), as is one
+        that raises, is not a string or is too slow. *deadline* is a `time.monotonic()` value shared by all
+        extensions; by default `SELECTION_COMMAND_TIMEOUT_S` from now.
+        """
+        if deadline is None:
+            deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
+        for extension in self.extensions:
+            if getattr(type(extension), hook) is getattr(Extension, hook):
+                continue
+            answer = self._text_hook(extension, hook, deadline, text, *args)
+            if answer is not None and answer.strip():
+                text = answer
+            elif answer is not None:
+                logger.warning("Extension %s returned an empty text from %s; ignored", extension.name, hook)
+        return text
+
     def has_expand_instruction_hook(self) -> bool:
-        """True when any loaded extension overrides `expand_instruction`; with none, asking costs nothing."""
-        return any(type(e).expand_instruction is not Extension.expand_instruction for e in self.extensions)
+        """True when any loaded extension overrides `expand_instruction`."""
+        return self._overrides("expand_instruction")
 
     def expand_instruction(self, instruction: str, app: ActiveApp, *, deadline: float | None = None) -> str:
         """*instruction* as every extension's `expand_instruction` leaves it, in load order; unchanged with none.
 
-        An answer that is empty or whitespace is ignored (the spoken command is never thrown away for the
-        default). *deadline* is a `time.monotonic()` value shared with `selection_command`; by default
-        `SELECTION_COMMAND_TIMEOUT_S` from now.
+        An empty answer is ignored (the spoken command is never thrown away for the default). *deadline* is shared
+        with `selection_command`.
         """
-        if deadline is None:
-            deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
-        for extension in self.extensions:
-            if type(extension).expand_instruction is Extension.expand_instruction:
-                continue
-            result = self._text_hook(extension, "expand_instruction", deadline, instruction, app)
-            if result is not None and result.strip():
-                instruction = result
-            elif result is not None:
-                logger.warning(
-                    "Extension %s returned an empty instruction from expand_instruction; ignored", extension.name
-                )
-        return instruction
+        return self._chain_text("expand_instruction", instruction, app, deadline=deadline)
 
     def has_polish_result_hook(self) -> bool:
-        """True when any loaded extension overrides `polish_result`; with none, asking costs nothing."""
-        return any(type(e).polish_result is not Extension.polish_result for e in self.extensions)
+        """True when any loaded extension overrides `polish_result`."""
+        return self._overrides("polish_result")
 
     def polish_result(self, result: str, app: ActiveApp, model: str, *, deadline: float | None = None) -> str:
         """*result* as every extension's `polish_result` leaves it, in load order; unchanged with none.
 
-        An answer that is empty or whitespace is ignored (the model's answer is never thrown away for nothing).
-        *deadline* is a `time.monotonic()` value shared by all extensions; by default
-        `SELECTION_COMMAND_TIMEOUT_S` from now.
+        An empty answer is ignored: an extension cannot veto the paste. Without *deadline* the budget starts when
+        this runs, so neither the model's time nor a wait in a thread pool's queue counts against the extensions.
         """
-        if deadline is None:
-            deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
-        for extension in self.extensions:
-            if type(extension).polish_result is Extension.polish_result:
-                continue
-            answer = self._text_hook(extension, "polish_result", deadline, result, app, model)
-            if answer is not None and answer.strip():
-                result = answer
-            elif answer is not None:
-                logger.warning("Extension %s returned an empty text from polish_result; ignored", extension.name)
-        return result
+        return self._chain_text("polish_result", result, app, model, deadline=deadline)
 
     def _text_hook(self, extension: Extension, hook: str, deadline: float, *args: Any) -> str | None:
         """What one extension's text hook answered, or None: nothing to say, or it failed (logged)."""

@@ -12,7 +12,7 @@ from ..dictation.injector import foreground_window, inject_text
 from ..dictation.overlay import ERROR
 from ..dictation.polish import DEFAULT_INSTRUCTION, polish, read_selection
 from ..dictation.polish_presets import resolve_instruction
-from ..extensions import ExtensionRegistry, loaded_extensions
+from ..extensions import ActiveApp, ExtensionRegistry, loaded_extensions
 from ..llm import LlmError, config_for, reload_unless_loaded
 from ..system.logsetup import Text
 from .common import logger
@@ -131,16 +131,8 @@ class SelectionPolish:
             return
         model_ms = round((time.perf_counter() - started) * 1000)
         if registry is not None and registry.has_polish_result_hook():
-            # A fresh budget: the model's time must not eat the extensions' share.
             rewritten = await loop.run_in_executor(
-                None,
-                functools.partial(
-                    registry.polish_result,
-                    rewritten,
-                    active_app,
-                    llm.model,
-                    deadline=ExtensionRegistry.selection_deadline(),
-                ),
+                None, self._extend_polish_result, registry, selection, rewritten, active_app, llm.model
             )
         await self._paste_over_selection(
             rewritten,
@@ -154,6 +146,21 @@ class SelectionPolish:
             model_ms=model_ms,
             llm=asked,
         )
+
+    @staticmethod
+    def _extend_polish_result(
+        registry: ExtensionRegistry, selection: str, rewritten: str, active_app: ActiveApp, model: str
+    ) -> str:
+        """*rewritten* after the extensions' `polish_result` hooks; they see the bare answer, not the whitespace
+        `polish()` put back around it from *selection*, and that whitespace (a selected line's newline) is
+        restored around what they return. The budget starts here, when the job runs, not when it was queued."""
+        core = selection.strip()
+        lead = selection[: selection.index(core)]
+        trail = selection[len(lead) + len(core) :]
+        if not (rewritten.startswith(lead) and rewritten.endswith(trail) and len(rewritten) >= len(lead) + len(trail)):
+            return registry.polish_result(rewritten, active_app, model)
+        bare = rewritten[len(lead) : len(rewritten) - len(trail)]
+        return lead + registry.polish_result(bare, active_app, model) + trail
 
     async def _paste_over_selection(
         self,

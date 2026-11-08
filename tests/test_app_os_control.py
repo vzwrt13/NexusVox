@@ -1115,7 +1115,7 @@ def test_the_result_hook_gets_the_model_of_the_polish_task(monkeypatch):
     assert hook.seen[0][2] == "fast-model"
 
 
-def test_a_slow_result_hook_is_skipped_and_the_model_time_does_not_count(monkeypatch):
+def test_a_slow_result_hook_is_skipped(monkeypatch):
     class Slow(_ResultHook):
         def polish_result(self, result, app, model):
             time.sleep(0.3)
@@ -1125,6 +1125,32 @@ def test_a_slow_result_hook_is_skipped_and_the_model_time_does_not_count(monkeyp
     app, calls = _result_app(monkeypatch, Slow("slow", None))
     asyncio.run(app._polish_selection("go", MagicMock()))
     assert calls["pasted"] == ["Thanks [sig]"]
+
+
+def test_the_models_time_does_not_use_up_the_result_hooks_budget(monkeypatch):
+    hook = _ResultHook("fast", lambda text: text.replace("[sig]", "Best"))
+    app, calls = _result_app(monkeypatch, hook)
+
+    def slow_model(sel, instruction, cfg):
+        time.sleep(0.3)  # longer than the whole hook budget below
+        return "Thanks [sig]"
+
+    patch_app(monkeypatch, "polish", slow_model)
+    monkeypatch.setattr("nexusvox.extensions.SELECTION_COMMAND_TIMEOUT_S", 0.2)
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["pasted"] == ["Thanks Best"]
+
+
+def test_the_result_hook_sees_the_bare_answer_and_the_selections_whitespace_is_kept(monkeypatch):
+    hook = _ResultHook("strip", lambda text: text.strip().replace("[sig]", "Best"))
+    app, calls = _polish_app(monkeypatch, "  hi leute\n", "unused")
+    registry = ExtensionRegistry()
+    registry.add(hook)
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
+    patch_app(monkeypatch, "polish", lambda sel, instruction, cfg: "  Thanks [sig]\n")  # polish() keeps the whitespace
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert hook.seen[0][0] == "Thanks [sig]"
+    assert calls["pasted"] == ["  Thanks Best\n"]
 
 
 def test_an_extension_selection_command_skips_the_result_hook(monkeypatch):

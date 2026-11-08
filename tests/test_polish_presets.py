@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nexusvox.dictation.polish_presets import resolve_instruction
+from nexusvox.dictation.polish_presets import resolve_instruction, unexpected_script
 from nexusvox.storage.vocabulary import PolishPreset
 
 PROMPT = PolishPreset("prompt engineer", "Rewrite this as a precise prompt for an AI assistant.")
@@ -36,6 +36,39 @@ def test_words_after_the_name_are_added():
 def test_anything_else_is_the_instruction_as_spoken():
     assert resolve_instruction("make it shorter", PRESETS) == ("make it shorter", None)
     assert resolve_instruction("mach es kürzer", PRESETS) == ("mach es kürzer", None)
+
+
+def test_a_slightly_misheard_name_still_selects_the_preset():
+    brief = PolishPreset("Brief", "Make it brief.")
+    assert resolve_instruction("Brif", [brief, PROMPT]) == ("Make it brief.", "Brief")
+    assert resolve_instruction("Brief.", [brief, PROMPT])[1] == "Brief"
+    assert resolve_instruction("Brif, und bitte höflich", [brief])[0] == "Make it brief.\nAlso: und bitte höflich"
+
+
+# -- scripts ----------------------------------------------------------------------
+
+
+def test_latin_text_in_either_language_is_expected():
+    assert unexpected_script("Brief", PRESETS) is None
+    assert unexpected_script("mach es kürzer, bitte", PRESETS) is None
+    assert unexpected_script("", PRESETS) is None
+    assert unexpected_script("123 ...", PRESETS) is None
+
+
+def test_another_script_is_not_an_instruction():
+    assert unexpected_script("Бриф.", PRESETS) == "CYRILLIC"
+    assert unexpected_script("簡潔に", PRESETS) == "CJK"
+    assert unexpected_script("Сделай короче please", PRESETS) == "CYRILLIC"
+
+
+def test_a_few_foreign_letters_in_latin_text_are_tolerated():
+    assert unexpected_script("make it shorter, Привет", PRESETS) is None
+
+
+def test_a_script_a_preset_name_uses_is_expected():
+    russian = PolishPreset("Бриф", "Сделай короче.")
+    assert unexpected_script("Бриф.", [*PRESETS, russian]) is None
+    assert unexpected_script("Бриф.", PRESETS) == "CYRILLIC"
 
 
 # -- storage ----------------------------------------------------------------------

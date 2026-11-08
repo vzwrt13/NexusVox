@@ -11,7 +11,7 @@ from ..dictation.feedback import beep_error
 from ..dictation.injector import foreground_window, inject_text
 from ..dictation.overlay import ERROR
 from ..dictation.polish import DEFAULT_INSTRUCTION, polish, read_selection
-from ..dictation.polish_presets import resolve_instruction
+from ..dictation.polish_presets import resolve_instruction, unexpected_script
 from ..extensions import ActiveApp, ExtensionRegistry, loaded_extensions
 from ..llm import LlmError, config_for, reload_unless_loaded
 from ..system.logsetup import Text
@@ -87,7 +87,16 @@ class SelectionPolish:
                     model_ms=None,
                 )
                 return
-        instruction, preset = resolve_instruction(spoken, self._db.get_polish_presets())
+        presets = self._db.get_polish_presets()
+        script = unexpected_script(spoken, presets)
+        if script:
+            # Not the text itself: a dictated instruction stays out of the log.
+            logger.warning(
+                "Polish: the instruction came back in %s script, not used (%d characters)", script, len(spoken)
+            )
+            self._cue(beep_error, ERROR)
+            return
+        instruction, preset = resolve_instruction(spoken, presets)
         if preset:
             logger.info("Polish: preset %r", preset)
         if registry is not None and registry.has_expand_instruction_hook():

@@ -176,6 +176,27 @@ def test_polish_uses_a_spoken_preset_and_saves_its_name(monkeypatch):
     assert app._save_command.call_args.args[1:] == ("[polish] formelle Mail", "Formelle Mail")
 
 
+def test_polish_ignores_an_instruction_in_an_unexpected_script(monkeypatch, caplog):
+    from nexusvox.storage.vocabulary import PolishPreset
+
+    app, calls = _polish_app(monkeypatch, "hi leute", "unused", presets=[PolishPreset("Brief", "Make it brief.")])
+    with caplog.at_level("INFO", logger="nexusvox"):
+        asyncio.run(app._polish_selection("Бриф.", MagicMock()))
+    assert calls == {"pasted": [], "beeps": ["error"]}  # the model is never asked, the selection stays
+    assert "instruction" not in calls
+    assert "CYRILLIC" in caplog.text and "Бриф" not in caplog.text
+    app._save_command.assert_not_called()
+
+
+def test_polish_with_a_misheard_preset_name_picks_the_preset(monkeypatch):
+    from nexusvox.storage.vocabulary import PolishPreset
+
+    app, calls = _polish_app(monkeypatch, "hi leute", "ok", presets=[PolishPreset("Brief", "Make it brief.")])
+    asyncio.run(app._polish_selection("Brif", MagicMock()))
+    assert calls["instruction"] == "Make it brief."
+    assert app._save_command.call_args.args[1] == "[polish] Brief"
+
+
 def test_polish_without_an_instruction_uses_the_default_preset(monkeypatch):
     from nexusvox.storage.vocabulary import PolishPreset
 

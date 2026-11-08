@@ -52,8 +52,10 @@ in the Recordings tab's recording options (▾ next to *Start recording*, `[meet
 Your microphone is **Speaker 1**. Set **Meetings: name for your own voice** in the Settings tab
 (`[meeting].own_voice_label`) to use a name instead; empty means `Speaker 1`. The system audio runs through
 the same speaker detection as uploads (Parakeet in its Docker container, up to four voices) and becomes
-**Speaker 2**, **Speaker 3**, ... If speaker detection is unavailable (CPU mode, no GPU container, another
-model) or fails, everyone on the system audio is **Speaker 2** and the transcript still completes; a note says
+**Speaker 2**, **Speaker 3**, ... Dictation keeps your chosen model, but a meeting (and an upload with speaker
+detection) always uses Parakeet for this: with another model active, NexusVox starts the Parakeet container for the
+job if it is not running, stops it again afterwards, and says so in the notes. If speaker detection is unavailable
+(CPU mode, no GPU, Docker missing, not enough VRAM) or fails, everyone on the system audio is **Speaker 2** and the transcript still completes; a note says
 why. The labels are stored the same way as for uploads, so the Recordings tab, TXT, SRT and VTT
 exports and extensions all show the same names (the name of your own voice is stored with the meeting, so it
 cannot get lost in an edit of the text). A name such as `Speaker 2` is refused, since another participant gets

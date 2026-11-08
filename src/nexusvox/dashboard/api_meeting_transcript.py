@@ -23,6 +23,7 @@ from ..meetings.transcribe import (
     track_shifts,
 )
 from ..transcription.file_transcribe import MAX_CHUNK_MS, NO_SPEAKER_LABELS
+from ..transcription.speaker_fallback import speaker_detection_job
 from .api_base import DashboardState, logger
 from .file_jobs import FileJob
 
@@ -65,7 +66,15 @@ class MeetingTranscriptMixin(DashboardState):
         except Exception as exc:
             logger.error("Loading meeting %s failed: %s", folder, exc)
             return {"ok": False, "error": f"Could not load the meeting: {exc}"}
-        notes = list(meeting.notes)
+        system = meeting.tracks.get("system")
+        wants_speakers = system is not None and system.frames / system.sample_rate <= MAX_DETECTION_S
+        # A model without speaker detection runs this meeting on Parakeet (see `speaker_fallback`); the container,
+        # if the job started it, stays up until the transcript is stored.
+        with speaker_detection_job(self._config.inference, wanted=wants_speakers, what="meeting") as speakers:
+            return self._transcribe_loaded_meeting(folder, meeting, speakers, job, progress)
+
+    def _transcribe_loaded_meeting(self, folder: Path, meeting, speakers, job, progress) -> dict:
+        notes = [speakers.notice, *meeting.notes] if speakers.notice else list(meeting.notes)
         store_audio = self._config.meeting.store_audio  # read once: a switch mid-job applies from the next one
         if not meeting.tracks:
             return {"ok": False, "error": "The meeting has no readable audio track"}
@@ -108,7 +117,11 @@ class MeetingTranscriptMixin(DashboardState):
 
                 try:
                     result = self._transcribe_wav_chunks(
-                        chunks, word_timestamps=True, diarize=detect_speakers, on_progress=track_progress
+                        chunks,
+                        word_timestamps=True,
+                        diarize=detect_speakers,
+                        on_progress=track_progress,
+                        inference=speakers.config,
                     )
                 except Exception as exc:
                     logger.error("Transcription failed for meeting %s: %s", folder, exc)
@@ -201,6 +214,7 @@ class MeetingTranscriptMixin(DashboardState):
             words=merged,
             speaker_names={SPEAKER_OWN: self._config.meeting.own_voice_label},
             kind="meeting",
+            model=speakers.config.model,
             audio_path=self._stored_audio_path(mix_path) if mix_path else None,
         )
         # The recorded tracks are the only audio there is when the mix could not be written: keep them then.

@@ -92,7 +92,7 @@ header h1 {
   color: var(--text);
 }
 
-.brand-vox { color: #6c5ce7; }
+.brand-vox { color: var(--accent); }
 
 .tabs {
   flex: 1 1 auto;

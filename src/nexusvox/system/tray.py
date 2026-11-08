@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import functools
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -14,17 +15,35 @@ from PIL import Image
 # dark taskbar; ``tile-N`` sits on the dark #0d0d10 tile and stays readable on a light taskbar.
 _ICON_DIR = Path(__file__).resolve().parent / "tray_icons"
 _SIZES = (16, 20, 24, 32, 48)
-_VIOLET = (108, 92, 231)
-_RECORDING_COLOR = (255, 107, 107)  # #ff6b6b replaces the mint stroke while recording
+
+# A linear colour map that keeps violet (#6c5ce7) and the dark tile (#0d0d10) and sends mint (#00d2a0) to red
+# (#ff6b6b). It is linear, so the anti-aliased edges between the colours stay correct. Rows: new R, G, B.
+_MINT_TO_RED = (
+    -0.2969, 1.08, 0.1762, 0,
+    0.5238, 0.5637, -0.0712, 0,
+    0.2696, -0.2245, 0.9634, 0,
+)  # fmt: skip
 
 
 def _small_icon_size() -> int:
-    """The tray icon size of this display (16 px at 100 % scaling), as the nearest drawn size."""
+    """The tray icon size of this display: the smallest drawn size that is not smaller than the wanted one.
+
+    The process is not DPI aware, so Windows would always answer 16 px; the calling thread is made DPI aware for
+    the query only. Scaling a larger drawing down looks better than stretching a smaller one up.
+    """
+    wanted = 16
     try:
-        wanted = ctypes.windll.user32.GetSystemMetrics(49)  # SM_CXSMICON
+        user32 = ctypes.windll.user32
+        user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+        old = user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))  # per-monitor aware v2
+        try:
+            wanted = round(16 * user32.GetDpiForSystem() / 96)
+        finally:
+            user32.SetThreadDpiAwarenessContext(old)
     except (AttributeError, OSError):
-        wanted = 32
-    return min(_SIZES, key=lambda size: abs(size - wanted)) if wanted else 32
+        pass
+    return next((size for size in _SIZES if size >= wanted), _SIZES[-1])
 
 
 def _taskbar_is_light() -> bool:
@@ -41,26 +60,19 @@ def _taskbar_is_light() -> bool:
 
 
 def _recolor_mint(img: Image.Image) -> Image.Image:
-    """Turn the mint stroke red: each pixel moves from violet toward red by how mint it is."""
-    out = img.convert("RGBA")
-    pixels = out.load()
-    for y in range(out.height):
-        for x in range(out.width):
-            r, g, b, a = pixels[x, y]
-            if a == 0:
-                continue
-            mint = max(0.0, min(1.0, (g - r + 16) / 226))
-            blended = tuple(round(v + (t - v) * mint) for v, t in zip(_VIOLET, _RECORDING_COLOR, strict=True))
-            if b < 200 and g > 150:  # an opaque mint pixel
-                blended = _RECORDING_COLOR
-            pixels[x, y] = (*blended, a)
-    return out
+    """Turn the mint stroke red and leave violet, the tile and the alpha channel as they are."""
+    rgba = img.convert("RGBA")
+    red = rgba.convert("RGB").convert("RGB", _MINT_TO_RED)
+    red.putalpha(rgba.getchannel("A"))
+    return red
 
 
+@functools.cache
 def _create_icon_image(active: bool = False, light_taskbar: bool = False, size: int | None = None) -> Image.Image:
     """The NexusVox mark from the logo kit: a violet and a mint stroke that form an N and a sound wave.
 
     The mint stroke turns red while recording. On a light taskbar the mark sits on its dark tile.
+    The result is cached per argument set: the hotkey path asks for it on every press and release.
     """
     size = size or _small_icon_size()
     name = "tile" if light_taskbar else "tray"
@@ -84,7 +96,7 @@ class SystemTray:
         self._on_open_dashboard = on_open_dashboard
         self._icon: pystray.Icon | None = None
         self._thread: threading.Thread | None = None
-        self._active = False
+        self._light_taskbar = False
 
     def _build_menu(self) -> pystray.Menu:
         items: list[pystray.MenuItem] = []
@@ -117,15 +129,16 @@ class SystemTray:
 
     def set_active(self, active: bool) -> None:
         """Update tray icon to reflect recording state."""
-        self._active = active
         if self._icon is not None:
-            self._icon.icon = _create_icon_image(active, _taskbar_is_light())
+            self._icon.icon = _create_icon_image(active, self._light_taskbar)
 
     def start(self) -> None:
         """Start the system tray icon in a background thread."""
+        # Read once: the variant follows the taskbar theme at the start of the app.
+        self._light_taskbar = _taskbar_is_light()
         self._icon = pystray.Icon(
             name="NexusVox",
-            icon=_create_icon_image(light_taskbar=_taskbar_is_light()),
+            icon=_create_icon_image(light_taskbar=self._light_taskbar),
             title="NexusVox — Ready",
             menu=self._build_menu(),
         )

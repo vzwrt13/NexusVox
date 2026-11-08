@@ -86,13 +86,20 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           Add-Type -AssemblyName System.Drawing
-          # The left stem of the mark is violet (#6c5ce7); a generic icon has no such pixel there.
-          foreach ($file in "dist\NexusVox\NexusVox.exe", "dist\installer\NexusVox-Setup.exe") {
+          # The mark is violet (#6c5ce7) on a dark tile; a generic icon has no such pixel. Scan every pixel so
+          # the frame size that Windows hands back does not matter.
+          foreach ($file in "dist/NexusVox/NexusVox.exe", "dist/installer/NexusVox-Setup.exe") {
             $icon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path $file).Path)
             $bitmap = $icon.ToBitmap()
-            $pixel = $bitmap.GetPixel([int]($bitmap.Width * 0.25), [int]($bitmap.Height * 0.72))
-            Write-Host "$file centre pixel: $pixel"
-            if ([math]::Abs($pixel.R - 108) -gt 12 -or [math]::Abs($pixel.G - 92) -gt 12 -or [math]::Abs($pixel.B - 231) -gt 12) {
+            $found = $false
+            for ($x = 0; $x -lt $bitmap.Width -and -not $found; $x++) {
+              for ($y = 0; $y -lt $bitmap.Height -and -not $found; $y++) {
+                $pixel = $bitmap.GetPixel($x, $y)
+                if ([math]::Abs($pixel.R - 108) -le 12 -and [math]::Abs($pixel.G - 92) -le 12 -and [math]::Abs($pixel.B - 231) -le 12) { $found = $true }
+              }
+            }
+            Write-Host "$file has a violet mark pixel: $found ($($bitmap.Width) px frame)"
+            if (-not $found) {
               throw "$file does not carry the NexusVox icon"
             }
           }

@@ -41,5 +41,19 @@ def test_light_taskbar_uses_the_dark_tile():
     assert tray._create_icon_image(size=16).getpixel((0, 0))[3] == 0
 
 
-def test_icon_size_is_one_of_the_drawn_sizes(monkeypatch):
+def test_recording_icon_on_a_light_taskbar_keeps_the_dark_tile_and_violet():
+    img = tray._create_icon_image(active=True, light_taskbar=True, size=16)
+    assert img.getpixel((0, 0))[:3] == (13, 13, 16)
+    colours = _opaque_colours(tray._create_icon_image(active=True, light_taskbar=True, size=32))
+    assert (108, 92, 231) in colours
+    assert (13, 13, 16) in colours
+    assert (0, 210, 160) not in colours
+    assert any(r > 240 and g < 120 for r, g, _ in colours)
+
+
+def test_icon_images_are_cached():
+    assert tray._create_icon_image(True, False, 32) is tray._create_icon_image(True, False, 32)
+
+
+def test_icon_size_is_one_of_the_drawn_sizes():
     assert tray._small_icon_size() in tray._SIZES

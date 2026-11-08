@@ -75,6 +75,7 @@ async def transcribe_file(
     word_timestamps: bool = False,
     diarize: bool = False,
     on_progress: Callable[..., None] | None = None,
+    explain_no_speakers: bool = True,
 ) -> TranscriptionResult:
     """Transcribe WAV chunks via the shared transcriber factory and join results.
 
@@ -83,6 +84,8 @@ async def transcribe_file(
     that support it also detect speakers once over the whole file; the text then becomes
     "Speaker 1: ..." paragraphs and each word carries its speaker. When speaker detection is not
     possible or fails, the plain transcript comes back with a note saying why.
+
+    With `explain_no_speakers` False the note about missing speaker detection is left out (the caller has said why).
 
     `on_progress(stage, current, total)` is called as the work moves on: `"transcribing"` as chunk
     `current` of `total` starts, `"diarizing"` when only speaker detection is left.
@@ -140,7 +143,8 @@ async def transcribe_file(
         text = " ".join(t for t in texts if t).strip()
         plain_text = text
         if diarize and not wants_speakers:
-            notes.append(_unavailable_note(entry, transcriber))
+            if explain_no_speakers:
+                notes.append(_unavailable_note(entry, transcriber))
         elif speakers is not None and text:
             if on_progress and not speakers.done():
                 on_progress("diarizing")

@@ -194,13 +194,18 @@ async function refreshDiarizeToggle() {
   } catch {
     current = {};
   }
-  const supported = Boolean(current.diarization);
+  const viaParakeet = !current.diarization && Boolean(current.diarization_fallback);
+  const supported = Boolean(current.diarization) || viaParakeet;
   diarizeToggle.disabled = !supported;
   if (!supported) diarizeToggle.checked = false;
   const models = (current.diarization_models || []).join(" or ") || "a model with speaker detection";
-  diarizeHint.textContent = supported
-    ? DIARIZE_HINT
-    : current.diarization_hint || "Requires " + models + " as the active model.";
+  // A model without speaker detection still gets it: the upload runs on Parakeet (its GPU container is
+  // started for the job when needed), so the toggle stays on and the hint says what will happen.
+  diarizeHint.textContent = viaParakeet
+    ? DIARIZE_HINT + " This upload is transcribed by Parakeet, because the active model has no speaker detection."
+    : supported
+      ? DIARIZE_HINT
+      : current.diarization_hint || "Requires " + models + " as the active model.";
 }
 
 document.addEventListener("visibilitychange", () => {

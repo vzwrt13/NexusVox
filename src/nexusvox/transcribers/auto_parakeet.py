@@ -48,6 +48,14 @@ GPU = "gpu"
 CPU = "cpu"
 
 
+async def warm_up_server(config: InferenceConfig) -> bool:
+    """One silent clip through a client of its own (a dictation's buffer is never touched); True when it came back."""
+    warm = OpenAIHttpTranscriber(config)
+    await warm.connect()
+    await warm.send_audio_chunk(bytes(int(16_000 * _WARM_UP_SILENCE_S) * 2))
+    return (await warm.finish(timeout=_WARM_UP_TIMEOUT_S)).done
+
+
 class _HealthProbeFilter(logging.Filter):
     """Drops httpx's one INFO line per health probe (every few seconds, all day); POST lines stay."""
 
@@ -183,11 +191,7 @@ class AutoParakeetTranscriber(BaseTranscriber):
             self._warm_thread.start()
 
     async def _warm_request(self) -> bool:
-        """One silent clip through a client of its own (so a dictation's buffer is never touched)."""
-        warm = OpenAIHttpTranscriber(self._config)
-        await warm.connect()
-        await warm.send_audio_chunk(bytes(int(16_000 * _WARM_UP_SILENCE_S) * 2))
-        return (await warm.finish(timeout=_WARM_UP_TIMEOUT_S)).done
+        return await warm_up_server(self._config)
 
     def _run_warm_up(self, generation: int) -> None:
         """Warm the server (thread), then let `_apply` switch to the GPU. A failure is retried by the next probe."""

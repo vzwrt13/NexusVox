@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
 from ..config import numbered_speaker_label
 from ..meetings.recorder import META_FILENAME, read_meeting_meta
 from ..meetings.transcribe import (
-    MAX_DETECTION_S,
     MIX_FILENAME,
     SPEAKER_FIRST_SYSTEM,
     SPEAKER_OWN,
@@ -23,6 +23,7 @@ from ..meetings.transcribe import (
     track_shifts,
 )
 from ..transcription.file_transcribe import MAX_CHUNK_MS, NO_SPEAKER_LABELS
+from ..transcription.speaker_fallback import speaker_detection_job
 from .api_base import DashboardState, logger
 from .file_jobs import FileJob
 
@@ -65,7 +66,31 @@ class MeetingTranscriptMixin(DashboardState):
         except Exception as exc:
             logger.error("Loading meeting %s failed: %s", folder, exc)
             return {"ok": False, "error": f"Could not load the meeting: {exc}"}
-        notes = list(meeting.notes)
+        system = meeting.tracks.get("system")
+        wants_speakers = system is not None and system.detects_speakers
+        # A model without speaker detection runs the system track on Parakeet (see `speaker_fallback`). The container,
+        # if the job started it, is stopped as soon as the tracks are transcribed.
+        stack = ExitStack()
+        speakers = stack.enter_context(
+            speaker_detection_job(
+                self._config.inference,
+                wanted=wants_speakers,
+                what="meeting",
+                active_model=lambda: self._config.inference.model,
+            )
+        )
+        try:
+            return self._transcribe_loaded_meeting(folder, meeting, speakers, stack, job, progress)
+        finally:
+            stack.close()  # idempotent: normally already closed after the tracks
+
+    def _transcribe_loaded_meeting(self, folder: Path, meeting, speakers, stack: ExitStack, job, progress) -> dict:
+        # The notice's "no speaker labels" is, for a meeting, the system audio shown as one speaker.
+        notice = speakers.notice.replace(
+            NO_SPEAKER_LABELS,
+            f"everyone on the system audio is shown as {numbered_speaker_label(SPEAKER_FIRST_SYSTEM)}.",
+        )
+        notes = [notice, *meeting.notes] if notice else list(meeting.notes)
         store_audio = self._config.meeting.store_audio  # read once: a switch mid-job applies from the next one
         if not meeting.tracks:
             return {"ok": False, "error": "The meeting has no readable audio track"}
@@ -99,7 +124,7 @@ class MeetingTranscriptMixin(DashboardState):
                 # The system track holds everyone else, so it runs through speaker detection like an upload.
                 # The whole track goes to the server in one request and is held a second time as one WAV, so a
                 # very long meeting skips it (everyone on the system audio is then one speaker).
-                detect_speakers = name == "system" and track.frames / track.sample_rate <= MAX_DETECTION_S
+                detect_speakers = track.detects_speakers
                 if name == "system" and not detect_speakers:
                     notes.append(
                         f"{label}: The recording is too long for speaker detection; everyone on it is shown as "
@@ -108,7 +133,12 @@ class MeetingTranscriptMixin(DashboardState):
 
                 try:
                     result = self._transcribe_wav_chunks(
-                        chunks, word_timestamps=True, diarize=detect_speakers, on_progress=track_progress
+                        chunks,
+                        word_timestamps=True,
+                        diarize=detect_speakers,
+                        on_progress=track_progress,
+                        inference=speakers.config if detect_speakers else None,
+                        explain_no_speakers=not (detect_speakers and speakers.failed),
                     )
                 except Exception as exc:
                     logger.error("Transcription failed for meeting %s: %s", folder, exc)
@@ -128,6 +158,8 @@ class MeetingTranscriptMixin(DashboardState):
                 # The server skips a word whose timing it cannot read; the labelled text is built from timed words.
                 if len(result.words) < len(plain[name].split()):
                     incomplete.append(label)
+
+            stack.close()  # all tracks are transcribed: a container this job started goes down now
 
             # The tracks are lined up (one of them delayed), in the words and in the mix alike.
             try:

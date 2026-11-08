@@ -23,7 +23,7 @@ A route reads its JSON body through `_json_object` in `routes_base.py`: valid JS
 | POST | `/api/log-folder/open` | Open the log folder in Explorer (`{ok, path}`, 500 with `error`) |
 | POST | `/api/settings/store-audio` | Toggle keeping a WAV per recording (`[database].store_audio`) |
 | GET | `/api/models` | List available models (filtered: GPU-only hidden on CPU systems) |
-| GET | `/api/models/current` | Active model, `diarization` (whether it can detect speakers in uploads: the model has it and the running transcriber supports it, so false for Parakeet in-process on CPU), `diarization_models` (display names of the models that can) and `diarization_hint` ("Speaker detection needs the GPU container" when only the CPU engine is the reason, else empty; the upload toggle shows it) |
+| GET | `/api/models/current` | Active model, `diarization_fallback` (true for a model without the flag: an upload with speakers runs on Parakeet), `diarization` (whether it can detect speakers in uploads: the model has it and the running transcriber supports it, so false for Parakeet in-process on CPU), `diarization_models` (display names of the models that can) and `diarization_hint` ("Speaker detection needs the GPU container" when only the CPU engine is the reason, else empty; the upload toggle shows it) |
 | POST | `/api/models/switch` | Switch model |
 | GET | `/api/models/status` | Switch progress (polled every 2s); `downloading` / `loading` / `error` while an in-process model loads or failed to load, once no switch is in flight |
 | GET | `/api/device` | Current device: requested, resolved, cuda_available |

@@ -15,6 +15,7 @@ from ..llm import config_for
 from ..transcription.diarization import speaker_turns
 from ..transcription.exports import NO_TIMING_HINT, SUBTITLE_TARGET_IDS
 from ..transcription.file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
+from ..transcription.speaker_fallback import speaker_detection_job
 from .api_base import DashboardState, logger
 from .file_jobs import FileJob
 
@@ -107,6 +108,8 @@ class FilesMixin(DashboardState):
         started = time.monotonic()
         progress = job.update if job else None
         logger.info("File transcription started: %d KB", len(file_bytes) // 1024)
+        if not diarize:
+            logger.info("Speaker detection was not requested for this upload (the Detect speakers switch was off)")
         if progress:
             progress("converting")
 
@@ -116,15 +119,25 @@ class FilesMixin(DashboardState):
             logger.error("Audio conversion failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Audio conversion failed: {exc}"}
 
+        # A model without speaker detection runs this upload on Parakeet (see `speaker_fallback`). The container, if
+        # the job started it, is stopped as soon as the transcription is done: the cleanup below may need the VRAM.
         try:
-            result = self._transcribe_wav_chunks(
-                wav_chunks, word_timestamps=True, diarize=diarize, on_progress=progress
-            )
+            with speaker_detection_job(
+                self._config.inference, wanted=diarize, what="upload", active_model=lambda: self._config.inference.model
+            ) as speakers:
+                result = self._transcribe_wav_chunks(
+                    wav_chunks,
+                    word_timestamps=True,
+                    diarize=diarize,
+                    on_progress=progress,
+                    inference=speakers.config,
+                    explain_no_speakers=not speakers.failed,
+                )
         except Exception as exc:
             logger.error("Transcription failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Transcription failed: {exc}"}
 
-        notes = list(result.notes)
+        notes = [speakers.notice, *result.notes] if speakers.notice else list(result.notes)
         cleaned_text = None
         if cleanup_level and result.text:
             try:
@@ -148,6 +161,7 @@ class FilesMixin(DashboardState):
             duration_ms=duration_ms,
             confidence=result.confidence,
             words=result.words,
+            model=speakers.config.model,
             cleaned_text=cleaned_text,
             cleanup_level=cleanup_level,
             processing_ms=int((time.monotonic() - started) * 1000),
@@ -164,8 +178,7 @@ class FilesMixin(DashboardState):
             record = self._db.save_file_transcription(
                 language=stored_language(fields.get("text", ""), strip_labels=True),
                 original_filename=filename,
-                model=self._config.inference.model,
-                **fields,
+                **{"model": self._config.inference.model, **fields},
             )
         except Exception as exc:
             logger.error("Saving the transcription of %s failed: %s", filename, exc)
@@ -236,15 +249,18 @@ class FilesMixin(DashboardState):
         word_timestamps: bool = False,
         diarize: bool = False,
         on_progress: Callable[..., None] | None = None,
+        inference=None,
+        explain_no_speakers: bool = True,
     ):
-        """Transcribe WAV chunks with the current model (blocking)."""
+        """Transcribe WAV chunks with the current model, or with `inference` when a job brings its own (blocking)."""
         return asyncio.run(
             transcribe_file(
                 wav_chunks,
-                self._config.inference,
+                inference or self._config.inference,
                 word_timestamps=word_timestamps,
                 diarize=diarize,
                 on_progress=on_progress,
+                explain_no_speakers=explain_no_speakers,
             )
         )
 

@@ -11,7 +11,7 @@ Rules and pointers only. How a module works is in `docs/internals/` (table at th
 - `meetings/` - `recorder.py`, `session.py`, `live.py`, `transcribe.py`.
 - `storage/` - `db.py`, `models.py`, `vocabulary.py`.
 - `system/` - `paths.py`, `logsetup.py`, `single_instance.py`, `tray.py`, `uia.py`, `window_manager.py`, `keyboard.py`, `com.py`, `docker_ctl.py`, `feedback_form.py`, `feedback_send.py`.
-- `transcription/` - `transcriber.py` (base class and factory), `file_transcribe.py`, `diarization.py`, `exports.py`.
+- `transcription/` - `transcriber.py` (base class and factory), `file_transcribe.py`, `diarization.py`, `speaker_fallback.py`, `exports.py`.
 - `transcribers/` (in-process backends), `config_sections/` (config dataclasses), `dashboard/` (Flask, own `CLAUDE.md`).
 
 ## Structure Rules

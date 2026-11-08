@@ -18,6 +18,10 @@ Quick usage:
   # Parakeet, full test split, German only
   python scripts/benchmark.py --model parakeet-tdt-0.6b --lang de_de
 
+  # A server you run yourself (e.g. Qwen3-ASR on llama-server), with a VRAM report
+  python scripts/benchmark.py --model custom-server --url http://127.0.0.1:8008/v1/audio/transcriptions \
+      --model-name qwen3-asr-1.7b --lang both
+
   # List available models
   python scripts/benchmark.py --list-models
 """
@@ -29,13 +33,16 @@ import io
 import json
 import re
 import statistics
+import subprocess
 import sys
+import threading
 import time
 import wave
 from datetime import datetime
 from itertools import islice
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 # Allow importing from src/ when running as a standalone script.
@@ -43,6 +50,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 from nexusvox.config import MODEL_REGISTRY  # noqa: E402
+from nexusvox.transcription.transcriber import strip_asr_text_prefix  # noqa: E402
 
 try:
     import numpy as np
@@ -74,6 +82,70 @@ except ImportError:
 HTTP_MODELS = {k: v for k, v in MODEL_REGISTRY.items() if v["protocol"] == "openai_http"}
 INPROCESS_MODELS = {k: v for k, v in MODEL_REGISTRY.items() if v.get("inprocess_supported")}
 BENCHMARKS_DIR = _PROJECT_ROOT / "benchmarks"
+CUSTOM_MODEL = "custom-server"
+VRAM_POLL_INTERVAL_S = 0.5
+
+
+class VramMonitor:
+    """Reads the GPU memory in use through nvidia-smi: once at the start, then the peak while a run is going.
+
+    The reading covers the whole GPU, so other processes show up in it. Without nvidia-smi (or a GPU) every value
+    stays ``None`` and the run goes on.
+    """
+
+    def __init__(self, interval_s: float = VRAM_POLL_INTERVAL_S) -> None:
+        self._interval_s = interval_s
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.start_mib: int | None = None
+        self.peak_mib: int | None = None
+
+    @staticmethod
+    def read_mib() -> int | None:
+        """Memory in use on the busiest GPU in MiB, or ``None`` when it cannot be read."""
+        try:
+            out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=True,
+            ).stdout
+            return max(int(line) for line in out.split() if line.strip().isdigit())
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+
+    def start(self) -> None:
+        self.start_mib = self.peak_mib = self.read_mib()
+        if self.start_mib is None:
+            return
+        self._thread = threading.Thread(target=self._poll, daemon=True)
+        self._thread.start()
+
+    def _poll(self) -> None:
+        while not self._stop.wait(self._interval_s):
+            self.sample()
+
+    def sample(self) -> None:
+        value = self.read_mib()
+        if value is not None and (self.peak_mib is None or value > self.peak_mib):
+            self.peak_mib = value
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self._interval_s + 5)
+            self.sample()
+
+    def summary(self) -> dict:
+        """Start value, peak, and the peak's increase over the start, all in MiB."""
+        increase = None if self.start_mib is None or self.peak_mib is None else self.peak_mib - self.start_mib
+        return {"vram_start_mib": self.start_mib, "vram_peak_mib": self.peak_mib, "vram_peak_increase_mib": increase}
+
+
+def clean_hypothesis(text: str, model_key: str) -> str:
+    """Remove the ``language <Name><asr_text>`` marker Qwen3-ASR behind llama-server puts before a transcript."""
+    return strip_asr_text_prefix(text) if model_key == CUSTOM_MODEL else text
 
 
 def list_models() -> None:
@@ -90,6 +162,7 @@ def list_models() -> None:
         print(f"  {key:<30s} {info['display_name']}")
         print(f"    {info['description']}")
         print()
+    print(f"\nYour own server (HTTP): {CUSTOM_MODEL}, with --url and --model-name\n")
     ws_models = [k for k, v in MODEL_REGISTRY.items() if v["protocol"] != "openai_http"]
     if ws_models:
         print(f"Not supported (WebSocket streaming): {', '.join(ws_models)}")
@@ -100,12 +173,21 @@ def parse_args() -> argparse.Namespace:
         description="Benchmark a transcription model on the FLEURS dataset.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    all_models = sorted(set(HTTP_MODELS) | set(INPROCESS_MODELS))
+    all_models = sorted(set(HTTP_MODELS) | set(INPROCESS_MODELS) | {CUSTOM_MODEL})
     parser.add_argument("--model", choices=all_models, help="Model to benchmark")
     parser.add_argument("--list-models", action="store_true", help="List available models and exit")
     parser.add_argument("--lang", choices=["en_us", "de_de", "both"], default="en_us")
     parser.add_argument("--limit", type=int, default=None, metavar="N", help="Max samples per language")
-    parser.add_argument("--url", default=None, help="Override transcription endpoint URL")
+    parser.add_argument(
+        "--url",
+        default=None,
+        help="Override transcription endpoint URL (required for --model custom-server)",
+    )
+    parser.add_argument(
+        "--model-name",
+        default=None,
+        help="Name sent to the server and stored in the results (custom-server only)",
+    )
     parser.add_argument("--split", default="test", help="HuggingFace dataset split")
     parser.add_argument("--timeout", type=float, default=120.0, metavar="SECONDS")
     parser.add_argument(
@@ -128,6 +210,16 @@ def parse_args() -> argparse.Namespace:
 
     if args.model is None:
         parser.error("--model is required (use --list-models to see options)")
+
+    if args.model == CUSTOM_MODEL:
+        if not args.url:
+            parser.error("--model custom-server needs --url, e.g. http://127.0.0.1:8008/v1/audio/transcriptions")
+        if args.device == "cpu":
+            parser.error("--model custom-server is a server you run yourself; drop --device cpu")
+        args.model_info = None
+        args.model_hf_name = args.model_name or CUSTOM_MODEL
+        args.langs = ["en_us", "de_de"] if args.lang == "both" else [args.lang]
+        return args
 
     args.model_info = MODEL_REGISTRY[args.model]
     args.model_hf_name = args.model_info["hf_name"]
@@ -171,6 +263,19 @@ def health_check(url: str, model_info: dict, timeout: float = 5.0) -> None:
         )
 
 
+def custom_health_check(url: str, timeout: float = 5.0) -> None:
+    """Probe ``/health`` on the custom server's host (llama-server has it); only an unreachable host aborts."""
+    parts = urlsplit(url)
+    health_url = f"{parts.scheme}://{parts.netloc}/health"
+    try:
+        with urlopen(health_url, timeout=timeout):
+            pass
+    except HTTPError:
+        pass  # the host answered; the server may have no /health route, the first sample will tell
+    except (URLError, OSError) as exc:
+        sys.exit(f"Cannot reach the custom server at {health_url}: {getattr(exc, 'reason', exc)}\nIs it running?")
+
+
 def float32_to_wav_bytes(audio_array: np.ndarray, sample_rate: int) -> bytes:
     """Convert a float32 audio array to a PCM16 WAV bytes object."""
     clipped = np.clip(audio_array, -1.0, 1.0)
@@ -185,7 +290,7 @@ def float32_to_wav_bytes(audio_array: np.ndarray, sample_rate: int) -> bytes:
 
 
 def transcribe(
-    wav_bytes: bytes, url: str, model_hf_name: str, timeout: float
+    wav_bytes: bytes, url: str, model_hf_name: str, timeout: float, model_key: str = ""
 ) -> tuple[str | None, float | None, str | None]:
     """POST WAV to transcription endpoint, return (hypothesis, latency_s, error)."""
     t0 = time.monotonic()
@@ -199,7 +304,7 @@ def transcribe(
         latency = time.monotonic() - t0
         if not resp.ok:
             return None, None, f"HTTP {resp.status_code}: {resp.text[:200]}"
-        text = resp.json().get("text", "").strip()
+        text = clean_hypothesis(resp.json().get("text", ""), model_key).strip()
         return text, latency, None
     except requests.exceptions.Timeout:
         return None, None, f"Timeout after {timeout}s"
@@ -257,6 +362,8 @@ def run_benchmark(lang: str, args: argparse.Namespace, inproc_model=None) -> tup
     ds = load_dataset("google/fleurs", lang, split=args.split, streaming=True, trust_remote_code=True)
     samples_iter = islice(ds, args.limit)
 
+    vram = VramMonitor()
+    vram.start()
     results: list[dict] = []
     wer_values: list[float] = []
     total_audio_s = 0.0
@@ -280,7 +387,7 @@ def run_benchmark(lang: str, args: argparse.Namespace, inproc_model=None) -> tup
         if args.device == "cpu":
             hypothesis, latency_s, error = transcribe_inprocess(inproc_model, wav_bytes, lang_hint, args.timeout)
         else:
-            hypothesis, latency_s, error = transcribe(wav_bytes, args.url, args.model_hf_name, args.timeout)
+            hypothesis, latency_s, error = transcribe(wav_bytes, args.url, args.model_hf_name, args.timeout, args.model)
 
         sample_wer: float | None = None
         if error is None:
@@ -316,7 +423,12 @@ def run_benchmark(lang: str, args: argparse.Namespace, inproc_model=None) -> tup
         pbar.close()
 
     wall_time = time.monotonic() - run_start
+    vram.stop()
     n_ok = len(wer_values)
+    # RTF without the dataset streaming time: only the transcription requests count.
+    ok = [r for r in results if r["latency_s"] is not None]
+    latencies = [r["latency_s"] for r in ok]
+    audio_ok_s = sum(r["audio_duration_s"] for r in ok)
 
     summary: dict = {
         "model": args.model_hf_name,
@@ -334,6 +446,8 @@ def run_benchmark(lang: str, args: argparse.Namespace, inproc_model=None) -> tup
         "total_audio_duration_s": round(total_audio_s, 2),
         "total_wall_time_s": round(wall_time, 2),
         "rtf": round(wall_time / total_audio_s, 4) if total_audio_s > 0 else None,
+        "rtf_server": round(sum(latencies) / audio_ok_s, 4) if audio_ok_s > 0 else None,
+        **vram.summary(),
     }
 
     if n_ok >= 2:
@@ -390,17 +504,26 @@ def main() -> None:
     if args.device == "cpu":
         inproc_model = _load_inprocess_model(args)
     else:
-        health_check(args.url, args.model_info)
+        if args.model == CUSTOM_MODEL:
+            custom_health_check(args.url)
+        else:
+            health_check(args.url, args.model_info)
 
     for lang in args.langs:
         results, summary = run_benchmark(lang, args, inproc_model=inproc_model)
         out_path = save_results(args.model, lang, results, summary)
         wer_str = f"{summary['wer_mean']:.4f}" if summary["wer_mean"] is not None else "n/a"
         rtf_str = f"{summary['rtf']:.3f}" if summary["rtf"] is not None else "n/a"
+        server_rtf_str = f"{summary['rtf_server']:.3f}" if summary["rtf_server"] is not None else "n/a"
         print(
-            f"\n{lang}: WER={wer_str}  RTF={rtf_str}  "
+            f"\n{lang}: WER={wer_str}  RTF={rtf_str}  server-RTF={server_rtf_str}  "
             f"samples={summary['total_samples']}  failed={summary['failed_samples']}"
         )
+        if summary["vram_peak_mib"] is not None:
+            print(
+                f"VRAM: start {summary['vram_start_mib']} MiB, peak {summary['vram_peak_mib']} MiB "
+                f"(+{summary['vram_peak_increase_mib']} MiB over the start)"
+            )
         print(f"Results: {out_path}")
 
     if len(args.langs) > 1:

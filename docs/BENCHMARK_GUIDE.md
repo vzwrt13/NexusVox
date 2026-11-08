@@ -24,7 +24,7 @@ For CPU (in-process) benchmarks you also need `faster-whisper`, which is already
 
 FLEURS samples stream from HuggingFace Hub — no manual download, but the first run of each language pulls ~several hundred MB of audio. Set `HF_HUB_OFFLINE=0` (default) to allow downloads.
 
-## Two benchmark modes
+## Three benchmark modes
 
 ### 1. Server-backed (GPU)
 
@@ -49,6 +49,18 @@ python scripts/benchmark.py --model whisper-large-v3-turbo --lang en_us --limit 
 ```
 
 First run downloads the model (~200 MB–1.5 GB depending on size) to `~/.cache/huggingface/`. Subsequent runs reuse the cache.
+
+### 3. Your own server (`custom-server`)
+
+For a backend you run yourself, such as Qwen3-ASR on llama-server (see `docs/CUSTOM_SERVER.md`). The benchmark POSTs WAVs to the URL you give and strips the `language <Name><asr_text>` marker Qwen3-ASR puts before the text, exactly as the app does. It never starts or stops the server; it only probes `/health` on the URL's host and aborts if nothing answers.
+
+```bash
+python scripts/benchmark.py --model custom-server     --url http://127.0.0.1:8008/v1/audio/transcriptions     --model-name qwen3-asr-1.7b --lang both --limit 200
+```
+
+`--model-name` is sent to the server and used as the model name in the results (default `custom-server`). Result files are named `custom-server_<lang>_<timestamp>.json`.
+
+**VRAM.** Every run reads the GPU memory in use once through `nvidia-smi` before the first sample, then polls it every 0.5 s. The summary holds `vram_start_mib`, `vram_peak_mib` and `vram_peak_increase_mib` (peak minus start). The reading covers the whole GPU: if the server already holds another model (an LLM, say), the start value contains it and the increase shows only what the run added. Do not send other requests to that server during the run, or their memory lands in the peak. Without `nvidia-smi` the three fields are `null`.
 
 ## Common invocations
 
@@ -85,7 +97,8 @@ python scripts/benchmark.py --model whisper-large-v3-turbo --lang both --limit 1
 | `--limit` | none (full split) | Max samples per language |
 | `--device` | `gpu` | `gpu` (HTTP) or `cpu` (in-process) |
 | `--compute-type` | `int8` on CPU, `float16` on GPU | CT2 quantization: `int8`, `int8_float16`, `float16`, `float32` |
-| `--url` | model's default | Override the HTTP endpoint (GPU mode only) |
+| `--url` | model's default | Override the HTTP endpoint (GPU mode only); required for `custom-server` |
+| `--model-name` | `custom-server` | Name sent to the server and stored in the results (`custom-server` only) |
 | `--split` | `test` | HuggingFace dataset split |
 | `--timeout` | `120.0` | Per-sample timeout in seconds |
 | `--list-models` | — | Print registry and exit |
@@ -105,6 +118,8 @@ Summary fields worth knowing:
 
 - `wer_mean`, `wer_median`, `wer_p90` — central tendency and tail of per-sample WER.
 - `rtf` — overall wall-time-to-audio ratio, including dataset streaming overhead.
+- `rtf_server` — summed request latency divided by the audio of the answered samples, without the dataset streaming. Use this to compare servers.
+- `vram_start_mib`, `vram_peak_mib`, `vram_peak_increase_mib` — GPU memory in use, see the custom-server section.
 - `failed_samples` — count of requests that errored out (timeout, connection error, etc.). A handful is tolerable; many means the run is unreliable.
 
 ## Interpreting results

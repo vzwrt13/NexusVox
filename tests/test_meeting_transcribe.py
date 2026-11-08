@@ -1182,7 +1182,7 @@ def test_a_very_long_system_track_skips_speaker_detection(meeting_api, tmp_path,
         return fake(chunks, **kwargs)
 
     api._transcribe_wav_chunks = spy
-    monkeypatch.setattr("nexusvox.dashboard.api_meeting_transcript.MAX_DETECTION_S", 1.0)
+    monkeypatch.setattr("nexusvox.meetings.transcribe.MAX_DETECTION_S", 1.0)
     folder = tmp_path / "m"
     write_meeting(folder, tone(2, 3000), tone(2, 3000))
 

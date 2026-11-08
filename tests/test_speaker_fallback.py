@@ -13,8 +13,10 @@ def docker(monkeypatch):
     ctl = MagicMock()
     ctl.wait_for_healthy.return_value = True
     monkeypatch.setattr(sf, "docker_ctl", ctl)
-    monkeypatch.setattr(sf, "_warm_up", lambda config: True)
-    monkeypatch.setattr(sf, "resolve_device", lambda requested: "cuda")
+    warm = MagicMock()
+    monkeypatch.setattr(sf, "_warm_up", warm)
+    ctl.warm = warm
+    monkeypatch.setattr(sf, "cuda_available", lambda: True)
     return ctl
 
 
@@ -50,15 +52,17 @@ def test_incompatible_model_uses_running_container(docker, monkeypatch, model):
         assert job.notice == "This meeting uses Parakeet for speaker detection."
     assert config.model == model  # dictation's config is untouched
     docker.start_profile.assert_not_called()
+    docker.warm.assert_not_called()  # a running server needs no warm-up (it may be busy)
     docker.stop_profile.assert_not_called()  # the app did not start it
 
 
-def test_container_started_and_stopped_again(docker, monkeypatch):
+def test_container_started_warmed_and_stopped_again(docker, monkeypatch):
     monkeypatch.setattr(sf, "probe_server", lambda url: False)
     with sf.speaker_detection_job(_config(), wanted=True) as job:
         assert job.started_container
         assert job.config.device == "cuda"
         docker.start_profile.assert_called_once_with("parakeet")
+        docker.warm.assert_called_once()
         docker.stop_profile.assert_not_called()  # still up while the job runs
     docker.stop_profile.assert_called_once_with("parakeet")
 
@@ -70,28 +74,62 @@ def test_container_stopped_when_the_job_raises(docker, monkeypatch):
     docker.stop_profile.assert_called_once_with("parakeet")
 
 
-def test_start_fails_falls_back_to_cpu(docker, monkeypatch, caplog):
+def test_container_kept_when_dictation_switched_to_parakeet(docker, monkeypatch):
     monkeypatch.setattr(sf, "probe_server", lambda url: False)
-    docker.start_profile.side_effect = RuntimeError("Docker is not installed")
-    with sf.speaker_detection_job(_config(), wanted=True) as job:
-        assert job.config.model == "parakeet-tdt-0.6b"
-        assert job.config.device == "cpu"
-        assert not job.started_container
-    docker.stop_profile.assert_not_called()
-    assert "Docker is not installed" in caplog.text
+    with sf.speaker_detection_job(_config(), wanted=True, active_model=lambda: "parakeet-tdt-0.6b"):
+        pass
+    docker.start_profile.assert_called_once()
+    docker.stop_profile.assert_not_called()  # now dictation's server
 
 
-def test_unhealthy_container_is_stopped_and_cpu_is_used(docker, monkeypatch):
+def test_container_stopped_when_dictation_stays_on_another_model(docker, monkeypatch):
     monkeypatch.setattr(sf, "probe_server", lambda url: False)
-    docker.wait_for_healthy.return_value = False
-    with sf.speaker_detection_job(_config(), wanted=True) as job:
-        assert job.config.device == "cpu"
+    with sf.speaker_detection_job(_config(), wanted=True, active_model=lambda: "whisper-large-v3-turbo"):
+        pass
     docker.stop_profile.assert_called_once_with("parakeet")
 
 
-def test_no_gpu_uses_cpu_without_touching_docker(docker, monkeypatch):
-    monkeypatch.setattr(sf, "resolve_device", lambda requested: "cpu")
+def test_start_fails_keeps_the_active_model(docker, monkeypatch, caplog):
+    monkeypatch.setattr(sf, "probe_server", lambda url: False)
+    docker.start_profile.side_effect = RuntimeError("Docker is not installed")
+    config = _config()
+    with sf.speaker_detection_job(config, wanted=True) as job:
+        assert job.config is config
+        assert "Docker is not installed" in job.notice
+        assert "no speaker labels" in job.notice
+    assert "Docker is not installed" in caplog.text
+    # compose may have created the container before it failed: it is stopped, the job started it
+    docker.stop_profile.assert_called_once_with("parakeet")
+
+
+def test_health_check_raising_still_stops_the_container(docker, monkeypatch):
+    monkeypatch.setattr(sf, "probe_server", lambda url: False)
+    docker.wait_for_healthy.side_effect = OSError("protocol error")
+    config = _config()
+    with sf.speaker_detection_job(config, wanted=True) as job:
+        assert job.config is config
+    docker.stop_profile.assert_called_once_with("parakeet")
+
+
+def test_unhealthy_container_is_stopped_and_the_model_kept(docker, monkeypatch):
+    monkeypatch.setattr(sf, "probe_server", lambda url: False)
+    docker.wait_for_healthy.return_value = False
+    config = _config()
+    with sf.speaker_detection_job(config, wanted=True) as job:
+        assert job.config is config
+    docker.stop_profile.assert_called_once_with("parakeet")
+
+
+def test_no_gpu_keeps_the_active_model_without_touching_docker(docker, monkeypatch):
+    monkeypatch.setattr(sf, "cuda_available", lambda: False)
+    config = _config(device="cpu")
+    with sf.speaker_detection_job(config, wanted=True) as job:
+        assert job.config is config
+        assert "no NVIDIA GPU" in job.notice
+    docker.start_profile.assert_not_called()
+
+
+def test_gpu_is_found_whatever_the_models_device_setting(docker, monkeypatch):
+    monkeypatch.setattr(sf, "probe_server", lambda url: True)
     with sf.speaker_detection_job(_config(device="cpu"), wanted=True) as job:
         assert job.config.model == "parakeet-tdt-0.6b"
-        assert job.config.device == "cpu"
-    docker.start_profile.assert_not_called()

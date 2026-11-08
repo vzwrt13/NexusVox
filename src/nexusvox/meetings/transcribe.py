@@ -100,6 +100,15 @@ class MeetingTrack:
     channels: int
     frames: int
 
+    @property
+    def duration_s(self) -> float:
+        return self.frames / self.sample_rate
+
+    @property
+    def detects_speakers(self) -> bool:
+        """Whether the track goes through speaker detection: the system track, unless it is too long."""
+        return self.name == "system" and self.duration_s <= MAX_DETECTION_S
+
 
 @dataclass
 class Meeting:

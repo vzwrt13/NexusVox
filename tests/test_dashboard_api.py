@@ -346,6 +346,7 @@ def test_switch_model(flask_client):
     assert resp.get_json() == {
         "model": "whisper-large-v3-turbo",
         "diarization": False,
+        "diarization_fallback": True,  # uploads run on Parakeet for speakers
         "diarization_models": ["Parakeet TDT 0.6B"],
         "diarization_hint": "",
     }

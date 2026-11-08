@@ -81,6 +81,8 @@ class ModelsMixin(DashboardState):
         return {
             "model": model,
             "diarization": flagged and engine_can,
+            # A model without the flag still gets speakers on an upload: the job runs on Parakeet instead.
+            "diarization_fallback": not flagged,
             "diarization_models": speaker_detection_models(),
             "diarization_hint": transcriber.no_diarization_reason if flagged and not engine_can else "",
         }

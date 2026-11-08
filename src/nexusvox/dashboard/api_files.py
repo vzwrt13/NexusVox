@@ -117,28 +117,15 @@ class FilesMixin(DashboardState):
             logger.error("Audio conversion failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Audio conversion failed: {exc}"}
 
-        # Speaker detection with a model that has none runs this upload on Parakeet (see `speaker_fallback`); the
-        # container, if the job started it, stays up until the transcript and its cleanup are done.
-        with speaker_detection_job(self._config.inference, wanted=diarize, what="upload") as speakers:
-            return self._transcribe_and_store(
-                filename,
-                wav_chunks,
-                duration_ms,
-                speakers,
-                started,
-                diarize=diarize,
-                cleanup_level=cleanup_level,
-                job=job,
-            )
-
-    def _transcribe_and_store(
-        self, filename, wav_chunks, duration_ms, speakers, started, *, diarize: bool, cleanup_level: str, job
-    ) -> dict:
-        progress = job.update if job else None
+        # A model without speaker detection runs this upload on Parakeet (see `speaker_fallback`). The container, if
+        # the job started it, is stopped as soon as the transcription is done: the cleanup below may need the VRAM.
         try:
-            result = self._transcribe_wav_chunks(
-                wav_chunks, word_timestamps=True, diarize=diarize, on_progress=progress, inference=speakers.config
-            )
+            with speaker_detection_job(
+                self._config.inference, wanted=diarize, what="upload", active_model=lambda: self._config.inference.model
+            ) as speakers:
+                result = self._transcribe_wav_chunks(
+                    wav_chunks, word_timestamps=True, diarize=diarize, on_progress=progress, inference=speakers.config
+                )
         except Exception as exc:
             logger.error("Transcription failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Transcription failed: {exc}"}

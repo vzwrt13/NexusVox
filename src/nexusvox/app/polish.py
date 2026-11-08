@@ -11,7 +11,7 @@ from ..dictation.feedback import beep_error
 from ..dictation.injector import foreground_window, inject_text
 from ..dictation.overlay import ERROR
 from ..dictation.polish import DEFAULT_INSTRUCTION, polish, read_selection
-from ..dictation.polish_presets import resolve_instruction
+from ..dictation.polish_presets import resolve_instruction, unexpected_script
 from ..extensions import ActiveApp, ExtensionRegistry, loaded_extensions
 from ..llm import LlmError, config_for, reload_unless_loaded
 from ..system.logsetup import Text
@@ -53,6 +53,18 @@ class SelectionPolish:
         worked, nothing is pasted (error beep); the paste key still pastes the reply.
         """
         loop = asyncio.get_running_loop()
+        spoken = instruction
+        presets = self._db.get_polish_presets()
+        script = unexpected_script(spoken, presets)
+        if script:
+            # Before the selection is read and before any extension sees it: a misheard instruction is used by
+            # nothing. Not the text itself in the log: a dictated instruction stays out of it.
+            logger.warning(
+                "Polish: the instruction came back in %s script, not used (%d characters)", script, len(spoken)
+            )
+            self._cue(beep_error, ERROR)
+            await self._save_polish(recording, "polish", spoken, spoken, ok=False, status="failed", model_ms=None)
+            return
         try:
             selection = await loop.run_in_executor(
                 None, read_selection, self._config.injection_delay_ms, self._config.polish.in_terminals
@@ -65,7 +77,6 @@ class SelectionPolish:
             logger.info("Polish: nothing selected")
             self._cue(beep_error, ERROR)
             return
-        spoken = instruction
         window = foreground_window()  # before any hook runs: the paste checks the focus did not move meanwhile
         registry = loaded_extensions()
         deadline = ExtensionRegistry.selection_deadline()  # one budget for both polish hooks
@@ -87,7 +98,7 @@ class SelectionPolish:
                     model_ms=None,
                 )
                 return
-        instruction, preset = resolve_instruction(spoken, self._db.get_polish_presets())
+        instruction, preset = resolve_instruction(spoken, presets)
         if preset:
             logger.info("Polish: preset %r", preset)
         if registry is not None and registry.has_expand_instruction_hook():

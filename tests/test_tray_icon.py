@@ -1,8 +1,13 @@
 """The tray icon comes from the logo kit's tray drawings, with a red stroke while recording."""
 
+import sys
+
 import pytest
 
-from nexusvox.system import tray
+if sys.platform != "win32":  # pystray needs a display server on Linux; the tray is Windows-only
+    pytest.skip("the tray is Windows-only", allow_module_level=True)
+
+from nexusvox.system import tray  # noqa: E402
 
 
 def _opaque_colours(img):

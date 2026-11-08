@@ -67,6 +67,20 @@ The same request NexusVox sends to the bundled HTTP models (OpenAI-compatible
 - A non-2xx status is logged and the recording produces no text. No reply within 30 s
   (120 s per chunk for dashboard file uploads) counts as an empty transcript.
 
+### Example: Qwen3-ASR on llama-server
+
+Qwen3-ASR-1.7B runs behind llama-server (build b8784 or newer) over the `http` protocol:
+
+```
+llama-server -m Qwen3-ASR-1.7B-Q8_0.gguf --mmproj mmproj-Qwen3-ASR-1.7B-Q8_0.gguf --port 8008
+```
+
+Set `url` to `http://127.0.0.1:8008/v1/audio/transcriptions`. The model detects the
+language itself, and it answers with a `language <Name><asr_text>` marker in front of the
+sentence; NexusVox removes that marker, so only the spoken text is typed. The server
+returns text only, with no word timestamps, so meeting recording and speaker detection
+stay on Parakeet.
+
 ## The `realtime` contract
 
 The vLLM `/v1/realtime` WebSocket protocol that vLLM serves (Voxtral was the bundled model that used it). NexusVox

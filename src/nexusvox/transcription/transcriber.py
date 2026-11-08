@@ -10,6 +10,7 @@ import ipaddress
 import json
 import logging
 import math
+import re
 import socket
 import wave
 from abc import ABC, abstractmethod
@@ -367,6 +368,14 @@ def _is_local_url(url: str) -> bool:
     return host in _this_pc_names()
 
 
+_ASR_TEXT_PREFIX = re.compile(r"^\s*language\s+[^<]*<asr_text>")
+
+
+def strip_asr_text_prefix(text: str) -> str:
+    """Drop a leading ``language <Name><asr_text>`` marker, as Qwen3-ASR behind llama-server emits it."""
+    return _ASR_TEXT_PREFIX.sub("", text, count=1).strip() if "<asr_text>" in text else text
+
+
 class OpenAIHttpTranscriber(BaseTranscriber):
     """Buffers audio chunks, then POSTs complete WAV to an OpenAI-compatible endpoint.
 
@@ -429,7 +438,7 @@ class OpenAIHttpTranscriber(BaseTranscriber):
                 response.raise_for_status()
                 data = response.json()
 
-            text = data.get("text", "")
+            text = strip_asr_text_prefix(data.get("text", ""))
             result.finalize(text=text)
             if self.word_timestamps:
                 result.words = parse_words(data.get("words"))

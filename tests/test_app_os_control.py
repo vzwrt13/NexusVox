@@ -331,7 +331,7 @@ def _dictation_app(monkeypatch, inject):
     app._last_typed = ""
     app._audio = MagicMock()
     app._audio.start.side_effect = lambda: app._record_stop_event.set()  # released right away
-    app._stream_audio = AsyncMock(return_value=bytearray())
+    app._stream_audio = AsyncMock(return_value=bytearray(b"pcm"))
     app._transcriber.finish = AsyncMock(return_value=MagicMock(text="hallo welt", confidence=None))
     app._run_command = AsyncMock(return_value=None)
     app._db = MagicMock()
@@ -714,7 +714,7 @@ def test_the_cap_does_not_apply_to_a_phone_recording():
     app = _app(command=False)
     app._config.hotkey.max_recording_s = 0.01
     app._remote_audio = MagicMock()
-    app._stream_audio = AsyncMock(return_value=bytearray())
+    app._stream_audio = AsyncMock(return_value=bytearray(b"pcm"))
     app._transcriber.finish = AsyncMock(return_value=MagicMock(text="", confidence=None))
     app._remote_cancelled = False
     app._remote_text = ""

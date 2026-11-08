@@ -399,3 +399,46 @@ def test_an_os_control_command_is_saved_off_the_event_loop(monkeypatch):
 
     asyncio.run(scenario())
     assert seen == [True]
+
+
+# -- Empty recordings ------------------------------------------------------------------------------
+
+
+def _run_take(app: NexusVoxApp) -> None:
+    app._audio.start.side_effect = lambda: app._record_stop_event.set()
+
+    async def scenario():
+        app._record_stop_event = asyncio.Event()
+        await app._transcription_cycle()
+
+    asyncio.run(scenario())
+
+
+def test_a_recording_without_audio_frames_sends_nothing(monkeypatch, caplog):
+    app = _take_app(monkeypatch, stop_info=(None, False, None))
+    app._stream_audio = AsyncMock(return_value=bytearray())
+    app._transcriber.finish = AsyncMock()
+    with caplog.at_level("INFO", logger="nexusvox.app"):
+        _run_take(app)
+    app._transcriber.finish.assert_not_awaited()
+    app._transcriber.disconnect.assert_awaited()
+    assert [r.getMessage() for r in caplog.records if "no audio frames" in r.getMessage()] == [
+        "Recording has no audio frames, nothing to transcribe"
+    ]
+    assert not [r for r in caplog.records if r.levelname in ("ERROR", "EXCEPTION")]
+
+
+def test_a_polish_tap_without_audio_frames_still_polishes_with_the_default(monkeypatch):
+    app = _take_app(monkeypatch, stop_info=(POLISH, False, None))
+    app._stream_audio = AsyncMock(return_value=bytearray())
+    app._transcriber.finish = AsyncMock()
+    _run_take(app)
+    app._transcriber.finish.assert_not_awaited()
+    app._polish_selection.assert_awaited_once_with("", None)
+
+
+def test_a_short_recording_with_frames_is_still_sent(monkeypatch):
+    app = _take_app(monkeypatch, stop_info=(None, False, None))
+    app._transcriber.finish = AsyncMock(return_value=MagicMock(text="", confidence=None))
+    _run_take(app)
+    app._transcriber.finish.assert_awaited_once()

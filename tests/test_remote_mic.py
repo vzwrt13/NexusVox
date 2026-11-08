@@ -364,6 +364,7 @@ def test_remote_text_goes_back_to_the_phone_and_is_not_typed(monkeypatch):
 
     async def cycle():
         app._record_stop_event = asyncio.Event()
+        app._remote_audio.feed(b"pcm")
         task = asyncio.create_task(app._transcription_cycle(remote=True))
         await asyncio.sleep(0.05)
         app._record_stop_event.set()
@@ -407,6 +408,7 @@ def test_a_phone_dictation_runs_the_extensions_protect_and_restore(monkeypatch):
 
     async def cycle():
         app._record_stop_event = asyncio.Event()
+        app._remote_audio.feed(b"pcm")
         task = asyncio.create_task(app._transcription_cycle(remote=True))
         await asyncio.sleep(0.05)
         app._record_stop_event.set()

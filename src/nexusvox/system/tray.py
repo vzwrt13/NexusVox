@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ctypes
 import threading
-import winreg
 from collections.abc import Callable
 from pathlib import Path
 
@@ -31,11 +30,13 @@ def _small_icon_size() -> int:
 def _taskbar_is_light() -> bool:
     """True when Windows draws the taskbar light (the SystemUsesLightTheme setting)."""
     try:
+        import winreg
+
         with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
         ) as key:
             return bool(winreg.QueryValueEx(key, "SystemUsesLightTheme")[0])
-    except OSError:
+    except (ImportError, OSError):
         return False
 
 

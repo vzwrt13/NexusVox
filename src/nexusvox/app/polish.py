@@ -10,9 +10,9 @@ from ..dictation.clipboard import ClipboardError
 from ..dictation.feedback import beep_error
 from ..dictation.injector import foreground_window, inject_text
 from ..dictation.overlay import ERROR
-from ..dictation.polish import polish, read_selection
+from ..dictation.polish import DEFAULT_INSTRUCTION, polish, read_selection
 from ..dictation.polish_presets import resolve_instruction
-from ..extensions import loaded_extensions
+from ..extensions import ExtensionRegistry, loaded_extensions
 from ..llm import LlmError, config_for, reload_unless_loaded
 from ..system.logsetup import Text
 from .common import logger
@@ -68,9 +68,11 @@ class SelectionPolish:
         spoken = instruction
         window = foreground_window()  # before any hook runs: the paste checks the focus did not move meanwhile
         registry = loaded_extensions()
+        deadline = ExtensionRegistry.selection_deadline()  # one budget for both polish hooks
+        active_app = self._active_app() if registry is not None and registry.extensions else None
         if registry is not None and registry.extensions:
             handled = await loop.run_in_executor(
-                None, registry.selection_command, selection, spoken, self._active_app()
+                None, functools.partial(registry.selection_command, selection, spoken, active_app, deadline=deadline)
             )
             if handled is not None:
                 await self._paste_over_selection(
@@ -88,8 +90,19 @@ class SelectionPolish:
         instruction, preset = resolve_instruction(spoken, self._db.get_polish_presets())
         if preset:
             logger.info("Polish: preset %r", preset)
-        if registry is not None and registry.extensions:
-            instruction = await loop.run_in_executor(None, registry.expand_instruction, instruction, self._active_app())
+        if registry is not None and registry.has_expand_instruction_hook():
+            # An empty instruction (a tap, no default preset) is what the model would get as the default text.
+            expanded = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    registry.expand_instruction,
+                    instruction.strip() or DEFAULT_INSTRUCTION,
+                    active_app,
+                    deadline=deadline,
+                ),
+            )
+            if expanded != (instruction.strip() or DEFAULT_INSTRUCTION):
+                instruction = expanded
         detail = preset or spoken or "default"
         # The model this request goes to, read now: settings apply live, so a switch while it runs must not
         # credit the old model's time to the new one.

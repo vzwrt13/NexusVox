@@ -1381,3 +1381,13 @@ def test_a_failing_expand_instruction_hook_is_skipped():
 
     registry = _registry(Boom(), NotText(), Expander("ok", "a", "b"))
     assert registry.expand_instruction("a", APP) == "b"
+
+
+def test_has_expand_instruction_hook_only_for_an_override():
+    assert not ExtensionRegistry().has_expand_instruction_hook()
+    assert not _registry(Suffix("a", "!")).has_expand_instruction_hook()
+    assert _registry(Suffix("a", "!"), Expander("e", "a", "b")).has_expand_instruction_hook()
+
+
+def test_expand_instruction_ignores_an_empty_answer():
+    assert _registry(Expander("e", "sig", "")).expand_instruction("sig", APP) == "sig"

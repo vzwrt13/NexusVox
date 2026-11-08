@@ -924,3 +924,122 @@ def test_polish_survives_an_instruction_hook_that_raises(monkeypatch):
     asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
     assert calls["instruction"] == "mach es formeller"
     assert calls["pasted"] == ["Hallo zusammen"]
+
+
+def _expander_app(monkeypatch, ext_cls, spoken_presets=(), selection_ext=None):
+    app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen", presets=spoken_presets)
+    registry = ExtensionRegistry()
+    if selection_ext:
+        registry.add(selection_ext)
+    registry.add(ext_cls())
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
+    return app, calls
+
+
+def test_the_instruction_hook_sees_the_preset_instruction(monkeypatch):
+    from nexusvox.storage.vocabulary import PolishPreset
+
+    seen: list = []
+
+    class Spy(Extension):
+        name = "spy"
+        api_version = API_VERSION
+
+        def expand_instruction(self, instruction, app):
+            seen.append(instruction)
+
+    preset = PolishPreset("formal", "Make it formal.")
+    app, calls = _expander_app(monkeypatch, Spy, spoken_presets=[preset])
+    asyncio.run(app._polish_selection("formal", MagicMock()))
+    assert seen == ["Make it formal."]
+    assert calls["instruction"] == "Make it formal."
+
+
+def test_the_instruction_hook_sees_the_default_on_a_quick_tap(monkeypatch):
+    from nexusvox.dictation.polish import DEFAULT_INSTRUCTION
+
+    seen: list = []
+
+    class Spy(Extension):
+        name = "spy"
+        api_version = API_VERSION
+
+        def expand_instruction(self, instruction, app):
+            seen.append(instruction)
+
+    app, calls = _expander_app(monkeypatch, Spy)
+    asyncio.run(app._polish_selection("", MagicMock()))
+    assert seen == [DEFAULT_INSTRUCTION]
+    assert calls["instruction"] == ""  # untouched hook answer: the tap behaves as before
+
+
+def test_an_empty_instruction_answer_keeps_the_spoken_command(monkeypatch):
+    class Blank(Extension):
+        name = "blank"
+        api_version = API_VERSION
+
+        def expand_instruction(self, instruction, app):
+            return ""
+
+    app, calls = _expander_app(monkeypatch, Blank)
+    asyncio.run(app._polish_selection("sig", MagicMock()))
+    assert calls["instruction"] == "sig"
+
+
+def test_a_slow_instruction_hook_is_skipped_and_the_budget_is_shared(monkeypatch):
+    class Slow(Extension):
+        name = "slow"
+        api_version = API_VERSION
+
+        def expand_instruction(self, instruction, app):
+            time.sleep(0.3)
+            return "late"
+
+    monkeypatch.setattr("nexusvox.extensions.SELECTION_COMMAND_TIMEOUT_S", 0.05)
+    app, calls = _expander_app(monkeypatch, Slow)
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["instruction"] == "go"
+
+    class SlowSelection(Extension):
+        name = "slow-selection"
+        api_version = API_VERSION
+
+        def on_selection_command(self, selection, command, app):
+            time.sleep(0.2)
+
+    class Quick(Extension):
+        name = "quick"
+        api_version = API_VERSION
+
+        def expand_instruction(self, instruction, app):
+            return "never"
+
+    monkeypatch.setattr("nexusvox.extensions.SELECTION_COMMAND_TIMEOUT_S", 0.1)
+    app, calls = _expander_app(monkeypatch, Quick, selection_ext=SlowSelection())
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert calls["instruction"] == "go"  # the selection hook used the budget, none left
+
+
+def test_the_active_app_is_read_once_and_only_when_a_hook_needs_it(monkeypatch):
+    reads: list = []
+    monkeypatch.setattr(
+        NexusVoxApp, "_active_app", staticmethod(lambda: reads.append(1) or ActiveApp("Code.exe", "main.py"))
+    )
+
+    class Both(Extension):
+        name = "both"
+        api_version = API_VERSION
+
+        def on_selection_command(self, selection, command, app):
+            return None
+
+        def expand_instruction(self, instruction, app):
+            return instruction
+
+    app, _ = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
+    monkeypatch.setattr(NexusVoxApp, "_active_app", staticmethod(lambda: reads.append(1) or ActiveApp("a", "b")))
+    registry = ExtensionRegistry()
+    registry.add(Both())
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
+    asyncio.run(app._polish_selection("go", MagicMock()))
+    assert len(reads) == 1

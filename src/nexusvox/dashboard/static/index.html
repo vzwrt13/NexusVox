@@ -376,7 +376,7 @@
         </div>
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
-            <h3>Language model (LLM)</h3>
+            <h3 id="llm-model-title">Language model (LLM)</h3>
             <p>Used by Cleanup, Polish and upload cleanup. Models that are not installed are greyed out with their download size; nothing downloads until you confirm it. It shares the GPU with the speech model - mind the VRAM.</p>
             <p id="llm-model-hint" class="settings-hint status-line" hidden></p>
             <p id="llm-slow-hint" class="settings-hint status-line warn" hidden>Noticeable latency on this hardware: Cleanup and Polish are slower.</p>
@@ -389,6 +389,33 @@
           <span id="llm-pull-text"></span>
           <progress id="llm-pull-progress" max="100" value="0" style="margin-left: 8px;"></progress>
           <button type="button" id="llm-pull-cancel" class="btn" style="margin-left: 8px;">Cancel</button>
+        </div>
+        <div class="settings-sub" id="llm-roles-card">
+          <h3 class="overview-title">Advanced: language models per task</h3>
+          <div class="setting-row">
+            <div class="setting-info">
+              <h3>Use different models per task</h3>
+              <p>Off: the language model above does everything. On: a small, fast model cleans up your dictations, and the model above becomes the main model for everything else, such as Polish, uploaded files and extensions. Both stay loaded while NexusVox runs - mind the VRAM.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="llm-per-task-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <p id="llm-roles-error" class="settings-hint status-line" role="alert" hidden></p>
+          <div id="llm-roles-details" hidden>
+            <div class="setting-row">
+              <div class="setting-info">
+                <h3>Fast model</h3>
+                <p>Picked from the same list as the main model: Ollama, your saved servers and the main model's server. Until you pick one, the main model does its tasks too.</p>
+              </div>
+              <select id="llm-fast-select" class="select-input" aria-label="Fast model"></select>
+            </div>
+            <p id="llm-fast-status" class="settings-hint status-line"></p>
+            <h3 class="overview-title" style="margin-top: 12px;">Which model does what</h3>
+            <div id="llm-task-roles" class="overview-grid"></div>
+            <p class="settings-hint">Extensions and Pro features (snippets, summaries, search and ask) always use the main model.</p>
+          </div>
         </div>
         <p class="settings-hint model-caution status-line warn">Switching GPU-backed models restarts Docker containers and reloads weights. CPU (in-process Whisper) switches reload the model directly — may take 5–20s on first load.</p>
         <div class="settings-sub" id="model-overview-card">

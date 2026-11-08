@@ -13,6 +13,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from app_parts import patch_app
 
+from nexusvox.config import LlmConfig
+
 try:
     from nexusvox.app.core import NexusVoxApp
     from nexusvox.dictation.feedback import beep_error
@@ -93,7 +95,7 @@ def _paste_app(last_typed: str) -> NexusVoxApp:
     app._last_typed_rewritten = False
     app._edit_watcher = MagicMock()
     app._last_typed = last_typed
-    app._config = MagicMock(injection_delay_ms=0)
+    app._config = MagicMock(injection_delay_ms=0, llm=LlmConfig())
     return app
 
 
@@ -118,7 +120,7 @@ def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
     patch_app(monkeypatch, "inject_text", lambda text, delay: pasted.append(text))
     app = _app(command=False, paste_last=True)
     app._last_typed = "Bin gleich da"
-    app._config = MagicMock(injection_delay_ms=0)
+    app._config = MagicMock(injection_delay_ms=0, llm=LlmConfig())
     _run_skipped_cycle(app)
     assert pasted == ["Bin gleich da"]
 
@@ -128,7 +130,7 @@ def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
 
 def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows=(1, 1), presets=()):
     app = NexusVoxApp.__new__(NexusVoxApp)
-    app._config = MagicMock(injection_delay_ms=0)
+    app._config = MagicMock(injection_delay_ms=0, llm=LlmConfig())
     app._last_typed = ""
     app._last_typed_rewritten = False
     app._save_command = MagicMock()
@@ -286,7 +288,7 @@ def _dictation_app(monkeypatch, inject):
     from nexusvox.dictation.translator import TranslateResult
 
     app = _app(command=False)
-    app._config = MagicMock(injection_delay_ms=0)
+    app._config = MagicMock(injection_delay_ms=0, llm=LlmConfig())
     app._config.learn_from_edits.enabled = True
     app._config.hotkey.max_recording_s = 600
     app._last_typed = ""

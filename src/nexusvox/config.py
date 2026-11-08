@@ -62,11 +62,14 @@ from .config_sections.integrations import (  # noqa: F401
 from .config_sections.llm import (  # noqa: F401
     CLEANUP_LEVELS,
     CLEANUP_TIMEOUT_CPU_S,
+    DEFAULT_FAST_TASKS,
     LLM_MODEL_CPU,
     LLM_PROTOCOLS,
+    LLM_TASKS,
     OLLAMA_URL,
     CleanupConfig,
     LlmConfig,
+    LlmFastModel,
     LlmServer,
     PolishConfig,
     is_builtin_ollama,
@@ -223,6 +226,26 @@ def _llm_servers(raw: object) -> list[LlmServer]:
     return servers
 
 
+def _llm_fast(raw: object) -> LlmFastModel:
+    """`[llm.fast]`: the fast model. A missing or unusable table is no fast model (its tasks use the main one)."""
+    if not isinstance(raw, dict):
+        return LlmFastModel()
+    protocol = raw.get("protocol")
+    return LlmFastModel(
+        url=str(raw.get("url", "")).strip().rstrip("/"),
+        protocol=protocol if protocol in LLM_PROTOCOLS else "ollama",
+        model=str(raw.get("model", "")).strip(),
+        api_key=str(raw.get("api_key", "")),
+    )
+
+
+def _llm_fast_tasks(raw: object) -> list[str]:
+    """`[llm].fast_tasks`: the known tasks in it, each once; unset is the default (dictation cleanup only)."""
+    if not isinstance(raw, list):
+        return list(DEFAULT_FAST_TASKS)
+    return [task for task in LLM_TASKS if task in raw]
+
+
 def _llm_model(data: dict) -> str:
     """The configured model, or the hardware default when none is set."""
     return str(data["model"]) if "model" in data else auto_llm_model()
@@ -285,16 +308,21 @@ class Config:
     database_path_configured: str | None = field(default=None, repr=False, compare=False)
 
 
-def _experimental_flag(section: dict, key: str) -> bool:
-    """An `[experimental]` switch: only a real TOML `true` turns a feature on.
+def _strict_flag(section: dict, key: str, where: str) -> bool:
+    """A switch that only a real TOML `true` turns on.
 
     `"false"` or `1` must not count as on (a non-empty string is truthy), so anything but a bool means off.
     """
     value = section.get(key, False)
     if isinstance(value, bool):
         return value
-    logging.getLogger(__name__).warning("[experimental].%s must be true or false, got %r; keeping it off", key, value)
+    logging.getLogger(__name__).warning("[%s].%s must be true or false, got %r; keeping it off", where, key, value)
     return False
+
+
+def _experimental_flag(section: dict, key: str) -> bool:
+    """An `[experimental]` switch (`_strict_flag`)."""
+    return _strict_flag(section, key, "experimental")
 
 
 def _log_level(value: object) -> str:
@@ -528,6 +556,9 @@ def load_config(path: Path | None = None) -> Config:
             timeout_s=float(llm_data.get("timeout_s", LlmConfig.timeout_s)),
             keep_alive=_llm_keep_alive(llm_data),
             servers=_llm_servers(llm_data.get("servers")),
+            per_task=_strict_flag(llm_data, "per_task", "llm"),
+            fast=_llm_fast(llm_data.get("fast")),
+            fast_tasks=_llm_fast_tasks(llm_data.get("fast_tasks")),
         ),
         polish=PolishConfig(in_terminals=bool(polish_data.get("in_terminals", False))),
         cleanup=_cleanup_config(cleanup_data),
@@ -815,6 +846,15 @@ def save_config(config: Config, path: Path | None = None) -> None:
                 ("api_key", config.llm.api_key),
                 ("timeout_s", config.llm.timeout_s),
                 ("keep_alive", config.llm.keep_alive),
+                ("per_task", config.llm.per_task),
+                ("fast_tasks", _only_strings(config.llm.fast_tasks, "[llm].fast_tasks")),
+            ),
+            *_section(
+                "llm.fast",
+                ("url", config.llm.fast.url),
+                ("protocol", config.llm.fast.protocol),
+                ("model", config.llm.fast.model),
+                ("api_key", config.llm.fast.api_key),
             ),
             *(
                 line

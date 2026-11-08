@@ -116,7 +116,17 @@ def register(app: Flask, api: DashboardAPI) -> None:
     @app.route("/api/settings/llm-select", methods=["POST"])
     def select_llm_server_model():
         data = _json_object()
-        resp = api.select_llm_server_model(data.get("url", ""), data.get("model", ""))
+        resp = api.select_llm_server_model(data.get("url", ""), data.get("model", ""), data.get("role", "main"))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
+    @app.route("/api/settings/llm-per-task", methods=["POST"])
+    def set_llm_per_task():
+        return jsonify(api.set_llm_per_task(_switch(_json_object(), None)))
+
+    @app.route("/api/settings/llm-task-role", methods=["POST"])
+    def set_llm_task_role():
+        data = _json_object()
+        resp = api.set_llm_task_role(data.get("task"), data.get("role"))
         return jsonify(resp), (400 if "error" in resp else 200)
 
     @app.route("/api/settings/llm-pull", methods=["GET", "POST", "DELETE"])

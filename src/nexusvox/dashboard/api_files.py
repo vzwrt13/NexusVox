@@ -11,6 +11,7 @@ from pathlib import Path
 from ..dictation.lang_detect import stored_language
 from ..extensions import HOOK_TIMEOUT_S, file_transcript_from_record
 from ..file_cleanup import clean_transcript
+from ..llm import config_for
 from ..transcription.diarization import speaker_turns
 from ..transcription.exports import NO_TIMING_HINT, SUBTITLE_TARGET_IDS
 from ..transcription.file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
@@ -127,7 +128,9 @@ class FilesMixin(DashboardState):
         cleaned_text = None
         if cleanup_level and result.text:
             try:
-                cleaned = clean_transcript(result.text, cleanup_level, self._config.llm, progress)
+                cleaned = clean_transcript(
+                    result.text, cleanup_level, config_for(self._config.llm, "file_cleanup"), progress
+                )
             except Exception as exc:  # clean_transcript reports model failures itself; this is a bug
                 logger.exception("Cleaning up the transcript of %s failed: %s", filename, exc)
                 notes.append("Text cleanup failed; the transcript is saved as transcribed.")

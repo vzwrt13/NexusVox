@@ -265,6 +265,21 @@ timeout_s = 60.0
 # A shorter duration frees the VRAM sooner (the speech model needs its share), but the first
 # request after unloading takes 10-50 s. "-1" never expires (not renewed, not released after a crash).
 keep_alive = "60m"
+# Different models per task (Settings > Models > Advanced). Off (default): the model above does everything.
+# On: the tasks in fast_tasks go to the fast model of [llm.fast], every other task to the model above (the main
+# model). Tasks: "dictation_cleanup", "polish", "file_cleanup" (uploaded files). Extensions and Pro features
+# (snippets, summaries, search and ask) always use the main model. timeout_s and keep_alive apply to both; both
+# are warmed up, kept loaded and released on quit.
+per_task = false
+fast_tasks = ["dictation_cleanup"]
+
+# The fast model, picked like the main model: its server's url, protocol and api_key, and the model name.
+# Empty model: none picked yet, its tasks use the main model.
+[llm.fast]
+url = ""
+protocol = "ollama"
+model = ""
+api_key = ""
 
 # Extra servers you saved in the dashboard (Settings > Models > Add custom server). Their models are listed in
 # the language model dropdown, grouped by server; picking one copies that server's url, protocol and api_key

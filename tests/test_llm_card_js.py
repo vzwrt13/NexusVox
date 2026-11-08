@@ -119,3 +119,70 @@ def test_polling_only_while_visible():
         console.log(JSON.stringify([hiddenRenders, renders.length, r.running]));"""
     )
     assert out == [0, 1, True]
+
+
+# -- models per task -------------------------------------------------------------------------------
+
+_TWO_SERVERS = """
+    const data = {reachable: true, protocol: "openai", url: "http://127.0.0.1:8083/v1", selected: "big.gguf",
+        recommended: [], other: [{name: "big.gguf", size_gb: 0, installed: true}],
+        ollama: {active: false, reachable: true, url: "http://127.0.0.1:11434",
+                 models: [{name: "gemma4:e2b"}]},
+        servers: [{active: true, name: "llama", url: "http://127.0.0.1:8083/v1", reachable: true,
+                   models: [{name: "big.gguf"}]}],
+        roles: {enabled: true, main_server: "llama", fast: null, tasks: [
+            {id: "dictation_cleanup", label: "Dictation cleanup", role: "fast"},
+            {id: "polish", label: "Polish", role: "main"},
+            {id: "file_cleanup", label: "Cleanup of uploaded files", role: "main"}]}};
+"""
+
+
+def test_the_fast_dropdown_names_the_server_of_every_model():
+    out = run_js(
+        _TWO_SERVERS
+        + """
+        const groups = llmFastOptionGroups(data);
+        console.log(JSON.stringify(groups.map((g) => [g.label, g.options.map((o) => [o.value, !!o.disabled])])));"""
+    )
+    assert out[0] == [None, [["", True]]]  # nothing picked yet
+    assert out[1] == ["llama — Models on this server", [['@@["http://127.0.0.1:8083/v1","big.gguf"]', False]]]
+    assert out[2] == ["Ollama", [['@@["http://127.0.0.1:11434","gemma4:e2b"]', False]]]
+
+
+def test_a_saved_fast_model_its_server_does_not_list_stays_selectable():
+    out = run_js(
+        _TWO_SERVERS
+        + """
+        data.roles.fast = {url: "http://10.0.0.5:11434", protocol: "ollama", model: "tiny:1b", server: "Box"};
+        const groups = llmFastOptionGroups(data);
+        console.log(JSON.stringify([groups[0], llmFastValue(data)]));"""
+    )
+    assert out[0] == {
+        "label": "Box",
+        "options": [{"value": '@@["http://10.0.0.5:11434","tiny:1b"]', "label": "tiny:1b"}],
+    }
+    assert out[1] == '@@["http://10.0.0.5:11434","tiny:1b"]'
+
+
+def test_a_model_that_is_not_installed_cannot_be_the_fast_model():
+    out = run_js(
+        """
+        const data = {reachable: true, protocol: "ollama", url: "http://127.0.0.1:11434", selected: "gemma4:e4b",
+            recommended: [{name: "gemma4:e2b", size_gb: 4.6, installed: false}], other: [],
+            ollama: {active: true}, servers: [],
+            roles: {enabled: true, main_server: "Ollama", fast: null, tasks: []}};
+        console.log(JSON.stringify(llmFastOptionGroups(data)[1]));"""
+    )
+    assert out["label"] == "Ollama — Recommended"
+    assert out["options"][0]["disabled"] is True
+
+
+def test_the_overview_says_what_the_main_model_does():
+    out = run_js(
+        _TWO_SERVERS
+        + """
+        const before = llmMainUsedFor(data);
+        data.roles.fast = {url: "http://127.0.0.1:11434", protocol: "ollama", model: "gemma4:e2b", server: "Ollama"};
+        console.log(JSON.stringify([before, llmMainUsedFor(data)]));"""
+    )
+    assert out == ["Cleanup, Polish, upload cleanup, extensions", "Polish, Cleanup of uploaded files, extensions"]

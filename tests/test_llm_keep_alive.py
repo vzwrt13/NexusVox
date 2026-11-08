@@ -137,7 +137,7 @@ def test_a_failed_release_is_kept_for_the_next_try(server, monkeypatch):
 
     monkeypatch.setattr(llm.urllib.request, "urlopen", refuse)
     assert llm.unload(config) is False
-    assert llm._reload_key(config) in llm._pinned
+    assert llm.model_key(config) in llm._pinned
 
 
 def test_nothing_is_unloaded_for_other_protocols(server):
@@ -242,20 +242,20 @@ def test_the_timer_never_loads_a_model_ollama_dropped(ollama, caplog):
 
 def test_the_timer_renews_with_a_custom_value(ollama):
     llm._pinned[("http://127.0.0.1:11434", "a:1b")] = True
-    llm.renew_once(LlmConfig(keep_alive="30m"))
+    llm.renew_once(LlmConfig(model="a:1b", keep_alive="30m"))
     assert ollama.posts[0][1]["keep_alive"] == "30m"
 
 
 @pytest.mark.parametrize("value", ["-1", "0", "forever"])
 def test_the_timer_skips_a_never_or_now_value(ollama, value):
     llm._pinned[("http://127.0.0.1:11434", "a:1b")] = True
-    assert llm.renew_once(LlmConfig(keep_alive=value)) == 0
+    assert llm.renew_once(LlmConfig(model="a:1b", keep_alive=value)) == 0
     assert ollama.posts == []
 
 
 def test_only_the_ollama_protocol_is_renewed(ollama):
     llm._pinned[("http://127.0.0.1:11434", "a:1b")] = True
-    assert llm.renew_once(LlmConfig(protocol="openai")) == 0
+    assert llm.renew_once(LlmConfig(model="a:1b", protocol="openai")) == 0
 
 
 @pytest.mark.parametrize(
@@ -270,7 +270,7 @@ def test_the_renewal_runs_every_fifty_minutes_and_stops_on_quit(ollama, monkeypa
     assert llm._renew_interval(LlmConfig()) == 3000.0
     assert llm._renew_interval(LlmConfig(keep_alive="-1")) is None
     llm._pinned[("http://127.0.0.1:11434", "a:1b")] = True
-    config = LlmConfig(keep_alive="1m")
+    config = LlmConfig(model="a:1b", keep_alive="1m")
     monkeypatch.setattr(llm, "_MIN_RENEW_INTERVAL_S", 0.05)
     monkeypatch.setattr(llm, "_RENEW_SHARE", 0.001)  # a round every ~0.06 s
     llm.start_renewal(lambda: config)

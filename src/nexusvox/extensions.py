@@ -258,6 +258,17 @@ class Extension:
         """
         return None
 
+    def polish_result(self, result: str, app: ActiveApp, model: str) -> str | None:
+        """Change the language model's polish result just before it is pasted over the selection.
+
+        *result* is what the model answered, *app* the window the polish was started in and *model* the name of the
+        model that answered (`[llm]` model of the polish task). Return the text to paste instead, or None to leave
+        it (an empty answer is ignored). Runs only when the model polished, not when an `on_selection_command`
+        extension handled the command. Several extensions run in entry-point order, each seeing the previous result;
+        one that raises, answers with something that is not a string or is too slow is logged and skipped.
+        """
+        return None
+
     def display_text(self, transcript: FileTranscript, text: str) -> str | None:
         """Change a transcript text the core shows or exports for a stored upload or meeting.
 
@@ -755,6 +766,29 @@ class ExtensionRegistry:
                     "Extension %s returned an empty instruction from expand_instruction; ignored", extension.name
                 )
         return instruction
+
+    def has_polish_result_hook(self) -> bool:
+        """True when any loaded extension overrides `polish_result`; with none, asking costs nothing."""
+        return any(type(e).polish_result is not Extension.polish_result for e in self.extensions)
+
+    def polish_result(self, result: str, app: ActiveApp, model: str, *, deadline: float | None = None) -> str:
+        """*result* as every extension's `polish_result` leaves it, in load order; unchanged with none.
+
+        An answer that is empty or whitespace is ignored (the model's answer is never thrown away for nothing).
+        *deadline* is a `time.monotonic()` value shared by all extensions; by default
+        `SELECTION_COMMAND_TIMEOUT_S` from now.
+        """
+        if deadline is None:
+            deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
+        for extension in self.extensions:
+            if type(extension).polish_result is Extension.polish_result:
+                continue
+            answer = self._text_hook(extension, "polish_result", deadline, result, app, model)
+            if answer is not None and answer.strip():
+                result = answer
+            elif answer is not None:
+                logger.warning("Extension %s returned an empty text from polish_result; ignored", extension.name)
+        return result
 
     def _text_hook(self, extension: Extension, hook: str, deadline: float, *args: Any) -> str | None:
         """What one extension's text hook answered, or None: nothing to say, or it failed (logged)."""

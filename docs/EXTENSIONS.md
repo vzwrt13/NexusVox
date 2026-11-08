@@ -466,6 +466,30 @@ send instead, or `None` to leave it. An extension can use it to expand a spoken 
 - **Speech.** Matching spoken phrases must work in English and German; that is the extension's job.
 - Added without an `API_VERSION` change.
 
+## Hook 11: change the polish result
+
+```python
+def polish_result(self, result: str, app: ActiveApp, model: str) -> str | None: ...
+```
+
+Runs on the polish key after the language model has answered and before the core pastes the answer over the
+selection. `result` is the model's answer, `app` the window the polish was started in and `model` the name of the
+model that produced it (the `[llm]` model of the polish task). Return the text to paste instead, or `None` to leave
+it. An extension can use it to put text in by code instead of trusting the model with it, for example to swap
+placeholders for a stored snippet verbatim.
+
+- **When.** Only when the language model polished: not when an extension's `on_selection_command` (Hook 6) handled
+  the command, and not when the model failed (nothing is pasted then).
+- **Order and fallback.** Extensions run in entry-point order, each seeing the previous result, within the 15 seconds
+  of `SELECTION_COMMAND_TIMEOUT_S`, one budget shared by the extensions; it starts after the model has answered, so a
+  slow model does not use it up. An extension that raises, answers something that is not a string, answers empty or
+  is too slow is logged and skipped; the previous result is pasted. An extension that does not override the hook is
+  not called.
+- **Unchanged without it.** With no extension the result is pasted exactly as the model gave it. The saved recording
+  and `Paste last` use the text that was pasted.
+- **Speech.** The hook sees text, not speech; anything it matches in the result must work in English and German.
+- Added without an `API_VERSION` change.
+
 ## Snippet matching helpers
 
 The core no longer stores or expands snippets; that is an extension's job (the Pro extension does it). The pure

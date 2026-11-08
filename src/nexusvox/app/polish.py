@@ -130,6 +130,18 @@ class SelectionPolish:
             )
             return
         model_ms = round((time.perf_counter() - started) * 1000)
+        if registry is not None and registry.has_polish_result_hook():
+            # A fresh budget: the model's time must not eat the extensions' share.
+            rewritten = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    registry.polish_result,
+                    rewritten,
+                    active_app,
+                    llm.model,
+                    deadline=ExtensionRegistry.selection_deadline(),
+                ),
+            )
         await self._paste_over_selection(
             rewritten,
             selection,

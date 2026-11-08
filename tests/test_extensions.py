@@ -1391,3 +1391,52 @@ def test_has_expand_instruction_hook_only_for_an_override():
 
 def test_expand_instruction_ignores_an_empty_answer():
     assert _registry(Expander("e", "sig", "")).expand_instruction("sig", APP) == "sig"
+
+
+class ResultChanger(V1Extension):
+    def __init__(self, name, old, new):
+        self.name = name
+        self.old, self.new = old, new
+        self.seen = []
+
+    def polish_result(self, result, app, model):
+        self.seen.append((result, app, model))
+        return result.replace(self.old, self.new)
+
+
+def test_polish_result_is_unchanged_without_an_extension():
+    assert ExtensionRegistry().polish_result("Hello", APP, "gemma") == "Hello"
+    assert _registry(Suffix("a", "!")).polish_result("Hello", APP, "gemma") == "Hello"
+
+
+def test_polish_result_passes_the_app_and_model_and_chains_in_order():
+    one, two = ResultChanger("one", "[sig]", "Best"), ResultChanger("two", "Best", "Best regards")
+    assert _registry(one, two).polish_result("Thanks [sig]", APP, "gemma") == "Thanks Best regards"
+    assert one.seen == [("Thanks [sig]", APP, "gemma")] and two.seen == [("Thanks Best", APP, "gemma")]
+
+
+def test_a_failing_polish_result_hook_is_skipped():
+    class Boom(V1Extension):
+        name = "boom"
+
+        def polish_result(self, result, app, model):
+            raise RuntimeError("nope")
+
+    class NotText(V1Extension):
+        name = "not-text"
+
+        def polish_result(self, result, app, model):
+            return ["x"]
+
+    assert _registry(Boom(), NotText(), ResultChanger("ok", "a", "b")).polish_result("a", APP, "m") == "b"
+
+
+def test_polish_result_ignores_an_empty_answer():
+    assert _registry(ResultChanger("e", "sig", "")).polish_result("sig", APP, "m") == "sig"
+    assert _registry(ResultChanger("e", "sig", "  ")).polish_result("sig", APP, "m") == "sig"
+
+
+def test_has_polish_result_hook_only_for_an_override():
+    assert not ExtensionRegistry().has_polish_result_hook()
+    assert not _registry(Suffix("a", "!")).has_polish_result_hook()
+    assert _registry(Suffix("a", "!"), ResultChanger("e", "a", "b")).has_polish_result_hook()

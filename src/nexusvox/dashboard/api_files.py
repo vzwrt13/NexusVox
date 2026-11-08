@@ -124,7 +124,12 @@ class FilesMixin(DashboardState):
                 self._config.inference, wanted=diarize, what="upload", active_model=lambda: self._config.inference.model
             ) as speakers:
                 result = self._transcribe_wav_chunks(
-                    wav_chunks, word_timestamps=True, diarize=diarize, on_progress=progress, inference=speakers.config
+                    wav_chunks,
+                    word_timestamps=True,
+                    diarize=diarize,
+                    on_progress=progress,
+                    inference=speakers.config,
+                    explain_no_speakers=not speakers.failed,
                 )
         except Exception as exc:
             logger.error("Transcription failed for %s: %s", filename, exc)
@@ -243,6 +248,7 @@ class FilesMixin(DashboardState):
         diarize: bool = False,
         on_progress: Callable[..., None] | None = None,
         inference=None,
+        explain_no_speakers: bool = True,
     ):
         """Transcribe WAV chunks with the current model, or with `inference` when a job brings its own (blocking)."""
         return asyncio.run(
@@ -252,6 +258,7 @@ class FilesMixin(DashboardState):
                 word_timestamps=word_timestamps,
                 diarize=diarize,
                 on_progress=on_progress,
+                explain_no_speakers=explain_no_speakers,
             )
         )
 

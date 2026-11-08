@@ -133,3 +133,13 @@ def test_gpu_is_found_whatever_the_models_device_setting(docker, monkeypatch):
     monkeypatch.setattr(sf, "probe_server", lambda url: True)
     with sf.speaker_detection_job(_config(device="cpu"), wanted=True) as job:
         assert job.config.model == "parakeet-tdt-0.6b"
+
+
+def test_a_failed_fallback_is_marked_so_the_job_adds_no_second_note(docker, monkeypatch):
+    monkeypatch.setattr(sf, "probe_server", lambda url: False)
+    docker.wait_for_healthy.return_value = False
+    with sf.speaker_detection_job(_config(), wanted=True) as job:
+        assert job.failed
+    monkeypatch.setattr(sf, "probe_server", lambda url: True)
+    with sf.speaker_detection_job(_config(), wanted=True) as job:
+        assert not job.failed

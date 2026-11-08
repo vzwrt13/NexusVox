@@ -67,7 +67,9 @@ def wait_for_healthy(url: str, timeout: float = 120.0, interval: float = 2.0) ->
                 if resp.status_code == 200:
                     logger.info("Health check passed: %s", url)
                     return True
-            except (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException):
+            except httpx.TransportError:
+                # Refused, reset, disconnected without a reply, timed out: a container that is still loading its
+                # model drops connections like this. Only the deadline ends the wait.
                 pass
             time.sleep(interval)
     logger.warning("Health check timed out after %.0fs: %s", timeout, url)

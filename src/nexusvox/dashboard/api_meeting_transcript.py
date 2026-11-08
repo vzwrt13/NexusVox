@@ -138,6 +138,7 @@ class MeetingTranscriptMixin(DashboardState):
                         diarize=detect_speakers,
                         on_progress=track_progress,
                         inference=speakers.config if detect_speakers else None,
+                        explain_no_speakers=not (detect_speakers and speakers.failed),
                     )
                 except Exception as exc:
                     logger.error("Transcription failed for meeting %s: %s", folder, exc)

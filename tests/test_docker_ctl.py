@@ -86,6 +86,45 @@ def test_wait_for_healthy_returns_false_on_timeout(mock_client_cls, mock_monoton
     assert result is False
 
 
+@patch("nexusvox.system.docker_ctl.time.sleep")
+@patch("nexusvox.system.docker_ctl.httpx.Client")
+def test_wait_for_healthy_retries_connection_errors_until_it_answers(mock_client_cls, mock_sleep):
+    import httpx
+
+    mock_client = MagicMock()
+    mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+    mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+    ok = MagicMock()
+    ok.status_code = 200
+    # A container that is still loading its model refuses, resets or drops the connection before it answers.
+    mock_client.get.side_effect = [
+        httpx.RemoteProtocolError("Server disconnected without sending a response."),
+        httpx.ConnectError("refused"),
+        httpx.ReadError("reset"),
+        httpx.ConnectTimeout("slow"),
+        ok,
+    ]
+
+    assert wait_for_healthy("http://localhost:8000/health", timeout=120.0) is True
+    assert mock_client.get.call_count == 5
+
+
+@patch("nexusvox.system.docker_ctl.time.sleep")
+@patch("nexusvox.system.docker_ctl.time.monotonic")
+@patch("nexusvox.system.docker_ctl.httpx.Client")
+def test_wait_for_healthy_gives_up_on_disconnects_only_at_the_deadline(mock_client_cls, mock_monotonic, mock_sleep):
+    import httpx
+
+    mock_client = MagicMock()
+    mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_client)
+    mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
+    mock_client.get.side_effect = httpx.RemoteProtocolError("Server disconnected without sending a response.")
+    mock_monotonic.side_effect = [0.0, 0.0, 1.0, 2.0, 130.0]
+
+    assert wait_for_healthy("http://localhost:8000/health", timeout=120.0) is False
+    assert mock_client.get.call_count == 3
+
+
 @patch("nexusvox.system.docker_ctl.subprocess.run")
 def test_start_profile_raises_clear_error_when_docker_missing(mock_run):
     mock_run.side_effect = FileNotFoundError("docker not found")

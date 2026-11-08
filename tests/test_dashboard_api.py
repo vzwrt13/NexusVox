@@ -1185,6 +1185,37 @@ def test_upload_with_diarize_passes_the_flag_and_stores_speakers(flask_client, d
     assert flask_client.get("/api/file-transcriptions").get_json()[0]["text"] == data["text"]
 
 
+def test_upload_whose_fallback_failed_shows_only_the_container_notice(flask_client, sample_wav_bytes, monkeypatch):
+    from contextlib import contextmanager
+
+    from nexusvox.config import InferenceConfig
+    from nexusvox.transcription.speaker_fallback import SpeakerJob
+    from nexusvox.transcription.transcriber import TranscriptionResult
+
+    notice = "Speaker detection needs the Parakeet GPU container (it did not become healthy); no labels."
+    seen: dict = {}
+
+    @contextmanager
+    def failed_fallback(config, **kwargs):
+        yield SpeakerJob(InferenceConfig(model="custom-server"), notice, failed=True)
+
+    async def fake_transcribe(wav_chunks, cfg, **kwargs):
+        seen.update(kwargs)
+        result = TranscriptionResult()
+        result.finalize(text="hello")
+        # What the real function adds unless told the caller explains it.
+        result.notes = [] if not kwargs["explain_no_speakers"] else ["Speaker detection needs Parakeet TDT 0.6B"]
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api_files.speaker_detection_job", failed_fallback)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
+
+    data = upload_file(flask_client, sample_wav_bytes, "meeting.wav", diarize="1")["result"]
+
+    assert seen["explain_no_speakers"] is False
+    assert data["notes"] == [notice]
+
+
 def _fake_transcription(monkeypatch, text):
     from nexusvox.transcription.transcriber import TranscriptionResult, Word
 

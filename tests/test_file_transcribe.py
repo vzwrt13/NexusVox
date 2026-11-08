@@ -559,6 +559,22 @@ async def test_diarize_with_a_model_without_speaker_detection_says_so(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_the_missing_speaker_detection_note_can_be_left_to_the_caller(monkeypatch):
+    import nexusvox.transcription.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+
+    transcriber = _DiarizingTranscriber([("hello", [], True)], [])
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+
+    result = await ft.transcribe_file(
+        [_silent_wav()], InferenceConfig(model="whisper-large-v3-turbo"), diarize=True, explain_no_speakers=False
+    )
+
+    assert result.text == "hello"
+    assert result.notes == []
+
+
+@pytest.mark.asyncio
 async def test_model_with_speaker_detection_but_a_client_without_it_is_not_told_to_switch(monkeypatch):
     import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig

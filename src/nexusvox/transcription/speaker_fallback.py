@@ -36,6 +36,8 @@ class SpeakerJob:
     config: InferenceConfig
     notice: str = ""
     started_container: bool = False
+    # The fallback was tried and failed: `notice` already says why, so the job adds no second note about it.
+    failed: bool = False
 
 
 def supports_speaker_detection(config: InferenceConfig) -> bool:
@@ -71,7 +73,8 @@ def _start(config: InferenceConfig, profile: str, started: list[bool]) -> bool:
 
 def _unavailable(config: InferenceConfig, why: str, what: str) -> SpeakerJob:
     logger.warning("No speaker detection for the %s: %s", what, why)
-    return SpeakerJob(config, f"Speaker detection needs the Parakeet GPU container ({why}); {NO_SPEAKER_LABELS}")
+    notice = f"Speaker detection needs the Parakeet GPU container ({why}); {NO_SPEAKER_LABELS}"
+    return SpeakerJob(config, notice, failed=True)
 
 
 @contextmanager

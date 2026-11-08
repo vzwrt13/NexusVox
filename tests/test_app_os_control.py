@@ -881,3 +881,46 @@ def test_the_paste_key_ending_a_polish_reply_ends_the_edit_watch(monkeypatch):
     app._edit_watcher.reset_mock()
     asyncio.run(app._paste_last_text())
     assert _watcher_calls(app) == []
+
+
+def test_polish_hands_the_instruction_to_extensions_before_the_model(monkeypatch):
+    class Expand(Extension):
+        name = "expand"
+        api_version = API_VERSION
+
+        def expand_instruction(self, instruction, app):
+            seen.append((instruction, app))
+            return instruction.replace("sig", "add my full signature")
+
+    seen: list = []
+    app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
+    registry = ExtensionRegistry()
+    registry.add(Expand())
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
+    asyncio.run(app._polish_selection("sig", MagicMock()))
+    assert calls["instruction"] == "add my full signature"
+    assert seen == [("sig", ActiveApp("Code.exe", "main.py"))]
+    assert app._save_command.call_args.args[1] == "[polish] sig"  # the saved row keeps the spoken words
+
+
+def test_polish_without_an_instruction_hook_is_unchanged(monkeypatch):
+    app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
+    asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
+    assert calls["instruction"] == "mach es formeller"
+
+
+def test_polish_survives_an_instruction_hook_that_raises(monkeypatch):
+    class Boom(Extension):
+        name = "boom"
+        api_version = API_VERSION
+
+        def expand_instruction(self, instruction, app):
+            raise RuntimeError("nope")
+
+    app, calls = _polish_app(monkeypatch, "hi leute", "Hallo zusammen")
+    registry = ExtensionRegistry()
+    registry.add(Boom())
+    patch_app(monkeypatch, "loaded_extensions", lambda: registry)
+    asyncio.run(app._polish_selection("mach es formeller", MagicMock()))
+    assert calls["instruction"] == "mach es formeller"
+    assert calls["pasted"] == ["Hallo zusammen"]

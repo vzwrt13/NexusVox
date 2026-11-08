@@ -88,6 +88,8 @@ class SelectionPolish:
         instruction, preset = resolve_instruction(spoken, self._db.get_polish_presets())
         if preset:
             logger.info("Polish: preset %r", preset)
+        if registry is not None and registry.extensions:
+            instruction = await loop.run_in_executor(None, registry.expand_instruction, instruction, self._active_app())
         detail = preset or spoken or "default"
         # The model this request goes to, read now: settings apply live, so a switch while it runs must not
         # credit the old model's time to the new one.

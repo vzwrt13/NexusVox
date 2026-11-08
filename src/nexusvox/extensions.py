@@ -246,6 +246,17 @@ class Extension:
         """
         return None
 
+    def expand_instruction(self, instruction: str, app: ActiveApp) -> str | None:
+        """Rewrite the polish instruction just before it goes to the language model.
+
+        *instruction* is what the model would be told: the spoken words, or the preset's instruction once a preset
+        name is resolved (`polish_presets.resolve_instruction`). Return the instruction to send instead, or None
+        to leave it. Runs only when no `on_selection_command` extension handled the command. Several extensions
+        run in entry-point order, each seeing the previous result; one that raises, answers with something that is
+        not a string or is too slow is logged and skipped, and the polish runs with the instruction as it was.
+        """
+        return None
+
     def display_text(self, transcript: FileTranscript, text: str) -> str | None:
         """Change a transcript text the core shows or exports for a stored upload or meeting.
 
@@ -707,6 +718,17 @@ class ExtensionRegistry:
                 logger.info("Extension %s handled the selection command %r", extension.name, Text(command))
                 return result
         return None
+
+    def expand_instruction(self, instruction: str, app: ActiveApp) -> str:
+        """*instruction* as every extension's `expand_instruction` leaves it, in load order; unchanged with none."""
+        deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
+        for extension in self.extensions:
+            if type(extension).expand_instruction is Extension.expand_instruction:
+                continue
+            result = self._text_hook(extension, "expand_instruction", deadline, instruction, app)
+            if result is not None:
+                instruction = result
+        return instruction
 
     def _text_hook(self, extension: Extension, hook: str, deadline: float, *args: Any) -> str | None:
         """What one extension's text hook answered, or None: nothing to say, or it failed (logged)."""

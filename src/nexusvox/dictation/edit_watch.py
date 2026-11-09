@@ -91,6 +91,7 @@ OUTCOMES = {
     "unreadable": "skipped: the focused element does not expose its text",
     "too_long": f"skipped: the field holds more than {MAX_FIELD_CHARS:,} characters",
     "not_found": "skipped: the pasted text did not show up in the field",
+    "failed": "skipped: comparing the texts failed",
 }
 # Outcomes of a watch that ran to its end: every one whose message does not say "skipped".
 WATCHED = frozenset(key for key, message in OUTCOMES.items() if not message.startswith("skipped"))
@@ -194,9 +195,11 @@ class _Edit:
     found: bool = True  # False when the dictation is not in `before` at all
 
 
-def _edit_of(before: str, injected: str, after: str) -> _Edit:
+def _edit_of(before: str, injected: str, after: str, span: tuple[int, int] | None = None) -> _Edit:
+    """`span` is where `injected` sits in the normalized `before` (`_find_last`), when the caller knows it already."""
     before, after = _normalize(before), _normalize(after)
-    span = _find_last(before, injected)
+    if span is None:
+        span = _find_last(before, injected)
     if span is None:
         return _Edit(None, found=False)
     start, end = span
@@ -208,14 +211,15 @@ def _edit_of(before: str, injected: str, after: str) -> _Edit:
     return _Edit(edited if ratio >= MIN_SIMILARITY else None, before[start:end], ratio)
 
 
-def extract_edit(before: str, injected: str, after: str) -> str | None:
+def extract_edit(before: str, injected: str, after: str, span: tuple[int, int] | None = None) -> str | None:
     """The user's version of `injected`, or None when it cannot be told apart.
 
     `before` is the field text right after the paste, `after` the latest one.
     Returns None when the pasted text is not in `before`, when it was deleted,
-    or when it was rewritten beyond `MIN_SIMILARITY`.
+    or when it was rewritten beyond `MIN_SIMILARITY`. A watch that polls the same
+    `before` many times passes `span` (`_find_last` of the normalized `before`) to find it once.
     """
-    return _edit_of(before, injected, after).edited
+    return _edit_of(before, injected, after, span).edited
 
 
 @dataclass(frozen=True)
@@ -228,15 +232,21 @@ class Verdict:
 
 
 def judge(
-    before: str, injected: str, after: str, existing: list[DictionaryEntry], spoken: str | None = None
+    before: str,
+    injected: str,
+    after: str,
+    existing: list[DictionaryEntry],
+    spoken: str | None = None,
+    span: tuple[int, int] | None = None,
 ) -> Verdict:
     """Dictionary suggestions from one watched paste, or the reason there are none.
 
     `spoken` is the text the dictionary will see again (the transcript after the
     dictionary). Voice commands make the paste differ from it, so only an entry that
-    matches `spoken` is kept: one for "25" would never match a transcript.
+    matches `spoken` is kept: one for "25" would never match a transcript. `span` is
+    the paste's place in `before`, when the watch found it already (see `extract_edit`).
     """
-    edit = _edit_of(before, injected, after)
+    edit = _edit_of(before, injected, after, span)
     if not edit.found:
         return Verdict("not_found", [], "the dictation is not in the text the watch started from")
     if edit.edited is None:
@@ -354,6 +364,9 @@ class UiaTextField:
         return None
 
 
+_NOTHING = object()  # "no item taken", as opposed to the stop sentinel None
+
+
 @dataclass
 class _Watch:
     injected: str
@@ -392,6 +405,10 @@ class EditWatcher:
         self._cancel_gen = 0  # raised by `cancel()`: every watch handed in before it ends
         self._paused = False
         self._epoch = 0  # raised by `pause()` and `cancel()`: a read that began before it is void
+        # Worker thread only: the item the running watch took off the queue (an `_Watch` or the stop sentinel
+        # None) before it ended, and whether the watch has recorded its outcome yet.
+        self._taken: _Watch | None | object = _NOTHING
+        self._concluded = False
 
     def watch(self, injected: str, window_s: float, spoken: str | None = None) -> None:
         if self._thread is None:
@@ -482,12 +499,18 @@ class EditWatcher:
             logger.debug("Learn from edits: COM init skipped", exc_info=True)
         item = self._queue.get()
         while item is not None:
+            self._taken, self._concluded = _NOTHING, False
             try:
                 item = self._watch_one(item)
             except Exception:
                 # A dead worker would leave every later watch() queued forever.
                 logger.exception("Learn from edits: watch failed")
-                item = self._queue.get()
+                if not self._concluded:
+                    self._record("failed", "the watch raised an error")
+                # What the failed watch already took off the queue (the next dictation, or the stop sentinel)
+                # is still ours to process: dropping it would lose a paste, or block `stop()` for good.
+                taken, self._taken = self._taken, _NOTHING
+                item = self._queue.get() if taken is _NOTHING else taken
 
     def _watch_one(self, item: _Watch) -> _Watch | None:
         """Watch one paste; returns the next queued item (or None to stop)."""
@@ -524,12 +547,14 @@ class EditWatcher:
             logger.exception("Learn from edits: reading the focused field failed")
             field, before, skip = None, None, "unreadable"
         if field is None or before is None:
-            self._record(skip)
+            self._conclude(skip)
             return self._queue.get()
         if self._is_cancelled(item) and self._disturbed(first_epoch):
             # The first read may hold the rewrite instead of the dictation: nothing to compare against.
-            self._record("polished")
+            self._conclude("polished")
             return self._queue.get()
+        # Where the paste sits in `before` is the same on every poll: find it once.
+        span = _find_last(_normalize(before), item.injected)
         after = before
         deadline = time.monotonic() + item.window_s
         nxt: _Watch | None | bool = False
@@ -541,6 +566,7 @@ class EditWatcher:
         while time.monotonic() < deadline and not self._is_cancelled(item):
             try:
                 nxt = self._queue.get(timeout=_POLL_S)
+                self._taken = nxt
                 ended = "next_dictation"
                 break
             except queue.Empty:
@@ -566,11 +592,15 @@ class EditWatcher:
                 continue  # the rewrite may have landed while the field was read: judge only what came before
             # A field cleared on send (or the dictation deleted) keeps the last text that still held it:
             # that is where the user's fixes are. Without an edit it equals `before`, so nothing is learned.
-            if len(current) <= MAX_FIELD_CHARS and extract_edit(before, item.injected, current) is not None:
+            if (
+                span is not None
+                and len(current) <= MAX_FIELD_CHARS
+                and extract_edit(before, item.injected, current, span) is not None
+            ):
                 after = current
         if self._is_cancelled(item):
             ended = "rewrite"
-        self._report(before, item, after, ended)
+        self._report(before, item, after, ended, span)
         return self._queue.get() if nxt is False else nxt
 
     def _refetch(
@@ -650,11 +680,19 @@ class EditWatcher:
                 return None, reason, False
             time.sleep(_POLL_S / 5)
 
-    def _report(self, before: str, item: _Watch, after: str, ended: str = "window") -> None:
+    def _conclude(self, outcome: str, detail: str = "") -> None:
+        """Record the one outcome of the watch the worker is running."""
+        self._concluded = True
+        self._record(outcome, detail)
+
+    def _report(
+        self, before: str, item: _Watch, after: str, ended: str = "window", span: tuple[int, int] | None = None
+    ) -> None:
         try:
-            verdict = judge(before, item.injected, after, self._existing(), item.spoken)
+            verdict = judge(before, item.injected, after, self._existing(), item.spoken, span)
         except Exception:
             logger.exception("Learn from edits: diff failed")
+            self._conclude("failed", "the comparison raised an error")
             return
         outcome, detail = verdict.outcome, verdict.detail
         how = _ENDED[ended] if ended != "window" else f"{_ENDED[ended]}, {item.window_s:g} s"
@@ -667,7 +705,7 @@ class EditWatcher:
             detail = f"{detail}; {how}" if detail else how
         else:
             detail = ""
-        self._record(outcome, detail)
+        self._conclude(outcome, detail)
         if verdict.suggestions:
             logger.info("Learn from edits: %d suggestion(s)", len(verdict.suggestions))
             self._on_suggestions(verdict.suggestions)

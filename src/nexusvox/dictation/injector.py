@@ -10,7 +10,7 @@ from ctypes import wintypes
 import pyperclip
 
 from ..system.keyboard import wait_for_physical_release
-from .clipboard import ClipboardError, set_text
+from .clipboard import ClipboardError, restore_formats, set_text, snapshot_formats
 
 logger = logging.getLogger("nexusvox.injector")
 
@@ -114,9 +114,18 @@ def _send_inputs(inputs: list[INPUT], name: str) -> bool:
     """SendInput a batch; logs when Windows injects fewer events than asked (UIPI, elevated target)."""
     array = (INPUT * len(inputs))(*inputs)
     sent = user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
+    logger.debug("SendInput %s: sent %d/%d events", name, sent, len(inputs))
     if sent != len(inputs):
         logger.error("SendInput %s: sent %d/%d events (blocked by UIPI?)", name, sent, len(inputs))
     return sent == len(inputs)
+
+
+class PasteError(ClipboardError):
+    """No way of pasting reached the target window (an elevated app, or none in the foreground).
+
+    A `ClipboardError` on purpose: every `inject_text` caller already answers it with the error cue and
+    keeps the text for the paste key.
+    """
 
 
 def send_menu_mask() -> bool:
@@ -191,13 +200,7 @@ def _send_ctrl_chord(vk: int, scan: int, name: str) -> bool:
         _make_key_input(vk, scan, KEYEVENTF_KEYUP),  # key up
         _make_key_input(VK_CONTROL, SCAN_CONTROL, KEYEVENTF_KEYUP),  # Ctrl up
     ]
-    array = (INPUT * len(inputs))(*inputs)
-    sent = user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
-
-    logger.info("SendInput Ctrl+%s: sent %d/%d events", name, sent, len(inputs))
-    if sent == 0:
-        logger.error("SendInput returned 0 — blocked by UIPI (target runs elevated?)")
-    return sent == len(inputs)
+    return _send_inputs(inputs, f"Ctrl+{name}")
 
 
 def _send_ctrl_v() -> bool:
@@ -219,10 +222,11 @@ def _focused_control(hwnd: int) -> int | None:
 
 
 def _paste_via_message() -> bool:
-    """Send WM_PASTE to the focused control in the foreground window.
+    """Post WM_PASTE to the focused control in the foreground window.
 
-    Bypasses UIPI since WM_PASTE is a window message, not synthetic input.
-    Returns True if the message was posted successfully.
+    Works for native Win32 controls that ignore synthetic keystrokes. It is no way around UIPI: a
+    window message to an elevated window is blocked just like SendInput, and `PostMessageW` then
+    returns 0. Returns True if the message was posted.
     """
     hwnd = user32.GetForegroundWindow()
     if not hwnd:
@@ -232,12 +236,16 @@ def _paste_via_message() -> bool:
     focused = _focused_control(hwnd)
     target = focused or hwnd
     result = user32.PostMessageW(target, WM_PASTE, 0, 0)
-    logger.info(
-        "WM_PASTE posted to %s (hwnd=%s): %s",
-        "focused control" if focused else "foreground window",
-        hex(target),
-        "OK" if result else "FAILED",
-    )
+    where = "focused control" if focused else "foreground window"
+    if result:
+        logger.info("WM_PASTE posted to %s (hwnd=%s)", where, hex(target))
+    else:
+        logger.error(
+            "WM_PASTE to %s (hwnd=%s) failed (error %d): the target runs elevated and blocks window messages too",
+            where,
+            hex(target),
+            ctypes.get_last_error(),
+        )
     return bool(result)
 
 
@@ -247,12 +255,7 @@ def _send_enter() -> bool:
         _make_key_input(VK_RETURN, SCAN_RETURN),
         _make_key_input(VK_RETURN, SCAN_RETURN, KEYEVENTF_KEYUP),
     ]
-    array = (INPUT * len(inputs))(*inputs)
-    sent = user32.SendInput(len(inputs), array, ctypes.sizeof(INPUT))
-    logger.info("SendInput Enter: sent %d/%d events", sent, len(inputs))
-    if sent == 0:
-        logger.error("SendInput returned 0 for Enter — blocked by UIPI (target runs elevated?)")
-    return sent == len(inputs)
+    return _send_inputs(inputs, "Enter")
 
 
 def _prepare_keyboard(injection_delay_ms: int) -> None:
@@ -272,16 +275,51 @@ def foreground_window() -> int:
     return user32.GetForegroundWindow() or 0
 
 
+def _save_clipboard() -> str | list[tuple[int, bytes]] | None:
+    """What is on the clipboard now, to put back later: its text, else every format it holds.
+
+    `pyperclip.paste()` answers "" for an image or a file list, and putting "" back would wipe it, so an
+    empty answer takes a snapshot of all formats. None when the clipboard cannot be read.
+    """
+    try:
+        text = pyperclip.paste()
+    except pyperclip.PyperclipException:
+        return None
+    return text or snapshot_formats()
+
+
+def _restore_clipboard(saved: str | list[tuple[int, bytes]] | None) -> None:
+    """Put back what `_save_clipboard` returned; a clipboard that cannot be written stays as it is."""
+    if saved is None:
+        return
+    try:
+        if isinstance(saved, str):
+            set_text(saved)
+        else:
+            restore_formats(saved)
+    except ClipboardError:
+        pass
+
+
+def _is_whole_line_copy(text: str) -> bool:
+    """True for exactly one line plus its line break: what an editor copies when nothing is selected.
+
+    VS Code (and other editors) answer Ctrl+C with no selection by copying the caret's whole line,
+    break included, so the clipboard changes although the user selected nothing. A real selection of
+    one line that includes its break looks the same and is not told apart.
+    """
+    body = text.rstrip("\r\n")
+    return 0 < len(text) - len(body) <= 2 and "\n" not in body and "\r" not in body
+
+
 def copy_selection(injection_delay_ms: int = 500, timeout_s: float = 1.0) -> str:
     """The text selected in the focused app, copied with Ctrl+C; "" when nothing is selected.
 
     The clipboard is emptied first, so an unchanged empty clipboard after Ctrl+C means
-    there was no selection, and it is put back as it was afterwards.
+    there was no selection, and it is put back as it was afterwards (an image or a file
+    list included). A whole line copied without any selection counts as no selection.
     """
-    try:
-        original = pyperclip.paste()
-    except pyperclip.PyperclipException:
-        original = None
+    original = _save_clipboard()
     try:
         set_text("")
         _prepare_keyboard(injection_delay_ms)
@@ -295,21 +333,21 @@ def copy_selection(injection_delay_ms: int = 500, timeout_s: float = 1.0) -> str
             except pyperclip.PyperclipException:
                 continue
             if selected:
+                if _is_whole_line_copy(selected):
+                    logger.info("Ctrl+C copied a whole line: treated as no selection")
+                    return ""
                 return selected
         return ""
     finally:
-        if original is not None:
-            try:
-                set_text(original)
-            except ClipboardError:
-                pass
+        _restore_clipboard(original)
 
 
 def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = False) -> float:
     """Inject text at the active cursor position using clipboard paste.
 
-    Saves the current clipboard, sets new content, pastes, then restores. Both writes
-    stay out of the Windows clipboard history (`clipboard.set_text`).
+    Saves the current clipboard, sets new content, pastes, then restores (all formats of an image
+    or file clipboard, not just text). Both writes stay out of the Windows clipboard history
+    (`clipboard.set_text`). Raises `PasteError` when no paste reached the target (an elevated window).
     ``injection_delay_ms`` is the pause between releasing modifier keys and
     sending the Ctrl+V keystroke, giving the OS time to clear stale state.
     With ``press_enter`` an Enter keypress follows the paste; an empty ``text``
@@ -324,11 +362,7 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
             _send_enter()
         return time.monotonic()
 
-    # Save current clipboard
-    try:
-        original = pyperclip.paste()
-    except pyperclip.PyperclipException:
-        original = None
+    original = _save_clipboard()
 
     clipboard_changed = False
     try:
@@ -342,7 +376,8 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
         # fall back to WM_PASTE (works for native Win32 controls like Notepad)
         if not _send_ctrl_v():
             logger.info("SendInput failed, falling back to WM_PASTE")
-            _paste_via_message()
+            if not _paste_via_message():
+                raise PasteError("neither SendInput nor WM_PASTE reached the target window (running elevated?)")
         # Wait for paste to complete
         time.sleep(0.05)
         if press_enter:
@@ -356,8 +391,5 @@ def inject_text(text: str, injection_delay_ms: int = 500, press_enter: bool = Fa
             # Electron apps and terminals read the clipboard well after Ctrl+V; restoring
             # sooner made them paste the old clipboard instead of the dictation.
             time.sleep(_RESTORE_DELAY_S)
-            try:
-                set_text(original)
-            except ClipboardError:
-                pass
+            _restore_clipboard(original)
     return pasted_at

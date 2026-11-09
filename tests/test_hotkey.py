@@ -30,6 +30,8 @@ def _listener(mode: str, modifiers=("ctrl", "alt"), key: str = ""):
     hk = HotkeyListener(
         config, lambda: events.append("start"), lambda: events.append("stop"), grace_s=0, physical_modifiers=set
     )
+    # The physical keys are the ones the hook has seen go down, unless a test says otherwise.
+    hk._physical_modifiers = lambda: set(hk._pressed_modifiers)
     return hk, events, config
 
 
@@ -614,6 +616,7 @@ def test_toggle_paste_and_command_markers_also_end_the_recording(vk, mark):
 
 def test_toggle_key_binding_marker_stops_without_a_grace_window():
     hk, events = _toggle(key="A")
+    hk._physical_modifiers = lambda: set(hk._pressed_modifiers)  # the keys the hook saw go down
     hk._handle(LCTRL, True)
     hk._handle(LALT, True)
     hk._handle(VK_A, True)  # start
@@ -697,6 +700,7 @@ def test_escape_in_hold_ignores_the_binding_modifiers_but_not_others():
 
 def test_key_binding_marker_in_the_starting_hold_only_marks_even_after_the_key_is_released():
     hk, events = _toggle(key="A")
+    hk._physical_modifiers = lambda: set(hk._pressed_modifiers)  # the keys the hook saw go down
     hk._handle(LCTRL, True)
     hk._handle(LALT, True)
     hk._handle(VK_A, True)
@@ -995,3 +999,40 @@ def test_toggle_chord_with_an_extra_modifier_already_down_does_not_start():
     )
     _hold_ctrl_win(hk)
     assert events == []
+
+
+# -- modifiers whose key-up was lost (Ctrl+Alt+Del, the lock screen) ---------------------------------
+
+
+def test_a_plain_key_after_a_lost_modifier_key_up_is_not_a_chord():
+    hk, events, _ = _listener("hold", key="A")
+    hk._handle(LCTRL, True)
+    hk._handle(LALT, True)  # then Ctrl+Alt+Del: the secure desktop eats both key-ups
+    hk._physical_modifiers = set  # nothing is down any more
+    assert hk._handle(VK_A, True) is False  # a plain "a": typed, not swallowed
+    assert hk._handle(VK_A, False) is False
+    assert events == [] and not hk.active
+    assert hk._pressed_modifiers == set()
+
+
+def test_only_the_modifier_that_lost_its_key_up_is_forgotten():
+    hk, events, _ = _listener("hold", key="A")
+    hk._handle(LCTRL, True)
+    hk._handle(LALT, True)
+    hk._physical_modifiers = lambda: {"ctrl"}  # Alt's key-up was lost
+    assert hk._handle(VK_A, True) is False and events == []
+    hk._handle(VK_A, False)
+    hk._handle(LALT, True)  # pressed again for real
+    hk._physical_modifiers = lambda: {"ctrl", "alt"}
+    assert hk._handle(VK_A, True) is True and events == ["start"]
+
+
+def test_a_key_press_survives_a_physical_state_that_cannot_be_read():
+    hk, events, _ = _listener("hold", key="A")
+    _press_combo(hk)
+
+    def broken():
+        raise OSError("no Win32")
+
+    hk._physical_modifiers = broken
+    assert hk._handle(VK_A, True) is True and events == ["start"]

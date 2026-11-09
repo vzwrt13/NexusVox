@@ -35,6 +35,7 @@ class ModelSwitching:
     """The model part of `NexusVoxApp`."""
 
     _switch_reset: asyncio.Future | None = None  # puts the status back to idle after a finished switch
+    _switch_note: str | None = None  # one short sentence about a finished switch, e.g. the CPU fallback
 
     def get_switch_status(self) -> dict:
         """Return the current model-switch status for the dashboard.
@@ -49,7 +50,7 @@ class ModelSwitching:
                 return {"status": load["state"], "error": None}
             if load and load["state"] == "error":
                 return {"status": "error", "error": load["error"]}
-        return {"status": self._switch_status, "error": self._switch_error}
+        return {"status": self._switch_status, "error": self._switch_error, "note": self._switch_note}
 
     async def switch_model(self, model_id: str) -> None:
         """Switch to a different transcription model.
@@ -78,8 +79,16 @@ class ModelSwitching:
 
         new_needs_docker = model_needs_docker(model_id, self._device)
         old_was_docker = self._transcriber.needs_docker
+        # "auto" may move a model that has an in-process path to the CPU when Docker is out of reach;
+        # an explicit device is never overridden.
+        cpu_fallback_ok = bool(new_info.get("inprocess_supported")) and self._config.inference.device == "auto"
+        cpu_reason: str | None = None  # set once the switch runs on the CPU although Docker was wanted
         if new_needs_docker and is_frozen():
-            raise RuntimeError(DOCKER_UNAVAILABLE_MSG)
+            if not cpu_fallback_ok:
+                raise RuntimeError(DOCKER_UNAVAILABLE_MSG)
+            new_needs_docker = False
+            cpu_reason = "Docker is not available in the installed app"
+        self._switch_note = None
 
         if self._switch_reset is not None:
             self._switch_reset.cancel()  # its 5 s are for the last switch, not for this one
@@ -94,7 +103,15 @@ class ModelSwitching:
 
             if new_needs_docker:
                 self._switch_status = "starting"
-                await loop.run_in_executor(None, docker_ctl.start_profile, new_info["docker_profile"])
+                try:
+                    await loop.run_in_executor(None, docker_ctl.start_profile, new_info["docker_profile"])
+                except RuntimeError as exc:
+                    if not cpu_fallback_ok:
+                        raise
+                    new_needs_docker = False
+                    cpu_reason = "Docker is not running"
+                    logger.info("Docker could not start profile %s (%s); falling back to the CPU", model_id, exc)
+            if new_needs_docker:
                 self._switch_status = "waiting"
                 healthy = await loop.run_in_executor(None, docker_ctl.wait_for_healthy, new_info["health_url"])
                 if not healthy:
@@ -103,11 +120,16 @@ class ModelSwitching:
             self._config.inference.model = model_id
             if new_needs_docker:
                 self._config.inference.server_url = str(new_info["default_url"])
-            self._transcriber = create_transcriber(
-                self._config.inference,
-                device=self._device,
-                auto_fallback=self._config.inference.device == "auto",
-            )
+            if cpu_reason:
+                self._switch_note = f"{cpu_reason}, using the CPU"
+                logger.info("Model %s runs in-process on the CPU: %s", model_id, cpu_reason)
+                self._transcriber = create_transcriber(self._config.inference, device="cpu")
+            else:
+                self._transcriber = create_transcriber(
+                    self._config.inference,
+                    device=self._device,
+                    auto_fallback=self._config.inference.device == "auto",
+                )
             save_config(self._config)
 
             self._switch_status = "ready"

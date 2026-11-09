@@ -889,7 +889,7 @@ function pollModelStatus(prevModel) {
   const interval = setInterval(async () => {
     try {
       const data = await fetch("/api/models/status").then((r) => r.json());
-      const msg = STATUS_MESSAGES[data.status] || data.status;
+      const msg = (data.status === "ready" && data.note) || STATUS_MESSAGES[data.status] || data.status;
       showModelStatus(msg);
 
       if (data.status === "ready") {
@@ -898,7 +898,7 @@ function pollModelStatus(prevModel) {
         modelSelect.disabled = false;
         // The switch downloaded the model: redraw the list so its mark follows.
         loadModelSwitcher();
-        setTimeout(hideModelStatus, 2000);
+        setTimeout(hideModelStatus, data.note ? 5000 : 2000);
       } else if (data.status === "error") {
         clearInterval(interval);
         modelSelect.value = prevModel;

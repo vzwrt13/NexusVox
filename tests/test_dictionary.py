@@ -177,3 +177,27 @@ def test_apply_counted_german_umlauts_and_eszett():
 
 def test_usage_key_folds_whitespace_and_case():
     assert usage_key("  Herr   MÜLLER ") == "herr müller"
+
+
+# ---- one pass: a replacement is never rewritten by another entry -----------
+
+
+def test_a_later_shorter_entry_does_not_rewrite_an_earlier_replacement():
+    entries = [DictionaryEntry("cloud code", "Claude Code"), DictionaryEntry("claude", "Cloud")]
+    assert apply_dictionary("cloud code rocks", entries) == "Claude Code rocks"
+    assert apply_dictionary("cloud code rocks", entries[::-1]) == "Claude Code rocks"
+
+
+def test_each_span_is_replaced_once_and_counted_once():
+    long_ = DictionaryEntry("cloud code editor", "Claude Code editor")
+    short = DictionaryEntry("cloud code", "Claude Code")
+    text, hits = apply_dictionary_counted("the cloud code editor and cloud code", [short, long_])
+    assert text == "the Claude Code editor and Claude Code"
+    assert hits == {long_: 1, short: 1}
+
+
+def test_a_replacement_that_contains_another_entry_wrong_phrase_is_left_alone():
+    entries = [DictionaryEntry("nexus fox", "NexusVox"), DictionaryEntry("nexusvox", "Nexus Vox")]
+    text, hits = apply_dictionary_counted("open nexus fox now", entries)
+    assert text == "open NexusVox now"
+    assert hits == {entries[0]: 1}

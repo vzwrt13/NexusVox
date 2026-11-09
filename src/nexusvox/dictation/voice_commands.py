@@ -54,8 +54,6 @@ _SAFE_SYMBOLS: frozenset[str] = frozenset(
         "close bracket",
         "open brace",
         "close brace",
-        "less than",
-        "greater than",
     }
 )
 
@@ -207,10 +205,13 @@ for _card in (*_ONES, *_TENS, *_SCALE):
     _ord = _IRREGULAR_ORD_EN.get(_card) or (_card[:-1] + "ieth" if _card.endswith("y") else _card + "th")
     _ORD_EN[_ord] = _card
 _ORD_WORD_PAT = "(?:" + "|".join(re.escape(w) for w in sorted(_ORD_EN, key=len, reverse=True)) + ")"
-# Match a maximal run of number words separated by spaces or hyphens, optionally ending in an ordinal
-_NUM_SEQ = _NUM_WORD_PAT + r"(?:[\s-]+" + _NUM_WORD_PAT + r")*"
+# Number words are separated by horizontal whitespace or a hyphen only: a run never spans a line break.
+_NUM_SEP = r"(?:[^\S\r\n]|-)+"
+_SEP_RE: re.Pattern[str] = re.compile(_NUM_SEP)
+# Match a maximal run of number words, optionally ending in an ordinal; _en_chunks cuts it into numbers.
+_NUM_SEQ = _NUM_WORD_PAT + r"(?:" + _NUM_SEP + _NUM_WORD_PAT + r")*"
 _NUM_SEQ_PATTERN: re.Pattern[str] = re.compile(
-    r"\b(?:(?:" + _NUM_SEQ + r"[\s-]+)?" + _ORD_WORD_PAT + r"|" + _NUM_SEQ + r")\b",
+    r"\b(?:(?:" + _NUM_SEQ + _NUM_SEP + r")?" + _ORD_WORD_PAT + r"|" + _NUM_SEQ + r")\b",
     re.IGNORECASE,
 )
 
@@ -235,8 +236,6 @@ def _words_to_int(words: list[str]) -> int:
 
 
 _WORD_RE: re.Pattern[str] = re.compile(r"[^\W\d_]+")
-# Horizontal whitespace or hyphen only: a number run must not span a line break.
-_SEP_RE: re.Pattern[str] = re.compile(r"(?:[^\S\r\n]|-)+")
 
 _DE_UNITS: dict[str, int] = {
     "null": 0,
@@ -485,43 +484,87 @@ def _en_ordinal_suffix(n: int) -> str:
     return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 
-def _ordinal_fits(prefix_value: int, card: str) -> bool:
-    """Whether a prefix such as "twenty" can stand in front of the ordinal of *card* ("first")."""
-    if card in _SCALE:
-        return prefix_value > 0
-    unit = 10 if _ONES.get(card, 100) < 10 else 100
-    return prefix_value > 0 and prefix_value % unit == 0
+def _en_chunks(words: list[str]) -> list[list[str]]:
+    """Cut a run of English number words into the numbers it spells ("one two three" -> three numbers).
+
+    A word continues the current number only where English grammar allows it ("twenty five",
+    "five thousand three hundred"); otherwise it starts the next number. So a list stays separate
+    numbers and "nineteen eighty four" is 19 and 84, as the German path treats "zwei drei".
+    """
+    chunks: list[list[str]] = []
+    group = 0  # value of the current group below 1000
+    last_scale = 0  # the last scale word (thousand, million, ...) of the current number; 0: none yet
+    closed = False  # "zero" stands alone
+    for word in words:
+        lower = word.lower()
+        card = _ORD_EN.get(lower, lower)  # an ordinal fits where its cardinal fits
+        fits = False
+        if chunks and not closed:
+            starts_group = (group == 0 and last_scale > 0) or (group > 0 and group % 100 == 0)
+            if card == "zero":
+                fits = False
+            elif card == "hundred":
+                fits = 0 < group < 100
+            elif card in _SCALE:
+                fits = group > 0 and (not last_scale or _SCALE[card] < last_scale)
+            elif card in _TENS or _ONES[card] >= 10:
+                fits = starts_group
+            else:  # 1..9 also follow a tens word ("twenty five")
+                fits = starts_group or (group % 100 != 0 and group % 10 == 0)
+        if fits:
+            chunks[-1].append(word)
+        else:
+            chunks.append([word])
+            group, last_scale, closed = 0, 0, False
+        if card == "zero":
+            closed = True
+        elif card == "hundred":
+            group = (group or 1) * 100
+        elif card in _SCALE:
+            last_scale, group = _SCALE[card], 0
+        else:
+            group += _TENS.get(card) or _ONES[card]
+    return chunks
+
+
+def _en_number_text(chunk: list[str]) -> str:
+    """One number's words as digits; a trailing ordinal word makes it an ordinal ("twenty first" -> "21st")."""
+    last = chunk[-1].lower()
+    if last not in _ORD_EN:
+        return str(_words_to_int(chunk))
+    # A lone "first" or "second" is usually an adverb or a time unit ("a second"), not a position.
+    if len(chunk) == 1 and last in ("first", "second"):
+        return chunk[0]
+    n = _words_to_int([*chunk[:-1], _ORD_EN[last]])
+    return f"{n}{_en_ordinal_suffix(n)}"
 
 
 def _convert_numbers_en(text: str) -> str:
     """Replace runs of English number words with digits ("twenty five" -> "25", "twelfth" -> "12th")."""
 
     def replace_match(m: re.Match[str]) -> str:
-        group = m.group()
-        words = re.split(r"[\s-]+", group)
-        last = words[-1].lower()
-        if last not in _ORD_EN:
-            return str(_words_to_int(words))
-        card = _ORD_EN[last]
-        if len(words) == 1:
-            # A lone "first" or "second" is usually an adverb or a time unit ("a second"), not a position.
-            if last in ("first", "second"):
-                return group
-            n = _words_to_int([card])
-            return f"{n}{_en_ordinal_suffix(n)}"
-        prefix_value = _words_to_int(words[:-1])
-        if _ordinal_fits(prefix_value, card):
-            n = _words_to_int([*words[:-1], card])
-            return f"{n}{_en_ordinal_suffix(n)}"
-        # "one second": the number and the word stay apart.
-        return f"{prefix_value} {words[-1]}"
+        words = [w for w in _SEP_RE.split(m.group()) if w]
+        return " ".join(_en_number_text(chunk) for chunk in _en_chunks(words))
 
     return _NUM_SEQ_PATTERN.sub(replace_match, text)
 
 
+def _is_english(text: str) -> bool:
+    """Whether the language detector reads *text* as English (German is the only other candidate)."""
+    from .lang_detect import language_guess  # lingua builds its detector on import: only numbers need it
+
+    return language_guess(text)[0] == "en"
+
+
 def _convert_numbers(text: str) -> str:
-    """Replace number words with digits, English and German alike."""
-    return _convert_numbers_en(_convert_numbers_de(text))
+    """Replace number words with digits, English and German alike.
+
+    German words that are also English words ("null", "elf") are left alone in a text that reads as
+    English, so "the function returns null" stays as it is.
+    """
+    if not _is_english(text):
+        text = _convert_numbers_de(text)
+    return _convert_numbers_en(text)
 
 
 # ---------------------------------------------------------------------------
@@ -607,15 +650,37 @@ def _strip_trailing_separator(text: str) -> str:
     return text
 
 
+# What the speech model puts after a spoken command: spaces, a comma, or sentence punctuation
+# ("Hello. New line. World."). A full stop only counts when a space or the end follows it (".NET" stays).
+_LEADING_SEPARATOR: re.Pattern[str] = re.compile(r"[ \t]*(?:,+|[,;:.…]+(?!\S))?[ \t]*")
+
+
 def _strip_leading_separator(text: str) -> str:
-    """Strip leading comma/space separator from text following a command."""
-    if text.startswith(", "):
-        return text[2:]
-    if text.startswith(","):
-        return text[1:]
-    if text.startswith(" "):
-        return text[1:]
-    return text
+    """Strip the punctuation and spaces the speech model put between a command and the text after it."""
+    return text[_LEADING_SEPARATOR.match(text).end() :]  # type: ignore[union-attr]  # it matches the empty string
+
+
+# "all caps" is a noun phrase after these words ("typed in all caps"), not a command.
+_ALL_CAPS_AFTER: frozenset[str] = frozenset(
+    {"in", "with", "without", "of", "the", "a", "an", "no", "not", "use", "using", "is", "are", "was", "were"}
+    | {"im", "mit", "ohne", "der", "die", "das", "ein", "eine", "kein", "keine", "nicht", "ist", "sind"}
+)
+_PRECEDING_WORD: re.Pattern[str] = re.compile(r"(\w+)\s*$")
+_ALL_CAPS_BEFORE: re.Pattern[str] = re.compile(r"\W*(?:geschrieben|schreiben|schreibt|schreibe)\b", re.IGNORECASE)
+
+
+def _is_all_caps_text(tokens: list[str], i: int) -> bool:
+    """Whether the "all caps" at ``tokens[i]`` is part of an ordinary sentence, so it stays text.
+
+    That is the case right after a word such as "in" ("I wrote it in all caps"), before "geschrieben"
+    ("alles groß geschrieben"), and when no word follows at all: the command would have nothing to
+    uppercase and only swallow the words.
+    """
+    before = _PRECEDING_WORD.search(tokens[i - 1]) if i else None
+    if before and before.group(1).lower() in _ALL_CAPS_AFTER:
+        return True
+    after = "".join(tokens[i + 1 :])
+    return not re.search(r"\w", after) or _ALL_CAPS_BEFORE.match(after) is not None
 
 
 def _apply_commands(
@@ -649,7 +714,7 @@ def _apply_commands(
                 tokens[i + 1] = _strip_leading_separator(tokens[i + 1])
             continue
 
-        if lower in caps_keys:
+        if lower in caps_keys and not _is_all_caps_text(tokens, i):
             caps_active = True
             # Strip leading comma/space from following text token
             if i + 1 < len(tokens):

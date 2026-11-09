@@ -499,3 +499,139 @@ def test_eins_still_a_number_in_a_list():
 def test_english_ordinals(spoken, expected):
     assert process_voice_commands(spoken, numbers_as_digits=True) == expected
     assert process_voice_commands(spoken) == spoken
+
+
+# --- English number runs: one number per run that fits, a list stays a list ---
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("count one two three", "count 1 2 3"),
+        ("nineteen eighty four", "19 84"),
+        ("in twenty twenty", "in 20 20"),
+        ("zero five", "0 5"),
+        ("twenty five", "25"),
+        ("twenty-one thousand three hundred forty two", "21342"),
+        ("five thousand three hundred", "5300"),
+        ("twenty one hundred", "2100"),
+        ("two million five hundred thousand", "2500000"),
+        ("one hundred twenty three four", "123 4"),
+        ("twenty first century", "21st century"),
+    ],
+)
+def test_english_number_runs_stop_where_the_next_word_does_not_fit(spoken, expected):
+    assert process_voice_commands(spoken, numbers_as_digits=True) == expected
+
+
+def test_english_number_run_never_crosses_a_line_break():
+    assert process_voice_commands("one\ntwo", numbers_as_digits=True) == "1\n2"
+    assert process_voice_commands("twenty\r\nfive", numbers_as_digits=True) == "20\r\n5"
+    assert process_voice_commands("twenty five\nthirty", numbers_as_digits=True) == "25\n30"
+
+
+def test_number_run_across_a_spoken_new_line_stays_two_numbers():
+    assert process_voice_commands("one new line two", numbers_as_digits=True) == "1\n2"
+
+
+# --- German number words in English text stay words ---
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    ["the function returns null here", "the elf ran", "I counted drei apples"],
+)
+def test_german_number_words_stay_in_english_text(spoken):
+    assert process_voice_commands(spoken, numbers_as_digits=True) == spoken
+
+
+def test_german_numbers_still_convert_in_german_text():
+    assert process_voice_commands("Ich habe elf Katzen", numbers_as_digits=True) == "Ich habe 11 Katzen"
+    assert process_voice_commands("Der Wert ist null", numbers_as_digits=True) == "Der Wert ist 0"
+
+
+def test_english_numbers_still_convert_in_english_text_next_to_german_words():
+    assert process_voice_commands("the elf ran twenty five miles", numbers_as_digits=True) == "the elf ran 25 miles"
+
+
+# --- Defaults: everyday sentences stay text ---
+
+
+def _with_default_config(text: str) -> str:
+    from nexusvox.config import VoiceCommandsConfig
+
+    cfg = VoiceCommandsConfig()
+    return process_voice_commands(text, frozenset(cfg.symbols), cfg.numbers_as_digits, frozenset(cfg.structural))
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "Das ist größer als gedacht.",
+        "Es ist kleiner als erwartet.",
+        "That is less than I thought.",
+        "Profit is greater than cost.",
+        "open a new tab please",
+        "Öffne einen neuen Tabulator bitte.",
+    ],
+)
+def test_ambiguous_commands_are_off_in_the_default_config(spoken):
+    assert _with_default_config(spoken) == spoken
+
+
+def test_default_config_still_recognises_the_safe_commands():
+    assert _with_default_config("path slash file new line next") == "path/file\nnext"
+
+
+def test_less_than_and_tab_still_work_when_enabled():
+    assert process_voice_commands("a less than b", frozenset({"less than"})) == "a<b"
+    assert process_voice_commands("a größer als b", frozenset({"greater than"})) == "a>b"
+    assert process_voice_commands("a tab b", active_structural=frozenset({"tab"})) == "a\tb"
+
+
+# --- Punctuation the speech model puts after a command ---
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("Hello. New line. World.", "Hello.\nWorld."),
+        ("Hello. New paragraph. World.", "Hello.\n\nWorld."),
+        ("Hallo. Neue Zeile. Welt.", "Hallo.\nWelt."),
+        ("Hello, new line, world", "Hello\nworld"),
+        ("Hello. New line.", "Hello.\n"),
+        ("Hello. New line... World.", "Hello.\nWorld."),
+        ("Save as new line .gitignore", "Save as\n.gitignore"),
+    ],
+)
+def test_punctuation_after_a_command_is_dropped(spoken, expected):
+    assert process_voice_commands(spoken) == expected
+
+
+def test_punctuation_after_a_symbol_command_is_dropped():
+    assert process_voice_commands("path slash. file", frozenset({"slash"})) == "path/file"
+
+
+# --- "all caps" inside an ordinary sentence ---
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "I wrote it in all caps today",
+        "He wrote in all caps.",
+        "Please do not use all caps",
+        "Is all caps rude?",
+        "Er hat alles groß geschrieben",
+        "Schreib das in alles groß.",
+        "all caps",
+    ],
+)
+def test_all_caps_in_a_normal_sentence_is_typed_as_text(spoken):
+    assert process_voice_commands(spoken) == spoken
+
+
+def test_all_caps_still_works_as_a_command():
+    assert process_voice_commands("Hello. All caps wow, new line next") == "Hello. WOW\nnext"
+    assert process_voice_commands("alles groß achtung") == "ACHTUNG"
+    assert process_voice_commands("all caps hello new line all caps world") == "HELLO\nWORLD"

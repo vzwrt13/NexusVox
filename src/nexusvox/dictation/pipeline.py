@@ -28,7 +28,7 @@ from ..config import CleanupConfig, Config, LlmConfig, TranslatorConfig, VoiceCo
 from ..llm import config_for
 from ..storage.vocabulary import DictionaryEntry
 from ..system.logsetup import Text
-from .cleanup import MIN_WORDS, CleanupResult, cleanup
+from .cleanup import MIN_WORDS, PROMPTS, CleanupResult, cleanup
 from .dictionary import apply_dictionary_counted
 from .translator import TranslateResult, translate
 from .voice_commands import process_voice_commands, split_press_enter
@@ -117,6 +117,8 @@ def process_text(
     cleaned = cleanup_fn(processed, config.cleanup, config_for(config.llm, "dictation_cleanup"))
     if config.cleanup.level == "off":
         logger.debug("Cleanup: off, typing the dictation as it is")
+    elif config.cleanup.level not in PROMPTS:  # a typo such as "meduim": cleanup never runs
+        logger.warning("Cleanup: unknown level %r, typing the dictation as it is", config.cleanup.level)
     elif cleaned.status is None:  # the model was not asked: every other outcome logs its own line
         logger.info("Cleanup (%s): skipped, the dictation is shorter than %d words", config.cleanup.level, MIN_WORDS)
 
@@ -154,8 +156,10 @@ def process_text(
         cleanup=cleaned,
         translation=translation,
         # The translator passes English through byte for byte (translated=True all the same):
-        # only a dictation whose words it actually changed is not learnable.
-        learnable=not cleaned.cleaned and translation.text == cleaned.text and typed == translation.text == extended,
+        # only a dictation whose words it actually changed is not learnable. `typed` is compared with
+        # `extended` (an extension's own change), not with `translation.text`, which still holds the
+        # placeholders of an extension's protect step.
+        learnable=not cleaned.cleaned and translation.text == cleaned.text and typed == extended,
         spoken=corrected,
         dictionary_hits=dictionary_hits,
     )

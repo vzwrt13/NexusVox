@@ -131,3 +131,31 @@ def test_is_reachable_false_when_port_does_not_speak_http():
         threading.Thread(target=serve_garbage, args=(listener,), daemon=True).start()
 
         assert is_reachable(TranslatorConfig(url=f"http://127.0.0.1:{listener.getsockname()[1]}/translate")) is False
+
+
+def test_translate_cut_off_reply_falls_back_to_original(monkeypatch):
+    import http.client
+
+    def cut_off(*_args, **_kwargs):
+        raise http.client.IncompleteRead(b"{", 100)
+
+    monkeypatch.setattr("nexusvox.dictation.translator.urllib.request.urlopen", cut_off)
+
+    result = translate("Hallo Welt", TranslatorConfig(enabled=True))
+
+    assert (result.text, result.translated) == ("Hallo Welt", False)
+    assert result.error is not None and "IncompleteRead" in result.error
+
+
+def test_translate_bad_status_line_falls_back_to_original(monkeypatch):
+    import http.client
+
+    def bad_status(*_args, **_kwargs):
+        raise http.client.BadStatusLine("garbage")
+
+    monkeypatch.setattr("nexusvox.dictation.translator.urllib.request.urlopen", bad_status)
+
+    result = translate("Hallo Welt", TranslatorConfig(enabled=True))
+
+    assert (result.text, result.translated) == ("Hallo Welt", False)
+    assert result.error is not None and "BadStatusLine" in result.error

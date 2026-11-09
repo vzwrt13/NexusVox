@@ -779,7 +779,7 @@ def test_voice_commands_structural_defaults_when_missing(tmp_path):
 
     loaded = load_config(path)
 
-    assert loaded.voice_commands.structural == ["new paragraph", "new line", "tab", "all caps"]
+    assert loaded.voice_commands.structural == ["new paragraph", "new line", "all caps"]
     assert loaded.voice_commands.bypass_structural is False
 
 

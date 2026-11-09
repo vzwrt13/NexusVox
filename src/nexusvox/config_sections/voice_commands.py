@@ -16,12 +16,11 @@ _DEFAULT_SYMBOLS: list[str] = [
     "close bracket",
     "open brace",
     "close brace",
-    "less than",
-    "greater than",
 ]
 
 
-_DEFAULT_STRUCTURAL = ["new paragraph", "new line", "tab", "all caps"]
+# "tab" is opt-in: "open a new tab" is an everyday sentence, and so are "less than" / "greater than".
+_DEFAULT_STRUCTURAL = ["new paragraph", "new line", "all caps"]
 
 
 @dataclass

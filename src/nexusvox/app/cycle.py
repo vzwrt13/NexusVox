@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import functools
 import logging
 import time
@@ -61,6 +60,8 @@ class TranscriptionCycle:
         recording_stopped = False
         pressed_at = self._press_time  # `_press_time` moves on with the next press, while this take still runs
         loop = asyncio.get_running_loop()
+        # The transcriber this take connected to; disconnected once, when the cycle ends, however it ends.
+        transcriber = None
         take: tuple[int | None, float] | None = None  # (meeting token, start) while a take is open
         audio: AudioCapture | RemoteAudioSource | None = None  # set once recording started
         stream_task: asyncio.Task | None = None
@@ -83,25 +84,35 @@ class TranscriptionCycle:
                 await loop.run_in_executor(None, self._end_take, token, start, end)
 
         try:
+            if self._switch_in_progress():
+                # A model switch tears the transcriber down and builds the next one: no take runs against it.
+                if remote:
+                    raise RuntimeError("A model switch is in progress")
+                logger.warning("A model switch is in progress, no dictation until it is done")
+                await self._offline_stop(pressed_at)
+                return
+
             # Connect to inference server BEFORE signalling readiness so the
             # WebSocket handshake doesn't race against hotkey release.
+            transcriber = self._transcriber
             try:
-                await self._transcriber.connect()
+                await transcriber.connect()
             except Exception:
                 if remote:
                     raise
                 logger.exception("Could not reach the transcription server")
-                with contextlib.suppress(Exception):
-                    await self._transcriber.disconnect()
                 await self._offline_stop(pressed_at)
                 return
 
             # A stop left from an earlier tap while the keys are down again: this press is the take, so record it.
             # Skipping would leave its release as a stop with no cycle to read it, and every later take would
-            # find a stale stop and be skipped too.
+            # find a stale stop and be skipped too. That press also set the start event again: this take is the
+            # one it asked for, so it is consumed here, or the loop would run a cycle with no key pressed.
             if not remote and self._record_stop_event.is_set() and self._hotkey.active:
                 self._record_stop_event.clear()
+                self._record_start_event.clear()
                 self._next_stop()
+                pressed_at = self._press_time
                 logger.info("Dropped a stop from an earlier press, the hotkey is held again")
 
             # Clear any stop event that arrived while we were connecting.
@@ -112,7 +123,6 @@ class TranscriptionCycle:
                 self._record_stop_event.clear()
                 skip_mark, skip_cancelled, _ = self._next_stop()
                 logger.info("Hotkey released before recording could start, skipping")
-                await self._transcriber.disconnect()
                 await self._hide_os_control()
                 if skip_cancelled:
                     return
@@ -183,7 +193,6 @@ class TranscriptionCycle:
             if cancelled:
                 logger.info("Recording discarded (Escape or a foreign key), nothing to transcribe")
                 self._tray.set_active(False)
-                await self._transcriber.disconnect()
                 await self._hide_os_control()
                 return
 
@@ -195,7 +204,6 @@ class TranscriptionCycle:
             if remote and self._remote_cancelled:
                 logger.info("Remote recording cancelled, nothing to transcribe")
                 self._tray.set_active(False)
-                await self._transcriber.disconnect()
                 return
 
             self._tray.set_active(False)
@@ -208,20 +216,17 @@ class TranscriptionCycle:
             take_s = (stop_at - start_time) if stop_at else duration_ms / 1000
             if not remote and mark is None and self._hotkey.mode == "toggle" and take_s < MIN_TOGGLE_TAKE_S:
                 logger.info("Toggle take under %d ms, dropped", MIN_TOGGLE_TAKE_S * 1000)
-                await self._transcriber.disconnect()
                 return
 
             if mark == PASTE_LAST:
                 # The paste key was tapped during the hold: drop this recording and paste
                 # the last text again instead of transcribing.
-                await self._transcriber.disconnect()
                 await self._paste_last_text()
                 return
 
             if not audio_buffer:
                 # No audio frames (a WAV of only its header): there is nothing to send, whatever the model.
                 logger.info("Recording has no audio frames, nothing to transcribe")
-                await self._transcriber.disconnect()
                 if mark == POLISH:
                     await self._polish_selection("", None)  # as a tap: the default instruction
                 elif mark == COMMAND:
@@ -230,21 +235,23 @@ class TranscriptionCycle:
 
             # Finalize transcription
             try:
-                result = await self._transcriber.finish()
+                result = await transcriber.finish()
             except Exception:
                 if remote or mark != POLISH or stop_at is None or stop_at - pressed_at >= QUICK_TAP_S:
                     raise
                 # A polish tap needs no transcript (HTTP backends only fail here, not in connect()).
                 logger.exception("Transcription failed; polishing with the default instruction")
-                await self._transcriber.disconnect()
                 await self._polish_selection("", None)
                 return
             transcribe_ms = int((time.monotonic() - stop_time) * 1000)
             logger.info("Transcript received after %dms", transcribe_ms)
 
-            # The engine that made this transcript, read now: an auto engine may switch for the next take meanwhile.
-            device = self._transcriber.device
-            recording = _Recording(audio_buffer, duration_ms, result.confidence, transcribe_ms, device)
+            # The engine and the model that made this transcript, read now: an auto engine may switch for the next
+            # take meanwhile, and the row is saved only after the paste and a translation.
+            device = transcriber.device
+            recording = _Recording(
+                audio_buffer, duration_ms, result.confidence, transcribe_ms, device, model=transcriber.model
+            )
 
             if mark == COMMAND:
                 # A command recording (command key pressed during the hold) is never
@@ -260,13 +267,11 @@ class TranscriptionCycle:
                     await loop.run_in_executor(
                         None, self._save_command, recording, f"[os-control] {command_text}", command_text
                     )
-                await self._transcriber.disconnect()
                 return
 
             if mark == POLISH:
                 # The polish key was tapped during the hold: what was said (maybe nothing)
                 # is an instruction for the selected text, not text to type.
-                await self._transcriber.disconnect()
                 await self._polish_selection(result.text.strip(), recording)
                 return
 
@@ -282,26 +287,24 @@ class TranscriptionCycle:
                 nexus_cmd = parse_nexus_command(raw_text)
                 if nexus_cmd is not None and nexus_cmd.action == "flag" and self._config.experimental.flag_command:
                     self._flag_last_transcription()
-                    await self._transcriber.disconnect()
                     return
                 label = await self._run_command(raw_text, nexus_cmd)
                 if label is not None:
                     await loop.run_in_executor(None, self._save_command, recording, label, raw_text)
-                    await self._transcriber.disconnect()
                     return
 
-            processed = await loop.run_in_executor(
-                None,
-                functools.partial(
-                    process_text,
+            def process():
+                # The dictionary is read here, in the executor: a locked database must not stall the hotkey events.
+                return process_text(
                     raw_text,
                     self._config,
                     self._db.get_dictionary_entries(),
                     remote=remote,
                     extend_fn=None if remote else self._extend_dictation,
                     protect_fn=functools.partial(self._protect_dictation, remote=remote),
-                ),
-            )
+                )
+
+            processed = await loop.run_in_executor(None, process)
             done_at = None  # when the text was in place; the clipboard restore after it is not latency
             target_app = None  # process name of the app the text lands in; never the window title
             if remote:
@@ -339,7 +342,7 @@ class TranscriptionCycle:
                 language=language,
                 duration_ms=duration_ms,
                 confidence=result.confidence,
-                model=self._transcriber.model,
+                model=recording.model,
                 translated=processed.translation.translated,
                 translate_source=processed.translation.source,
                 translate_ms=processed.translation.ms,
@@ -375,7 +378,6 @@ class TranscriptionCycle:
             if not remote:
                 # `_hotkey.command` may still describe the last hotkey recording.
                 await self._hide_os_control()
-            await self._transcriber.disconnect()
         finally:
             if cue_timer is not None:
                 cue_timer.cancel()
@@ -391,6 +393,11 @@ class TranscriptionCycle:
                 elif self._shows_overlay():
                     # Held again: the next take starts when its connection is up, but the user is speaking now.
                     self._overlay.show(RECORDING)
+            if transcriber is not None:
+                try:
+                    await transcriber.disconnect()  # idempotent: a backend that closed itself is no error
+                except Exception:
+                    logger.exception("Could not disconnect from the transcription server")
 
     def _paste(self, text: str, delay_ms: int, press_enter: bool) -> tuple[float, str | None]:
         """Type the text at the cursor (runs in the executor); also the process name of the app it lands in.

@@ -7,7 +7,10 @@ package, one mixin each; they all work on the state set up here.
 from __future__ import annotations
 
 import asyncio
+import functools
+import inspect
 import threading
+from collections.abc import Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -27,7 +30,6 @@ from ..llm import unload_all as llm_unload_all
 from ..llm import warm_up as llm_warm_up
 from ..storage.db import Database
 from ..system.tray import SystemTray
-from ..transcription.transcriber import create_transcriber
 from .commands import CommandHandling
 from .common import logger
 from .cycle import TranscriptionCycle
@@ -82,11 +84,7 @@ class NexusVoxApp(
             self._overlay.warm_up()
         self._audio.on_rms = self._on_rms
         self._audio.rms_wanted = self._shows_overlay
-        self._transcriber = create_transcriber(
-            config.inference,
-            device=self._device,
-            auto_fallback=config.inference.device == "auto",
-        )
+        self._transcriber = self._build_transcriber()
         self._db = Database(config.database)
         # Statistics writes (dictionary hits, learn-from-edits outcomes) run here, one at a time and in order,
         # so a slow or locked database never delays the paste or the hotkey.
@@ -155,6 +153,18 @@ class NexusVoxApp(
         # Model switch state
         self._switch_status: str = "idle"
         self._switch_error: str | None = None
+        # Background tasks (warm-ups, the phone server). The loop keeps only a weak reference to a task.
+        self._tasks: set[asyncio.Task] = set()
+
+    def _spawn(self, coro: Coroutine) -> asyncio.Task:
+        """Run *coro* as a background task and keep a reference to it until it ends.
+
+        The event loop holds tasks only weakly, so a task nobody references can be garbage-collected mid-run.
+        """
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
 
     def _open_dashboard(self) -> None:
         """Open the dashboard window."""
@@ -200,7 +210,10 @@ class NexusVoxApp(
             await self._serve()
         except asyncio.CancelledError:
             logger.info("Quit requested")
-        await self._shutdown()
+        finally:
+            # Also after a crash of `_serve`: other apps' microphones are unmuted and an open meeting's
+            # WAV files are finalized either way.
+            await self._shutdown()
 
     async def _serve(self) -> None:
         """Start the components, then run a transcription cycle for each hotkey press."""
@@ -243,7 +256,7 @@ class NexusVoxApp(
         # A custom server is remote and has nothing to preload.
         # Engine "auto" on a GPU machine warms up the Docker server (or the CPU model while it is down).
         if self._warms_up():
-            asyncio.create_task(self._preload_transcriber())
+            self._spawn(self._preload_transcriber())
 
         if self._config.remote_mic.enabled:
             self._remote_mic = RemoteMicServer(
@@ -253,7 +266,7 @@ class NexusVoxApp(
                 self._on_remote_stop,
                 self._on_remote_cancel,
             )
-            asyncio.create_task(self._remote_mic.run())
+            self._spawn(self._remote_mic.run())
 
         # Main loop: wait for hotkey press, run transcription cycle
         while self._running:
@@ -277,25 +290,47 @@ class NexusVoxApp(
                         self._remote_mic.finished(self._remote_text)
 
     async def _shutdown(self) -> None:
-        """Clean up all components."""
+        """Clean up all components.
+
+        The mic guard goes first, so other apps' microphones are unmuted whatever a later step does, and
+        each step is guarded: one that fails is logged and the rest still run.
+        """
         logger.info("Shutting down...")
-        self._hotkey.stop()
-        self._meeting_hotkey.stop()
-        api = running_dashboard_api()
-        if api is not None:
-            api.shutdown_meeting()
-        self._tray.stop()
-        self._audio.stop()
-        self._edit_watcher.stop()
-        self._stats_pool.shutdown(wait=True)
-        if self._remote_mic is not None:
-            await self._remote_mic.close()
+        loop = asyncio.get_running_loop()
+
+        def close_meeting() -> None:
+            api = running_dashboard_api()
+            if api is not None:
+                api.shutdown_meeting()
+
         if self._mic_guard is not None:
-            self._mic_guard.release()
-        await self._transcriber.disconnect()
+            await self._shutdown_step("mic guard", self._mic_guard.release)
+        await self._shutdown_step("hotkey", self._hotkey.stop)
+        await self._shutdown_step("meeting hotkey", self._meeting_hotkey.stop)
+        await self._shutdown_step("meeting", close_meeting)
+        await self._shutdown_step("tray", self._tray.stop)
+        await self._shutdown_step("audio", self._audio.stop)
+        await self._shutdown_step("edit watcher", self._edit_watcher.stop)
+        # Waits for the last statistics write, which a locked database can hold up: off the loop.
+        await self._shutdown_step(
+            "statistics", lambda: loop.run_in_executor(None, functools.partial(self._stats_pool.shutdown, wait=True))
+        )
+        if self._remote_mic is not None:
+            await self._shutdown_step("phone server", self._remote_mic.close)
+        await self._shutdown_step("transcriber", self._transcriber.disconnect)
         # The model stays loaded while the app runs (renewed hourly); give its memory back on quit.
-        llm_stop_renewal()
-        await asyncio.get_running_loop().run_in_executor(None, llm_unload_all, self._config.llm)
+        await self._shutdown_step("LLM renewal", llm_stop_renewal)
+        await self._shutdown_step("LLM unload", lambda: loop.run_in_executor(None, llm_unload_all, self._config.llm))
+
+    @staticmethod
+    async def _shutdown_step(name: str, step: Callable[[], object]) -> None:
+        """Run one shutdown step (plain or awaitable); a failure is logged, never raised."""
+        try:
+            result = step()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.exception("Shutdown step failed: %s", name)
 
     def run(self) -> None:
         """Start the application."""

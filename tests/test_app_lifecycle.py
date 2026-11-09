@@ -166,6 +166,54 @@ def test_quit_during_a_phone_recording_still_answers_the_phone(monkeypatch):
     _assert_shut_down(app, api)
 
 
+def test_a_crash_of_the_main_loop_still_runs_the_shutdown(monkeypatch):
+    app, api = _running_app(monkeypatch)
+    app._serve = AsyncMock(side_effect=RuntimeError("boom"))
+    with pytest.raises(RuntimeError, match="boom"):
+        app.run()
+    _assert_shut_down(app, api)
+
+
+def test_the_shutdown_releases_the_mic_guard_first_and_survives_a_failing_step(monkeypatch):
+    app, api = _running_app(monkeypatch)
+    steps = []
+    app._mic_guard = MagicMock()
+    app._mic_guard.release.side_effect = lambda: steps.append("mic guard")
+
+    def broken_hotkey_stop():
+        steps.append("hotkey")
+        raise RuntimeError("hook already gone")
+
+    app._hotkey.stop.side_effect = broken_hotkey_stop
+    loop_thread = []
+    app._stats_pool.shutdown.side_effect = lambda **_kw: loop_thread.append(threading.get_ident())
+
+    async def scenario():
+        loop_thread.insert(0, threading.get_ident())
+        await app._shutdown()
+
+    asyncio.run(scenario())
+    assert steps == ["mic guard", "hotkey"]
+    _assert_shut_down(app, api)  # every later step still ran
+    assert loop_thread[0] != loop_thread[1]  # a locked database never holds the loop
+
+
+def test_a_background_task_is_kept_until_it_ends():
+    app = NexusVoxApp.__new__(NexusVoxApp)
+    app._tasks = set()
+
+    async def scenario():
+        release = asyncio.Event()
+        task = app._spawn(release.wait())
+        held = task in app._tasks
+        release.set()
+        await task
+        return held
+
+    assert asyncio.run(scenario()) is True
+    assert app._tasks == set()
+
+
 # -- Model switch ---------------------------------------------------------------------------------
 
 
@@ -208,6 +256,74 @@ def test_choosing_the_active_model_during_a_dictation_is_no_error(monkeypatch):
     assert app._switch_status == "idle"
 
 
+def _fast_status_reset(monkeypatch) -> None:
+    """The 5 s that a switch status stays readable pass at once."""
+    real_sleep = asyncio.sleep
+
+    async def fast(_seconds):
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", fast)
+
+
+def test_a_refused_switch_clears_its_error_like_a_finished_one(monkeypatch):
+    app = _switch_app(monkeypatch, cycle_running=True)
+    _fast_status_reset(monkeypatch)
+
+    async def scenario():
+        with pytest.raises(RuntimeError, match="during a dictation"):
+            await app.switch_model("whisper-large-v3-turbo")
+        refused = app._switch_status
+        await app._switch_reset
+        return refused
+
+    assert asyncio.run(scenario()) == "error"
+    assert app._switch_status == "idle" and app._switch_error is None
+
+
+def test_a_failed_switch_clears_its_error_like_a_finished_one(monkeypatch):
+    app, _docker, _built = _cuda_switch_app(monkeypatch, start_error="port is already allocated")
+    _fast_status_reset(monkeypatch)
+
+    async def scenario():
+        await app.switch_model("parakeet-tdt-0.6b")
+        failed = app._switch_status
+        await app._switch_reset
+        return failed
+
+    assert asyncio.run(scenario()) == "error"
+    assert app._switch_status == "idle" and app._switch_error is None
+
+
+def test_a_failed_switch_keeps_the_transcriber_it_never_replaced(monkeypatch):
+    app, _docker, built = _cuda_switch_app(monkeypatch, device="cuda", healthy=False)
+    old = app._transcriber
+    asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
+    assert app._transcriber is old and built == []
+
+
+def test_a_switch_that_fails_after_the_swap_rebuilds_the_old_model_and_warms_it_up(monkeypatch):
+    app, _docker, built = _cuda_switch_app(monkeypatch)
+
+    def save_fails(_config):
+        raise OSError("config.toml is read-only")
+
+    patch_app(monkeypatch, "save_config", save_fails)
+    app._warms_up = lambda: True
+    app._tasks = set()
+    app._preload_transcriber = AsyncMock()
+
+    async def scenario():
+        await app.switch_model("parakeet-tdt-0.6b")
+        await asyncio.gather(*app._tasks)
+
+    asyncio.run(scenario())
+    assert app._switch_status == "error" and app._config.inference.model == "whisper-large-v3-turbo"
+    assert len(built) == 2  # the new model, then the old one again
+    assert built[-1][0][0].model == "whisper-large-v3-turbo"
+    app._preload_transcriber.assert_awaited_once()
+
+
 def test_the_timer_of_a_finished_switch_leaves_a_newer_switch_alone(monkeypatch):
     real_sleep = asyncio.sleep
     patch_app(monkeypatch, "docker_ctl", MagicMock())
@@ -245,6 +361,8 @@ def _take_app(monkeypatch, *, stop_info, press_time=100.0) -> NexusVoxApp:
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._transcriber = MagicMock(connect=AsyncMock(), disconnect=AsyncMock())
     app._hotkey = MagicMock(command=False, mark=None, active=False, mode="hold")
+    app._record_start_event = asyncio.Event()
+    app._switch_status = "idle"
     app._stop_info = stop_info
     app._config = MagicMock(hotkey=MagicMock(max_recording_s=600))
     app._overlay = None
@@ -268,6 +386,7 @@ def test_a_stop_from_an_earlier_tap_does_not_skip_the_held_press(monkeypatch):
     async def scenario():
         app._record_stop_event = asyncio.Event()
         app._record_stop_event.set()  # from the first release
+        app._record_start_event.set()  # from the second press, while the first one's cycle connected
         cycle = asyncio.create_task(app._transcription_cycle())
         await asyncio.sleep(0.02)
         assert not cycle.done()  # recording, and waiting for the real release
@@ -275,11 +394,55 @@ def test_a_stop_from_an_earlier_tap_does_not_skip_the_held_press(monkeypatch):
         app._hotkey.active = False
         app._record_stop_event.set()
         await cycle
-        return app._record_stop_event.is_set()
+        return app._record_stop_event.is_set(), app._record_start_event.is_set()
 
-    assert asyncio.run(scenario()) is False  # nothing stale is left for the next take
+    # Nothing stale is left for the next take, and no cycle starts without a press.
+    assert asyncio.run(scenario()) == (False, False)
     assert recorded == [False]
     assert app._stop_info is None
+
+
+def test_a_polish_tap_after_a_dropped_stop_is_timed_from_its_own_press(monkeypatch):
+    # The first press is at 100; it is released and pressed again at 104 while the cycle connects.
+    app = _take_app(monkeypatch, stop_info=(None, False, 100.2))
+    app._transcriber.finish = AsyncMock(side_effect=RuntimeError("connection refused"))
+
+    async def second_press():
+        app._press_time = 104.0
+        app._hotkey.active = True
+        app._record_stop_event.set()
+
+    app._transcriber.connect = AsyncMock(side_effect=second_press)
+
+    def tap_released():
+        app._stop_info = (POLISH, False, 104.2)  # a quick polish tap
+        app._hotkey.active = False
+        app._record_stop_event.set()
+
+    app._audio.start.side_effect = lambda: asyncio.get_running_loop().call_later(0.01, tap_released)
+
+    async def scenario():
+        app._record_stop_event = asyncio.Event()
+        await app._transcription_cycle()
+
+    asyncio.run(scenario())
+    app._polish_selection.assert_awaited_once_with("", None)
+
+
+def test_no_take_runs_while_a_model_switch_tears_the_transcriber_down(monkeypatch):
+    app = _take_app(monkeypatch, stop_info=None)
+    app._switch_status = "waiting"
+    app._offline_stop = AsyncMock()
+
+    async def scenario():
+        app._record_stop_event = asyncio.Event()
+        await app._transcription_cycle()
+
+    asyncio.run(scenario())
+    app._offline_stop.assert_awaited_once_with(100.0)  # paste-last and a polish tap still work
+    app._transcriber.connect.assert_not_awaited()
+    app._transcriber.disconnect.assert_not_awaited()  # it belongs to the switch
+    app._audio.start.assert_not_called()
 
 
 def test_a_stop_with_the_hotkey_up_still_skips_the_cycle(monkeypatch):
@@ -442,6 +605,88 @@ def test_a_short_recording_with_frames_is_still_sent(monkeypatch):
     app._transcriber.finish = AsyncMock(return_value=MagicMock(text="", confidence=None))
     _run_take(app)
     app._transcriber.finish.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("stop_info", "text"),
+    [
+        ((None, False, None), ""),  # an empty transcription
+        ((None, False, None), "hello"),  # a dictation that was typed
+        ((POLISH, False, None), "shorter"),  # an instruction for the selection
+        ((None, True, None), "unused"),  # dropped by Escape
+    ],
+)
+def test_every_take_disconnects_its_transcriber_exactly_once(monkeypatch, stop_info, text):
+    app = _dictation_app(monkeypatch, stop_info=stop_info, text=text)
+    app._hide_os_control = AsyncMock()
+    _run_take(app)
+    app._transcriber.disconnect.assert_awaited_once()
+
+
+# -- What a dictation saves ------------------------------------------------------------------------
+
+
+def _dictation_app(monkeypatch, *, stop_info=(None, False, None), text="hello") -> NexusVoxApp:
+    """A take that goes all the way to the paste and the saved row; nothing real behind it."""
+    app = _take_app(monkeypatch, stop_info=stop_info)
+    app._transcriber.finish = AsyncMock(return_value=MagicMock(text=text, confidence=0.9))
+    app._transcriber.model = "parakeet-tdt-0.6b"
+    app._transcriber.device = "gpu"
+    app._config.experimental.flag_command = False
+    app._config.learn_from_edits.enabled = False
+    app._run_command = AsyncMock(return_value=None)
+    app._paste = MagicMock(return_value=(None, "notepad.exe"))
+    app._db = MagicMock()
+    app._db.save_transcription.return_value = MagicMock(id=1)
+    app._stats_pool = MagicMock()
+    app._store_audio = MagicMock()
+    processed = MagicMock(typed=text, saved=text, press_enter=False, dictionary_hits={})
+    patch_app(monkeypatch, "process_text", lambda *a, **k: processed)
+    patch_app(monkeypatch, "stored_language", lambda text: "en")
+    return app
+
+
+def test_the_dictionary_is_read_off_the_event_loop(monkeypatch):
+    app = _dictation_app(monkeypatch)
+    threads = []
+    app._db.get_dictionary_entries.side_effect = lambda: threads.append(threading.get_ident()) or []
+
+    async def scenario():
+        threads.append(threading.get_ident())
+        app._audio.start.side_effect = lambda: app._record_stop_event.set()
+        app._record_stop_event = asyncio.Event()
+        await app._transcription_cycle()
+
+    asyncio.run(scenario())
+    loop_thread, read_thread = threads
+    assert read_thread != loop_thread
+
+
+def test_a_dictation_is_saved_with_the_model_that_transcribed_it(monkeypatch):
+    app = _dictation_app(monkeypatch)
+    after_switch = MagicMock(model="whisper-large-v3-turbo", device="cpu", disconnect=AsyncMock())
+
+    def paste_while_the_model_changes(*_args):
+        app._transcriber = after_switch
+        return None, "notepad.exe"
+
+    app._paste = MagicMock(side_effect=paste_while_the_model_changes)
+    _run_take(app)
+    saved = app._db.save_transcription.call_args.kwargs
+    assert (saved["model"], saved["transcribe_device"]) == ("parakeet-tdt-0.6b", "gpu")
+
+
+def test_a_command_row_is_saved_with_the_model_of_its_recording(monkeypatch):
+    patch_app(monkeypatch, "stored_language", lambda text: "en")
+    from nexusvox.app.records import _Recording
+
+    app = NexusVoxApp.__new__(NexusVoxApp)
+    app._config = Config()
+    app._db = MagicMock()
+    app._transcriber = MagicMock(model="whisper-large-v3-turbo")  # switched since the recording
+    app._store_audio = MagicMock()
+    app._save_command(_Recording(bytearray(b"\x01\x00"), 10, None, 1, "gpu", "parakeet-tdt-0.6b"), "[x] y", "y")
+    assert app._db.save_transcription.call_args.kwargs["model"] == "parakeet-tdt-0.6b"
 
 
 def _cuda_switch_app(

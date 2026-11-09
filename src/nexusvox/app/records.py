@@ -25,6 +25,7 @@ class _Recording:
     confidence: float | None
     transcribe_ms: int
     device: str | None = None  # where the transcript was made ("cpu", "gpu", "remote"), read when it arrived
+    model: str | None = None  # the model that made it, read with the device: a switch may follow before the save
 
 
 class RecordKeeping:
@@ -94,7 +95,7 @@ class RecordKeeping:
             language=stored_language(spoken),
             duration_ms=recording.duration_ms if recording else 0,
             confidence=recording.confidence if recording else None,
-            model=self._transcriber.model if recording else None,
+            model=recording.model if recording else None,
             transcribe_ms=recording.transcribe_ms if recording else None,
             app=COMMAND_APP,
             polish_status=polish_status,

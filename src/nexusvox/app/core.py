@@ -144,15 +144,19 @@ class NexusVoxApp(
         self._remote_recording = False
         self._remote_cancelled = False
         self._remote_text = ""
-        self._cycle_running = False
         # What the last dictation pasted, for the paste key. In memory only: the saved
         # transcript is the spoken text, which differs once it was translated.
         self._last_typed = ""
         self._last_typed_rewritten = False  # True when it is a Polish or extension reply, not a dictation
 
         # Model switch state
-        self._switch_status: str = "idle"
+        self._switch_status: str = "idle"  # idle, stopping, starting, waiting, ready or error
         self._switch_error: str | None = None
+        self._switch_reset: asyncio.Future | None = None  # puts the status back to idle 5 s after a switch ended
+        self._switch_note: str | None = None  # one short sentence about a finished switch, e.g. the CPU fallback
+        # Held by a dictation cycle for its take and by a model switch from start to end: the two never overlap.
+        # Neither waits for it: a switch is refused during a take, and a press during a switch records nothing.
+        self._transcriber_lock = asyncio.Lock()
         # Background tasks (warm-ups, the phone server). The loop keeps only a weak reference to a task.
         self._tasks: set[asyncio.Task] = set()
 
@@ -195,6 +199,8 @@ class NexusVoxApp(
         Not `loop.stop()`: that leaves `_run` unfinished, so `_shutdown` never runs (an open meeting would keep
         its WAV files without proper headers) and `asyncio.run` raises.
         """
+        if not self._running:
+            return  # quit already: a second cancel would cut the shutdown short
         self._running = False
         if self._loop is not None and self._main_task is not None:
             self._loop.call_soon_threadsafe(self._main_task.cancel)
@@ -276,11 +282,9 @@ class NexusVoxApp(
             if not self._running:
                 break
 
-            self._cycle_running = True
             try:
-                await self._transcription_cycle(remote=self._remote_recording)
+                await self._run_cycle(remote=self._remote_recording)
             finally:
-                self._cycle_running = False
                 if self._remote_recording:
                     self._remote_recording = False
                     # A cycle that failed after the phone's stop leaves it set; the next
@@ -289,11 +293,20 @@ class NexusVoxApp(
                     if self._remote_mic is not None:
                         self._remote_mic.finished(self._remote_text)
 
+    async def _run_cycle(self, remote: bool) -> None:
+        """One transcription cycle, holding `_transcriber_lock`; while a model switch holds it, nothing records."""
+        if self._transcriber_lock.locked():
+            await self._take_during_switch(remote)
+            return
+        async with self._transcriber_lock:
+            await self._transcription_cycle(remote=remote)
+
     async def _shutdown(self) -> None:
         """Clean up all components.
 
-        The mic guard goes first, so other apps' microphones are unmuted whatever a later step does, and
-        each step is guarded: one that fails is logged and the rest still run.
+        The hotkey hook goes first, so no press can mute other apps again, then the mic guard is released;
+        it is released once more as the last step, after a hold the hook queued just before it stopped.
+        Each step is guarded: one that fails (or a second cancel) is logged and the rest still run.
         """
         logger.info("Shutting down...")
         loop = asyncio.get_running_loop()
@@ -303,9 +316,9 @@ class NexusVoxApp(
             if api is not None:
                 api.shutdown_meeting()
 
+        await self._shutdown_step("hotkey", self._hotkey.stop)
         if self._mic_guard is not None:
             await self._shutdown_step("mic guard", self._mic_guard.release)
-        await self._shutdown_step("hotkey", self._hotkey.stop)
         await self._shutdown_step("meeting hotkey", self._meeting_hotkey.stop)
         await self._shutdown_step("meeting", close_meeting)
         await self._shutdown_step("tray", self._tray.stop)
@@ -321,15 +334,21 @@ class NexusVoxApp(
         # The model stays loaded while the app runs (renewed hourly); give its memory back on quit.
         await self._shutdown_step("LLM renewal", llm_stop_renewal)
         await self._shutdown_step("LLM unload", lambda: loop.run_in_executor(None, llm_unload_all, self._config.llm))
+        if self._mic_guard is not None:
+            await self._shutdown_step("mic guard", self._mic_guard.release)  # idempotent: usually nothing left
 
     @staticmethod
     async def _shutdown_step(name: str, step: Callable[[], object]) -> None:
-        """Run one shutdown step (plain or awaitable); a failure is logged, never raised."""
+        """Run one shutdown step (plain or awaitable); a failure or a cancel is logged, never raised.
+
+        A cancel lands here when the main task is cancelled again during the shutdown; the remaining steps
+        (the meeting's WAV files, the mic guard) matter more than ending at once.
+        """
         try:
             result = step()
             if inspect.isawaitable(result):
                 await result
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             logger.exception("Shutdown step failed: %s", name)
 
     def run(self) -> None:

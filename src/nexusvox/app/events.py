@@ -122,9 +122,9 @@ class InputEvents:
             self._meeting_toggle_lock.release()
 
     def _on_remote_start(self) -> bool:
-        """Called on the loop when a phone starts a recording. False while busy: a cycle
-        is running or queued, or the hotkey is held."""
-        if self._cycle_running or self._hotkey.active or self._record_start_event.is_set():
+        """Called on the loop when a phone starts a recording. False while busy: a cycle is running or
+        queued, a model switch runs (both hold `_transcriber_lock`), or the hotkey is held."""
+        if self._transcriber_lock.locked() or self._hotkey.active or self._record_start_event.is_set():
             return False
         self._remote_recording = True
         self._remote_cancelled = False

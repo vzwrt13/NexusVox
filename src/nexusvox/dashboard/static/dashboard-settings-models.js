@@ -803,7 +803,7 @@ async function loadModelSwitcher() {
   // An in-process model (Parakeet on CPU) may still be downloading or loading from the start.
   const status = await fetch("/api/models/status").then((r) => r.json()).catch(() => null);
   if (status && (status.status === "downloading" || status.status === "loading")) {
-    showModelStatus(STATUS_MESSAGES[status.status]);
+    showModelStatus(status.note ? `${status.note}. ${STATUS_MESSAGES[status.status]}` : STATUS_MESSAGES[status.status]);
     pollModelStatus(current.model);
   }
 }
@@ -889,7 +889,8 @@ function pollModelStatus(prevModel) {
   const interval = setInterval(async () => {
     try {
       const data = await fetch("/api/models/status").then((r) => r.json());
-      const msg = (data.status === "ready" && data.note) || STATUS_MESSAGES[data.status] || data.status;
+      const base = STATUS_MESSAGES[data.status] || data.status;
+      const msg = data.note ? (data.status === "ready" ? data.note : `${data.note}. ${base}`) : base;
       showModelStatus(msg);
 
       if (data.status === "ready") {

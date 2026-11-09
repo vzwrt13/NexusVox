@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -34,6 +35,23 @@ def _run_compose(args: list[str]) -> subprocess.CompletedProcess[str]:
         )
     except FileNotFoundError as exc:
         raise RuntimeError(_MISSING_DOCKER_MSG) from exc
+
+
+def unavailable_reason() -> str | None:
+    """Why Docker cannot be used right now, as a short phrase, or None when the daemon answers.
+
+    Only "Docker is out of reach" counts: a running Docker whose compose run fails (port in use, image
+    error) is a real error and stays one.
+    """
+    if is_frozen():
+        return "Docker is not available in the installed app"
+    if shutil.which("docker") is None:
+        return "Docker is not installed"
+    try:
+        result = subprocess.run(["docker", "info"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return "Docker is not running"
+    return None if result.returncode == 0 else "Docker is not running"
 
 
 def stop_profile(profile: str) -> None:

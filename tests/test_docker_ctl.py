@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nexusvox.system.docker_ctl import DOCKER_DIR, start_profile, stop_profile, wait_for_healthy
+from nexusvox.system.docker_ctl import DOCKER_DIR, start_profile, stop_profile, unavailable_reason, wait_for_healthy
 
 
 def test_docker_dir_finds_the_compose_file():
@@ -139,3 +139,24 @@ def test_stop_profile_raises_clear_error_when_docker_missing(mock_run):
 
     with pytest.raises(RuntimeError, match="Docker is not installed"):
         stop_profile("voxtral")
+
+
+@pytest.mark.parametrize(
+    ("frozen", "which", "run", "expected"),
+    [
+        (True, "docker", 0, "installed app"),
+        (False, None, 0, "not installed"),
+        (False, "docker", 1, "not running"),
+        (False, "docker", subprocess.TimeoutExpired("docker", 15), "not running"),
+        (False, "docker", 0, None),
+    ],
+)
+def test_unavailable_reason(frozen, which, run, expected):
+    result = subprocess.CompletedProcess(args=[], returncode=run) if isinstance(run, int) else None
+    with (
+        patch("nexusvox.system.docker_ctl.is_frozen", return_value=frozen),
+        patch("nexusvox.system.docker_ctl.shutil.which", return_value=which),
+        patch("nexusvox.system.docker_ctl.subprocess.run", return_value=result, side_effect=None if result else run),
+    ):
+        reason = unavailable_reason()
+    assert (reason is None) if expected is None else (expected in reason)

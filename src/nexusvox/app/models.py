@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
 from ..config import DEFAULT_MODEL, MODEL_REGISTRY, InferenceConfig, model_needs_docker, save_config
 from ..system import docker_ctl
@@ -47,11 +48,14 @@ class ModelSwitching:
         if self._switch_status in ("idle", "ready"):
             load = self._transcriber.load_status()
             if load and load["state"] in ("downloading", "loading"):
-                return {"status": load["state"], "error": None}
+                status = {"status": load["state"], "error": None}
+                if self._switch_note:  # the first CPU start downloads: the reason must not vanish meanwhile
+                    status["note"] = self._switch_note
+                return status
             if load and load["state"] == "error":
                 return {"status": "error", "error": load["error"]}
         status = {"status": self._switch_status, "error": self._switch_error}
-        if self._switch_note:
+        if self._switch_note and self._switch_status == "ready":
             status["note"] = self._switch_note
         return status
 
@@ -69,6 +73,7 @@ class ModelSwitching:
         old_model = self._config.inference.model
         if old_model == model_id:
             return
+        self._switch_note = None  # a note belongs to the switch that set it
         if self._cycle_running:
             # The cycle holds the live transcriber. The dashboard reads the refusal from the switch status.
             self._switch_status = "error"
@@ -85,13 +90,14 @@ class ModelSwitching:
         # "auto" may move a model that has an in-process path to the CPU when Docker is out of reach;
         # an explicit device is never overridden.
         cpu_fallback_ok = bool(new_info.get("inprocess_supported")) and self._config.inference.device == "auto"
-        cpu_reason: str | None = None  # set once the switch runs on the CPU although Docker was wanted
-        if new_needs_docker and is_frozen():
-            if not cpu_fallback_ok:
-                raise RuntimeError(DOCKER_UNAVAILABLE_MSG)
+        if new_needs_docker and is_frozen() and not cpu_fallback_ok:
+            raise RuntimeError(DOCKER_UNAVAILABLE_MSG)
+        # Set once the switch runs on the CPU although Docker was wanted. Checked before the old container
+        # is stopped: with Docker out of reach `compose stop` would fail first.
+        cpu_reason = docker_ctl.unavailable_reason() if new_needs_docker and cpu_fallback_ok else None
+        if cpu_reason:
             new_needs_docker = False
-            cpu_reason = "Docker is not available in the installed app"
-        self._switch_note = None
+            old_was_docker = False  # nothing of ours can be running without Docker
 
         if self._switch_reset is not None:
             self._switch_reset.cancel()  # its 5 s are for the last switch, not for this one
@@ -106,27 +112,26 @@ class ModelSwitching:
 
             if new_needs_docker:
                 self._switch_status = "starting"
-                try:
-                    await loop.run_in_executor(None, docker_ctl.start_profile, new_info["docker_profile"])
-                except RuntimeError as exc:
-                    if not cpu_fallback_ok:
-                        raise
-                    new_needs_docker = False
-                    cpu_reason = "Docker is not running"
-                    logger.info("Docker could not start profile %s (%s); falling back to the CPU", model_id, exc)
-            if new_needs_docker:
+                await loop.run_in_executor(None, docker_ctl.start_profile, new_info["docker_profile"])
                 self._switch_status = "waiting"
                 healthy = await loop.run_in_executor(None, docker_ctl.wait_for_healthy, new_info["health_url"])
                 if not healthy:
-                    raise RuntimeError(f"Container for {model_id} did not become healthy")
+                    if not cpu_fallback_ok:
+                        raise RuntimeError(f"Container for {model_id} did not become healthy")
+                    cpu_reason = "The Docker container did not become healthy"
+                    new_needs_docker = False
+                    try:  # do not leave a half-started container behind
+                        await loop.run_in_executor(None, docker_ctl.stop_profile, new_info["docker_profile"])
+                    except Exception:
+                        logger.info("Could not stop the unhealthy %s container", model_id)
 
             self._config.inference.model = model_id
             if new_needs_docker:
                 self._config.inference.server_url = str(new_info["default_url"])
             if cpu_reason:
                 self._switch_note = f"{cpu_reason}, using the CPU"
-                logger.info("Model %s runs in-process on the CPU: %s", model_id, cpu_reason)
-                self._transcriber = create_transcriber(self._config.inference, device="cpu")
+                logger.info("Model %s runs on the CPU: %s", model_id, cpu_reason)
+                self._transcriber = self._create_cpu_fallback_transcriber()
             else:
                 self._transcriber = create_transcriber(
                     self._config.inference,
@@ -150,6 +155,7 @@ class ModelSwitching:
         except Exception as exc:
             self._switch_status = "error"
             self._switch_error = str(exc)
+            self._switch_note = None
             logger.exception("Model switch failed")
             # Keep the config on the model that is actually serving.
             self._config.inference.model = old_model
@@ -166,6 +172,17 @@ class ModelSwitching:
                 )
             except Exception:
                 logger.exception("Fallback restart also failed")
+
+    def _create_cpu_fallback_transcriber(self):
+        """The transcriber for a switch that Docker could not serve.
+
+        Parakeet from source keeps the "auto" engine: it runs on the CPU now and returns to the server once
+        one answers. Otherwise (installed app, Whisper) it is plain CPU, with a GPU compute-type override dropped.
+        """
+        inference = self._config.inference
+        if not is_frozen() and MODEL_REGISTRY[inference.model].get("inprocess_engine") == "parakeet-onnx":
+            return create_transcriber(inference, device=self._device, auto_fallback=True)
+        return create_transcriber(replace(inference, compute_type=None), device="cpu")
 
     def _is_inprocess(self) -> bool:
         """Whether the active model runs in this process; a custom server is remote and has nothing to load."""

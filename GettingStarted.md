@@ -185,8 +185,9 @@ enabled = true
 # Transcribe numbers as digits ("five" / "fünf" → "5"); on by default, set false to keep words
 numbers_as_digits = true
 # Structural commands (new line, new paragraph, tab, all caps) are their own category:
-# pick which ones fire, or bypass them all without clearing the list
-structural = ["new paragraph", "new line", "tab", "all caps"]
+# pick which ones fire, or bypass them all without clearing the list.
+# "tab" is not on by default ("open a new tab" is an everyday sentence): add it for a Tab character.
+structural = ["new paragraph", "new line", "all caps"]
 bypass_structural = false
 # End a dictation with "press enter" / "Enter drücken" to paste, then press Enter (off by default)
 press_enter = false
@@ -253,7 +254,7 @@ With `[voice_commands].enabled = true`, certain spoken phrases are converted bef
 |---|---|
 | "new line" / "neue Zeile" | `\n` |
 | "new paragraph" / "neuer Absatz" | `\n\n` |
-| "tab" / "Tabulator" | `\t` |
+| "tab" / "Tabulator" (add `"tab"` to `structural` first) | `\t` |
 | "all caps [text]" / "alles groß [text]" | `TEXT` |
 | "twenty five" / "fünfundzwanzig" (with `numbers_as_digits`) | `25` |
 | "period", "comma", etc. | `.`, `,`, etc. (configurable via `symbols`) |

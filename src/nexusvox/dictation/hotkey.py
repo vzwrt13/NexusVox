@@ -203,12 +203,14 @@ class HotkeyListener:
 
     # -- core -----------------------------------------------------------------
 
-    def _heal_modifiers(self) -> None:
+    def _heal_modifiers(self, keep: str | None = None) -> None:
         """Forget tracked modifiers that are no longer physically down.
 
         A key-up the hook never saw (Ctrl+Alt+Del, the lock screen) leaves a modifier "held" in the tracked
-        set, and the next plain press of the binding's key would then start a recording and swallow the letter.
-        Asked before the key press decides, like `MeetingHotkey` does.
+        set. With a key in the binding the next plain press of that key would start a recording and swallow
+        the letter; with a modifier-only binding the next lone press of the other modifier (Win, to open
+        Start) would complete the chord. Asked before a press decides, like `MeetingHotkey` does.
+        `keep` is the modifier being pressed right now: inside the hook its key state is not updated yet.
         """
         if not self._pressed_modifiers:
             return
@@ -216,7 +218,7 @@ class HotkeyListener:
             physical = self._physical_modifiers()
         except Exception:
             return  # no Win32 (a headless runner): nothing to compare with
-        stale = self._pressed_modifiers - physical
+        stale = self._pressed_modifiers - physical - {keep}
         if stale:
             logger.debug("Dropped modifiers without a key-up: %s", ", ".join(sorted(stale)))
             self._pressed_modifiers -= stale
@@ -402,6 +404,8 @@ class HotkeyListener:
                 self._discard_on_foreign_key()
             return False  # the key itself always reaches the application
         repeat = pressed and vk in self._modifier_vks_down  # a held key repeats its key-down every ~31 ms
+        if pressed and not repeat:
+            self._heal_modifiers(keep=modifier)
         if pressed:
             self._modifier_vks_down.add(vk)
         else:

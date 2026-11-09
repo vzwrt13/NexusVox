@@ -861,13 +861,20 @@ def test_a_failing_judge_still_records_one_outcome(monkeypatch):
     assert "failed" not in edit_watch.WATCHED  # a skipped watch, not a watched one
 
 
-def test_a_failing_watch_records_one_outcome_too(monkeypatch):
-    def broken(self, item):
-        raise RuntimeError("the watch blew up")
+def test_a_field_that_raises_while_polling_records_one_outcome(caplog):
+    class RaisingField:
+        def __init__(self):
+            self.reads = 0
 
-    monkeypatch.setattr(EditWatcher, "_watch_one", broken)
-    status = _outcome(lambda: FakeField(["I use nexus fox"]))
+        def read(self):
+            self.reads += 1
+            if self.reads > 1:  # the first read finds the paste, the poll then blows up
+                raise RuntimeError("UI Automation failed")
+            return "I use nexus fox"
+
+    status = _outcome(RaisingField)
     assert status["counts"] == {"failed": 1}
+    assert "see the log" in status["last"]["message"]  # not a claim about the comparison: the field failed
 
 
 def test_a_watch_that_fails_after_taking_the_next_item_still_processes_it():

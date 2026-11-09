@@ -30,9 +30,14 @@ def _listener(mode: str, modifiers=("ctrl", "alt"), key: str = ""):
     hk = HotkeyListener(
         config, lambda: events.append("start"), lambda: events.append("stop"), grace_s=0, physical_modifiers=set
     )
-    # The physical keys are the ones the hook has seen go down, unless a test says otherwise.
-    hk._physical_modifiers = lambda: set(hk._pressed_modifiers)
+    _follow_keys(hk)
     return hk, events, config
+
+
+def _follow_keys(hk, extra=()):
+    """The physical keys are the ones the hook has seen go down, plus `extra` keys a test holds by hand."""
+    hk._physical_modifiers = lambda: set(hk._pressed_modifiers) | set(extra() if callable(extra) else extra)
+    return hk
 
 
 def _press_combo(hk):
@@ -268,7 +273,7 @@ def _command_listener(
         timer_factory=FakeTimer,
         physical_modifiers=set,
     )
-    return hk, events
+    return _follow_keys(hk), events
 
 
 def test_command_key_during_hold_marks_the_recording_and_is_swallowed():
@@ -578,9 +583,9 @@ def _toggle(key: str = "", grace_s: float = 0.3, physical=None):
         on_cancel=lambda: events.append("cancel"),
         grace_s=grace_s,
         timer_factory=FakeTimer,
-        physical_modifiers=lambda: set(physical or ()),
+        physical_modifiers=set,
     )
-    return hk, events
+    return _follow_keys(hk, lambda: physical or ()), events
 
 
 def test_toggle_modifier_only_plain_stop_waits_for_the_grace_window():
@@ -616,7 +621,6 @@ def test_toggle_paste_and_command_markers_also_end_the_recording(vk, mark):
 
 def test_toggle_key_binding_marker_stops_without_a_grace_window():
     hk, events = _toggle(key="A")
-    hk._physical_modifiers = lambda: set(hk._pressed_modifiers)  # the keys the hook saw go down
     hk._handle(LCTRL, True)
     hk._handle(LALT, True)
     hk._handle(VK_A, True)  # start
@@ -655,6 +659,8 @@ def test_escape_cancels_a_recording_and_only_that_escape_is_swallowed(mode):
     assert hk._handle(VK_ESC, True) is False  # no recording: passes through
     assert hk._handle(VK_ESC, False) is False
     _press_combo(hk)
+    if mode == "toggle":
+        _release_combo(hk)  # in Toggle the keys are up while recording; Escape inside a held chord is another shortcut
     assert hk._handle(VK_ESC, True) is True
     assert hk._handle(VK_ESC, False) is True
     assert events == ["start", "cancel"] and not hk.active
@@ -668,6 +674,7 @@ def test_escape_during_the_grace_window_cancels_the_pending_stop():
     _press_combo(hk)
     _release_combo(hk)
     _press_combo(hk)
+    _release_combo(hk)  # the stop chord is over, the grace window still runs
     assert hk._handle(VK_ESC, True) is True
     FakeTimer.fire_all()
     assert events == ["start", "cancel"]
@@ -700,7 +707,6 @@ def test_escape_in_hold_ignores_the_binding_modifiers_but_not_others():
 
 def test_key_binding_marker_in_the_starting_hold_only_marks_even_after_the_key_is_released():
     hk, events = _toggle(key="A")
-    hk._physical_modifiers = lambda: set(hk._pressed_modifiers)  # the keys the hook saw go down
     hk._handle(LCTRL, True)
     hk._handle(LALT, True)
     hk._handle(VK_A, True)
@@ -753,7 +759,7 @@ def _win_listener(mode: str = "hold", key: str = ""):
         timer_factory=FakeTimer,
         physical_modifiers=set,
     )
-    return hk, events
+    return _follow_keys(hk), events
 
 
 def _hold_ctrl_win(hk):
@@ -843,7 +849,9 @@ def test_unassigned_paste_key_counts_as_foreign():
         lambda: events.append("stop"),
         on_cancel=lambda: events.append("cancel"),
         grace_s=0,
+        physical_modifiers=set,
     )
+    _follow_keys(hk)
     _hold_ctrl_win(hk)
     hk._handle(ord("V"), True)
     assert events == ["start", "cancel"]
@@ -914,8 +922,9 @@ def test_toggle_stop_chord_is_not_refused_by_a_held_extra_modifier():
         lambda: events.append("start"),
         lambda: events.append("stop"),
         grace_s=0,
-        physical_modifiers=lambda: set(physical),
+        physical_modifiers=set,
     )
+    _follow_keys(hk, lambda: physical)
     _hold_ctrl_win(hk)
     hk._handle(LWIN, False)
     hk._handle(LCTRL, False)
@@ -970,8 +979,9 @@ def test_chord_with_an_extra_modifier_already_down_does_not_start():
         lambda: events.append("start"),
         lambda: events.append("stop"),
         on_cancel=lambda: events.append("cancel"),
-        physical_modifiers=lambda: {"alt", "ctrl", "win"},
+        physical_modifiers=set,
     )
+    _follow_keys(hk, {"alt"})
     _hold_ctrl_win(hk)
     assert events == []
 
@@ -983,8 +993,9 @@ def test_key_binding_with_an_extra_modifier_down_does_not_start_or_swallow():
         config,
         lambda: events.append("start"),
         lambda: events.append("stop"),
-        physical_modifiers=lambda: {"alt", "ctrl", "shift"},
+        physical_modifiers=set,
     )
+    _follow_keys(hk, {"alt"})
     hk._handle(LCTRL, True)
     hk._handle(LSHIFT, True)
     assert hk._handle(VK_A, True) is False
@@ -994,9 +1005,8 @@ def test_key_binding_with_an_extra_modifier_down_does_not_start_or_swallow():
 def test_toggle_chord_with_an_extra_modifier_already_down_does_not_start():
     events: list[str] = []
     config = HotkeyConfig(modifiers=["ctrl", "win"], key="", mode="toggle")
-    hk = HotkeyListener(
-        config, lambda: events.append("start"), lambda: events.append("stop"), physical_modifiers=lambda: {"alt"}
-    )
+    hk = HotkeyListener(config, lambda: events.append("start"), lambda: events.append("stop"), physical_modifiers=set)
+    _follow_keys(hk, {"alt"})
     _hold_ctrl_win(hk)
     assert events == []
 
@@ -1036,3 +1046,27 @@ def test_a_key_press_survives_a_physical_state_that_cannot_be_read():
 
     hk._physical_modifiers = broken
     assert hk._handle(VK_A, True) is True and events == ["start"]
+
+
+def test_a_lone_modifier_after_a_lost_key_up_does_not_complete_a_modifier_only_chord():
+    # Default Ctrl+Win: Ctrl+Alt+Del ate Ctrl's key-up; later a tap of Win alone must open Start, not record
+    hk, events, _ = _listener("toggle", modifiers=("ctrl", "win"))
+    hk._mask_sender = lambda: events.append("mask")
+    hk._handle(LCTRL, True)
+    hk._physical_modifiers = set  # the secure desktop ate the key-up: nothing is down any more
+    hk._handle(0x5B, True)  # Left Win, pressed alone
+    assert events == [] and not hk.active and hk._pressed_modifiers == {"win"}
+    hk._handle(0x5B, False)
+    _follow_keys(hk)
+    hk._handle(LCTRL, True)  # a real chord afterwards still works
+    hk._handle(0x5B, True)
+    assert events == ["mask", "start"] and hk.active
+
+
+def test_a_modifier_pressed_now_is_not_forgotten_before_the_key_state_catches_up():
+    # inside the hook the key being pressed is not in GetAsyncKeyState yet: it must not heal itself away
+    hk, events, _ = _listener("hold", modifiers=("ctrl", "win"))
+    hk._physical_modifiers = lambda: {"ctrl"}  # Win is going down right now
+    hk._handle(LCTRL, True)
+    hk._handle(0x5B, True)
+    assert events == ["start"]

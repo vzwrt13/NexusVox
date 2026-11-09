@@ -66,6 +66,8 @@ def _capture_inputs(monkeypatch, held):
     monkeypatch.setattr(injector.time, "sleep", lambda s: None)
     monkeypatch.setattr(injector.pyperclip, "paste", lambda: "selected")
     monkeypatch.setattr(injector, "set_text", lambda text: None)
+    monkeypatch.setattr(injector, "snapshot_formats", lambda: [])
+    monkeypatch.setattr(injector, "restore_formats", lambda formats: None)
     injector.copy_selection(0, timeout_s=0.1)  # Polish step 1: Ctrl+C
     injector.inject_text("polished", 0)  # Polish step 2: Ctrl+V
     return [(i._input.ki.wVk, bool(i._input.ki.dwFlags & injector.KEYEVENTF_KEYUP)) for i in sent]

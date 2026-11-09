@@ -15,9 +15,10 @@ IMAGE = [(8, b"dib-pixels"), (17, b"dibv5-pixels")]  # CF_DIB, CF_DIBV5: what an
 class FakeClipboard:
     """What the injector sees of the clipboard: the text pyperclip reads, the snapshot, and what is written."""
 
-    def __init__(self, text="", formats=None):
+    def __init__(self, text="", formats=None, snapshot_works=True):
+        self.formats = formats if formats is not None else ([(13, text.encode())] if text else [])
         self.text = text
-        self.formats = formats if formats is not None else []
+        self.snapshot_works = snapshot_works
         self.writes = []  # ("text", value) or ("formats", value), in order
 
     def paste(self):
@@ -25,14 +26,15 @@ class FakeClipboard:
 
     def set_text(self, text):
         self.text = text
+        self.formats = [(13, text.encode())]
         self.writes.append(("text", text))
 
     def snapshot_formats(self):
-        return list(self.formats)
+        return list(self.formats) if self.snapshot_works else None
 
     def restore_formats(self, formats):
         self.formats = list(formats)
-        self.text = ""
+        self.text = next((data.decode() for fmt, data in formats if fmt == 13), "")
         self.writes.append(("formats", list(formats)))
 
 
@@ -66,12 +68,23 @@ def test_an_image_on_the_clipboard_is_put_back_after_a_dictation(monkeypatch, in
     assert clipboard.formats == IMAGE
 
 
-def test_a_text_clipboard_is_still_put_back_as_text(monkeypatch, injector):
-    clipboard = FakeClipboard(text="my notes", formats=[(13, b"never read")])
+def test_formatted_text_keeps_its_formatting(monkeypatch, injector):
+    """Regression: only the plain text of a Word or web copy came back, its HTML, RTF and images were gone."""
+    rich = [(13, b"my notes"), (0xD001, b"<b>my notes</b>"), (0xD002, b"rtf-data")]
+    clipboard = FakeClipboard(text="my notes", formats=rich)
     _use(monkeypatch, injector, clipboard)
     monkeypatch.setattr(injector, "_send_ctrl_v", lambda: True)
     injector.inject_text("hello", 0)
-    assert clipboard.writes == [("text", "hello"), ("text", "my notes")]
+    assert clipboard.writes == [("text", "hello"), ("formats", rich)]
+    assert clipboard.formats == rich
+
+
+def test_a_text_clipboard_is_put_back(monkeypatch, injector):
+    clipboard = FakeClipboard(text="my notes")
+    _use(monkeypatch, injector, clipboard)
+    monkeypatch.setattr(injector, "_send_ctrl_v", lambda: True)
+    injector.inject_text("hello", 0)
+    assert clipboard.text == "my notes"
 
 
 def test_an_empty_clipboard_is_left_empty(monkeypatch, injector):
@@ -83,8 +96,17 @@ def test_an_empty_clipboard_is_left_empty(monkeypatch, injector):
     assert clipboard.formats == []
 
 
-def test_an_unreadable_clipboard_is_not_restored(monkeypatch, injector):
-    clipboard = FakeClipboard()
+def test_a_clipboard_that_cannot_be_snapshotted_still_gets_its_text_back(monkeypatch, injector):
+    """The snapshot cannot open the clipboard (a manager holds it): the text pyperclip reads is put back."""
+    clipboard = FakeClipboard(text="my notes", snapshot_works=False)
+    _use(monkeypatch, injector, clipboard)
+    monkeypatch.setattr(injector, "_send_ctrl_v", lambda: True)
+    injector.inject_text("hello", 0)
+    assert clipboard.writes == [("text", "hello"), ("text", "my notes")]
+
+
+def test_a_clipboard_nothing_could_read_is_not_restored(monkeypatch, injector):
+    clipboard = FakeClipboard(text="", snapshot_works=False)
     _use(monkeypatch, injector, clipboard)
 
     def broken():
@@ -121,9 +143,10 @@ def test_polish_without_a_selection_puts_an_image_clipboard_back(monkeypatch, in
 
 
 @pytest.mark.parametrize("copied", ["the caret line\r\n", "the caret line\n", "\r\n", "  indented line  \n"])
-def test_a_whole_line_copy_counts_as_no_selection(monkeypatch, injector, copied):
+def test_a_whole_line_copy_in_vs_code_counts_as_no_selection(monkeypatch, injector, copied):
     clipboard = FakeClipboard(text="old")
     _use(monkeypatch, injector, clipboard)
+    monkeypatch.setattr(injector, "_copies_whole_line_without_selection", lambda: True)
 
     def copy(vk, scan, name):
         clipboard.text = copied
@@ -141,6 +164,7 @@ def test_a_whole_line_copy_counts_as_no_selection(monkeypatch, injector, copied)
 def test_a_real_selection_is_returned(monkeypatch, injector, copied):
     clipboard = FakeClipboard(text="old")
     _use(monkeypatch, injector, clipboard)
+    monkeypatch.setattr(injector, "_copies_whole_line_without_selection", lambda: True)
 
     def copy(vk, scan, name):
         clipboard.text = copied
@@ -148,6 +172,50 @@ def test_a_real_selection_is_returned(monkeypatch, injector, copied):
 
     monkeypatch.setattr(injector, "_send_ctrl_chord", copy)
     assert injector.copy_selection(0, timeout_s=0.5) == copied
+
+
+@pytest.mark.parametrize("copied", ["some line\n", "some line\r\n"])
+def test_a_one_line_selection_with_its_break_is_kept_outside_vs_code(monkeypatch, injector, copied):
+    """Polish keeps a selected line's newline on purpose: in Slack or Obsidian it is a selection."""
+    clipboard = FakeClipboard(text="old")
+    _use(monkeypatch, injector, clipboard)
+    monkeypatch.setattr(injector, "_copies_whole_line_without_selection", lambda: False)
+
+    def copy(vk, scan, name):
+        clipboard.text = copied
+        return True
+
+    monkeypatch.setattr(injector, "_send_ctrl_chord", copy)
+    assert injector.copy_selection(0, timeout_s=0.5) == copied
+
+
+@pytest.mark.parametrize(
+    ("process", "expected"),
+    [
+        ("Code.exe", True),
+        ("Code - Insiders.exe", True),
+        ("VSCodium.exe", True),
+        ("Cursor.exe", True),
+        ("slack.exe", False),
+        ("Obsidian.exe", False),
+        ("", False),
+    ],
+)
+def test_which_apps_copy_a_line_without_a_selection(monkeypatch, injector, process, expected):
+    from nexusvox.system import window_manager
+
+    monkeypatch.setattr(window_manager, "foreground_app", lambda: (process, "title"))
+    assert injector._copies_whole_line_without_selection() is expected
+
+
+def test_an_unreadable_foreground_app_is_not_an_editor(monkeypatch, injector):
+    from nexusvox.system import window_manager
+
+    def broken():
+        raise OSError("no window")
+
+    monkeypatch.setattr(window_manager, "foreground_app", broken)
+    assert injector._copies_whole_line_without_selection() is False
 
 
 # -- the paste fallback is not a way around UIPI -----------------------------------------------------------

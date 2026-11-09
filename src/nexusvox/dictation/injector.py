@@ -276,16 +276,20 @@ def foreground_window() -> int:
 
 
 def _save_clipboard() -> str | list[tuple[int, bytes]] | None:
-    """What is on the clipboard now, to put back later: its text, else every format it holds.
+    """What is on the clipboard now, to put back later: every format it holds (text with its formatting, an
+    image, a file list), so a dictation or a Polish leaves it as it was whatever it held.
 
-    `pyperclip.paste()` answers "" for an image or a file list, and putting "" back would wipe it, so an
-    empty answer takes a snapshot of all formats. None when the clipboard cannot be read.
+    `pyperclip.paste()` alone would answer "" for an image and only the plain text of a formatted copy.
+    Only when the clipboard cannot be opened for the snapshot is its text (if it has any) all there is to
+    put back; None when nothing could be read.
     """
+    saved = snapshot_formats()
+    if saved is not None:
+        return saved
     try:
-        text = pyperclip.paste()
+        return pyperclip.paste() or None
     except pyperclip.PyperclipException:
         return None
-    return text or snapshot_formats()
 
 
 def _restore_clipboard(saved: str | list[tuple[int, bytes]] | None) -> None:
@@ -301,12 +305,28 @@ def _restore_clipboard(saved: str | list[tuple[int, bytes]] | None) -> None:
         pass
 
 
-def _is_whole_line_copy(text: str) -> bool:
-    """True for exactly one line plus its line break: what an editor copies when nothing is selected.
+# Editors that answer Ctrl+C with no selection by copying the caret's whole line (process file names, lower case)
+_WHOLE_LINE_COPY_APPS = frozenset(
+    {"code.exe", "code - insiders.exe", "vscodium.exe", "cursor.exe", "windsurf.exe"}  # VS Code and its forks
+)
 
-    VS Code (and other editors) answer Ctrl+C with no selection by copying the caret's whole line,
-    break included, so the clipboard changes although the user selected nothing. A real selection of
-    one line that includes its break looks the same and is not told apart.
+
+def _copies_whole_line_without_selection() -> bool:
+    """Whether the focused app is one that copies the caret's line when nothing is selected."""
+    from ..system.window_manager import foreground_app  # Win32 at import, like this module
+
+    try:
+        return foreground_app()[0].lower() in _WHOLE_LINE_COPY_APPS
+    except Exception:
+        return False
+
+
+def _is_whole_line_copy(text: str) -> bool:
+    """True for exactly one line plus its line break: what such an editor copies when nothing is selected.
+
+    A real selection of one line that includes its break looks the same, so this is only asked of the apps
+    in `_WHOLE_LINE_COPY_APPS` (see `_copies_whole_line_without_selection`); everywhere else a one-line
+    selection with its break is a selection, which Polish keeps on purpose.
     """
     body = text.rstrip("\r\n")
     return 0 < len(text) - len(body) <= 2 and "\n" not in body and "\r" not in body
@@ -317,7 +337,7 @@ def copy_selection(injection_delay_ms: int = 500, timeout_s: float = 1.0) -> str
 
     The clipboard is emptied first, so an unchanged empty clipboard after Ctrl+C means
     there was no selection, and it is put back as it was afterwards (an image or a file
-    list included). A whole line copied without any selection counts as no selection.
+    list included). In VS Code and its forks a whole line copied without any selection counts as none.
     """
     original = _save_clipboard()
     try:
@@ -333,8 +353,8 @@ def copy_selection(injection_delay_ms: int = 500, timeout_s: float = 1.0) -> str
             except pyperclip.PyperclipException:
                 continue
             if selected:
-                if _is_whole_line_copy(selected):
-                    logger.info("Ctrl+C copied a whole line: treated as no selection")
+                if _is_whole_line_copy(selected) and _copies_whole_line_without_selection():
+                    logger.info("Ctrl+C copied a whole line in an editor that does so without a selection: ignored")
                     return ""
                 return selected
         return ""

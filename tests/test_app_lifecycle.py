@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from app_parts import patch_app
 
-from nexusvox.config import Config
+from nexusvox.config import MODEL_REGISTRY, Config
 
 try:
     from nexusvox.app.core import NexusVoxApp
@@ -442,3 +442,122 @@ def test_a_short_recording_with_frames_is_still_sent(monkeypatch):
     app._transcriber.finish = AsyncMock(return_value=MagicMock(text="", confidence=None))
     _run_take(app)
     app._transcriber.finish.assert_awaited_once()
+
+
+def _cuda_switch_app(
+    monkeypatch,
+    *,
+    device: str = "auto",
+    frozen: bool = False,
+    unavailable: str | None = None,
+    start_error: str | None = None,
+    healthy: bool = True,
+    model: str = "whisper-large-v3-turbo",
+):
+    """An app on a GPU machine that switches to Parakeet; Docker is a mock and never started."""
+    docker = MagicMock()
+    docker.unavailable_reason.return_value = unavailable
+    if unavailable:  # the real compose calls fail the same way while Docker is out of reach
+        docker.stop_profile.side_effect = RuntimeError("Failed to stop profile")
+        docker.start_profile.side_effect = RuntimeError("Failed to start profile parakeet")
+    if start_error:
+        docker.start_profile.side_effect = RuntimeError(start_error)
+    docker.wait_for_healthy.return_value = healthy
+    patch_app(monkeypatch, "docker_ctl", docker)
+    patch_app(monkeypatch, "is_frozen", lambda: frozen)
+    app = _switch_app(monkeypatch)
+    built = []
+    patch_app(monkeypatch, "create_transcriber", lambda *a, **k: built.append((a, k)) or MagicMock(needs_docker=False))
+    app._device = "cuda"
+    app._config.inference.device = device
+    app._config.inference.model = model
+    app._transcriber = MagicMock(needs_docker=True, disconnect=AsyncMock())
+    return app, docker, built
+
+
+def test_docker_out_of_reach_falls_back_to_the_cpu_on_auto_even_with_a_docker_model_running(monkeypatch, caplog):
+    app, docker, built = _cuda_switch_app(monkeypatch, unavailable="Docker is not running")
+    with caplog.at_level("INFO"):
+        asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
+    assert app._switch_status == "ready" and app._config.inference.model == "parakeet-tdt-0.6b"
+    assert app.get_switch_status()["note"] == "Docker is not running, using the CPU"
+    docker.stop_profile.assert_not_called()  # it would raise with Docker down
+    docker.start_profile.assert_not_called()
+    assert not [r for r in caplog.records if r.exc_info]  # an expected case, no traceback
+    assert any("runs on the CPU" in r.getMessage() for r in caplog.records)
+
+
+def test_the_cpu_fallback_keeps_the_auto_engine_for_parakeet_so_the_gpu_can_return(monkeypatch):
+    app, _docker, built = _cuda_switch_app(monkeypatch, unavailable="Docker is not running")
+    asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
+    assert built[-1][1] == {"device": "cuda", "auto_fallback": True}
+
+
+def test_the_cpu_fallback_for_whisper_drops_a_gpu_compute_type(monkeypatch):
+    app, _docker, built = _cuda_switch_app(monkeypatch, unavailable="Docker is not running", model="parakeet-tdt-0.6b")
+    app._config.inference.compute_type = "float16"
+    asyncio.run(app.switch_model("whisper-large-v3-turbo"))
+    (config,), kwargs = built[-1]
+    assert kwargs == {"device": "cpu"} and config.compute_type is None
+    assert app._config.inference.compute_type == "float16"  # the user's setting is untouched
+
+
+def test_a_frozen_build_switches_to_the_cpu_instead_of_raising(monkeypatch):
+    app, docker, built = _cuda_switch_app(
+        monkeypatch, frozen=True, unavailable="Docker is not available in the installed app"
+    )
+    asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
+    assert app._switch_status == "ready"
+    assert built[-1][1] == {"device": "cpu"}  # no server in the installed app, no auto engine
+    assert "installed app" in app.get_switch_status()["note"]
+    docker.start_profile.assert_not_called()
+
+
+def test_a_frozen_build_still_refuses_a_model_without_an_in_process_path(monkeypatch):
+    app, _docker, _built = _cuda_switch_app(monkeypatch, frozen=True)
+    monkeypatch.setitem(MODEL_REGISTRY, "needs-docker", {"docker_profile": "x", "default_url": "u", "health_url": "h"})
+    with pytest.raises(RuntimeError, match="Docker"):
+        asyncio.run(app.switch_model("needs-docker"))
+
+
+def test_a_real_compose_failure_with_docker_running_stays_an_error(monkeypatch):
+    app, _docker, built = _cuda_switch_app(monkeypatch, start_error="port is already allocated")
+    asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
+    assert app._switch_status == "error" and "port is already allocated" in app._switch_error
+    assert app._config.inference.model == "whisper-large-v3-turbo"
+    assert "note" not in app.get_switch_status()
+
+
+def test_a_container_that_never_gets_healthy_falls_back_to_the_cpu_on_auto(monkeypatch):
+    app, docker, _built = _cuda_switch_app(monkeypatch, healthy=False)
+    asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
+    assert app._switch_status == "ready"
+    assert app.get_switch_status()["note"] == "The Docker container did not become healthy, using the CPU"
+    docker.stop_profile.assert_called_with("parakeet")  # the half-started container is stopped
+
+
+def test_explicit_cuda_keeps_the_error_and_does_not_fall_back(monkeypatch):
+    app, docker, built = _cuda_switch_app(monkeypatch, device="cuda", start_error="Failed to start profile parakeet")
+    asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
+    assert app._switch_status == "error" and "Failed to start profile parakeet" in app._switch_error
+    assert app._config.inference.model == "whisper-large-v3-turbo"
+    docker.unavailable_reason.assert_not_called()
+
+
+def test_explicit_cuda_in_a_frozen_build_still_raises(monkeypatch):
+    app, _docker, _built = _cuda_switch_app(monkeypatch, device="cuda", frozen=True)
+    with pytest.raises(RuntimeError, match="Docker"):
+        asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
+
+
+def test_the_note_survives_a_first_download_but_not_a_later_refusal(monkeypatch):
+    app, _docker, _built = _cuda_switch_app(monkeypatch, unavailable="Docker is not running")
+    asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
+    app._switch_status = "idle"  # the 5 s timer ran
+    assert "note" not in app.get_switch_status()
+    app._transcriber.load_status.return_value = {"state": "downloading", "error": None}
+    assert app.get_switch_status()["note"] == "Docker is not running, using the CPU"
+    app._cycle_running = True
+    with pytest.raises(RuntimeError, match="during a dictation"):
+        asyncio.run(app.switch_model("whisper-large-v3-turbo"))
+    assert "note" not in app.get_switch_status()

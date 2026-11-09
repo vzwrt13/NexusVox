@@ -123,9 +123,9 @@ class CustomServerConfig:
 
 @dataclass
 class InferenceConfig:
-    server_url: str = "http://localhost:8002/v1/audio/transcriptions"
+    server_url: str = str(MODEL_REGISTRY[DEFAULT_MODEL]["default_url"])
     transcription_delay_ms: int = 480
-    model: str = "parakeet-tdt-0.6b"
+    model: str = DEFAULT_MODEL
     device: str = "auto"
     compute_type: str | None = None
     custom: CustomServerConfig = field(default_factory=CustomServerConfig)

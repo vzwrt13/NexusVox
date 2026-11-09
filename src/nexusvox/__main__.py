@@ -3,18 +3,28 @@
 import logging
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from .app.core import NexusVoxApp
 from .config import load_config
-from .system.logsetup import setup_file_logging
+from .system.logsetup import set_file_log_level, setup_file_logging
 from .system.paths import apply_models_dir, default_config_path, ensure_dirs
 from .system.single_instance import SingleInstance, show_message
 
+NOT_A_CHECKOUT = "(not a git checkout)"
 
-def _git_revision() -> str:
-    """`branch@commit` of the checkout this code runs from, "(not a git checkout)" for an installed copy."""
-    folder = Path(__file__).resolve().parent
+
+def _is_checkout(folder: Path) -> bool:
+    """True when *folder* is `<checkout>/src/nexusvox` of a git checkout, and the app is not a frozen build.
+
+    An installed copy that sits inside some other repository (a virtual environment in a project) is not one.
+    """
+    return not getattr(sys, "frozen", False) and (folder.parent.parent / ".git").exists()
+
+
+def _git_revision(folder: Path) -> str:
+    """`branch@commit` of the checkout in *folder* (`_is_checkout` is the caller's business)."""
 
     def git(*args: str) -> str:
         done = subprocess.run(
@@ -31,7 +41,20 @@ def _git_revision() -> str:
     try:
         return f"{git('rev-parse', '--abbrev-ref', 'HEAD')}@{git('rev-parse', '--short', 'HEAD')}"
     except (OSError, subprocess.SubprocessError):
-        return "(not a git checkout)"
+        return NOT_A_CHECKOUT
+
+
+def _log_code_revision() -> None:
+    """Logs which code runs. The git calls can take seconds, so they never delay the start: a checkout logs from a
+    background thread, anything else (an installed copy, a frozen build) at once without asking git."""
+    folder = Path(__file__).resolve().parent
+    log = logging.getLogger(__name__).info
+    if _is_checkout(folder):
+        threading.Thread(
+            target=lambda: log("Code: %s, %s", folder, _git_revision(folder)), name="git-revision", daemon=True
+        ).start()
+    else:
+        log("Code: %s, %s", folder, NOT_A_CHECKOUT)
 
 
 AUTOSTART_FLAG = "--autostart"
@@ -53,17 +76,25 @@ def main() -> None:
     try:
         ensure_dirs()
         apply_models_dir()
-        config = load_config()
-        level = getattr(logging, config.log_level)
-        # DEBUG is for NexusVox's own loggers: comtypes and urllib3 log every COM call and request at DEBUG
-        # and would bury the lines the user turned it on to read.
+        # Logging first, so what `load_config` has to say (a config moved aside, a model that is gone) reaches the
+        # file too: the windowed app has no console. The level and the full-text switch are in the config, which is
+        # not read yet; they are applied right after it.
         logging.basicConfig(
-            level=max(level, logging.INFO),
+            level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             datefmt="%H:%M:%S",
         )
+        loaded: list = []
+        log_file = setup_file_logging(lambda: bool(loaded) and loaded[0].log_full_text)
+        config = load_config()
+        loaded.append(config)
+        level = getattr(logging, config.log_level)
+        # DEBUG is for NexusVox's own loggers: comtypes and urllib3 log every COM call and request at DEBUG
+        # and would bury the lines the user turned it on to read.
+        if level > logging.INFO:
+            logging.getLogger().setLevel(level)
         logging.getLogger("nexusvox").setLevel(level)
-        log_file = setup_file_logging(lambda: config.log_full_text, level=level)
+        set_file_log_level(level)
 
         # Which config and database this process runs on: a config.toml in the wrong working directory is
         # otherwise only noticed as a setting that does nothing.
@@ -76,7 +107,7 @@ def main() -> None:
         )
 
         # Which code runs: a retest against the wrong checkout is otherwise only noticed as a fix that does nothing.
-        logging.getLogger(__name__).info("Code: %s, %s", Path(__file__).resolve().parent, _git_revision())
+        _log_code_revision()
 
         app = NexusVoxApp(config, autostart=is_autostart(sys.argv[1:]))
         instance.watch(app.open_dashboard_from_second_start)

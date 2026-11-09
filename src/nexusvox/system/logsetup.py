@@ -142,3 +142,10 @@ def setup_file_logging(
     logging.getLogger().addHandler(handler)
     handler.write_format_mark()
     return directory / LOG_FILE_NAME
+
+
+def set_file_log_level(level: int) -> None:
+    """Sets the level of the file handler `setup_file_logging` added (known only once the config is read)."""
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, _DailyFileHandler):
+            handler.setLevel(level)

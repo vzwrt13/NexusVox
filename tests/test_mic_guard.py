@@ -222,3 +222,42 @@ def test_async_hold_then_release_keeps_order_on_quick_tap():
 
     assert s.set_calls == [True, False]
     assert not g.active
+
+
+def test_release_restores_a_session_the_app_recreated_during_the_hold():
+    # Discord rejoining a call creates a new session (new instance id); Windows carries the mute over to it
+    # under the stable session identifier, so the release must find it by that identifier.
+    discord = FakeSession(1, app="discord")
+    current = [discord]
+    g = _guard(current)
+
+    g.hold()
+    rejoined = FakeSession(1, muted=True, app="discord")
+    rejoined.instance_id = "discord|sid|rejoined"
+    current[0] = rejoined
+
+    assert g.release() == 1
+    assert rejoined.muted is False
+    assert not g.active
+
+
+def test_restoring_by_session_id_leaves_a_sibling_the_user_muted_alone():
+    discord = FakeSession(1, app="discord")
+    user_muted = FakeSession(5, muted=True, app="discord")  # same app, same stable id, muted on purpose
+    g = _guard([discord, user_muted])
+
+    g.hold()
+    assert g.release() == 1
+    assert discord.muted is False
+    assert user_muted.muted is True
+    assert user_muted.set_calls == []
+
+
+def test_hold_mutes_nothing_when_the_state_file_cannot_be_written(tmp_path, caplog):
+    s = FakeSession(1, app="discord")
+    g = _guard([s], state_path=tmp_path / "missing-dir" / STATE_FILENAME)
+
+    assert g.hold() == []
+    assert s.set_calls == []
+    assert s.muted is False
+    assert not g.active

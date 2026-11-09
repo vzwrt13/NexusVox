@@ -10,7 +10,11 @@ Nothing may stay muted after NexusVox lets go of the key, exits, or dies:
 - `release()` is idempotent and is called on key-up, in the `finally` of the recording
   cycle, from `atexit`, and from a watchdog timer that fires if key-up is never seen;
 - while a hold is active the affected sessions are written to a small state file, and
-  `restore_leftovers()` unmutes them on the next start if the previous process was killed.
+  `restore_leftovers()` unmutes them on the next start if the previous process was killed;
+  when that file cannot be written, nothing is muted;
+- an app that re-creates its capture session during the hold (Discord rejoining a call)
+  gets a new instance identifier, and Windows carries the mute over to it under the stable
+  session identifier: `release()` restores by that identifier too.
 
 The WASAPI access lives in `WasapiCaptureSessions`; `MicGuard` only sees objects that
 satisfy `CaptureSession`, so the remember/restore logic is testable with fakes.
@@ -90,6 +94,9 @@ class MicGuard:
         self._watchdog_s = watchdog_s
         self._lock = threading.Lock()
         self._muted: list[MutedEntry] = []
+        # Instance ids of the sessions `hold()` left alone (muted by the user, unreadable): a restore by
+        # session identifier never unmutes them.
+        self._kept: set[str] = set()
         self._watchdog: threading.Timer | None = None
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mic-guard")
 
@@ -130,21 +137,28 @@ class MicGuard:
                 return []
 
             targets: list[tuple[CaptureSession, MutedEntry]] = []
+            kept: set[str] = set()
             for s in sessions:
                 if s.pid == 0 or s.pid in self._own_pids:
                     continue
                 try:
                     if s.get_mute():
+                        kept.add(s.instance_id)
                         continue  # muted on purpose by the user; leave it alone
                 except Exception:
                     logger.warning("Mic guard: cannot read mute state of pid %d, skipping", s.pid)
+                    kept.add(s.instance_id)
                     continue
                 targets.append((s, MutedEntry(s.pid, s.instance_id, s.session_id)))
 
             # Persist before muting: if we die between the two, the next start unmutes
-            # sessions that were unmuted anyway, which is harmless.
+            # sessions that were unmuted anyway, which is harmless. Without the file a crash
+            # during the hold would leave them muted for good, so then nothing is muted.
             entries = [e for _, e in targets]
-            self._write_state(entries)
+            if not self._write_state(entries):
+                logger.error("Mic guard: cannot record the sessions to restore after a crash, nothing muted")
+                return []
+            self._kept = kept
 
             muted: list[MutedEntry] = []
             for s, entry in targets:
@@ -176,16 +190,21 @@ class MicGuard:
             if not self._muted:
                 return 0
             wanted = {e.instance_id for e in self._muted}
-            restored = self._unmute_matching(instance_ids=wanted, session_ids=set())
+            restored = self._unmute_matching(
+                instance_ids=wanted,
+                session_ids={e.session_id for e in self._muted if e.session_id},
+                keep=self._kept,
+            )
             if restored is None:
                 # Nothing was touched: keep the list and the state file so the next
                 # release (or the next start) retries instead of leaving them muted.
                 logger.error("Mic guard: %d session(s) still muted, will retry on the next release", len(wanted))
                 return 0
             missing = len(wanted) - restored
-            if missing:
+            if missing > 0:
                 logger.warning("Mic guard: %d muted session(s) vanished before restore", missing)
             self._muted = []
+            self._kept = set()
             self._clear_state()
             logger.info("Mic guard: restored %d capture session(s)", restored)
             return restored
@@ -240,8 +259,13 @@ class MicGuard:
         logger.info("Mic guard: restored %d microphone session(s) left muted by a previous run", restored)
         return restored
 
-    def _unmute_matching(self, *, instance_ids: set[str], session_ids: set[str]) -> int | None:
-        """Unmute the matching sessions; None when enumeration failed and nothing was touched."""
+    def _unmute_matching(
+        self, *, instance_ids: set[str], session_ids: set[str], keep: frozenset[str] | set[str] = frozenset()
+    ) -> int | None:
+        """Unmute the sessions matching by instance or session identifier, except the instances in `keep`.
+
+        None when enumeration failed and nothing was touched.
+        """
         try:
             sessions = self._enumerate()
         except Exception:
@@ -249,7 +273,7 @@ class MicGuard:
             return None
         restored = 0
         for s in sessions:
-            if s.instance_id in instance_ids or s.session_id in session_ids:
+            if s.instance_id in instance_ids or (s.session_id in session_ids and s.instance_id not in keep):
                 try:
                     s.set_mute(False)
                     restored += 1
@@ -259,9 +283,10 @@ class MicGuard:
 
     # -- state file -------------------------------------------------------------------
 
-    def _write_state(self, entries: list[MutedEntry]) -> None:
+    def _write_state(self, entries: list[MutedEntry]) -> bool:
+        """Record the sessions about to be muted; False when the file could not be written."""
         if self._state_path is None or not entries:
-            return
+            return True
         try:
             payload = {"ts": time.time(), "entries": [e.__dict__ for e in entries]}
             tmp = self._state_path.with_suffix(".tmp")
@@ -269,6 +294,8 @@ class MicGuard:
             os.replace(tmp, self._state_path)
         except OSError:
             logger.warning("Mic guard: cannot write state file %s", self._state_path)
+            return False
+        return True
 
     def _clear_state(self) -> None:
         if self._state_path is None:

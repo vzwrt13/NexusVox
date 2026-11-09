@@ -390,3 +390,116 @@ def test_a_meeting_without_dictation_stores_an_empty_list(tmp_path):
     folder = rec.start()
     rec.stop()
     assert json.loads((folder / "meeting.json").read_text(encoding="utf-8"))["dictations"] == []
+
+
+def test_frames_lost_to_a_full_queue_are_padded_where_they_were_lost(tmp_path, monkeypatch):
+    # The blocks still in the queue arrived before the loss; the silence belongs after them, and the audio after
+    # the gap must survive whole (none of it trimmed as a "surplus").
+    monkeypatch.setattr("nexusvox.meetings.recorder.QUEUE_CHUNKS", 8)
+    rec, _mic, system, clock = _recorder(tmp_path, AudioFormat(8000, 1), AudioFormat(8000, 1))
+    folder = rec.start()
+    track = rec._tracks["system"]
+    gate = threading.Event()
+    original_write = track.writer.write
+
+    def stalled_write(data, arrival):
+        gate.wait()
+        original_write(data, arrival)
+
+    track.writer.write = stalled_write
+    block = 400  # 0.05 s at 8 kHz
+    kept_before = 0
+    while track.dropped == 0:
+        clock.advance(0.05)
+        system.push(0.05)
+        kept_before += 1
+    kept_before -= 1  # the push that overflowed was lost
+    while track.dropped < 10:  # 0.5 s lost: more than the jitter tolerance
+        clock.advance(0.05)
+        system.push(0.05)
+    gate.set()
+    rec.flush()
+    for _ in range(4):
+        clock.advance(0.05)
+        system.push(0.05)
+    rec.flush()
+    rec.stop()
+
+    with wave.open(str(folder / "system.wav"), "rb") as w:
+        raw = w.readframes(w.getnframes())
+    samples = [raw[i : i + 2] for i in range(0, len(raw), 2)]
+    silent = [i for i, sample in enumerate(samples) if sample == b"\x00\x00"]
+    assert len(samples) - len(silent) == (kept_before + 4) * block  # no real audio trimmed
+    assert silent == list(range(kept_before * block, (kept_before + 10) * block))  # the gap, at its place
+
+
+class _FailingStream:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def stop(self) -> None:
+        raise OSError("device unplugged")
+
+    stop_stream = stop
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_a_meeting_mic_that_fails_to_stop_is_still_closed_and_uncounted():
+    from nexusvox.audio import state as audio_state
+    from nexusvox.meetings.recorder import MicSource
+
+    source = MicSource()
+    stream = _FailingStream()
+    source._stream = stream
+    audio_state.stream_opened()
+    open_before = audio_state.streams_open()
+    with pytest.raises(OSError):
+        source.stop()
+    assert stream.closed
+    assert audio_state.streams_open() == open_before - 1
+    assert source._stream is None
+    source.stop()  # a second stop does not uncount again
+    assert audio_state.streams_open() == open_before - 1
+
+
+def test_a_loopback_that_fails_to_stop_still_terminates_pyaudio():
+    from nexusvox.meetings.recorder import LoopbackSource
+
+    class FakePa:
+        terminated = False
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+    source = LoopbackSource()
+    stream, pa = _FailingStream(), FakePa()
+    source._stream, source._pa = stream, pa
+    with pytest.raises(OSError):
+        source.stop()
+    assert stream.closed
+    assert pa.terminated
+    assert source._stream is None and source._pa is None
+
+
+def test_listing_and_finding_outputs_share_one_filter():
+    from nexusvox.meetings.recorder import _wasapi_outputs
+
+    devices = [
+        {"name": "Speakers", "maxOutputChannels": 2, "index": 1},
+        {"name": "Speakers [Loopback]", "maxOutputChannels": 2, "isLoopbackDevice": True, "index": 2},
+        {"name": "Microphone", "maxOutputChannels": 0, "index": 3},
+    ]
+
+    class FakePa:
+        def get_host_api_info_by_type(self, kind):
+            return {"deviceCount": len(devices), "index": 0}
+
+        def get_device_info_by_host_api_device_index(self, api, i):
+            return devices[i]
+
+    class FakePyAudio:
+        paWASAPI = 13
+
+    assert [d["name"] for d in _wasapi_outputs(FakePa(), FakePyAudio)] == ["Speakers"]

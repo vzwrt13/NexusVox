@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..audio import state as audio_state
-from ..audio.devices import find_input_device, input_open_lock, list_input_names, refresh_devices
+from ..audio.devices import find_input_device, input_open_lock, list_input_names, named_input, refresh_devices
 
 logger = logging.getLogger("nexusvox.meeting_recorder")
 
@@ -138,14 +138,8 @@ class MicSource:
     def _refind(self, sd) -> int | None:
         """The current index of the device `describe()` saw, on the same host API: an MME device opened through
         WASAPI would run at another rate than the WAV header says."""
-        for dev in sd.query_devices():
-            if (
-                dev["name"] == self._device_name
-                and dev.get("hostapi") == self._hostapi
-                and dev.get("max_input_channels", 0) > 0
-            ):
-                return int(dev["index"])
-        return None
+        dev = named_input(sd, self._device_name, self._hostapi)
+        return int(dev["index"]) if dev is not None else None
 
     def start(self, sink: Callable[[bytes], None]) -> None:
         import sounddevice as sd
@@ -185,15 +179,8 @@ class MicSource:
     def stop(self) -> None:
         """Stop and close the stream; it counts as closed even when PortAudio raises (a headset unplugged)."""
         stream, self._stream = self._stream, None
-        if stream is None:
-            return
-        try:
-            stream.stop()
-        finally:
-            try:
-                stream.close()
-            finally:
-                audio_state.stream_closed()
+        if stream is not None:
+            audio_state.close_stream(stream)
 
 
 class LoopbackSource:
@@ -363,9 +350,11 @@ class _Track:
         self.source = source
         self.writer = writer
         self._clock = clock
-        self._queue: queue.Queue[tuple[float, bytes] | None] = queue.Queue(QUEUE_CHUNKS)
+        # (arrival, data, frames lost to a full queue just before this block)
+        self._queue: queue.Queue[tuple[float, bytes, int] | None] = queue.Queue(QUEUE_CHUNKS)
         self._thread = threading.Thread(target=self._run, name=f"meeting-{name}", daemon=True)
         self._lock = threading.Lock()
+        self._lost_frames = 0  # dropped since the last block that made it into the queue
         self.dropped = 0
         self.error: str | None = None
         self.latency_s: float | None = None
@@ -373,25 +362,32 @@ class _Track:
     def sink(self, data: bytes) -> None:
         """Runs on the audio thread: never blocks, a full queue drops the block.
 
-        A dropped block needs no bookkeeping: the next block's arrival time shows the gap, and `TrackWriter.write`
-        pads it there (or `finish` at the end), at the place in the timeline where the audio was lost.
+        The frames of dropped blocks ride along with the next block that is queued, because that is where they were
+        lost in the timeline: the writer pads exactly that many frames right before it, also a loss shorter than the
+        jitter tolerance. Blocks still queued arrived before the loss and are written first; a loss at the very end
+        is covered by `finish()`, which pads to the stop time.
         """
         if self._tap is not None:
             try:
                 self._tap(data)
             except Exception:  # the live preview must never cost a recorded block
                 logger.exception("Meeting %s audio tap failed", self.name)
-        try:
-            self._queue.put_nowait((self._clock(), data))
-        except queue.Full:
-            with self._lock:
+        with self._lock:
+            try:
+                self._queue.put_nowait((self._clock(), data, self._lost_frames))
+            except queue.Full:
                 self.dropped += 1
+                self._lost_frames += len(data) // self.writer.frame_bytes
+            else:
+                self._lost_frames = 0
 
     def _run(self) -> None:
         while (item := self._queue.get()) is not None:
             if self.error is None:
                 try:
-                    self.writer.write(item[1], item[0])
+                    arrival, data, lost = item
+                    self.writer.pad(lost)
+                    self.writer.write(data, arrival)
                 except Exception as exc:  # disk full, file removed: keep draining, report at the end
                     self.error = str(exc)
                     logger.error("Meeting %s track failed: %s", self.name, exc)

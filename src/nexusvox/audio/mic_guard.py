@@ -14,7 +14,11 @@ Nothing may stay muted after NexusVox lets go of the key, exits, or dies:
   when that file cannot be written, nothing is muted;
 - an app that re-creates its capture session during the hold (Discord rejoining a call)
   gets a new instance identifier, and Windows carries the mute over to it under the stable
-  session identifier: `release()` restores by that identifier too.
+  session identifier. So for each muted session that vanished, `release()` (and
+  `restore_leftovers()`) unmutes one stand-in: a muted session with the same stable
+  identifier that did not exist at the hold and is not NexusVox's own. Sessions that
+  existed at the hold and were left alone (muted by the user) are never touched; the
+  instance identifiers seen at the hold are in the state file for the crash case.
 
 The WASAPI access lives in `WasapiCaptureSessions`; `MicGuard` only sees objects that
 satisfy `CaptureSession`, so the remember/restore logic is testable with fakes.
@@ -28,6 +32,7 @@ import logging
 import os
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -94,9 +99,9 @@ class MicGuard:
         self._watchdog_s = watchdog_s
         self._lock = threading.Lock()
         self._muted: list[MutedEntry] = []
-        # Instance ids of the sessions `hold()` left alone (muted by the user, unreadable): a restore by
-        # session identifier never unmutes them.
-        self._kept: set[str] = set()
+        # Instance ids of every session that existed at the hold: a stand-in for a vanished muted session is
+        # never one of them, so a session the user muted before the hold is never unmuted.
+        self._seen: set[str] = set()
         self._watchdog: threading.Timer | None = None
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mic-guard")
 
@@ -137,17 +142,15 @@ class MicGuard:
                 return []
 
             targets: list[tuple[CaptureSession, MutedEntry]] = []
-            kept: set[str] = set()
+            seen = {s.instance_id for s in sessions}
             for s in sessions:
                 if s.pid == 0 or s.pid in self._own_pids:
                     continue
                 try:
                     if s.get_mute():
-                        kept.add(s.instance_id)
                         continue  # muted on purpose by the user; leave it alone
                 except Exception:
                     logger.warning("Mic guard: cannot read mute state of pid %d, skipping", s.pid)
-                    kept.add(s.instance_id)
                     continue
                 targets.append((s, MutedEntry(s.pid, s.instance_id, s.session_id)))
 
@@ -155,10 +158,10 @@ class MicGuard:
             # sessions that were unmuted anyway, which is harmless. Without the file a crash
             # during the hold would leave them muted for good, so then nothing is muted.
             entries = [e for _, e in targets]
-            if not self._write_state(entries):
+            if not self._write_state(entries, seen):
                 logger.error("Mic guard: cannot record the sessions to restore after a crash, nothing muted")
                 return []
-            self._kept = kept
+            self._seen = seen
 
             muted: list[MutedEntry] = []
             for s, entry in targets:
@@ -189,22 +192,17 @@ class MicGuard:
                 self._watchdog = None
             if not self._muted:
                 return 0
-            wanted = {e.instance_id for e in self._muted}
-            restored = self._unmute_matching(
-                instance_ids=wanted,
-                session_ids={e.session_id for e in self._muted if e.session_id},
-                keep=self._kept,
-            )
-            if restored is None:
+            result = self._restore(self._muted, self._seen)
+            if result is None:
                 # Nothing was touched: keep the list and the state file so the next
                 # release (or the next start) retries instead of leaving them muted.
-                logger.error("Mic guard: %d session(s) still muted, will retry on the next release", len(wanted))
+                logger.error("Mic guard: %d session(s) still muted, will retry on the next release", len(self._muted))
                 return 0
-            missing = len(wanted) - restored
-            if missing > 0:
+            restored, missing = result
+            if missing:
                 logger.warning("Mic guard: %d muted session(s) vanished before restore", missing)
             self._muted = []
-            self._kept = set()
+            self._seen = set()
             self._clear_state()
             logger.info("Mic guard: restored %d capture session(s)", restored)
             return restored
@@ -243,52 +241,72 @@ class MicGuard:
 
     def restore_leftovers(self) -> int:
         """Unmute sessions a previous, killed NexusVox left muted. Call once at startup."""
-        entries = self._read_state()
+        entries, seen = self._read_state()
         if not entries:
             return 0
         with self._lock:
             # Windows persists per-app mute under the session identifier, so a session that
-            # was restarted since the crash is still muted: match on the stable id too.
-            restored = self._unmute_matching(
-                instance_ids={e.instance_id for e in entries},
-                session_ids={e.session_id for e in entries},
-            )
-            if restored is None:
+            # was restarted since the crash is still muted: its stand-in is restored too.
+            result = self._restore(entries, seen)
+            if result is None:
                 return 0  # state file kept, the next start tries again
+            restored, _missing = result
             self._clear_state()
         logger.info("Mic guard: restored %d microphone session(s) left muted by a previous run", restored)
         return restored
 
-    def _unmute_matching(
-        self, *, instance_ids: set[str], session_ids: set[str], keep: frozenset[str] | set[str] = frozenset()
-    ) -> int | None:
-        """Unmute the sessions matching by instance or session identifier, except the instances in `keep`.
+    def _restore(self, entries: list[MutedEntry], seen: set[str]) -> tuple[int, int] | None:
+        """Unmute the muted sessions, and one stand-in for each that vanished.
 
-        None when enumeration failed and nothing was touched.
+        A stand-in has the vanished session's stable identifier, did not exist at the hold (`seen`), is muted now
+        (Windows carried the mute over) and is neither NexusVox's own nor the system's. Returns (restored, missing):
+        the sessions unmuted and the vanished ones without a stand-in. None when enumeration failed and nothing
+        was touched.
         """
         try:
             sessions = self._enumerate()
         except Exception:
             logger.exception("Mic guard: enumerating capture sessions failed, nothing restored")
             return None
+        present = {s.instance_id for s in sessions}
+        wanted = {e.instance_id for e in entries}
+        vanished = Counter(e.session_id for e in entries if e.instance_id not in present and e.session_id)
         restored = 0
         for s in sessions:
-            if s.instance_id in instance_ids or (s.session_id in session_ids and s.instance_id not in keep):
-                try:
-                    s.set_mute(False)
-                    restored += 1
-                except Exception:
-                    logger.warning("Mic guard: unmuting pid %d failed", s.pid)
-        return restored
+            if s.instance_id in wanted:
+                restored += self._unmute(s)
+            elif vanished[s.session_id] > 0 and self._is_stand_in(s, seen):
+                vanished[s.session_id] -= 1
+                restored += self._unmute(s)
+        return restored, sum(vanished.values())
+
+    def _is_stand_in(self, s: CaptureSession, seen: set[str]) -> bool:
+        if s.instance_id in seen or s.pid == 0 or s.pid in self._own_pids:
+            return False
+        try:
+            return bool(s.get_mute())
+        except Exception:
+            return False
+
+    @staticmethod
+    def _unmute(s: CaptureSession) -> int:
+        """1 when the session was unmuted, 0 when that failed (logged)."""
+        try:
+            s.set_mute(False)
+        except Exception:
+            logger.warning("Mic guard: unmuting pid %d failed", s.pid)
+            return 0
+        return 1
 
     # -- state file -------------------------------------------------------------------
 
-    def _write_state(self, entries: list[MutedEntry]) -> bool:
-        """Record the sessions about to be muted; False when the file could not be written."""
+    def _write_state(self, entries: list[MutedEntry], seen: set[str]) -> bool:
+        """Record the sessions about to be muted and every session seen at the hold; False when the file could
+        not be written."""
         if self._state_path is None or not entries:
             return True
         try:
-            payload = {"ts": time.time(), "entries": [e.__dict__ for e in entries]}
+            payload = {"ts": time.time(), "entries": [e.__dict__ for e in entries], "seen": sorted(seen)}
             tmp = self._state_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(payload), encoding="utf-8")
             os.replace(tmp, self._state_path)
@@ -305,15 +323,17 @@ class MicGuard:
         except OSError:
             logger.warning("Mic guard: cannot remove state file %s", self._state_path)
 
-    def _read_state(self) -> list[MutedEntry]:
+    def _read_state(self) -> tuple[list[MutedEntry], set[str]]:
+        """The muted sessions and the instance ids seen at the hold (empty in a file an older version wrote)."""
         if self._state_path is None or not self._state_path.exists():
-            return []
+            return [], set()
         try:
             data = json.loads(self._state_path.read_text(encoding="utf-8"))
-            return [MutedEntry(int(e["pid"]), str(e["instance_id"]), str(e["session_id"])) for e in data["entries"]]
-        except (OSError, ValueError, KeyError, TypeError):
+            entries = [MutedEntry(int(e["pid"]), str(e["instance_id"]), str(e["session_id"])) for e in data["entries"]]
+            return entries, {str(i) for i in data.get("seen", [])}
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
             logger.warning("Mic guard: state file %s is unreadable, ignoring", self._state_path)
-            return []
+            return [], set()
 
 
 # -- WASAPI backend -----------------------------------------------------------------------

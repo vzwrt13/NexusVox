@@ -24,6 +24,21 @@ def stream_closed() -> None:
         _open = max(0, _open - 1)
 
 
+def close_stream(stream) -> None:
+    """Stop and close a counted input stream (sounddevice API: `stop()`, `close()`).
+
+    Every step runs even when an earlier one raises (a microphone unplugged): the stream is always closed and
+    always uncounted. The first error is raised afterwards.
+    """
+    try:
+        stream.stop()
+    finally:
+        try:
+            stream.close()
+        finally:
+            stream_closed()
+
+
 def streams_open() -> int:
     """How many streams (dictation and meeting microphone) are open right now."""
     return _open

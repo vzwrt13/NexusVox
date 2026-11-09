@@ -392,9 +392,10 @@ def test_a_meeting_without_dictation_stores_an_empty_list(tmp_path):
     assert json.loads((folder / "meeting.json").read_text(encoding="utf-8"))["dictations"] == []
 
 
-def test_frames_lost_to_a_full_queue_are_padded_where_they_were_lost(tmp_path, monkeypatch):
-    # The blocks still in the queue arrived before the loss; the silence belongs after them, and the audio after
-    # the gap must survive whole (none of it trimmed as a "surplus").
+@pytest.mark.parametrize("lost", [2, 10])  # 0.1 s (under the jitter tolerance) and 0.5 s (over it)
+def test_frames_lost_to_a_full_queue_are_padded_where_they_were_lost(tmp_path, monkeypatch, lost):
+    # The blocks still in the queue arrived before the loss; the silence belongs after them, exactly as long as
+    # the loss (also one shorter than the tolerance), and the audio after the gap must survive whole.
     monkeypatch.setattr("nexusvox.meetings.recorder.QUEUE_CHUNKS", 8)
     rec, _mic, system, clock = _recorder(tmp_path, AudioFormat(8000, 1), AudioFormat(8000, 1))
     folder = rec.start()
@@ -414,7 +415,7 @@ def test_frames_lost_to_a_full_queue_are_padded_where_they_were_lost(tmp_path, m
         system.push(0.05)
         kept_before += 1
     kept_before -= 1  # the push that overflowed was lost
-    while track.dropped < 10:  # 0.5 s lost: more than the jitter tolerance
+    while track.dropped < lost:
         clock.advance(0.05)
         system.push(0.05)
     gate.set()
@@ -430,7 +431,7 @@ def test_frames_lost_to_a_full_queue_are_padded_where_they_were_lost(tmp_path, m
     samples = [raw[i : i + 2] for i in range(0, len(raw), 2)]
     silent = [i for i, sample in enumerate(samples) if sample == b"\x00\x00"]
     assert len(samples) - len(silent) == (kept_before + 4) * block  # no real audio trimmed
-    assert silent == list(range(kept_before * block, (kept_before + 10) * block))  # the gap, at its place
+    assert silent == list(range(kept_before * block, (kept_before + lost) * block))  # the gap, at its place
 
 
 class _FailingStream:

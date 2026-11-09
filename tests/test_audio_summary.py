@@ -118,10 +118,12 @@ async def test_the_length_adds_up_the_frames_the_callbacks_delivered(monkeypatch
 
 async def test_a_device_that_fails_to_stop_still_leaves_the_summary(monkeypatch, caplog):
     capture = _recording(monkeypatch)
-    capture._stream.stop.side_effect = OSError("device unplugged")
+    stream = capture._stream
+    stream.stop.side_effect = OSError("device unplugged")
     with caplog.at_level(logging.INFO, logger="nexusvox.audio"):
         _feed(capture, 0.0, 10)
         capture.stop()  # logged, not raised: the take is kept
+    stream.close.assert_called_once()  # closed although stopping failed: nothing left feeding the next take
     assert any("10 chunks" in m for m in _messages(caplog, logging.INFO))
     assert any("was silent" in m for m in _messages(caplog, logging.WARNING))
     assert capture._stream is None

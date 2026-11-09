@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from . import llm as llm_module
 from .config import CleanupConfig, LlmConfig
-from .dictation.cleanup import PROMPTS, cleanup
+from .dictation.cleanup import PROMPTS, RELOADING, cleanup
 
 logger = logging.getLogger(__name__)
 
@@ -199,12 +199,20 @@ def clean_transcript(
                 if on_progress:
                     on_progress("cleaning", done, total)
                 result = cleanup(piece, config, llm, MIN_PIECE_WORDS)
+                load_gave_up = False
+                if result.error == RELOADING:
+                    # No request went out: the model is loading (a timeout, or the warm-up at start). An upload is
+                    # not in a hurry, so it waits for the load and asks again instead of giving the piece up.
+                    if llm_module.wait_for_reload(llm):
+                        result = cleanup(piece, config, llm, MIN_PIECE_WORDS)
+                    else:
+                        load_gave_up = True  # still loading after the whole wait: the model is as good as down
                 if result.error:
                     failed += 1
                 if result.ms is not None:
                     streak = 0  # the model answered, sensibly or not
-                elif result.error:
-                    streak += 1  # the request failed; a piece too short to send changes nothing
+                elif result.error and (result.error != RELOADING or load_gave_up):
+                    streak += 1  # the request failed; a piece too short to send or a loading model is no failure
                 changed = changed or result.text != piece
                 cleaned_pieces.append(result.text)
             cleaned_paragraphs.append(_join(paragraph, cleaned_pieces))

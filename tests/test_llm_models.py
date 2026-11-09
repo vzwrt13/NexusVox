@@ -179,3 +179,112 @@ def test_size_near_the_disk_size_is_believed(monkeypatch):
     _serve(monkeypatch, ps)
     loaded = llm.loaded_model(LlmConfig(model="gemma4:12b-it-qat"), "gemma4:12b-it-qat", disk_gb=7.2)
     assert loaded == {"plausible": True, "vram_gb": 7.7, "ram_gb": 0.0}
+
+
+def _record_requests(monkeypatch, body):
+    """`urlopen` that answers with *body* and keeps the requests it got."""
+    seen = []
+
+    def fake(request, timeout=None):
+        seen.append(request)
+        return _Resp(body(request.full_url) if callable(body) else json.dumps(body).encode())
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", fake)
+    return seen
+
+
+def test_loaded_model_sends_the_api_key(monkeypatch):
+    ps = {"models": [{"name": "m:1", "size": 2_000_000_000, "size_vram": 1_000_000_000}]}
+    seen = _record_requests(monkeypatch, ps)
+    assert llm.loaded_model(LlmConfig(model="m:1", api_key="secret"), "m:1") is not None
+    assert seen[0].full_url.endswith("/api/ps")
+    assert seen[0].get_header("Authorization") == "Bearer secret"
+
+
+def test_pull_sends_the_api_key(monkeypatch):
+    seen = _record_requests(monkeypatch, _lines({"status": "success"}))
+    pull = llm.ModelPull()
+    pull.start(LlmConfig(api_key="secret"), "gemma4:e2b")
+    _wait(pull, "done")
+    assert seen[0].get_header("Authorization") == "Bearer secret"
+    assert seen[0].get_header("Content-type") == "application/json"
+
+
+@pytest.mark.parametrize(
+    "event",
+    [[1, 2], {"status": "pulling x", "total": 100, "completed": None}, {"status": "pulling x", "total": "many"}],
+)
+def test_an_odd_pull_event_ends_the_pull_as_an_error_and_allows_the_next(monkeypatch, event):
+    _serve(monkeypatch, _lines(event))
+    pull = llm.ModelPull()
+    pull.start(LlmConfig(), "gemma4:e2b")
+    assert _wait(pull, "error")["error"]
+    _serve(monkeypatch, _lines({"status": "success"}))
+    assert pull.start(LlmConfig(), "gemma4:e2b")  # a dead thread must not block every later pull
+    _wait(pull, "done")
+
+
+def test_a_pull_widens_the_read_timeout_for_the_silent_digest_phase():
+    class _Sock:
+        timeout = None
+
+        def settimeout(self, seconds):
+            self.timeout = seconds
+
+    sock = _Sock()
+    response = type("R", (), {"fp": type("F", (), {"raw": type("W", (), {"_sock": sock})()})()})()
+    llm._allow_silence(response, 900.0)
+    assert sock.timeout == 900.0
+    llm._allow_silence(object(), 900.0)  # a response without a socket is left alone
+
+
+def test_a_read_timeout_ends_the_pull_as_an_error(monkeypatch):
+    class Stalled(_Resp):
+        def __iter__(self):
+            raise TimeoutError("timed out")
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", lambda r, timeout=None: Stalled())
+    pull = llm.ModelPull()
+    pull.start(LlmConfig(), "gemma4:e2b")
+    assert "TimeoutError" in _wait(pull, "error")["error"]
+
+
+def test_a_saved_model_without_a_tag_is_not_listed_twice(monkeypatch):
+    _serve(monkeypatch, {"models": [{"name": "llama3:latest", "size": 4_000_000_000}]})
+    data = llm.build_model_list(LlmConfig(model="llama3"), cuda=False, vram_gb=None)
+    assert [m["name"] for m in data["other"]] == ["llama3:latest"]
+    assert data["other"][0]["installed"] is True
+
+
+def test_a_malformed_port_is_an_llm_error_not_a_crash(monkeypatch):
+    def refuse(request, timeout=None):
+        raise ValueError("Port could not be cast to integer value")
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", refuse)
+    with pytest.raises(llm.LlmError):
+        llm.complete(LlmConfig(url="http://localhost:abc", protocol="openai"), "system", "user")
+
+
+def test_a_nested_background_block_restores_the_outer_one():
+    def background() -> bool:
+        return getattr(llm._local, "background", False)
+
+    assert background() is False
+    with llm.background():
+        with llm.background():
+            assert background() is True
+        assert background() is True
+    assert background() is False
+
+
+def test_wait_for_reload_returns_when_the_reload_ends_or_the_time_is_up(monkeypatch):
+    config = LlmConfig(model="m", url="http://x:1")
+    assert llm.wait_for_reload(config, 1.0) is True  # nothing reloading
+    monkeypatch.setattr(llm, "_RELOAD_POLL_S", 0.01)
+    with llm._reload_lock:
+        llm._reloading.add(llm.model_key(config))
+    try:
+        assert llm.wait_for_reload(config, 0.05) is False
+    finally:
+        with llm._reload_lock:
+            llm._reloading.discard(llm.model_key(config))

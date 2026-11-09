@@ -207,7 +207,7 @@ class Ollama:
     def __call__(self, request, timeout=None):
         import io
 
-        if isinstance(request, str):  # /api/ps
+        if isinstance(request, str) or request.full_url.endswith("/api/ps"):
             models = [{"name": m, "size": 5, "size_vram": 5} for m in sorted(self.loaded)]
             return io.BytesIO(json.dumps({"models": models}).encode())
         self.posts.append((request.full_url.rsplit("/api/", 1)[1], json.loads(request.data)))

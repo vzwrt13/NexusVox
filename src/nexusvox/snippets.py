@@ -86,7 +86,10 @@ def best_option(spoken: str, options: tuple[SnippetOption, ...]) -> tuple[str, i
 def _matches(text: str, snippet: Snippet) -> list[tuple[int, int, str]]:
     """(start, end, replacement) for every match of *snippet* in *text*, left to right."""
     found: list[tuple[int, int, str]] = []
+    consumed = 0  # where the last match ended: a trigger inside an option name it swallowed is not a trigger
     for m in _trigger_pattern(_normalize(snippet.trigger)).finditer(text):
+        if m.start() < consumed:
+            continue
         end, replacement = m.end(), snippet.expansion
         if snippet.options:
             rest = text[end:]
@@ -101,6 +104,7 @@ def _matches(text: str, snippet: Snippet) -> list[tuple[int, int, str]]:
         if mark is not None:
             end = mark.end()
         found.append((m.start(), end, replacement))
+        consumed = end
     return found
 
 

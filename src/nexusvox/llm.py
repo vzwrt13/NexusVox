@@ -152,11 +152,12 @@ def _keep_alive_seconds(keep_alive: str) -> float | None:
 @contextmanager
 def background() -> Iterator[None]:
     """Requests made by this thread inside the block yield to live requests (dictation, polish)."""
+    previous = getattr(_local, "background", False)
     _local.background = True
     try:
         yield
     finally:
-        _local.background = False
+        _local.background = previous  # a nested block must not switch the outer one off
 
 
 def complete(config: LlmConfig, system: str, user: str) -> str:
@@ -229,8 +230,13 @@ def _rejects_thinking_flag(exc: urllib.error.HTTPError) -> bool:
 def _log_request(config: LlmConfig, started: float, outcome: str) -> None:
     """One INFO line per request to the model server: where, which model, how long and how it ended. Never the text,
     and never the API key or a password in the address."""
-    parts = urllib.parse.urlsplit(config.url)
-    where = f"{parts.scheme}://{parts.hostname or ''}{f':{parts.port}' if parts.port else ''}{parts.path.rstrip('/')}"
+    try:
+        parts = urllib.parse.urlsplit(config.url)
+        where = (
+            f"{parts.scheme}://{parts.hostname or ''}{f':{parts.port}' if parts.port else ''}{parts.path.rstrip('/')}"
+        )
+    except ValueError:  # a malformed port or address: the request failed on it, this line must not
+        where = "(malformed address)"
     logger.info(
         "LLM request: %s (%s), model %s, %d ms, %s",
         where,
@@ -343,6 +349,7 @@ def warm_up(config: LlmConfig) -> None:
     threading.Thread(target=run, daemon=True, name="llm-warm-up").start()
 
 
+_RELOAD_POLL_S = 0.25
 _reload_lock = threading.Lock()
 _reloading: set[tuple[str, str]] = set()  # (url, model) with a reload in flight
 # Keep-loaded requests in flight per (url, model): a load, a warm-up or a live request. Each pins its model when it
@@ -387,6 +394,16 @@ def reload_running(config: LlmConfig) -> bool:
     """Whether a reload of this server's model is in flight (a request now would only queue behind it)."""
     with _reload_lock:
         return model_key(config) in _reloading
+
+
+def wait_for_reload(config: LlmConfig, timeout_s: float = RELOAD_DEADLINE_S) -> bool:
+    """Block until no reload of this server's model is in flight; False when *timeout_s* ran out first."""
+    deadline = time.monotonic() + timeout_s
+    while reload_running(config):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_RELOAD_POLL_S)
+    return True
 
 
 def reload_in_background(config: LlmConfig, deadline_s: float = RELOAD_DEADLINE_S, reason: str = "timeout") -> bool:
@@ -707,8 +724,7 @@ def loaded_model(config: LlmConfig, name: str, disk_gb: float | None = None) -> 
     if config.protocol != "ollama":
         return None
     try:
-        with urllib.request.urlopen(f"{config.url.rstrip('/')}/api/ps", timeout=_LIST_TIMEOUT_S) as response:
-            running = json.load(response)["models"]
+        running = _get_json(f"{config.url.rstrip('/')}/api/ps", config.api_key, _LIST_TIMEOUT_S)["models"]
         for m in running:
             if isinstance(m, dict) and any(_same_model(name, n) for n in (m.get("name"), m.get("model"))):
                 total, vram = float(m.get("size", 0)), float(m.get("size_vram", 0))
@@ -754,7 +770,7 @@ def build_model_list(config: LlmConfig, cuda: bool, vram_gb: float | None) -> di
     ]
     known = {m["name"] for m in recommended}
     other = [{"name": m["name"], "size_gb": m["size_gb"], "installed": True} for m in have if m["name"] not in known]
-    if config.model not in known and config.model not in {m["name"] for m in other}:
+    if not model_is_installed(config.model, recommended + other):
         # A saved model that is not in the lists: keep showing it, installed only if the server said so.
         missing = False if reachable and config.protocol == "ollama" else None
         other.insert(0, {"name": config.model, "size_gb": 0.0, "installed": missing})
@@ -812,6 +828,20 @@ def start_ollama() -> None:
 
 
 # ── Pulling a model ───────────────────────────────────────────────────────────────────────────────
+_PULL_CONNECT_TIMEOUT_S = 30.0
+# Ollama says nothing while it verifies a downloaded layer's digest, which takes a minute or more for a big model.
+# A pull is only given up after this much silence; a cancel closes the connection at once.
+_PULL_SILENCE_S = 900.0
+
+
+def _allow_silence(response: object, seconds: float) -> None:
+    """Widen the read timeout of an open response (the connect timeout is short, a silent phase is not)."""
+    try:
+        response.fp.raw._sock.settimeout(seconds)  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        pass  # not a plain socket response: the connect timeout stays
+
+
 class ModelPull:
     """One `/api/pull` download at a time, run in a thread. `state()` is polled by the dashboard.
 
@@ -869,12 +899,13 @@ class ModelPull:
     def _run(self, config: LlmConfig, model: str, cancel: threading.Event) -> None:
         url = f"{config.url.rstrip('/')}/api/pull"
         request = urllib.request.Request(
-            url, json.dumps({"model": model, "stream": True}).encode("utf-8"), {"Content-Type": "application/json"}
+            url, json.dumps({"model": model, "stream": True}).encode("utf-8"), _headers(config)
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=_PULL_CONNECT_TIMEOUT_S) as response:
                 with self._lock:
                     self._response = response
+                _allow_silence(response, _PULL_SILENCE_S)
                 for line in response:
                     if cancel.is_set():
                         break
@@ -896,10 +927,11 @@ class ModelPull:
                     self._finish("done")
                 else:
                     self._finish("error", "the download ended early")
-        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - whatever goes wrong, the pull must end, or no later one starts
             if cancel.is_set():
                 self._finish("cancelled")
             else:
+                logger.warning("Pulling %s failed: %s", model, exc)
                 self._finish("error", f"{type(exc).__name__}: {exc}"[:200])
 
 

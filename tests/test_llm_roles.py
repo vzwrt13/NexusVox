@@ -152,7 +152,7 @@ class Server:
         self.loaded, self.posts = set(loaded), []
 
     def __call__(self, request, timeout=None):
-        if isinstance(request, str):  # /api/ps
+        if isinstance(request, str) or request.full_url.endswith("/api/ps"):
             models = [{"name": m, "size": 5, "size_vram": 5} for m in sorted(self.loaded)]
             return io.BytesIO(json.dumps({"models": models}).encode())
         self.posts.append((request.full_url, json.loads(request.data)))
@@ -212,7 +212,7 @@ def test_a_release_during_a_load_is_repeated_when_the_load_ends(server, monkeypa
     real = server.__call__
 
     def slow(request, timeout=None):
-        if not isinstance(request, str) and "messages" in json.loads(request.data):
+        if getattr(request, "data", None) and "messages" in json.loads(request.data):
             started.set()
             gate.wait(5)  # the load is still running
         return real(request, timeout)
@@ -375,7 +375,7 @@ def _slow_chat(server, monkeypatch):
     real = server.__call__
 
     def slow(request, timeout=None):
-        if not isinstance(request, str) and "messages" in json.loads(request.data):
+        if getattr(request, "data", None) and "messages" in json.loads(request.data):
             started.set()
             gate.wait(5)
         return real(request, timeout)

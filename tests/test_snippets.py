@@ -106,3 +106,9 @@ def test_option_without_match_uses_the_fallback_text():
     snippet = Snippet("meine Adresse", "Hauptstraße 1", (SnippetOption("Büro", "Office 7"),))
     assert _run("meine Adresse Büro", [snippet]) == "Office 7"
     assert _run("meine Adresse.", [snippet]) == "Hauptstraße 1"
+
+
+def test_a_trigger_inside_a_consumed_option_name_is_not_expanded_twice():
+    snippet = Snippet("repo", "FALLBACK", (SnippetOption("repo site", "SITE"),))
+    assert _run("repo repo site", [snippet]) == "SITE"
+    assert _run("say repo repo site today", [snippet]) == "say SITE today"

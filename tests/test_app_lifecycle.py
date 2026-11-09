@@ -468,7 +468,7 @@ def test_a_failed_docker_start_falls_back_to_cpu_parakeet_on_auto(monkeypatch, c
     with caplog.at_level("INFO"):
         asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
     assert app._switch_status == "ready" and app._config.inference.model == "parakeet-tdt-0.6b"
-    assert app.get_switch_status()["note"] == "Docker is not running, using the CPU"
+    assert app.get_switch_status().get("note") == "Docker is not running, using the CPU"
     assert built[-1]["device"] == "cpu"
     docker.wait_for_healthy.assert_not_called()
     assert not [r for r in caplog.records if r.exc_info]  # an expected case, no traceback
@@ -480,7 +480,7 @@ def test_a_frozen_build_switches_to_cpu_parakeet_instead_of_raising(monkeypatch)
     asyncio.run(app.switch_model("parakeet-tdt-0.6b"))
     assert app._switch_status == "ready"
     assert built[-1]["device"] == "cpu"
-    assert "installed app" in app.get_switch_status()["note"]
+    assert "installed app" in app.get_switch_status().get("note")
     docker.start_profile.assert_not_called()
 
 

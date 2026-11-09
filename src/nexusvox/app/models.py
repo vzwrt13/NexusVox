@@ -50,7 +50,10 @@ class ModelSwitching:
                 return {"status": load["state"], "error": None}
             if load and load["state"] == "error":
                 return {"status": "error", "error": load["error"]}
-        return {"status": self._switch_status, "error": self._switch_error, "note": self._switch_note}
+        status = {"status": self._switch_status, "error": self._switch_error}
+        if self._switch_note:
+            status["note"] = self._switch_note
+        return status
 
     async def switch_model(self, model_id: str) -> None:
         """Switch to a different transcription model.

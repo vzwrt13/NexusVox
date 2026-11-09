@@ -32,7 +32,8 @@ class FileJob:
 
     def update(self, stage: str, current: int = 0, total: int = 0) -> None:
         """Move to a stage: `converting`, `transcribing` (chunk `current` of `total`), `diarizing`,
-        `cleaning` (passage `current` of `total`) or `saving`."""
+        `cleaning` (passage `current` of `total`), `waiting` (the cleanup waits for the
+        model to load) or `saving`."""
         with self._lock:
             if self.state == "running":
                 self.stage, self.current, self.total = stage, current, total
@@ -86,6 +87,8 @@ def _describe(stage: str, current: int, total: int) -> tuple[str, float]:
     if stage == "cleaning" and total:
         done = (current - 1) / total
         return f"Cleaning up text, passage {current} of {total}", _CLEANUP_FROM + (_CLEANUP_TO - _CLEANUP_FROM) * done
+    if stage == "waiting":
+        return "Waiting for the language model to load", _CLEANUP_FROM
     if stage == "saving":
         return "Saving", 0.95
     return "Converting audio", 0.0

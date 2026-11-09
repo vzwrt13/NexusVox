@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import sys
 import threading
 import time
 from pathlib import Path
@@ -1551,3 +1552,31 @@ def test_extensions_without_an_override_get_no_thread(monkeypatch):
     assert registry.selection_command("s", "c", APP) is None
     assert registry.display_texts(transcript, ["a", "b"]) == ["a", "b"]
     assert started == []
+
+
+def test_a_job_note_names_the_exception_even_when_it_has_no_message():
+    class Quitter(V1Extension):
+        name = "quitter"
+
+        def on_file_transcribed(self, transcript):
+            sys.exit()
+
+    _, notes = _registry(Quitter()).file_transcribed(SimpleNamespace(id=1, text="hi"))
+
+    assert notes == ["Extension quitter failed: SystemExit: "]
+
+
+def test_an_upload_deleted_while_its_check_runs_leaves_no_pending_state():
+    holder = {}
+
+    def check(tid):
+        holder["registry"].forget_upload(tid)  # the user deletes the upload while the poll is inside its check
+        return {"pending": "Summarising"}
+
+    reg = holder["registry"] = _summary_registry(check)
+
+    assert reg.unavailable_exports(42) == {"gated-md": {"pending": "Summarising"}}  # this poll still answers
+
+    assert reg._last_pending == {}
+    assert reg._checking == {} and reg._forgotten == set()  # nothing is kept for the next upload with this id
+    assert reg.unavailable_exports(43) == {"gated-md": {"pending": "Summarising"}}

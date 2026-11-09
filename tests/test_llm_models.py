@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 import time
 import urllib.error
 
@@ -288,3 +289,63 @@ def test_wait_for_reload_returns_when_the_reload_ends_or_the_time_is_up(monkeypa
     finally:
         with llm._reload_lock:
             llm._reloading.discard(llm.model_key(config))
+
+
+def test_listed_name_finds_the_latest_tag_of_an_untagged_model():
+    have = [{"name": "llama3:latest"}, {"name": "gemma4:e2b"}]
+    assert llm.listed_name("llama3", have) == "llama3:latest"
+    assert llm.listed_name("gemma4:e2b", have) == "gemma4:e2b"
+    assert llm.listed_name("gemma4", have) is None
+    assert llm.listed_name("mistral:7b", have) is None
+
+
+def test_the_dropdown_selects_the_listed_name_of_an_untagged_saved_model(db, session_factory, monkeypatch, patch_api):
+    from nexusvox.config import Config
+    from nexusvox.dashboard.api import DashboardAPI
+
+    patch_api("cuda_available", lambda: False)
+    _serve(monkeypatch, {"models": [{"name": "llama3:latest", "size": 4_000_000_000}]})
+    api = DashboardAPI(session_factory, Config(llm=LlmConfig(model="llama3")), db=db)
+
+    data = api.get_llm_models()
+
+    assert [m["name"] for m in data["other"]] == ["llama3:latest"]
+    assert data["selected"] == "llama3:latest"  # the name of an option, or the select shows nothing
+
+
+def test_cancel_shuts_the_socket_down_so_a_waiting_read_ends(monkeypatch):
+    shut = threading.Event()
+
+    class _Sock:
+        def settimeout(self, seconds):
+            pass
+
+        def shutdown(self, how):
+            shut.set()
+
+    class Silent(_Resp):
+        fp = type("F", (), {"raw": type("W", (), {"_sock": _Sock()})()})()
+
+        def __iter__(self):
+            yield b'{"status": "verifying sha256 digest"}\n'
+            if not shut.wait(5):  # a recv() that only the shutdown of the socket ends
+                raise AssertionError("the read was never interrupted")
+            raise OSError("connection shut down")
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", lambda r, timeout=None: Silent())
+    pull = llm.ModelPull()
+    pull.start(LlmConfig(), "gemma4:e2b")
+    for _ in range(100):
+        if pull.state()["detail"] == "verifying sha256 digest":
+            break
+        time.sleep(0.02)
+    pull.cancel()
+
+    assert shut.is_set()
+    _wait(pull, "cancelled")
+
+
+def test_a_response_without_a_socket_logs_that_the_silent_phase_is_not_covered(caplog):
+    with caplog.at_level("WARNING", logger="nexusvox.llm"):
+        llm._allow_silence(object(), 900.0)
+    assert "read timeout" in caplog.text

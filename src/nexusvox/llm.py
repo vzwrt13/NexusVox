@@ -20,6 +20,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -740,10 +741,17 @@ def loaded_model(config: LlmConfig, name: str, disk_gb: float | None = None) -> 
     return None
 
 
+def listed_name(name: str, installed: list[dict]) -> str | None:
+    """The entry of *installed* that is the model *name*: the name itself, or `name:latest` for an untagged one."""
+    names = {m["name"] for m in installed}
+    if name in names:
+        return name
+    return f"{name}:latest" if ":" not in name and f"{name}:latest" in names else None
+
+
 def model_is_installed(name: str, installed: list[dict]) -> bool:
     """Ollama treats `gemma4:e4b` and `gemma4:e4b:latest`-style tags as the same only for `:latest`."""
-    names = {m["name"] for m in installed}
-    return name in names or (":" not in name and f"{name}:latest" in names)
+    return listed_name(name, installed) is not None
 
 
 def build_model_list(config: LlmConfig, cuda: bool, vram_gb: float | None) -> dict:
@@ -834,12 +842,21 @@ _PULL_CONNECT_TIMEOUT_S = 30.0
 _PULL_SILENCE_S = 900.0
 
 
+def _response_socket(response: object) -> object | None:
+    """The socket under an open `urlopen` response, or None when it is not a plain one (a wrapper, a test double)."""
+    try:
+        return response.fp.raw._sock  # type: ignore[attr-defined]
+    except AttributeError:
+        return None
+
+
 def _allow_silence(response: object, seconds: float) -> None:
     """Widen the read timeout of an open response (the connect timeout is short, a silent phase is not)."""
+    sock = _response_socket(response)
     try:
-        response.fp.raw._sock.settimeout(seconds)  # type: ignore[attr-defined]
+        sock.settimeout(seconds)  # type: ignore[attr-defined]
     except (AttributeError, OSError):
-        pass  # not a plain socket response: the connect timeout stays
+        logger.warning("Cannot widen the read timeout of the model download; a long silent phase may end it")
 
 
 class ModelPull:
@@ -857,6 +874,7 @@ class ModelPull:
         self._error = ""
         self._cancel = threading.Event()
         self._response = None
+        self._socket = None
 
     def state(self) -> dict:
         with self._lock:
@@ -885,7 +903,14 @@ class ModelPull:
             if self._status != "pulling":
                 return
             self._cancel.set()
-            response = self._response
+            response, sock = self._response, self._socket
+        if sock is not None:
+            try:
+                # `close()` alone leaves a read that already waits for bytes waiting (the file object keeps the
+                # socket open): shut the connection down so the silent digest phase ends at once too.
+                sock.shutdown(socket.SHUT_RDWR)  # type: ignore[attr-defined]
+            except (AttributeError, OSError):
+                pass
         if response is not None:
             try:
                 response.close()
@@ -894,7 +919,7 @@ class ModelPull:
 
     def _finish(self, status: str, error: str = "") -> None:
         with self._lock:
-            self._status, self._error, self._response = status, error, None
+            self._status, self._error, self._response, self._socket = status, error, None, None
 
     def _run(self, config: LlmConfig, model: str, cancel: threading.Event) -> None:
         url = f"{config.url.rstrip('/')}/api/pull"
@@ -903,9 +928,9 @@ class ModelPull:
         )
         try:
             with urllib.request.urlopen(request, timeout=_PULL_CONNECT_TIMEOUT_S) as response:
-                with self._lock:
-                    self._response = response
                 _allow_silence(response, _PULL_SILENCE_S)
+                with self._lock:
+                    self._response, self._socket = response, _response_socket(response)
                 for line in response:
                     if cancel.is_set():
                         break

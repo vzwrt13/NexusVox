@@ -30,7 +30,10 @@ class MyExtension(Extension):
 
 **A broken extension never stops NexusVox.** One that cannot be imported, has no `name`, reuses a taken
 name, targets another `api_version`, fails while registering its panels or targets, or raises inside a hook
-is logged and skipped (a hook failure only skips that call).
+is logged and skipped (a hook failure only skips that call). This holds for `sys.exit()` too, at import, in a
+factory, in `on_file_transcribed` and in every other hook: the exit is logged and treated as a failure. An extension
+that does not override a text hook (`on_dictation`, `on_selection_command`, `display_text`, ...) is not called for it
+and costs nothing.
 
 ## Starting without extensions (developers)
 

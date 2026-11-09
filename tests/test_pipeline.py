@@ -349,3 +349,33 @@ def test_extend_fn_sees_the_restored_text():
         protect_fn=protect,
     )
     assert (result.typed, result.saved) == ("MAIL HAUPTSTRASSE 1", "mail Hauptstrasse 1")
+
+
+def test_a_protected_dictation_stays_learnable_when_nothing_changed_its_words():
+    protect, _ = _protect()
+    result = _run_protected("send it to my address", protect)
+    assert (result.typed, result.spoken, result.learnable) == (
+        "send it to Hauptstrasse 1",
+        "send it to my address",
+        True,
+    )
+
+
+def test_a_protected_dictation_is_not_learnable_after_cleanup():
+    protect, _ = _protect()
+
+    def cleanup_fn(text, _c, _l):
+        return CleanupResult(text.replace("uh ", ""), cleaned=True)
+
+    result = _run_protected("uh send it to my address", protect, cleanup_fn=cleanup_fn)
+    assert (result.typed, result.learnable) == ("send it to Hauptstrasse 1", False)
+
+
+def test_an_unknown_cleanup_level_is_logged_by_name(caplog):
+    config = _config()
+    config.cleanup = CleanupConfig(level="meduim")
+    with caplog.at_level("INFO", logger="nexusvox.pipeline"):
+        result = _run("this dictation has enough words", config=config)
+    assert result.typed == "this dictation has enough words"
+    assert "meduim" in caplog.text
+    assert "shorter than" not in caplog.text

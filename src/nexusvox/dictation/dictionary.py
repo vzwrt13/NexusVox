@@ -18,16 +18,31 @@ def apply_dictionary_counted(text: str, entries: list[DictionaryEntry]) -> tuple
     hits: dict[DictionaryEntry, int] = {}
     if not text or not entries:
         return text, hits
-    # Longest phrases first so "cloud code editor" wins over "cloud code".
-    for entry in sorted(entries, key=lambda e: len(e.wrong), reverse=True):
+    # Every entry looks at the spoken text, never at another entry's replacement: "cloud code" -> "Claude Code"
+    # and "claude" -> "Cloud" must not turn "Claude Code" into "Cloud Code".
+    found: list[tuple[int, int, DictionaryEntry]] = []
+    for entry in entries:
         wrong = normalize_phrase(entry.wrong)
         if not wrong:
             continue
         pattern = r"(?<!\w)" + r"\s+".join(re.escape(w) for w in wrong.split()) + r"(?!\w)"
-        text, count = re.subn(pattern, lambda _m, r=entry.right: r, text, flags=re.IGNORECASE)
-        if count:
-            hits[entry] = count
-    return text, hits
+        found.extend((m.start(), m.end(), entry) for m in re.finditer(pattern, text, flags=re.IGNORECASE))
+    # Each span is replaced at most once: the longest match wins ("cloud code editor" over "cloud code"),
+    # the earlier one on a tie.
+    found.sort(key=lambda f: (-(f[1] - f[0]), f[0]))
+    taken: list[tuple[int, int, DictionaryEntry]] = []
+    for start, end, entry in found:
+        if all(end <= t_start or start >= t_end for t_start, t_end, _ in taken):
+            taken.append((start, end, entry))
+    out: list[str] = []
+    pos = 0
+    for start, end, entry in sorted(taken, key=lambda t: t[0]):
+        out.append(text[pos:start])
+        out.append(entry.right)
+        pos = end
+        hits[entry] = hits.get(entry, 0) + 1
+    out.append(text[pos:])
+    return "".join(out), hits
 
 
 def apply_dictionary(text: str, entries: list[DictionaryEntry]) -> str:

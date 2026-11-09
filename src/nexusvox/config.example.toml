@@ -162,8 +162,9 @@ bypass_symbols = false
 # When true, structural commands are skipped but your structural list is preserved.
 bypass_structural = false
 # Structural commands to recognise (German: neue Zeile, neuer Absatz, Tabulator, alles groß).
-# Remove entries to type those words literally.
-structural = ["new paragraph", "new line", "tab", "all caps"]
+# Remove entries to type those words literally. "tab" is not on by default ("open a new tab" is an
+# everyday sentence): add it to the list if you want a Tab character.
+structural = ["new paragraph", "new line", "all caps"]
 # When true, ending a dictation with "press enter" / "hit enter" (German: "Enter drücken",
 # "drück Enter") pastes the text without the phrase, then presses Enter - e.g. to send a chat
 # message. Saying only the phrase presses Enter alone. Disabled by default.
@@ -172,15 +173,15 @@ press_enter = false
 #
 # Safe defaults (rarely appear as plain words in dictation):
 #   slash, backslash, pipe, tilde, asterisk,
-#   open paren, close paren, open bracket, close bracket, open brace, close brace,
-#   less than, greater than
+#   open paren, close paren, open bracket, close bracket, open brace, close brace
 #
-# Opt-in (common English words — add only if you need them):
-#   hash, percent, dash, hyphen, plus, equal, colon, star
+# Opt-in (common English and German words — add only if you need them):
+#   less than, greater than (German: kleiner als, größer als), hash, percent, dash, hyphen,
+#   plus, equal, colon, star
 symbols = [
   "slash", "backslash", "pipe", "tilde", "asterisk",
   "open paren", "close paren", "open bracket", "close bracket",
-  "open brace", "close brace", "less than", "greater than"
+  "open brace", "close brace"
 ]
 
 [assistant]

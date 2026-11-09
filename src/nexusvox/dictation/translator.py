@@ -49,7 +49,15 @@ def translate(text: str, config: TranslatorConfig) -> TranslateResult:
         translated = result["text"]
         if not isinstance(translated, str):
             raise TypeError("translator returned no text")
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, TypeError) as exc:
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        http.client.HTTPException,  # IncompleteRead, BadStatusLine: a reply cut off halfway
+    ) as exc:
         logger.warning("Translator unavailable at %s (%s); injecting the original text", config.url, exc)
         return TranslateResult(text, error=f"{type(exc).__name__}: {exc}"[:_ERROR_LIMIT])
     source = result.get("source")

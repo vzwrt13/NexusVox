@@ -499,3 +499,233 @@ def test_eins_still_a_number_in_a_list():
 def test_english_ordinals(spoken, expected):
     assert process_voice_commands(spoken, numbers_as_digits=True) == expected
     assert process_voice_commands(spoken) == spoken
+
+
+# --- English number runs: one number per run that fits, a list stays a list ---
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("count one two three", "count 1 2 3"),
+        ("nineteen eighty four", "19 84"),
+        ("in twenty twenty", "in 20 20"),
+        ("zero five", "0 5"),
+        ("twenty five", "25"),
+        ("twenty-one thousand three hundred forty two", "21342"),
+        ("five thousand three hundred", "5300"),
+        ("twenty one hundred", "2100"),
+        ("two million five hundred thousand", "2500000"),
+        ("one hundred twenty three four", "123 4"),
+        ("twenty first century", "21st century"),
+    ],
+)
+def test_english_number_runs_stop_where_the_next_word_does_not_fit(spoken, expected):
+    assert process_voice_commands(spoken, numbers_as_digits=True) == expected
+
+
+def test_english_number_run_never_crosses_a_line_break():
+    assert process_voice_commands("one\ntwo", numbers_as_digits=True) == "1\n2"
+    assert process_voice_commands("twenty\r\nfive", numbers_as_digits=True) == "20\r\n5"
+    assert process_voice_commands("twenty five\nthirty", numbers_as_digits=True) == "25\n30"
+
+
+def test_number_run_across_a_spoken_new_line_stays_two_numbers():
+    assert process_voice_commands("one new line two", numbers_as_digits=True) == "1\n2"
+
+
+# --- German number words in English text stay words ---
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    ["the function returns null here", "the elf ran"],
+)
+def test_homograph_number_words_stay_words_in_english_text(spoken):
+    assert process_voice_commands(spoken, numbers_as_digits=True) == spoken
+
+
+def test_german_numbers_still_convert_in_german_text():
+    assert process_voice_commands("Ich habe elf Katzen", numbers_as_digits=True) == "Ich habe 11 Katzen"
+    assert process_voice_commands("Der Wert ist null", numbers_as_digits=True) == "Der Wert ist 0"
+
+
+def test_english_numbers_still_convert_in_english_text_next_to_german_words():
+    assert process_voice_commands("the elf ran twenty five miles", numbers_as_digits=True) == "the elf ran 25 miles"
+
+
+# --- Defaults: everyday sentences stay text ---
+
+
+def _with_default_config(text: str) -> str:
+    from nexusvox.config import VoiceCommandsConfig
+
+    cfg = VoiceCommandsConfig()
+    return process_voice_commands(text, frozenset(cfg.symbols), cfg.numbers_as_digits, frozenset(cfg.structural))
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "Das ist größer als gedacht.",
+        "Es ist kleiner als erwartet.",
+        "That is less than I thought.",
+        "Profit is greater than cost.",
+        "open a new tab please",
+        "Öffne einen neuen Tabulator bitte.",
+    ],
+)
+def test_ambiguous_commands_are_off_in_the_default_config(spoken):
+    assert _with_default_config(spoken) == spoken
+
+
+def test_default_config_still_recognises_the_safe_commands():
+    assert _with_default_config("path slash file new line next") == "path/file\nnext"
+
+
+def test_less_than_and_tab_still_work_when_enabled():
+    assert process_voice_commands("a less than b", frozenset({"less than"})) == "a<b"
+    assert process_voice_commands("a größer als b", frozenset({"greater than"})) == "a>b"
+    assert process_voice_commands("a tab b", active_structural=frozenset({"tab"})) == "a\tb"
+
+
+# --- Punctuation the speech model puts after a command ---
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("Hello. New line. World.", "Hello.\nWorld."),
+        ("Hello. New paragraph. World.", "Hello.\n\nWorld."),
+        ("Hallo. Neue Zeile. Welt.", "Hallo.\nWelt."),
+        ("Hello, new line, world", "Hello\nworld"),
+        ("Hello. New line.", "Hello.\n"),
+        ("Hello. New line... World.", "Hello.\nWorld."),
+        ("Save as new line .gitignore", "Save as\n.gitignore"),
+    ],
+)
+def test_punctuation_after_a_command_is_dropped(spoken, expected):
+    assert process_voice_commands(spoken) == expected
+
+
+def test_a_symbol_command_leaves_the_sentence_punctuation_after_it():
+    symbols = frozenset({"slash", "open paren", "close paren", "close brace"})
+    assert (
+        process_voice_commands("call foo open paren close paren. Next sentence", symbols) == "call foo(). Next sentence"
+    )
+    assert process_voice_commands("path slash. file", symbols) == "path/. file"
+    assert process_voice_commands("path slash file", symbols) == "path/file"
+
+
+# --- "all caps" inside an ordinary sentence ---
+
+
+@pytest.mark.parametrize(
+    "spoken",
+    [
+        "I wrote it in all caps today",
+        "He wrote in all caps.",
+        "Please do not use all caps",
+        "Is all caps rude?",
+        "Er hat alles groß geschrieben",
+        "Schreib das in alles groß.",
+        "all caps",
+    ],
+)
+def test_all_caps_in_a_normal_sentence_is_typed_as_text(spoken):
+    assert process_voice_commands(spoken) == spoken
+
+
+def test_all_caps_still_works_as_a_command():
+    assert process_voice_commands("Hello. All caps wow, new line next") == "Hello. WOW\nnext"
+    assert process_voice_commands("alles groß achtung") == "ACHTUNG"
+    assert process_voice_commands("all caps hello new line all caps world") == "HELLO\nWORLD"
+
+
+# --- Review follow-ups: ordinals, "ten", separators, scales, German homographs ---
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("one third of the users", "1 third of the users"),
+        ("one fourth of it", "1 fourth of it"),
+        ("two tenth", "2 tenth"),
+        ("the third", "the 3rd"),
+        ("twenty third", "23rd"),
+    ],
+)
+def test_an_ordinal_behind_another_number_stays_a_word(spoken, expected):
+    assert process_voice_commands(spoken, numbers_as_digits=True) == expected
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("count down ten nine eight", "count down 10 9 8"),
+        ("ten five", "10 5"),
+        ("twenty five", "25"),
+        ("one hundred ten", "110"),
+        ("one hundred ten five", "110 5"),
+    ],
+)
+def test_ten_and_the_teens_do_not_take_a_following_digit(spoken, expected):
+    assert process_voice_commands(spoken, numbers_as_digits=True) == expected
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("two hundred three hundred", "200 300"),
+        ("one thousand two thousand", "1000 2000"),
+        ("five million three thousand two hundred", "5003200"),
+        ("two hundred thousand", "200000"),
+        ("one million two hundred thousand", "1200000"),
+        ("twenty five hundred", "2500"),
+    ],
+)
+def test_a_word_that_multiplies_the_next_one_starts_the_next_number(spoken, expected):
+    assert process_voice_commands(spoken, numbers_as_digits=True) == expected
+
+
+def test_the_separators_between_numbers_stay():
+    assert process_voice_commands(
+        "one tab two tab three", active_structural=frozenset({"tab"}), numbers_as_digits=True
+    ) == ("1\t2\t3")
+    assert process_voice_commands("one-two", numbers_as_digits=True) == "1-2"
+    assert process_voice_commands("one   two", numbers_as_digits=True) == "1   2"
+    assert process_voice_commands("twenty-five items", numbers_as_digits=True) == "25 items"
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("Meeting um elf", "Meeting um 11"),
+        ("Das Treffen ist um null Uhr", "Das Treffen ist um 0 Uhr"),
+        ("I need zwanzig items please", "I need 20 items please"),
+        ("I counted drei apples", "I counted 3 apples"),
+        ("Meeting at elf Uhr", "Meeting at 11 Uhr"),
+    ],
+)
+def test_german_numbers_convert_whatever_the_language_guess_says(spoken, expected):
+    assert process_voice_commands(spoken, numbers_as_digits=True) == expected
+
+
+def test_the_language_check_runs_only_for_the_homographs(monkeypatch):
+    calls = []
+    monkeypatch.setattr("nexusvox.dictation.voice_commands._is_english", lambda text: calls.append(text) or True)
+    assert process_voice_commands("I need zwanzig items", numbers_as_digits=True) == "I need 20 items"
+    assert calls == []
+    assert process_voice_commands("returns null", numbers_as_digits=True) == "returns null"
+    assert calls == ["returns null"]
+
+
+@pytest.mark.parametrize(
+    ("spoken", "expected"),
+    [
+        ("Is it done new line? Yes", "Is it done\nYes"),
+        ("Done new line! Next", "Done\nNext"),
+    ],
+)
+def test_a_question_or_exclamation_mark_after_a_command_is_dropped(spoken, expected):
+    assert process_voice_commands(spoken) == expected

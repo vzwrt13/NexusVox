@@ -1152,3 +1152,230 @@ def test_save_config_logs_the_names_of_the_settings_it_changed(tmp_path, caplog)
         save_config(config, config_path)
     assert "Settings saved: llm.model" in caplog.text
     assert "a-secret-model-name" not in caplog.text  # names only, never values
+
+
+# ── Bad values in a hand-edited config.toml ───────────────────────────────────────────────────────
+def test_a_config_saved_as_ansi_is_moved_aside_like_invalid_toml(tmp_path):
+    path = tmp_path / "config.toml"
+    ansi = '[meeting]\nown_voice_label = "Jörg"\n'.encode("cp1252")
+    path.write_bytes(ansi)
+
+    cfg = load_config(path)
+
+    backups = list(tmp_path.glob("config.toml.broken-*"))
+    assert len(backups) == 1 and backups[0].read_bytes() == ansi
+    assert cfg.meeting.own_voice_label == MeetingConfig().own_voice_label
+
+
+# (section, key, reader, what a quoted "false" must give): off, except where off would be the unsafe side.
+_SWITCHES = [
+    ("general", "log_full_text", lambda c: c.log_full_text, False),
+    ("general", "setup_done", lambda c: c.setup_done, True),
+    ("database", "store_audio", lambda c: c.database.store_audio, False),
+    ("meeting", "store_audio", lambda c: c.meeting.store_audio, False),
+    ("meeting", "consent_hint", lambda c: c.meeting.consent_hint, True),
+    ("meeting", "leave_dictation_out", lambda c: c.meeting.leave_dictation_out, True),
+    ("meeting", "live_transcript", lambda c: c.meeting.live_transcript, False),
+    ("remote_mic", "enabled", lambda c: c.remote_mic.enabled, False),
+    ("assistant", "enabled", lambda c: c.assistant.enabled, False),
+    ("os_control", "enabled", lambda c: c.os_control.enabled, False),
+    ("translator", "enabled", lambda c: c.translator.enabled, False),
+    ("mic_guard", "enabled", lambda c: c.mic_guard.enabled, False),
+    ("os_commands", "enabled", lambda c: c.os_commands.enabled, False),
+    ("learn_from_edits", "enabled", lambda c: c.learn_from_edits.enabled, False),
+    ("polish", "in_terminals", lambda c: c.polish.in_terminals, False),
+    ("voice_commands", "enabled", lambda c: c.voice_commands.enabled, True),
+    ("voice_commands", "press_enter", lambda c: c.voice_commands.press_enter, False),
+]
+
+
+@pytest.mark.parametrize(("section", "key", "read", "garbled"), _SWITCHES)
+def test_a_quoted_switch_is_never_read_as_true(tmp_path, caplog, section, key, read, garbled):
+    """`"false"` is a non-empty string: it must not turn a setting (a privacy one above all) on."""
+    path = tmp_path / "config.toml"
+    for value, expected in (("true", True), ("false", False)):
+        path.write_text(f"[{section}]\n{key} = {value}\n", encoding="utf-8")
+        assert read(load_config(path)) is expected
+    path.write_text(f'[{section}]\n{key} = "false"\n', encoding="utf-8")
+    with caplog.at_level("WARNING", logger="nexusvox.config"):
+        assert read(load_config(path)) is garbled
+    assert any(f"[{section}].{key}" in record.message for record in caplog.records)
+
+
+def test_privacy_switches_stay_off_when_garbled_and_keep_their_defaults_when_missing(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[general]\nlog_full_text = 1\n[database]\nstore_audio = "no"\n[meeting]\nstore_audio = 0\n')
+    cfg = load_config(path)
+    assert (cfg.log_full_text, cfg.database.store_audio, cfg.meeting.store_audio) == (False, False, False)
+    path.write_text("")
+    cfg = load_config(path)
+    assert (cfg.log_full_text, cfg.database.store_audio, cfg.meeting.store_audio) == (False, True, True)
+
+
+def test_a_bad_number_falls_back_to_the_default_with_a_warning(tmp_path, caplog):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[assistant]\nport = "49730a"\ntimeout_s = "60s"\n'
+        "[os_control]\nport = 70000\ntimeout_s = -1\n"
+        "[translator]\ntimeout_s = inf\n"
+        '[mic_guard]\nwatchdog_s = "soon"\n'
+        "[learn_from_edits]\nwindow_s = true\n"
+        "[remote_mic]\nport = 0\n"
+        '[llm]\ntimeout_s = "slow"\n'
+    )
+    with caplog.at_level("WARNING", logger="nexusvox.config"):
+        cfg = load_config(path)
+    assert (cfg.assistant.port, cfg.assistant.timeout_s) == (49730, 5.0)
+    assert (cfg.os_control.port, cfg.os_control.timeout_s) == (49730, 5.0)
+    assert cfg.translator.timeout_s == 8.0
+    assert cfg.mic_guard.watchdog_s == 30.0
+    assert cfg.learn_from_edits.window_s == 20.0
+    assert cfg.remote_mic.port == 47393
+    assert cfg.llm.timeout_s == LlmConfig.timeout_s
+    assert any("[assistant].port" in record.message for record in caplog.records)
+
+
+def test_numbers_written_as_text_or_whole_are_still_read(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[assistant]\nport = "49731"\ntimeout_s = 2\n[mic_guard]\nwatchdog_s = 0\n')
+    cfg = load_config(path)
+    assert (cfg.assistant.port, cfg.assistant.timeout_s, cfg.mic_guard.watchdog_s) == (49731, 2.0, 0.0)
+
+
+@pytest.mark.parametrize("raw", ["0", "-5", "inf", "nan", '"60s"', "true"])
+def test_llm_timeout_must_be_a_positive_finite_number(tmp_path, raw):
+    path = tmp_path / "config.toml"
+    path.write_text(f"[llm]\ntimeout_s = {raw}\n")
+    assert load_config(path).llm.timeout_s == LlmConfig.timeout_s
+    path.write_text("[llm]\ntimeout_s = 12.5\n")
+    assert load_config(path).llm.timeout_s == 12.5
+
+
+def test_an_integer_beyond_64_bits_is_never_written(tmp_path):
+    path = tmp_path / "config.toml"
+    save_config(Config(), path)
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="64 bits"):
+        save_config(Config(injection_delay_ms=2**63), path)
+    assert path.read_bytes() == before  # the file is untouched
+    save_config(Config(injection_delay_ms=2**63 - 1), path)
+    assert load_config(path).injection_delay_ms == 2**63 - 1
+
+
+def test_every_llm_server_change_is_logged_on_its_own(tmp_path, caplog):
+    first = Config(llm=LlmConfig(servers=[LlmServer("http://a:1", "ollama"), LlmServer("http://b:2", "ollama")]))
+    changed = Config(llm=LlmConfig(servers=[LlmServer("http://a:9", "ollama"), LlmServer("http://b:2", "ollama")]))
+    path = tmp_path / "config.toml"
+    save_config(first, path)
+    with caplog.at_level("INFO", logger="nexusvox.config"):
+        save_config(changed, path)
+    assert "llm.servers[1].url" in caplog.text and "llm.servers[2]" not in caplog.text
+
+
+def test_setting_lines_keep_every_array_entry_apart():
+    raw = b'[llm]\nurl = "x"\n[[llm.servers]]\nurl = "a"\n[[llm.servers]]\nurl = "b"\n'
+    assert config_module._setting_lines(raw) == {
+        "llm.url": '"x"',
+        "llm.servers[1].url": '"a"',
+        "llm.servers[2].url": '"b"',
+    }
+
+
+def test_the_cuda_probe_runs_once_per_process(monkeypatch):
+    calls = []
+    monkeypatch.setattr(config_module, "resolve_device", lambda requested: calls.append(requested) or "cuda")
+    assert config_module.cuda_available() is True
+    monkeypatch.setattr(config_module, "resolve_device", lambda requested: calls.append("again") or "cpu")
+    assert config_module.cuda_available() is True
+    assert calls == ["auto"]
+
+
+def test_a_save_probes_the_gpu_once(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(config_module, "resolve_device", lambda requested: calls.append(requested) or "cpu")
+    save_config(Config(), tmp_path / "config.toml")
+    save_config(Config(), tmp_path / "config.toml")
+    assert len(calls) == 1
+
+
+def test_the_inference_defaults_come_from_the_model_registry():
+    assert InferenceConfig().model == config_module.DEFAULT_MODEL
+    assert InferenceConfig().server_url == config_module.MODEL_REGISTRY[config_module.DEFAULT_MODEL]["default_url"]
+
+
+def test_main_logs_what_load_config_warns_about(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    import types
+
+    class App:
+        def __init__(self, config, autostart=False):
+            pass
+
+        def run(self):
+            raise KeyboardInterrupt
+
+        def open_dashboard_from_second_start(self):
+            pass
+
+    monkeypatch.setitem(sys.modules, "nexusvox.app.core", types.SimpleNamespace(NexusVoxApp=App))
+    monkeypatch.delitem(sys.modules, "nexusvox.__main__", raising=False)
+    entry = importlib.import_module("nexusvox.__main__")
+    monkeypatch.setattr(
+        entry,
+        "SingleInstance",
+        lambda: types.SimpleNamespace(acquire=lambda: True, watch=lambda cb: None, release=lambda: None),
+    )
+    monkeypatch.setattr(entry, "_log_code_revision", lambda: None)
+    monkeypatch.setattr(logging, "basicConfig", lambda **kwargs: None)
+
+    def warn_while_loading():
+        logging.getLogger("nexusvox.config").warning("moved the config aside")
+        return Config()
+
+    monkeypatch.setattr(entry, "load_config", warn_while_loading)
+    own = logging.getLogger("nexusvox")
+    previous = own.level
+    own.setLevel(logging.INFO)  # the root logger is not configured here: basicConfig is stubbed
+    try:
+        with pytest.raises(SystemExit):
+            entry.main()
+    finally:
+        own.setLevel(previous)
+        sys.modules.pop("nexusvox.__main__", None)
+    log = next((tmp_path / "localappdata" / "NexusVox" / "logs").glob("nexusvox.log*"))
+    assert "moved the config aside" in log.read_text(encoding="utf-8")
+
+
+def test_a_frozen_build_or_a_foreign_repository_runs_no_git(monkeypatch):
+    import sys
+
+    from nexusvox import __main__ as entry
+
+    def no_git(*args, **kwargs):
+        raise AssertionError("git must not run")
+
+    monkeypatch.setattr(entry.subprocess, "run", no_git)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert entry._git_revision() == entry.NOT_A_CHECKOUT
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    monkeypatch.setattr(entry, "_is_checkout", lambda folder: False)
+    assert entry._git_revision() == entry.NOT_A_CHECKOUT
+
+
+def test_the_git_revision_is_logged_from_a_thread_in_a_checkout(monkeypatch):
+    from nexusvox import __main__ as entry
+
+    started = []
+
+    class FakeThread:
+        def __init__(self, **kwargs):
+            started.append(kwargs)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(entry, "_is_checkout", lambda folder: True)
+    monkeypatch.setattr(entry.threading, "Thread", FakeThread)
+    entry._log_code_revision()
+    assert started and started[0]["daemon"] is True

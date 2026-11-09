@@ -129,12 +129,23 @@ def resolve_device(requested: str) -> str:
         return "cpu"
 
 
+_cuda_probed = False
+_cuda: bool = False
+
+
 def cuda_available() -> bool:
-    """True when a CUDA GPU is usable: the gate for features that need the local language model."""
-    try:
-        return resolve_device("auto") == "cuda"
-    except Exception:
-        return False
+    """True when a CUDA GPU is usable: the gate for features that need the local language model.
+
+    Probed once per process, like `gpu_vram_gb`: every save asks for it twice, under the config lock.
+    """
+    global _cuda_probed, _cuda
+    if not _cuda_probed:
+        try:
+            _cuda = resolve_device("auto") == "cuda"
+        except Exception:
+            _cuda = False
+        _cuda_probed = True
+    return _cuda
 
 
 _vram_probed = False
@@ -254,11 +265,11 @@ def _llm_model(data: dict) -> str:
 def _cleanup_config(data: dict) -> CleanupConfig:
     """An unknown level is off; a timeout of 0 or less would fail every request at once."""
     level = str(data.get("level", "off")).strip().lower()
-    timeout_s = float(data["timeout_s"]) if "timeout_s" in data else auto_cleanup_timeout()
-    return CleanupConfig(
-        level=level if level in CLEANUP_LEVELS else "off",
-        timeout_s=timeout_s if timeout_s > 0 else CleanupConfig.timeout_s,
-    )
+    if "timeout_s" in data:
+        timeout_s = _number(data, "timeout_s", "cleanup", CleanupConfig.timeout_s, positive=True)
+    else:
+        timeout_s = auto_cleanup_timeout()
+    return CleanupConfig(level=level if level in CLEANUP_LEVELS else "off", timeout_s=timeout_s)
 
 
 def _feedback_form_url(value: object) -> str:
@@ -308,16 +319,54 @@ class Config:
     database_path_configured: str | None = field(default=None, repr=False, compare=False)
 
 
-def _strict_flag(section: dict, key: str, where: str) -> bool:
-    """A switch that only a real TOML `true` turns on.
+def _strict_flag(section: dict, key: str, where: str, default: bool = False, invalid: bool = False) -> bool:
+    """A switch that only a real TOML `true` or `false` sets: *default* when the key is missing.
 
-    `"false"` or `1` must not count as on (a non-empty string is truthy), so anything but a bool means off.
+    `"false"` or `1` must not count as on (a non-empty string is truthy), so anything that is not a bool is
+    logged and gives *invalid*: off, unless the safe side of that setting is on (a hint, the first-run setup).
     """
-    value = section.get(key, False)
+    if key not in section:
+        return default
+    value = section[key]
     if isinstance(value, bool):
         return value
-    logging.getLogger(__name__).warning("[%s].%s must be true or false, got %r; keeping it off", where, key, value)
-    return False
+    logger.warning("[%s].%s must be true or false, got %r; using %s", where, key, value, str(invalid).lower())
+    return invalid
+
+
+_INT64_MAX = 2**63 - 1  # the largest integer a TOML file can hold
+
+
+def _number(
+    section: dict,
+    key: str,
+    where: str,
+    default: float,
+    *,
+    whole: bool = False,
+    positive: bool = False,
+    maximum: float | None = None,
+) -> float:
+    """A number setting: *default* when the key is missing, and, with a warning, when the value is not a finite
+    number (`"60s"`, `"49730a"`, `inf`), is negative (zero too with *positive*) or is above *maximum*, so a
+    hand-edited file never stops the app. *whole* reads an integer."""
+    if key not in section:
+        return default
+    value = section[key]
+    try:
+        if isinstance(value, bool):
+            raise ValueError("a switch is not a number")
+        number = int(value) if whole else float(value)
+        if not math.isfinite(number) or number < 0 or (positive and number == 0):
+            raise ValueError("out of range")
+        if number > (_INT64_MAX if maximum is None else maximum):
+            raise ValueError("out of range")
+    except (TypeError, ValueError, OverflowError):
+        logger.warning(
+            "[%s].%s must be a%s number, got %r; using %s", where, key, " positive" if positive else "", value, default
+        )
+        return default
+    return number
 
 
 def _experimental_flag(section: dict, key: str) -> bool:
@@ -372,9 +421,10 @@ def load_config(path: Path | None = None) -> Config:
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
-    except tomllib.TOMLDecodeError as exc:
-        # A file the old `save_config` broke (an unescaped Windows path) would otherwise keep the app from starting.
-        # Keep it next to the config so nothing is lost, and start from the template.
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+        # A file the old `save_config` broke (an unescaped Windows path) or an editor saved in ANSI (an umlaut that
+        # is not UTF-8) would otherwise keep the app from starting. Keep it next to the config so nothing is lost,
+        # and start from the template.
         backup = path.with_name(f"{path.name}.broken-{time.strftime('%Y%m%d-%H%M%S')}")
         try:
             os.replace(path, backup)
@@ -450,17 +500,17 @@ def load_config(path: Path | None = None) -> Config:
     # Backward compat: old configs use general.voice_commands_enabled (bool only)
     if vc_data is not None:
         vc_config = VoiceCommandsConfig(
-            enabled=vc_data.get("enabled", True),
+            enabled=_strict_flag(vc_data, "enabled", "voice_commands", True, invalid=True),
             symbols=list(vc_data.get("symbols", _DEFAULT_SYMBOLS)),
-            numbers_as_digits=vc_data.get("numbers_as_digits", True),
-            bypass_symbols=vc_data.get("bypass_symbols", False),
+            numbers_as_digits=_strict_flag(vc_data, "numbers_as_digits", "voice_commands", True, invalid=True),
+            bypass_symbols=_strict_flag(vc_data, "bypass_symbols", "voice_commands"),
             structural=list(vc_data.get("structural", _DEFAULT_STRUCTURAL)),
-            bypass_structural=vc_data.get("bypass_structural", False),
-            press_enter=vc_data.get("press_enter", False),
+            bypass_structural=_strict_flag(vc_data, "bypass_structural", "voice_commands"),
+            press_enter=_strict_flag(vc_data, "press_enter", "voice_commands"),
         )
     else:
         vc_config = VoiceCommandsConfig(
-            enabled=general.get("voice_commands_enabled", True),
+            enabled=_strict_flag(general, "voice_commands_enabled", "general", True, invalid=True),
             symbols=list(_DEFAULT_SYMBOLS),
             numbers_as_digits=True,
         )
@@ -468,8 +518,8 @@ def load_config(path: Path | None = None) -> Config:
     config = Config(
         injection_delay_ms=general.get("injection_delay_ms", 500),
         log_level=_log_level(general.get("log_level", "INFO")),
-        log_full_text=bool(general.get("log_full_text", False)),
-        setup_done=bool(general.get("setup_done", True)),
+        log_full_text=_strict_flag(general, "log_full_text", "general"),
+        setup_done=_strict_flag(general, "setup_done", "general", True, invalid=True),
         hotkey=HotkeyConfig(
             modifiers=hotkey_modifiers,
             key=normalize_hotkey_key(hotkey_key) or "",
@@ -483,11 +533,11 @@ def load_config(path: Path | None = None) -> Config:
             key=normalize_hotkey_key(meeting_key) or DEFAULT_MEETING_KEY,
             mic_device=str(meeting_data.get("mic_device", "")),
             output_device=str(meeting_data.get("output_device", "")),
-            consent_hint=bool(meeting_data.get("consent_hint", True)),
-            leave_dictation_out=bool(meeting_data.get("leave_dictation_out", True)),
+            consent_hint=_strict_flag(meeting_data, "consent_hint", "meeting", True, invalid=True),
+            leave_dictation_out=_strict_flag(meeting_data, "leave_dictation_out", "meeting", True, invalid=True),
             own_voice_label=_own_voice_label(meeting_data.get("own_voice_label", "")),
-            live_transcript=bool(meeting_data.get("live_transcript", False)),
-            store_audio=bool(meeting_data.get("store_audio", True)),
+            live_transcript=_strict_flag(meeting_data, "live_transcript", "meeting"),
+            store_audio=_strict_flag(meeting_data, "store_audio", "meeting", True),
         ),
         audio=AudioConfig(
             sample_rate=audio_data.get("sample_rate", 16_000),
@@ -509,10 +559,10 @@ def load_config(path: Path | None = None) -> Config:
         database=DatabaseConfig(
             path=resolve_data_path(db_data.get("path", "nexusvox.db")),
             audio_dir=db_data.get("audio_dir", "audio"),
-            store_audio=bool(db_data.get("store_audio", True)),
+            store_audio=_strict_flag(db_data, "store_audio", "database", True),
         ),
         os_commands=OSCommandsConfig(
-            enabled=os_cmd_data.get("enabled", False),
+            enabled=_strict_flag(os_cmd_data, "enabled", "os_commands"),
             apps=dict(os_cmd_data.get("apps", {})),
         ),
         experimental=ExperimentalConfig(
@@ -522,28 +572,28 @@ def load_config(path: Path | None = None) -> Config:
         ),
         voice_commands=vc_config,
         assistant=AssistantConfig(
-            enabled=assistant_data.get("enabled", False),
+            enabled=_strict_flag(assistant_data, "enabled", "assistant"),
             host=assistant_data.get("host", "127.0.0.1"),
-            port=int(assistant_data.get("port", 49730)),
+            port=int(_number(assistant_data, "port", "assistant", 49730, whole=True, positive=True, maximum=65535)),
             service=assistant_data.get("service", "voice-assistant"),
-            timeout_s=float(assistant_data.get("timeout_s", 5.0)),
+            timeout_s=_number(assistant_data, "timeout_s", "assistant", 5.0, positive=True),
         ),
         os_control=OsControlConfig(
-            enabled=switcher_data.get("enabled", False),
+            enabled=_strict_flag(switcher_data, "enabled", "os_control"),
             command_key=command_key if command_key in COMMAND_KEY_VKS else "Y",
             host=switcher_data.get("host", "127.0.0.1"),
-            port=int(switcher_data.get("port", 49730)),
+            port=int(_number(switcher_data, "port", "os_control", 49730, whole=True, positive=True, maximum=65535)),
             service=switcher_data.get("service", "os-control"),
-            timeout_s=float(switcher_data.get("timeout_s", 5.0)),
+            timeout_s=_number(switcher_data, "timeout_s", "os_control", 5.0, positive=True),
         ),
         translator=TranslatorConfig(
-            enabled=translator_data.get("enabled", False),
+            enabled=_strict_flag(translator_data, "enabled", "translator"),
             url=translator_data.get("url", "http://127.0.0.1:8003/translate"),
-            timeout_s=float(translator_data.get("timeout_s", 8.0)),
+            timeout_s=_number(translator_data, "timeout_s", "translator", 8.0, positive=True),
         ),
         mic_guard=MicGuardConfig(
-            enabled=mic_guard_data.get("enabled", False),
-            watchdog_s=float(mic_guard_data.get("watchdog_s", 30.0)),
+            enabled=_strict_flag(mic_guard_data, "enabled", "mic_guard"),
+            watchdog_s=_number(mic_guard_data, "watchdog_s", "mic_guard", 30.0),  # 0 turns the watchdog off
         ),
         feedback=FeedbackConfig(
             mode=feedback_data.get("mode") if feedback_data.get("mode") in FEEDBACK_MODES else "sound",
@@ -553,23 +603,23 @@ def load_config(path: Path | None = None) -> Config:
             protocol=llm_data.get("protocol") if llm_data.get("protocol") in LLM_PROTOCOLS else "ollama",
             model=_llm_model(llm_data),
             api_key=str(llm_data.get("api_key", "")),
-            timeout_s=float(llm_data.get("timeout_s", LlmConfig.timeout_s)),
+            timeout_s=_number(llm_data, "timeout_s", "llm", LlmConfig.timeout_s, positive=True),
             keep_alive=_llm_keep_alive(llm_data),
             servers=_llm_servers(llm_data.get("servers")),
             per_task=_strict_flag(llm_data, "per_task", "llm"),
             fast=_llm_fast(llm_data.get("fast")),
             fast_tasks=_llm_fast_tasks(llm_data.get("fast_tasks")),
         ),
-        polish=PolishConfig(in_terminals=bool(polish_data.get("in_terminals", False))),
+        polish=PolishConfig(in_terminals=_strict_flag(polish_data, "in_terminals", "polish")),
         cleanup=_cleanup_config(cleanup_data),
         learn_from_edits=LearnFromEditsConfig(
-            enabled=learn_data.get("enabled", False),
-            window_s=float(learn_data.get("window_s", 20.0)),
+            enabled=_strict_flag(learn_data, "enabled", "learn_from_edits"),
+            window_s=_number(learn_data, "window_s", "learn_from_edits", 20.0, positive=True),
         ),
         remote_mic=RemoteMicConfig(
-            enabled=remote_mic_data.get("enabled", False),
+            enabled=_strict_flag(remote_mic_data, "enabled", "remote_mic"),
             host=remote_mic_data.get("host", "127.0.0.1"),
-            port=int(remote_mic_data.get("port", 47393)),
+            port=int(_number(remote_mic_data, "port", "remote_mic", 47393, whole=True, positive=True, maximum=65535)),
             token=str(remote_mic_data.get("token", "")),
         ),
         support=SupportConfig(
@@ -613,6 +663,8 @@ def _toml_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
+        if not -(_INT64_MAX + 1) <= value <= _INT64_MAX:
+            raise ValueError("an integer beyond 64 bits cannot be written to the config")
         return str(value)
     if isinstance(value, float):
         if math.isnan(value):
@@ -689,12 +741,19 @@ _MAX_LOGGED_KEYS = 8
 
 
 def _setting_lines(raw: bytes) -> dict[str, str]:
-    """`section.key` -> the rest of its line, for every single-line `key = value` of a config file."""
+    """`section.key` -> the rest of its line, for every single-line `key = value` of a config file (`section[n].key`
+    for the n-th entry of an array of tables)."""
     section = ""
+    entries: dict[str, int] = {}
     found: dict[str, str] = {}
     for line in raw.decode("utf-8", errors="replace").splitlines():
         line = line.strip()
-        if line.startswith("["):
+        if line.startswith("[["):
+            # An entry of an array of tables (`[[llm.servers]]`) is a section of its own, so a change to any shows.
+            name = line.strip("[]").strip()
+            entries[name] = entries.get(name, 0) + 1
+            section = f"{name}[{entries[name]}]"
+        elif line.startswith("["):
             section = line.strip("[]").strip()
         elif match := _KEY_LINE.match(line):
             found[f"{section}.{match.group(1)}" if section else match.group(1)] = match.group(2)

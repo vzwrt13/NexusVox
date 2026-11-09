@@ -56,6 +56,14 @@ def _tests_never_touch_the_real_log(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_cuda_probe(monkeypatch):
+    """`cuda_available` probes once per process; every test probes (or patches the probe) for itself."""
+    import nexusvox.config
+
+    monkeypatch.setattr(nexusvox.config, "_cuda_probed", False)
+
+
+@pytest.fixture(autouse=True)
 def _tests_never_play_sound(monkeypatch):
     """No test makes the speakers chime: the app's start/stop/error beeps go through ``sounddevice.play``."""
     try:

@@ -131,20 +131,25 @@ def resolve_device(requested: str) -> str:
 
 _cuda_probed = False
 _cuda: bool = False
+_cuda_probed_at = 0.0
+# A "no" is trusted for this long: a driver that is not ready at login (autostart) must not keep the GPU off for the
+# whole session, yet a save asks twice in a row and must not probe twice.
+_CUDA_NO_TTL_S = 30.0
 
 
 def cuda_available() -> bool:
     """True when a CUDA GPU is usable: the gate for features that need the local language model.
 
-    Probed once per process, like `gpu_vram_gb`: every save asks for it twice, under the config lock.
+    A "yes" is probed once per process, like `gpu_vram_gb`; a "no" is probed again after `_CUDA_NO_TTL_S`.
     """
-    global _cuda_probed, _cuda
-    if not _cuda_probed:
-        try:
-            _cuda = resolve_device("auto") == "cuda"
-        except Exception:
-            _cuda = False
-        _cuda_probed = True
+    global _cuda_probed, _cuda, _cuda_probed_at
+    if _cuda_probed and (_cuda or time.monotonic() - _cuda_probed_at < _CUDA_NO_TTL_S):
+        return _cuda
+    try:
+        _cuda = resolve_device("auto") == "cuda"
+    except Exception:
+        _cuda = False
+    _cuda_probed, _cuda_probed_at = True, time.monotonic()
     return _cuda
 
 
@@ -266,7 +271,7 @@ def _cleanup_config(data: dict) -> CleanupConfig:
     """An unknown level is off; a timeout of 0 or less would fail every request at once."""
     level = str(data.get("level", "off")).strip().lower()
     if "timeout_s" in data:
-        timeout_s = _number(data, "timeout_s", "cleanup", CleanupConfig.timeout_s, positive=True)
+        timeout_s = _number(data, "timeout_s", "cleanup", auto_cleanup_timeout(), positive=True)
     else:
         timeout_s = auto_cleanup_timeout()
     return CleanupConfig(level=level if level in CLEANUP_LEVELS else "off", timeout_s=timeout_s)
@@ -337,36 +342,63 @@ def _strict_flag(section: dict, key: str, where: str, default: bool = False, inv
 _INT64_MAX = 2**63 - 1  # the largest integer a TOML file can hold
 
 
-def _number(
-    section: dict,
-    key: str,
-    where: str,
-    default: float,
-    *,
-    whole: bool = False,
-    positive: bool = False,
-    maximum: float | None = None,
+def _read_number(
+    section: dict, key: str, where: str, default: float, *, whole: bool, positive: bool, maximum: float
 ) -> float:
-    """A number setting: *default* when the key is missing, and, with a warning, when the value is not a finite
-    number (`"60s"`, `"49730a"`, `inf`), is negative (zero too with *positive*) or is above *maximum*, so a
-    hand-edited file never stops the app. *whole* reads an integer."""
+    """The number behind `_number` and `_whole`: *default* when the key is missing, and, with a warning, when the
+    value is not a finite number (`"60s"`, `inf`), is negative (zero too with *positive*), above *maximum*, or, for
+    *whole*, has a fractional part (`47393.9` would silently become another port)."""
     if key not in section:
         return default
     value = section[key]
     try:
         if isinstance(value, bool):
             raise ValueError("a switch is not a number")
-        number = int(value) if whole else float(value)
+        number = float(value)
         if not math.isfinite(number) or number < 0 or (positive and number == 0):
             raise ValueError("out of range")
-        if number > (_INT64_MAX if maximum is None else maximum):
+        if not whole and number > maximum:
             raise ValueError("out of range")
+        if whole:
+            if isinstance(value, str):
+                number = int(value)
+            elif isinstance(value, int):
+                number = value  # not through float: it would round a large integer
+            elif number.is_integer():
+                number = int(number)
+            else:
+                raise ValueError("not a whole number")
+            if number > maximum:
+                raise ValueError("out of range")
     except (TypeError, ValueError, OverflowError):
         logger.warning(
-            "[%s].%s must be a%s number, got %r; using %s", where, key, " positive" if positive else "", value, default
+            "[%s].%s must be a%s %s, got %r; using %s",
+            where,
+            key,
+            " positive" if positive else "",
+            "whole number" if whole else "number",
+            value,
+            default,
         )
         return default
     return number
+
+
+def _number(section: dict, key: str, where: str, default: float, *, positive: bool = False) -> float:
+    """A seconds setting (a timeout, a window): a finite number that `threading` and the sockets can wait for."""
+    return _read_number(section, key, where, default, whole=False, positive=positive, maximum=threading.TIMEOUT_MAX)
+
+
+def _whole(
+    section: dict, key: str, where: str, default: int, *, positive: bool = False, maximum: int = _INT64_MAX
+) -> int:
+    """An integer setting (a delay, a rate, a size, a port)."""
+    return int(_read_number(section, key, where, default, whole=True, positive=positive, maximum=maximum))
+
+
+def _port(section: dict, key: str, where: str, default: int) -> int:
+    """A TCP port, 1 to 65535."""
+    return _whole(section, key, where, default, positive=True, maximum=65535)
 
 
 def _experimental_flag(section: dict, key: str) -> bool:
@@ -382,13 +414,7 @@ def _log_level(value: object) -> str:
 
 def _max_recording_s(value: object) -> int:
     """`[hotkey].max_recording_s`: whole seconds, 0 turns the cap off; anything unusable keeps the 10-minute default."""
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        return 600
-    if value == 0:
-        return 0
-    if not math.isfinite(value) or value < 1:
-        return 600
-    return int(value)
+    return _whole({"max_recording_s": value}, "max_recording_s", "hotkey", 600)
 
 
 def _polish_key(hotkey_data: dict) -> str:
@@ -402,6 +428,19 @@ def _own_voice_label(raw: object) -> str:
     """The configured own-voice label; the default when a hand-edited file uses another speaker's label."""
     label = normalize_speaker_label(raw)
     return DEFAULT_OWN_VOICE_LABEL if own_voice_label_problem(label) else label
+
+
+def _read_text(path: Path) -> str:
+    """The text of the config file. UTF-8, with or without the byte order mark Notepad adds; failing that
+    Windows-1252, which is what Notepad's "ANSI" is, so an umlaut saved that way keeps the user's settings (the next
+    save writes UTF-8). Bytes that are neither raise `UnicodeDecodeError`."""
+    raw = path.read_bytes()
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+        logger.warning("%s is not UTF-8; read it as Windows-1252 (the next save writes UTF-8)", path)
+        return text
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -419,12 +458,11 @@ def load_config(path: Path | None = None) -> Config:
             return with_hardware_defaults(Config())
 
     try:
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
+        data = tomllib.loads(_read_text(path))
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
-        # A file the old `save_config` broke (an unescaped Windows path) or an editor saved in ANSI (an umlaut that
-        # is not UTF-8) would otherwise keep the app from starting. Keep it next to the config so nothing is lost,
-        # and start from the template.
+        # A file the old `save_config` broke (an unescaped Windows path), or one that is not text in any encoding
+        # we know, would otherwise keep the app from starting. Keep it next to the config so nothing is lost, and
+        # start from the template.
         backup = path.with_name(f"{path.name}.broken-{time.strftime('%Y%m%d-%H%M%S')}")
         try:
             os.replace(path, backup)
@@ -516,7 +554,7 @@ def load_config(path: Path | None = None) -> Config:
         )
 
     config = Config(
-        injection_delay_ms=general.get("injection_delay_ms", 500),
+        injection_delay_ms=_whole(general, "injection_delay_ms", "general", 500),
         log_level=_log_level(general.get("log_level", "INFO")),
         log_full_text=_strict_flag(general, "log_full_text", "general"),
         setup_done=_strict_flag(general, "setup_done", "general", True, invalid=True),
@@ -540,13 +578,13 @@ def load_config(path: Path | None = None) -> Config:
             store_audio=_strict_flag(meeting_data, "store_audio", "meeting", True),
         ),
         audio=AudioConfig(
-            sample_rate=audio_data.get("sample_rate", 16_000),
-            chunk_size=audio_data.get("chunk_size", 4096),
+            sample_rate=_whole(audio_data, "sample_rate", "audio", 16_000, positive=True),
+            chunk_size=_whole(audio_data, "chunk_size", "audio", 4096, positive=True),
             device=str(audio_data.get("device", "")),
         ),
         inference=InferenceConfig(
             server_url=server_url,
-            transcription_delay_ms=inference_data.get("transcription_delay_ms", 480),
+            transcription_delay_ms=_whole(inference_data, "transcription_delay_ms", "inference", 480),
             model=model,
             device=inference_data.get("device", "auto"),
             compute_type=inference_data.get("compute_type", None),
@@ -574,7 +612,7 @@ def load_config(path: Path | None = None) -> Config:
         assistant=AssistantConfig(
             enabled=_strict_flag(assistant_data, "enabled", "assistant"),
             host=assistant_data.get("host", "127.0.0.1"),
-            port=int(_number(assistant_data, "port", "assistant", 49730, whole=True, positive=True, maximum=65535)),
+            port=_port(assistant_data, "port", "assistant", 49730),
             service=assistant_data.get("service", "voice-assistant"),
             timeout_s=_number(assistant_data, "timeout_s", "assistant", 5.0, positive=True),
         ),
@@ -582,7 +620,7 @@ def load_config(path: Path | None = None) -> Config:
             enabled=_strict_flag(switcher_data, "enabled", "os_control"),
             command_key=command_key if command_key in COMMAND_KEY_VKS else "Y",
             host=switcher_data.get("host", "127.0.0.1"),
-            port=int(_number(switcher_data, "port", "os_control", 49730, whole=True, positive=True, maximum=65535)),
+            port=_port(switcher_data, "port", "os_control", 49730),
             service=switcher_data.get("service", "os-control"),
             timeout_s=_number(switcher_data, "timeout_s", "os_control", 5.0, positive=True),
         ),
@@ -619,7 +657,7 @@ def load_config(path: Path | None = None) -> Config:
         remote_mic=RemoteMicConfig(
             enabled=_strict_flag(remote_mic_data, "enabled", "remote_mic"),
             host=remote_mic_data.get("host", "127.0.0.1"),
-            port=int(_number(remote_mic_data, "port", "remote_mic", 47393, whole=True, positive=True, maximum=65535)),
+            port=_port(remote_mic_data, "port", "remote_mic", 47393),
             token=str(remote_mic_data.get("token", "")),
         ),
         support=SupportConfig(
@@ -740,24 +778,47 @@ _KEY_LINE = re.compile(r"^([A-Za-z_][\w-]*)\s*=\s*(.*)$")
 _MAX_LOGGED_KEYS = 8
 
 
-def _setting_lines(raw: bytes) -> dict[str, str]:
-    """`section.key` -> the rest of its line, for every single-line `key = value` of a config file (`section[n].key`
-    for the n-th entry of an array of tables)."""
+def _setting_lines(raw: bytes) -> tuple[dict[str, str], dict[str, list[dict[str, str]]]]:
+    """The single-line `key = value` settings of a config file: `section.key` -> the rest of its line, and, for every
+    array of tables (`[[llm.servers]]`), its entries in order, each a `key` -> rest-of-line dict."""
     section = ""
-    entries: dict[str, int] = {}
+    entry: dict[str, str] | None = None
     found: dict[str, str] = {}
+    tables: dict[str, list[dict[str, str]]] = {}
     for line in raw.decode("utf-8", errors="replace").splitlines():
         line = line.strip()
-        if line.startswith("[["):
-            # An entry of an array of tables (`[[llm.servers]]`) is a section of its own, so a change to any shows.
-            name = line.strip("[]").strip()
-            entries[name] = entries.get(name, 0) + 1
-            section = f"{name}[{entries[name]}]"
-        elif line.startswith("["):
+        if line.startswith("["):
             section = line.strip("[]").strip()
+            entry = None
+            if line.startswith("[["):
+                entry = {}
+                tables.setdefault(section, []).append(entry)
         elif match := _KEY_LINE.match(line):
-            found[f"{section}.{match.group(1)}" if section else match.group(1)] = match.group(2)
-    return found
+            if entry is not None:
+                entry[match.group(1)] = match.group(2)
+            else:
+                found[f"{section}.{match.group(1)}" if section else match.group(1)] = match.group(2)
+    return found, tables
+
+
+def _changed_entries(name: str, before: list[dict[str, str]], after: list[dict[str, str]]) -> list[str]:
+    """Which entries of an array of tables a save changed. Entries that are the same are matched first, wherever they
+    sit, so deleting or adding one does not make every later entry look changed; what is left is paired in order
+    (the keys that differ are named) and the rest is reported as added or removed."""
+    old = [(i, e) for i, e in enumerate(before, 1)]
+    new = []
+    for i, e in enumerate(after, 1):
+        match = next((pair for pair in old if pair[1] == e), None)
+        if match:
+            old.remove(match)
+        else:
+            new.append((i, e))
+    changed = []
+    for (_, was), (i, now) in zip(old, new, strict=False):
+        changed += [f"{name}[{i}].{key}" for key in sorted(was.keys() | now.keys()) if was.get(key) != now.get(key)]
+    changed += [f"{name}[{i}] added" for i, _ in new[len(old) :]]
+    changed += [f"{name}[{i}] removed" for i, _ in old[len(new) :]]
+    return changed
 
 
 def _log_saved(previous: bytes | None, data: bytes) -> None:
@@ -767,8 +828,10 @@ def _log_saved(previous: bytes | None, data: bytes) -> None:
         if previous is None:
             logger.info("Settings file created")
             return
-        before, after = _setting_lines(previous), _setting_lines(data)
+        (before, before_tables), (after, after_tables) = _setting_lines(previous), _setting_lines(data)
         changed = sorted(key for key in before.keys() | after.keys() if before.get(key) != after.get(key))
+        for name in sorted(before_tables.keys() | after_tables.keys()):
+            changed += _changed_entries(name, before_tables.get(name, []), after_tables.get(name, []))
     except Exception:
         logger.debug("Could not tell which settings a save changed", exc_info=True)
         return

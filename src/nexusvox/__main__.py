@@ -23,11 +23,8 @@ def _is_checkout(folder: Path) -> bool:
     return not getattr(sys, "frozen", False) and (folder.parent.parent / ".git").exists()
 
 
-def _git_revision() -> str:
-    """`branch@commit` of the checkout this code runs from, "(not a git checkout)" for an installed or frozen copy."""
-    folder = Path(__file__).resolve().parent
-    if not _is_checkout(folder):
-        return NOT_A_CHECKOUT
+def _git_revision(folder: Path) -> str:
+    """`branch@commit` of the checkout in *folder* (`_is_checkout` is the caller's business)."""
 
     def git(*args: str) -> str:
         done = subprocess.run(
@@ -49,16 +46,15 @@ def _git_revision() -> str:
 
 def _log_code_revision() -> None:
     """Logs which code runs. The git calls can take seconds, so they never delay the start: a checkout logs from a
-    background thread, anything else at once."""
+    background thread, anything else (an installed copy, a frozen build) at once without asking git."""
     folder = Path(__file__).resolve().parent
-
-    def log() -> None:
-        logging.getLogger(__name__).info("Code: %s, %s", folder, _git_revision())
-
+    log = logging.getLogger(__name__).info
     if _is_checkout(folder):
-        threading.Thread(target=log, name="git-revision", daemon=True).start()
+        threading.Thread(
+            target=lambda: log("Code: %s, %s", folder, _git_revision(folder)), name="git-revision", daemon=True
+        ).start()
     else:
-        log()
+        log("Code: %s, %s", folder, NOT_A_CHECKOUT)
 
 
 AUTOSTART_FLAG = "--autostart"

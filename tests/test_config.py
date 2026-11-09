@@ -1155,19 +1155,37 @@ def test_save_config_logs_the_names_of_the_settings_it_changed(tmp_path, caplog)
 
 
 # ── Bad values in a hand-edited config.toml ───────────────────────────────────────────────────────
-def test_a_config_saved_as_ansi_is_moved_aside_like_invalid_toml(tmp_path):
+def test_a_config_saved_as_ansi_keeps_its_settings(tmp_path, caplog):
+    """Notepad's "ANSI" is Windows-1252: an umlaut in it must not cost the user the whole config."""
     path = tmp_path / "config.toml"
-    ansi = '[meeting]\nown_voice_label = "Jörg"\n'.encode("cp1252")
-    path.write_bytes(ansi)
+    path.write_bytes('[audio]\ndevice = "Mikrofon (Jörg)"\n[meeting]\nstore_audio = false\n'.encode("cp1252"))
 
-    cfg = load_config(path)
+    with caplog.at_level("WARNING", logger="nexusvox.config"):
+        cfg = load_config(path)
+
+    assert cfg.audio.device == "Mikrofon (Jörg)" and cfg.meeting.store_audio is False
+    assert list(tmp_path.glob("config.toml.broken-*")) == []
+    assert any("not UTF-8" in record.message for record in caplog.records)
+
+
+def test_a_config_with_a_byte_order_mark_is_read(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_bytes(b"\xef\xbb\xbf" + b'[audio]\ndevice = "Mikrofon"\n')
+    assert load_config(path).audio.device == "Mikrofon"
+    assert list(tmp_path.glob("config.toml.broken-*")) == []
+
+
+def test_a_config_that_is_no_known_text_is_moved_aside(tmp_path):
+    path = tmp_path / "config.toml"
+    garbage = b'[audio]\ndevice = "\x81\x8d\x8f\x90\x9d"\n'  # bytes Windows-1252 does not define
+    path.write_bytes(garbage)
+
+    load_config(path)
 
     backups = list(tmp_path.glob("config.toml.broken-*"))
-    assert len(backups) == 1 and backups[0].read_bytes() == ansi
-    assert cfg.meeting.own_voice_label == MeetingConfig().own_voice_label
+    assert len(backups) == 1 and backups[0].read_bytes() == garbage
 
 
-# (section, key, reader, what a quoted "false" must give): off, except where off would be the unsafe side.
 _SWITCHES = [
     ("general", "log_full_text", lambda c: c.log_full_text, False),
     ("general", "setup_done", lambda c: c.setup_done, True),
@@ -1222,6 +1240,9 @@ def test_a_bad_number_falls_back_to_the_default_with_a_warning(tmp_path, caplog)
         "[learn_from_edits]\nwindow_s = true\n"
         "[remote_mic]\nport = 0\n"
         '[llm]\ntimeout_s = "slow"\n'
+        '[general]\ninjection_delay_ms = "fast"\n'
+        '[audio]\nsample_rate = "16000a"\nchunk_size = 0\n'
+        "[inference]\ntranscription_delay_ms = -4\n"
     )
     with caplog.at_level("WARNING", logger="nexusvox.config"):
         cfg = load_config(path)
@@ -1232,7 +1253,50 @@ def test_a_bad_number_falls_back_to_the_default_with_a_warning(tmp_path, caplog)
     assert cfg.learn_from_edits.window_s == 20.0
     assert cfg.remote_mic.port == 47393
     assert cfg.llm.timeout_s == LlmConfig.timeout_s
+    assert cfg.injection_delay_ms == 500
+    assert (cfg.audio.sample_rate, cfg.audio.chunk_size) == (16_000, 4096)
+    assert cfg.inference.transcription_delay_ms == 480
     assert any("[assistant].port" in record.message for record in caplog.records)
+
+
+def test_a_number_written_as_text_is_read_as_a_number_not_kept_as_text(tmp_path):
+    """`injection_delay_ms = "500"` used to reach `time.sleep("500" / 1000)` and fail every dictation."""
+    path = tmp_path / "config.toml"
+    path.write_text('[general]\ninjection_delay_ms = "250"\n[audio]\nsample_rate = "8000"\nchunk_size = 2048.0\n')
+    cfg = load_config(path)
+    assert cfg.injection_delay_ms == 250 and isinstance(cfg.injection_delay_ms, int)
+    assert (cfg.audio.sample_rate, cfg.audio.chunk_size) == (8000, 2048)
+
+
+@pytest.mark.parametrize("raw", ["47393.9", '"8080.5"', "-1"])
+def test_a_port_with_a_fraction_is_refused_not_cut(tmp_path, caplog, raw):
+    path = tmp_path / "config.toml"
+    path.write_text(f"[remote_mic]\nport = {raw}\n")
+    with caplog.at_level("WARNING", logger="nexusvox.config"):
+        assert load_config(path).remote_mic.port == 47393
+    assert any("[remote_mic].port" in record.message for record in caplog.records)
+
+
+def test_a_wait_longer_than_the_platform_can_sleep_is_refused(tmp_path):
+    """`threading.Timer(1e10, ...)` raises OverflowError in its thread: the mic watchdog would never fire."""
+    import threading
+
+    path = tmp_path / "config.toml"
+    path.write_text("[mic_guard]\nwatchdog_s = 1e10\n[learn_from_edits]\nwindow_s = 1e10\n[llm]\ntimeout_s = 1e10\n")
+    cfg = load_config(path)
+    assert (cfg.mic_guard.watchdog_s, cfg.learn_from_edits.window_s) == (30.0, 20.0)
+    assert cfg.llm.timeout_s == LlmConfig.timeout_s
+    path.write_text(f"[mic_guard]\nwatchdog_s = {threading.TIMEOUT_MAX / 2}\n")
+    assert load_config(path).mic_guard.watchdog_s == threading.TIMEOUT_MAX / 2
+
+
+def test_a_bad_cleanup_timeout_falls_back_to_the_hardware_default(tmp_path, monkeypatch):
+    path = tmp_path / "config.toml"
+    path.write_text('[cleanup]\nlevel = "light"\ntimeout_s = "30s"\n')
+    monkeypatch.setattr(config_module, "cuda_available", lambda: False)
+    assert load_config(path).cleanup.timeout_s == config_module.CLEANUP_TIMEOUT_CPU_S
+    monkeypatch.setattr(config_module, "cuda_available", lambda: True)
+    assert load_config(path).cleanup.timeout_s == CleanupConfig.timeout_s
 
 
 def test_numbers_written_as_text_or_whole_are_still_read(tmp_path):
@@ -1262,32 +1326,65 @@ def test_an_integer_beyond_64_bits_is_never_written(tmp_path):
     assert load_config(path).injection_delay_ms == 2**63 - 1
 
 
-def test_every_llm_server_change_is_logged_on_its_own(tmp_path, caplog):
-    first = Config(llm=LlmConfig(servers=[LlmServer("http://a:1", "ollama"), LlmServer("http://b:2", "ollama")]))
-    changed = Config(llm=LlmConfig(servers=[LlmServer("http://a:9", "ollama"), LlmServer("http://b:2", "ollama")]))
+def _servers(*urls):
+    return Config(llm=LlmConfig(servers=[LlmServer(url, "ollama") for url in urls]))
+
+
+def _logged_keys(tmp_path, caplog, before, after):
     path = tmp_path / "config.toml"
-    save_config(first, path)
+    save_config(before, path)
+    caplog.clear()
     with caplog.at_level("INFO", logger="nexusvox.config"):
-        save_config(changed, path)
-    assert "llm.servers[1].url" in caplog.text and "llm.servers[2]" not in caplog.text
+        save_config(after, path)
+    return [record.getMessage() for record in caplog.records if record.getMessage().startswith("Settings saved")]
+
+
+def test_every_llm_server_change_is_logged_on_its_own(tmp_path, caplog):
+    logged = _logged_keys(tmp_path, caplog, _servers("http://a:1", "http://b:2"), _servers("http://a:9", "http://b:2"))
+    assert logged == ["Settings saved: llm.servers[1].url"]
+
+
+def test_removing_the_first_server_is_one_change_not_one_per_later_entry(tmp_path, caplog):
+    before = _servers("http://a:1", "http://b:2", "http://c:3", "http://d:4")
+    logged = _logged_keys(tmp_path, caplog, before, _servers("http://b:2", "http://c:3", "http://d:4"))
+    assert logged == ["Settings saved: llm.servers[1] removed"]
+
+
+def test_adding_a_server_in_the_middle_is_one_change(tmp_path, caplog):
+    logged = _logged_keys(
+        tmp_path, caplog, _servers("http://a:1", "http://c:3"), _servers("http://a:1", "http://b:2", "http://c:3")
+    )
+    assert logged == ["Settings saved: llm.servers[2] added"]
 
 
 def test_setting_lines_keep_every_array_entry_apart():
-    raw = b'[llm]\nurl = "x"\n[[llm.servers]]\nurl = "a"\n[[llm.servers]]\nurl = "b"\n'
-    assert config_module._setting_lines(raw) == {
-        "llm.url": '"x"',
-        "llm.servers[1].url": '"a"',
-        "llm.servers[2].url": '"b"',
-    }
+    raw = b'[llm]\nurl = "x"\n[[llm.servers]]\nurl = "a"\n[[llm.servers]]\nurl = "b"\n[polish]\nin_terminals = true\n'
+    assert config_module._setting_lines(raw) == (
+        {"llm.url": '"x"', "polish.in_terminals": "true"},
+        {"llm.servers": [{"url": '"a"'}, {"url": '"b"'}]},
+    )
 
 
-def test_the_cuda_probe_runs_once_per_process(monkeypatch):
+def test_a_cuda_yes_is_probed_once_per_process(monkeypatch):
     calls = []
     monkeypatch.setattr(config_module, "resolve_device", lambda requested: calls.append(requested) or "cuda")
     assert config_module.cuda_available() is True
     monkeypatch.setattr(config_module, "resolve_device", lambda requested: calls.append("again") or "cpu")
     assert config_module.cuda_available() is True
     assert calls == ["auto"]
+
+
+def test_a_cuda_no_is_probed_again_later(monkeypatch):
+    """A driver that is not ready at autostart must not keep the GPU off until the app restarts."""
+    now = [1000.0]
+    answers = ["cpu", "cuda"]
+    calls = []
+    monkeypatch.setattr(config_module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(config_module, "resolve_device", lambda requested: calls.append(1) or answers[len(calls) - 1])
+    assert config_module.cuda_available() is False
+    assert config_module.cuda_available() is False and len(calls) == 1  # the next call of a save: no second probe
+    now[0] += config_module._CUDA_NO_TTL_S + 1
+    assert config_module.cuda_available() is True and len(calls) == 2
 
 
 def test_a_save_probes_the_gpu_once(tmp_path, monkeypatch):
@@ -1347,7 +1444,7 @@ def test_main_logs_what_load_config_warns_about(monkeypatch, tmp_path):
     assert "moved the config aside" in log.read_text(encoding="utf-8")
 
 
-def test_a_frozen_build_or_a_foreign_repository_runs_no_git(monkeypatch):
+def test_a_frozen_build_or_a_foreign_repository_runs_no_git(monkeypatch, tmp_path, caplog):
     import sys
 
     from nexusvox import __main__ as entry
@@ -1355,12 +1452,20 @@ def test_a_frozen_build_or_a_foreign_repository_runs_no_git(monkeypatch):
     def no_git(*args, **kwargs):
         raise AssertionError("git must not run")
 
-    monkeypatch.setattr(entry.subprocess, "run", no_git)
+    package = tmp_path / "repo" / "src" / "nexusvox"
+    package.mkdir(parents=True)
+    assert entry._is_checkout(package) is False  # no .git two levels up: an installed copy
+    (tmp_path / "repo" / ".git").mkdir()
+    assert entry._is_checkout(package) is True
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    assert entry._git_revision() == entry.NOT_A_CHECKOUT
-    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    assert entry._is_checkout(package) is False
+
+    monkeypatch.setattr(entry.subprocess, "run", no_git)
+    monkeypatch.setattr(entry.threading, "Thread", no_git)
     monkeypatch.setattr(entry, "_is_checkout", lambda folder: False)
-    assert entry._git_revision() == entry.NOT_A_CHECKOUT
+    with caplog.at_level("INFO", logger="nexusvox.__main__"):
+        entry._log_code_revision()
+    assert entry.NOT_A_CHECKOUT in caplog.text
 
 
 def test_the_git_revision_is_logged_from_a_thread_in_a_checkout(monkeypatch):

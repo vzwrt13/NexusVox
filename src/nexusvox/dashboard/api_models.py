@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 from ..config import (
@@ -16,6 +17,8 @@ from ..config import (
 from ..system.paths import models_dir
 from ..transcription.diarization import speaker_detection_models
 from .api_base import DashboardState
+
+logger = logging.getLogger(__name__)
 
 # How long a model's downloaded-or-not answer is reused (seconds).
 DOWNLOAD_STATE_TTL_S = 10.0
@@ -92,7 +95,11 @@ class ModelsMixin(DashboardState):
             return {"ok": False, "error": f"Unknown model: {model_id}"}
         info = MODEL_REGISTRY[model_id]
         if self._on_model_switch:
-            self._on_model_switch(model_id)
+            try:
+                self._on_model_switch(model_id)
+            except Exception as exc:
+                logger.error("Model switch to %s could not start: %s", model_id, exc)
+                return {"ok": False, "error": f"The model switch could not start: {exc}"}
             return {"ok": True, "status": "switching"}
         # No callback — update config directly (fallback for tests / no app)
         self._config.inference.model = model_id

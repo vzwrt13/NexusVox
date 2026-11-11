@@ -311,3 +311,16 @@ def test_real_every_port_held_gives_one_message_and_no_exit(db, monkeypatch):
 
     assert opened == []
     assert len(shown) == 1 and "port" in shown[0]
+
+
+def test_the_meeting_sweep_starts_even_when_every_dashboard_port_is_taken(db, monkeypatch):
+    import threading
+
+    dashboard, _, _ = _fresh_dashboard(db, monkeypatch)
+    swept = threading.Event()
+    monkeypatch.setattr(dashboard.DashboardAPI, "sweep_meeting_leftovers", lambda self: swept.set())
+    monkeypatch.setattr(dashboard, "_bind_server", lambda app: None)
+
+    dashboard.ensure_dashboard_api(db, Config())
+
+    assert swept.wait(2)

@@ -25,9 +25,7 @@ def time_saved_minutes(words: int, duration_ms: int) -> float:
 
 def _dictations(query, start: str | None, end: str | None):
     """The date-filtered query without command rows: a command is no dictation, so no total counts it."""
-    return _apply_date_filter(query, start, end).filter(
-        Transcription.app.is_(None) | (Transcription.app != COMMAND_APP)
-    )
+    return _apply_date_filter(query, start, end, dictations=True)
 
 
 def get_overview(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> dict:

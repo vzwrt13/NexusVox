@@ -128,6 +128,12 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     return app
 
 
+def _log_switch_failure(future) -> None:
+    """Log the exception of a model switch that ran on the app loop; nobody awaits that future."""
+    if not future.cancelled() and (exc := future.exception()) is not None:
+        logger.error("Model switch from the dashboard failed: %s", exc, exc_info=exc)
+
+
 def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None = None) -> DashboardAPI:
     """Start the Flask server (once) without opening the browser, and return its API object."""
     global _server_started, _api, _guard, _port, _start_failed
@@ -143,8 +149,11 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
             if app is not None:
 
                 def on_model_switch(model_id: str) -> None:
-                    if app._loop is not None:
-                        asyncio.run_coroutine_threadsafe(app.switch_model(model_id), app._loop)
+                    loop = app._loop
+                    if loop is None:
+                        raise RuntimeError("The app is not running yet, so the model cannot be switched")
+                    future = asyncio.run_coroutine_threadsafe(app.switch_model(model_id), loop)
+                    future.add_done_callback(_log_switch_failure)
 
                 get_switch_status = app.get_switch_status
                 get_learn_status = app.get_learn_status
@@ -168,6 +177,8 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 benchmarks_dir=benchmarks_dir,
                 extensions=load_extensions(),
             )
+            # Independent of the dashboard port: leftovers are swept even when every port is taken.
+            threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
         if not _server_started and not _start_failed:
             # The Flask app needs the port (host check), the port needs the bind: bind first, hand the
             # requests to the app once it exists.
@@ -190,7 +201,6 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 flask_app = _create_app(_api, port)
                 flask_holder.append(flask_app)
                 _guard = flask_app.extensions["nexusvox_guard"]
-                threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
                 threading.Thread(target=server.serve_forever, daemon=True, name="dashboard-server").start()
                 _server_started = True
                 _port = port

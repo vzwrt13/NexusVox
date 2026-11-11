@@ -9,22 +9,20 @@ from sqlalchemy import func
 from sqlalchemy.orm import sessionmaker
 
 from ..dictation.lang_detect import UNDETERMINED
-from ..storage.models import COMMAND_APP, Transcription
-from .analytics_common import _apply_date_filter, parse_day
+from ..storage.models import Transcription
+from .analytics_common import _apply_date_filter, parse_day, period_bucket
 
 
 def get_transcriptions_over_time(
     session_factory: sessionmaker, period: str = "day", *, start: str | None = None, end: str | None = None
 ) -> dict:
     """Transcription counts grouped by day, week, or month."""
-    fmt = {"day": "%Y-%m-%d", "week": "%Y-W%W", "month": "%Y-%m"}.get(period, "%Y-%m-%d")
-
     with session_factory() as session:
         query = session.query(
-            func.strftime(fmt, Transcription.created_at, "localtime").label("period"),
+            period_bucket(period, Transcription.created_at).label("period"),
             func.count().label("count"),
         )
-        rows = _apply_date_filter(query, start, end).group_by("period").order_by("period").all()
+        rows = _apply_date_filter(query, start, end, dictations=True).group_by("period").order_by("period").all()
 
     return {"labels": [r.period for r in rows], "values": [r.count for r in rows]}
 
@@ -38,8 +36,7 @@ def get_day_totals(session_factory: sessionmaker, start: str | None = None, end:
     local_day = func.strftime("%Y-%m-%d", Transcription.created_at, "localtime")
     with session_factory() as session:
         query = session.query(local_day, Transcription.text, Transcription.duration_ms)
-        query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
-        rows = _apply_date_filter(query, start, end).all()
+        rows = _apply_date_filter(query, start, end, dictations=True).all()
 
     days: dict[str, dict] = {}
     for day, text, duration_ms in rows:
@@ -48,6 +45,10 @@ def get_day_totals(session_factory: sessionmaker, start: str | None = None, end:
         total["words"] += len(text.split())
         total["duration_ms"] += duration_ms
     return days
+
+
+# Longest list `get_words_per_day` builds; an earlier `start` is raised so the newest days stay.
+MAX_WORDS_PER_DAY_SPAN = 3660
 
 
 def day_labels(first: date, last: date) -> list[str]:
@@ -67,6 +68,7 @@ def get_words_per_day(session_factory: sessionmaker, start: str | None = None, e
     last = last or date.today()
     if first is None or first > last:
         return {"labels": [], "values": []}
+    first = max(first, last - timedelta(days=MAX_WORDS_PER_DAY_SPAN - 1))
     labels = day_labels(first, last)
     return {"labels": labels, "values": [days[label]["words"] if label in days else 0 for label in labels]}
 
@@ -81,7 +83,7 @@ def get_language_distribution(
             func.count().label("count"),
         )
         query = query.filter(Transcription.language != UNDETERMINED)  # nothing to tell: not a language
-        rows = _apply_date_filter(query, start, end).group_by(Transcription.language).all()
+        rows = _apply_date_filter(query, start, end, dictations=True).group_by(Transcription.language).all()
 
     return {"labels": [r.language.upper() for r in rows], "values": [r.count for r in rows]}
 
@@ -92,8 +94,7 @@ def get_top_words(
     """Most frequent words across all dictations; the text of a command row is a label, not spoken words."""
     with session_factory() as session:
         query = session.query(Transcription.text)
-        query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
-        texts = _apply_date_filter(query, start, end).all()
+        texts = _apply_date_filter(query, start, end, dictations=True).all()
 
     counter: Counter[str] = Counter()
     for (text,) in texts:
@@ -116,7 +117,7 @@ def get_peak_usage_hours(session_factory: sessionmaker, *, start: str | None = N
             func.strftime("%H", Transcription.created_at, "localtime").label("hour"),
             func.count().label("count"),
         )
-        rows = _apply_date_filter(query, start, end).group_by("hour").order_by("hour").all()
+        rows = _apply_date_filter(query, start, end, dictations=True).group_by("hour").order_by("hour").all()
 
     # Fill in missing hours with 0.
     hour_map = {r.hour: r.count for r in rows}
@@ -134,7 +135,7 @@ def get_activity_heatmap(session_factory: sessionmaker, *, start: str | None = N
             func.strftime("%H", Transcription.created_at, "localtime").label("hour"),
             func.count().label("count"),
         )
-        rows = _apply_date_filter(query, start, end).group_by("dow", "hour").all()
+        rows = _apply_date_filter(query, start, end, dictations=True).group_by("dow", "hour").all()
 
     # Build 7x24 grid (days x hours).
     grid = [[0] * 24 for _ in range(7)]
@@ -152,16 +153,14 @@ def get_latency_over_time(
     session_factory: sessionmaker, period: str = "day", *, start: str | None = None, end: str | None = None
 ) -> dict:
     """Average transcribe and injection latency grouped by time period."""
-    fmt = {"day": "%Y-%m-%d", "week": "%Y-W%W", "month": "%Y-%m"}.get(period, "%Y-%m-%d")
-
     with session_factory() as session:
         query = session.query(
-            func.strftime(fmt, Transcription.created_at, "localtime").label("period"),
+            period_bucket(period, Transcription.created_at).label("period"),
             func.avg(Transcription.transcribe_ms).label("transcribe_ms"),
             func.avg(Transcription.latency_ms).label("latency_ms"),
         ).filter(Transcription.transcribe_ms.isnot(None))
 
-        rows = _apply_date_filter(query, start, end).group_by("period").order_by("period").all()
+        rows = _apply_date_filter(query, start, end, dictations=True).group_by("period").order_by("period").all()
 
     return {
         "labels": [r.period for r in rows],
@@ -181,7 +180,7 @@ def get_model_breakdown(
             Transcription.duration_ms,
             Transcription.transcribe_ms,
         )
-        rows = _apply_date_filter(query, start, end).all()
+        rows = _apply_date_filter(query, start, end, dictations=True).all()
 
     groups: dict[str, list] = {}
     for r in rows:
@@ -272,8 +271,7 @@ def get_app_breakdown(session_factory: sessionmaker, *, start: str | None = None
     """
     with session_factory() as session:
         query = session.query(Transcription.app, Transcription.text)
-        query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
-        rows = _apply_date_filter(query, start, end).all()
+        rows = _apply_date_filter(query, start, end, dictations=True).all()
 
     groups: dict[str, dict] = {}
     for r in rows:

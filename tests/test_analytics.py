@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -1244,3 +1244,60 @@ def test_language_distribution_skips_undetermined(session_factory):
     )
 
     assert get_language_distribution(session_factory)["labels"] == ["EN"]
+
+
+# -- command rows stay out of every chart, weekly buckets, bounded ranges -------------------------
+
+
+def _mixed_rows():
+    def row(text, **fields):
+        return {"text": text, "language": "en", "duration_ms": 6000, "created_at": datetime(2026, 3, 15, 12), **fields}
+
+    return [row("one two three"), row("[nexus] open github", app=COMMAND_APP, transcribe_ms=5, model="m-cmd")]
+
+
+def test_every_chart_counts_dictations_like_the_overview_and_skips_command_rows(session_factory):
+    from nexusvox.dashboard.analytics import (
+        get_activity_heatmap,
+        get_language_distribution,
+        get_latency_over_time,
+        get_model_breakdown,
+        get_peak_usage_hours,
+        get_transcriptions_over_time,
+    )
+
+    _seed(session_factory, _mixed_rows())
+
+    assert get_transcriptions_over_time(session_factory)["values"] == [1]
+    assert sum(get_peak_usage_hours(session_factory)["values"]) == 1
+    assert sum(sum(r) for r in get_activity_heatmap(session_factory)["grid"]) == 1
+    assert get_language_distribution(session_factory)["values"] == [1]
+    assert get_latency_over_time(session_factory)["labels"] == []  # the only timed row is a command
+    breakdown = get_model_breakdown(session_factory)
+    assert [m["count"] for m in breakdown] == [1] and "m-cmd" not in [m["model"] for m in breakdown]
+
+
+def test_a_week_that_crosses_new_year_is_one_bucket(session_factory):
+    from nexusvox.dashboard.analytics import get_transcriptions_over_time
+
+    def row(day):
+        return {"text": "a b", "language": "en", "duration_ms": 1, "created_at": day}
+
+    # Wed 2025-12-31 and Thu 2026-01-01 are in the week of Monday 2025-12-29; Mon 2026-01-05 starts the next.
+    _seed(
+        session_factory, [row(datetime(2025, 12, 31, 12)), row(datetime(2026, 1, 1, 12)), row(datetime(2026, 1, 5, 12))]
+    )
+
+    result = get_transcriptions_over_time(session_factory, "week")
+
+    assert result == {"labels": ["2025-12-29", "2026-01-05"], "values": [2, 1]}
+
+
+def test_words_per_day_caps_a_user_supplied_start(session_factory):
+    from nexusvox.dashboard.analytics import get_words_per_day
+    from nexusvox.dashboard.analytics_usage import MAX_WORDS_PER_DAY_SPAN
+
+    result = get_words_per_day(session_factory, start="0001-01-01")
+
+    assert len(result["labels"]) == MAX_WORDS_PER_DAY_SPAN
+    assert result["labels"][-1] == date.today().isoformat()

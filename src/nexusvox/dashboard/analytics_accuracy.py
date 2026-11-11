@@ -12,14 +12,13 @@ from ..dictation.dictionary import suggest_entries
 from ..dictation.edit_watch import OUTCOMES, WATCHED_KEYS
 from ..storage.models import (
     ACCEPTED_EVENT,
-    COMMAND_APP,
     DictionaryEntryRow,
     DictionaryUsageRow,
     LearnEventRow,
     Transcription,
 )
 from ..storage.vocabulary import usage_key
-from .analytics_common import _apply_date_filter
+from .analytics_common import _apply_date_filter, period_bucket
 
 
 def _word_edits(original: str, corrected: str) -> int:
@@ -37,14 +36,12 @@ def get_accuracy_over_time(
     A correction is a word the user changed in a reviewed transcript (`corrected_text`) or a suggestion
     accepted in the dashboard. Periods without a dictation are left out.
     """
-    fmt = {"day": "%Y-%m-%d", "week": "%Y-W%W", "month": "%Y-%m"}.get(period, "%Y-%m-%d")
-    period_col = func.strftime(fmt, Transcription.created_at, "localtime")
+    period_col = period_bucket(period, Transcription.created_at)
 
     with session_factory() as session:
         query = session.query(period_col, Transcription.text, Transcription.corrected_text)
-        query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
-        rows = _apply_date_filter(query, start, end).all()
-        event_period = func.strftime(fmt, LearnEventRow.created_at, "localtime")
+        rows = _apply_date_filter(query, start, end, dictations=True).all()
+        event_period = period_bucket(period, LearnEventRow.created_at)
         event_query = session.query(event_period, func.count()).filter(LearnEventRow.outcome == ACCEPTED_EVENT)
         accepted = dict(_apply_date_filter(event_query, start, end, LearnEventRow).group_by(event_period).all())
 

@@ -470,6 +470,15 @@ class HotkeyListener:
                 timer.cancel()
             self._active = False
 
+    def settle(self) -> None:
+        """Return once a start or stop the hook is handling right now has run its callback.
+
+        `active` changes before `on_activate` / `on_deactivate` runs, both under the lock, so a reader on
+        another thread that also needs the callback's effects waits for the lock first.
+        """
+        with self._lock:
+            pass
+
     def modifiers_physically_down(self) -> bool:
         """True while every key of the binding is physically held, asked straight from Win32.
 

@@ -257,7 +257,7 @@ def _app(*, hotkey_active: bool = False) -> "NexusVoxApp":
     app._remote_audio = RemoteAudioSource()
     app._remote_recording = False
     app._remote_cancelled = False
-    app._cycle_running = False
+    app._transcriber_lock = asyncio.Lock()
     app._record_start_event = asyncio.Event()
     app._record_stop_event = asyncio.Event()
     return app
@@ -274,10 +274,11 @@ def test_remote_start_queues_a_cycle():
 
 
 @needs_app
-@pytest.mark.parametrize("busy", ["cycle", "hotkey", "queued"])
+@pytest.mark.parametrize("busy", ["cycle or model switch", "hotkey", "queued"])
 def test_remote_start_is_refused_while_busy(busy):
     app = _app(hotkey_active=busy == "hotkey")
-    app._cycle_running = busy == "cycle"
+    if busy == "cycle or model switch":  # both hold the transcriber lock
+        asyncio.run(app._transcriber_lock.acquire())
     if busy == "queued":
         app._record_start_event.set()
     assert app._on_remote_start() is False

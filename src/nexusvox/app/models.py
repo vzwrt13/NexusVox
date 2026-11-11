@@ -35,9 +35,6 @@ def apply_startup_fallback(inference: InferenceConfig, device: str) -> None:
 class ModelSwitching:
     """The model part of `NexusVoxApp`."""
 
-    _switch_reset: asyncio.Future | None = None  # puts the status back to idle after a finished switch
-    _switch_note: str | None = None  # one short sentence about a finished switch, e.g. the CPU fallback
-
     def get_switch_status(self) -> dict:
         """Return the current model-switch status for the dashboard.
 
@@ -59,25 +56,54 @@ class ModelSwitching:
             status["note"] = self._switch_note
         return status
 
+    def _switch_in_progress(self) -> bool:
+        """Whether a model switch is tearing down or building the transcriber right now."""
+        return self._switch_status not in ("idle", "ready", "error")
+
+    def _build_transcriber(self):
+        """The transcriber for `[inference]` as it stands, on the resolved device."""
+        inference = self._config.inference
+        return create_transcriber(inference, device=self._device, auto_fallback=inference.device == "auto")
+
+    def _cancel_switch_reset(self) -> None:
+        """Stop the timer of the last switch: its 5 s are for that switch, not for the next one."""
+        if self._switch_reset is not None:
+            self._switch_reset.cancel()
+            self._switch_reset = None
+
+    def _end_switch(self, status: str, error: str | None = None) -> None:
+        """Settle the switch status ("ready" or "error"); the dashboard reads it for 5 s, then it goes back to idle."""
+        self._switch_status = status
+        self._switch_error = error
+        self._cancel_switch_reset()
+
+        async def _reset_status():
+            await asyncio.sleep(5)
+            self._switch_status = "idle"
+            self._switch_error = None
+
+        self._switch_reset = asyncio.ensure_future(_reset_status())
+
     async def switch_model(self, model_id: str) -> None:
         """Switch to a different transcription model.
 
         In-process (Parakeet or Whisper on CPU) and custom-server switches skip Docker entirely;
         GPU-backed switches stop the old container, start the new one, and wait for health.
+        The switch holds `_transcriber_lock` throughout, as a dictation cycle does for its take: a switch is
+        refused during a dictation, and a press during a switch records nothing (`_take_during_switch`).
         """
         if model_id not in MODEL_REGISTRY:
             raise ValueError(f"Unknown model: {model_id}")
-        if self._switch_status not in ("idle", "ready", "error"):
+        if self._switch_in_progress():
             raise RuntimeError("Model switch already in progress")
 
         old_model = self._config.inference.model
         if old_model == model_id:
             return
         self._switch_note = None  # a note belongs to the switch that set it
-        if self._cycle_running:
-            # The cycle holds the live transcriber. The dashboard reads the refusal from the switch status.
-            self._switch_status = "error"
-            self._switch_error = "Cannot switch the model during a dictation"
+        if self._transcriber_lock.locked():
+            # A dictation holds the live transcriber. The dashboard reads the refusal from the switch status.
+            self._end_switch("error", "Cannot switch the model during a dictation")
             raise RuntimeError(self._switch_error)
         old_url = self._config.inference.server_url
 
@@ -99,79 +125,78 @@ class ModelSwitching:
             new_needs_docker = False
             old_was_docker = False  # nothing of ours can be running without Docker
 
-        if self._switch_reset is not None:
-            self._switch_reset.cancel()  # its 5 s are for the last switch, not for this one
-            self._switch_reset = None
-
-        try:
-            self._switch_status = "stopping"
-            await self._transcriber.disconnect()
-
-            if old_was_docker:
-                await loop.run_in_executor(None, docker_ctl.stop_profile, old_info["docker_profile"])
-
-            if new_needs_docker:
-                self._switch_status = "starting"
-                await loop.run_in_executor(None, docker_ctl.start_profile, new_info["docker_profile"])
-                self._switch_status = "waiting"
-                healthy = await loop.run_in_executor(None, docker_ctl.wait_for_healthy, new_info["health_url"])
-                if not healthy:
-                    if not cpu_fallback_ok:
-                        raise RuntimeError(f"Container for {model_id} did not become healthy")
-                    cpu_reason = "The Docker container did not become healthy"
-                    new_needs_docker = False
-                    try:  # do not leave a half-started container behind
-                        await loop.run_in_executor(None, docker_ctl.stop_profile, new_info["docker_profile"])
-                    except Exception:
-                        logger.info("Could not stop the unhealthy %s container", model_id)
-
-            self._config.inference.model = model_id
-            if new_needs_docker:
-                self._config.inference.server_url = str(new_info["default_url"])
-            if cpu_reason:
-                self._switch_note = f"{cpu_reason}, using the CPU"
-                logger.info("Model %s runs on the CPU: %s", model_id, cpu_reason)
-                self._transcriber = self._create_cpu_fallback_transcriber()
-            else:
-                self._transcriber = create_transcriber(
-                    self._config.inference,
-                    device=self._device,
-                    auto_fallback=self._config.inference.device == "auto",
-                )
-            save_config(self._config)
-
-            self._switch_status = "ready"
-            logger.info("Switched to model: %s", model_id)
-            if self._warms_up():
-                asyncio.create_task(self._preload_transcriber())
-
-            async def _reset_status():
-                await asyncio.sleep(5)
-                self._switch_status = "idle"
-                self._switch_error = None
-
-            self._switch_reset = asyncio.ensure_future(_reset_status())
-
-        except Exception as exc:
-            self._switch_status = "error"
-            self._switch_error = str(exc)
-            self._switch_note = None
-            logger.exception("Model switch failed")
-            # Keep the config on the model that is actually serving.
-            self._config.inference.model = old_model
-            self._config.inference.server_url = old_url
-            # Fallback: restart the old container if it was Docker-backed.
+        self._cancel_switch_reset()
+        replaced = False  # whether `self._transcriber` already serves the new model
+        # Free (checked above, and nothing was awaited since), so this takes it at once.
+        async with self._transcriber_lock:
             try:
+                self._switch_status = "stopping"
+                await self._transcriber.disconnect()
+
                 if old_was_docker:
-                    await loop.run_in_executor(None, docker_ctl.start_profile, old_info["docker_profile"])
-                    await loop.run_in_executor(None, docker_ctl.wait_for_healthy, old_info["health_url"])
-                self._transcriber = create_transcriber(
-                    self._config.inference,
-                    device=self._device,
-                    auto_fallback=self._config.inference.device == "auto",
-                )
-            except Exception:
-                logger.exception("Fallback restart also failed")
+                    await loop.run_in_executor(None, docker_ctl.stop_profile, old_info["docker_profile"])
+
+                if new_needs_docker:
+                    self._switch_status = "starting"
+                    await loop.run_in_executor(None, docker_ctl.start_profile, new_info["docker_profile"])
+                    self._switch_status = "waiting"
+                    healthy = await loop.run_in_executor(None, docker_ctl.wait_for_healthy, new_info["health_url"])
+                    if not healthy:
+                        if not cpu_fallback_ok:
+                            raise RuntimeError(f"Container for {model_id} did not become healthy")
+                        cpu_reason = "The Docker container did not become healthy"
+                        new_needs_docker = False
+                        try:  # do not leave a half-started container behind
+                            await loop.run_in_executor(None, docker_ctl.stop_profile, new_info["docker_profile"])
+                        except Exception:
+                            logger.info("Could not stop the unhealthy %s container", model_id)
+
+                self._config.inference.model = model_id
+                if new_needs_docker:
+                    self._config.inference.server_url = str(new_info["default_url"])
+                if cpu_reason:
+                    self._switch_note = f"{cpu_reason}, using the CPU"
+                    logger.info("Model %s runs on the CPU: %s", model_id, cpu_reason)
+                    self._transcriber = self._create_cpu_fallback_transcriber()
+                else:
+                    self._transcriber = self._build_transcriber()
+                replaced = True
+                # The last step that can fail: once the file names the new model the switch stands, so memory
+                # and file never disagree on the model.
+                save_config(self._config)
+                self._end_switch("ready")
+
+            except Exception as exc:
+                self._switch_note = None
+                logger.exception("Model switch failed")
+                # Keep the config on the model that is actually serving.
+                self._config.inference.model = old_model
+                self._config.inference.server_url = old_url
+                # Fallback: restart the old container if it was Docker-backed. The old transcriber was only
+                # disconnected and serves again; it is rebuilt only when the new one had already replaced it.
+                # The lock stays held meanwhile, so no dictation starts against a transcriber about to change.
+                try:
+                    if old_was_docker:
+                        await loop.run_in_executor(None, docker_ctl.start_profile, old_info["docker_profile"])
+                        await loop.run_in_executor(None, docker_ctl.wait_for_healthy, old_info["health_url"])
+                    if replaced:
+                        self._transcriber = self._build_transcriber()
+                        if self._warms_up():  # else the next dictation pays the cold load
+                            self._spawn(self._preload_transcriber())
+                except Exception:
+                    logger.exception("Fallback restart also failed")
+                self._end_switch("error", str(exc))
+                return
+
+            finally:
+                if self._switch_in_progress():
+                    # Cancelled, or a BaseException out of Docker: neither branch above settled the status, and
+                    # one left at "waiting" would refuse every later switch.
+                    self._end_switch("error", "The model switch was interrupted")
+
+        logger.info("Switched to model: %s", model_id)
+        if self._warms_up():
+            self._spawn(self._preload_transcriber())
 
     def _create_cpu_fallback_transcriber(self):
         """The transcriber for a switch that Docker could not serve.

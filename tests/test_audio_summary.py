@@ -118,13 +118,14 @@ async def test_the_length_adds_up_the_frames_the_callbacks_delivered(monkeypatch
 
 async def test_a_device_that_fails_to_stop_still_leaves_the_summary(monkeypatch, caplog):
     capture = _recording(monkeypatch)
-    capture._stream.stop.side_effect = OSError("device unplugged")
+    stream = capture._stream
+    stream.stop.side_effect = OSError("device unplugged")
     with caplog.at_level(logging.INFO, logger="nexusvox.audio"):
         _feed(capture, 0.0, 10)
-        with pytest.raises(OSError):
-            capture.stop()
+        capture.stop()  # logged, not raised: the take is kept
+    stream.close.assert_called_once()  # closed although stopping failed: nothing left feeding the next take
     assert any("10 chunks" in m for m in _messages(caplog, logging.INFO))
-    assert _messages(caplog, logging.WARNING)
+    assert any("was silent" in m for m in _messages(caplog, logging.WARNING))
     assert capture._stream is None
 
 
@@ -139,3 +140,18 @@ async def test_a_new_recording_closes_a_stream_an_earlier_stop_left_open(monkeyp
     old_stream.close.assert_called_once()
     assert first._levels.chunks == 0
     first.stop()
+
+
+async def test_a_microphone_that_fails_to_close_still_ends_the_take_with_its_audio(monkeypatch, caplog):
+    from nexusvox.audio import state as audio_state
+
+    capture = _recording(monkeypatch)
+    _feed(capture, 0.05, 3)
+    capture._stream.stop.side_effect = OSError("device unplugged")  # the mic was pulled out at key-up
+    open_before = audio_state.streams_open()
+    with caplog.at_level(logging.INFO, logger="nexusvox.audio"):
+        capture.stop()  # never raises: the take is kept
+    chunks = [chunk async for chunk in capture.chunks()]  # ends: the end marker was queued
+    assert len(chunks) == 3
+    assert audio_state.streams_open() == open_before - 1
+    assert any("Closing the microphone failed" in m for m in _messages(caplog, logging.WARNING))

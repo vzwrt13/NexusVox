@@ -222,3 +222,135 @@ def test_async_hold_then_release_keeps_order_on_quick_tap():
 
     assert s.set_calls == [True, False]
     assert not g.active
+
+
+def test_release_restores_a_session_the_app_recreated_during_the_hold():
+    # Discord rejoining a call creates a new session (new instance id); Windows carries the mute over to it
+    # under the stable session identifier, so the release must find it by that identifier.
+    discord = FakeSession(1, app="discord")
+    current = [discord]
+    g = _guard(current)
+
+    g.hold()
+    rejoined = FakeSession(1, muted=True, app="discord")
+    rejoined.instance_id = "discord|sid|rejoined"
+    current[0] = rejoined
+
+    assert g.release() == 1
+    assert rejoined.muted is False
+    assert not g.active
+
+
+def test_restoring_by_session_id_leaves_a_sibling_the_user_muted_alone():
+    discord = FakeSession(1, app="discord")
+    user_muted = FakeSession(5, muted=True, app="discord")  # same app, same stable id, muted on purpose
+    g = _guard([discord, user_muted])
+
+    g.hold()
+    assert g.release() == 1
+    assert discord.muted is False
+    assert user_muted.muted is True
+    assert user_muted.set_calls == []
+
+
+def test_hold_mutes_nothing_when_the_state_file_cannot_be_written(tmp_path, caplog):
+    s = FakeSession(1, app="discord")
+    g = _guard([s], state_path=tmp_path / "missing-dir" / STATE_FILENAME)
+
+    assert g.hold() == []
+    assert s.set_calls == []
+    assert s.muted is False
+    assert not g.active
+
+
+def test_a_session_the_user_starts_and_mutes_during_the_hold_stays_muted():
+    discord = FakeSession(1, app="discord")
+    current = [discord]
+    g = _guard(current)
+
+    g.hold()
+    second = FakeSession(5, muted=True, app="discord")  # started during the hold, muted on purpose
+    current.append(second)
+
+    assert g.release() == 1
+    assert discord.muted is False
+    assert second.muted is True  # the muted session is still there: nothing to stand in for
+    assert second.set_calls == []
+
+
+def test_one_stand_in_per_vanished_session_and_the_rest_is_reported_missing(caplog):
+    a1 = FakeSession(1, app="discord")
+    a2 = FakeSession(2, app="discord")
+    current = [a1, a2]
+    g = _guard(current)
+
+    g.hold()
+    current.remove(a1)
+    current.remove(a2)
+    stand_in = FakeSession(3, muted=True, app="discord")
+    current.append(stand_in)
+
+    with caplog.at_level("WARNING", logger="nexusvox.mic_guard"):
+        assert g.release() == 1
+    assert stand_in.muted is False
+    assert any("1 muted session(s) vanished" in r.getMessage() for r in caplog.records)
+
+
+def test_nexusvox_own_session_is_never_a_stand_in():
+    other = FakeSession(1, app="python")  # another app on the same interpreter shares the stable id
+    current = [other]
+    g = _guard(current, own_pids={999})
+
+    g.hold()
+    current.clear()
+    own = FakeSession(999, muted=True, app="python")  # NexusVox's own session, muted by the user
+    current.append(own)
+
+    assert g.release() == 0
+    assert own.muted is True
+    assert own.set_calls == []
+
+
+def _killed_during_hold(path, sessions):
+    """A hold whose process dies: the state file stays, nothing is released."""
+    _guard(sessions, state_path=path).hold()
+
+
+def test_restore_after_a_crash_leaves_a_sibling_the_user_muted_alone(tmp_path):
+    path = tmp_path / STATE_FILENAME
+    muted_by_guard = FakeSession(1, app="discord")
+    user_muted = FakeSession(5, muted=True, app="discord")  # same stable id, muted by the user before the hold
+    _killed_during_hold(path, [muted_by_guard, user_muted])
+
+    assert _guard([muted_by_guard, user_muted], state_path=path).restore_leftovers() == 1
+    assert muted_by_guard.muted is False
+    assert user_muted.muted is True
+    assert user_muted.set_calls == []
+
+
+def test_restore_after_a_crash_unmutes_a_restarted_session_but_not_the_user_muted_sibling(tmp_path):
+    path = tmp_path / STATE_FILENAME
+    muted_by_guard = FakeSession(1, app="discord")
+    user_muted = FakeSession(5, muted=True, app="discord")
+    _killed_during_hold(path, [muted_by_guard, user_muted])
+
+    restarted = FakeSession(42, muted=True, app="discord")  # the muted one restarted and inherited the mute
+    assert _guard([restarted, user_muted], state_path=path).restore_leftovers() == 1
+    assert restarted.muted is False
+    assert user_muted.muted is True
+
+
+def test_restored_count_is_not_inflated_by_extra_same_app_sessions():
+    a1 = FakeSession(1, app="discord")
+    a2 = FakeSession(2, app="discord")
+    current = [a1, a2]
+    g = _guard(current)
+
+    g.hold()
+    current.remove(a2)
+    new_one, new_two = FakeSession(3, muted=True, app="discord"), FakeSession(4, muted=True, app="discord")
+    current += [new_one, new_two]
+
+    assert g.release() == 2  # a1 and one stand-in for a2
+    assert a1.muted is False
+    assert [new_one.muted, new_two.muted].count(False) == 1

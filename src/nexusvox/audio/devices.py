@@ -56,11 +56,13 @@ def wasapi_index(sd) -> int | None:
     return None
 
 
-def _named_input(sd, name: str) -> dict | None:
-    wasapi = wasapi_index(sd)
+def named_input(sd, name: str, hostapi: int | None = None) -> dict | None:
+    """The input device called `name` in the current list: on `hostapi` when given, else on WASAPI when there is
+    one (its names are the full ones). None when it is not listed."""
+    wanted = hostapi if hostapi is not None else wasapi_index(sd)
     for dev in sd.query_devices():
         if dev["name"] == name and dev["max_input_channels"] > 0:
-            if wasapi is None or dev["hostapi"] == wasapi:
+            if wanted is None or dev["hostapi"] == wanted:
                 return dev
     return None
 
@@ -73,10 +75,10 @@ def find_input_device(sd, name: str, what: str = "Microphone") -> dict:
     """
     if name:
         with input_open_lock:
-            dev = _named_input(sd, name)
+            dev = named_input(sd, name)
             if dev is None:
                 refresh_devices(sd, force=True)
-                dev = _named_input(sd, name)
+                dev = named_input(sd, name)
             if dev is not None:
                 return dev
         logger.warning("%s %r not found; using the default input", what, name)

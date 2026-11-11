@@ -183,27 +183,29 @@ class AudioCapture:
         raise error if error is not None else OSError("No microphone could be opened")
 
     def stop(self) -> None:
-        """Stop capturing audio."""
-        if self._stream is not None:
-            try:
-                self._close_stream()
-            finally:
+        """Stop capturing audio and queue the end marker.
+
+        A device that fails to close (a microphone unplugged at key-up) is logged, not raised: the audio captured
+        so far is in the queue, and the end marker after it lets the take be transcribed.
+        """
+        try:
+            if self._stream is not None:
+                try:
+                    self._close_stream()
+                except Exception:
+                    logger.warning("Closing the microphone failed; keeping the recording", exc_info=True)
                 # Also when the device failed: that is the recording the summary is there to explain.
                 self._log_summary()
-        # Signal end of stream
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, None)
+        finally:
+            # Signal end of stream
+            if self._loop is not None:
+                self._loop.call_soon_threadsafe(self._queue.put_nowait, None)
 
     def _close_stream(self) -> None:
-        """Stop and close the running stream, if any; it counts as closed even when PortAudio raises."""
+        """Stop and close the running stream, if any; it is closed and uncounted even when stopping raises."""
         stream, self._stream = self._stream, None
-        if stream is None:
-            return
-        try:
-            stream.stop()
-            stream.close()
-        finally:
-            audio_state.stream_closed()
+        if stream is not None:
+            audio_state.close_stream(stream)
 
     def _log_summary(self) -> None:
         """One INFO line for the recording that just ended, and a WARNING when it was silent throughout."""

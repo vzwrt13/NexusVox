@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..audio import state as audio_state
-from ..audio.devices import find_input_device, input_open_lock, list_input_names
+from ..audio.devices import find_input_device, input_open_lock, list_input_names, named_input, refresh_devices
 
 logger = logging.getLogger("nexusvox.meeting_recorder")
 
@@ -82,16 +82,21 @@ def list_devices() -> dict[str, list[str]]:
 
         pa = pyaudio.PyAudio()
         try:
-            wasapi_info = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
-            for i in range(wasapi_info["deviceCount"]):
-                dev = pa.get_device_info_by_host_api_device_index(wasapi_info["index"], i)
-                if dev["maxOutputChannels"] > 0 and not dev.get("isLoopbackDevice") and dev["name"] not in outputs:
+            for dev in _wasapi_outputs(pa, pyaudio):
+                if dev["name"] not in outputs:
                     outputs.append(dev["name"])
         finally:
             pa.terminate()
     except Exception:
         logger.exception("Listing the output devices failed")
     return {"inputs": inputs, "outputs": outputs}
+
+
+def _wasapi_outputs(pa, pyaudio) -> list[dict]:
+    """The WASAPI output devices a meeting can record from: the ones with output channels, loopbacks left out."""
+    wasapi = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
+    devices = (pa.get_device_info_by_host_api_device_index(wasapi["index"], i) for i in range(wasapi["deviceCount"]))
+    return [dev for dev in devices if dev["maxOutputChannels"] > 0 and not dev.get("isLoopbackDevice")]
 
 
 class MicSource:
@@ -106,6 +111,7 @@ class MicSource:
         self._stream = None
         self._device: int | None = None
         self._device_name = ""
+        self._hostapi: int | None = None
         self._fmt: AudioFormat | None = None
 
     def _find(self, sd) -> dict:
@@ -117,8 +123,23 @@ class MicSource:
         dev = self._find(sd)
         self._device = int(dev["index"])
         self._device_name = str(dev["name"])
+        self._hostapi = dev.get("hostapi")
         self._fmt = AudioFormat(int(dev["default_samplerate"]), 1)
         return self._fmt
+
+    def _still_listed(self, sd) -> bool:
+        """Whether the index `describe()` saw still holds that device (same name and host API)."""
+        try:
+            dev = sd.query_devices(self._device)
+        except Exception:  # the index is past the end of a list that shrank
+            return False
+        return dev["name"] == self._device_name and dev.get("hostapi") == self._hostapi
+
+    def _refind(self, sd) -> int | None:
+        """The current index of the device `describe()` saw, on the same host API: an MME device opened through
+        WASAPI would run at another rate than the WAV header says."""
+        dev = named_input(sd, self._device_name, self._hostapi)
+        return int(dev["index"]) if dev is not None else None
 
     def start(self, sink: Callable[[bytes], None]) -> None:
         import sounddevice as sd
@@ -133,11 +154,14 @@ class MicSource:
         with input_open_lock:
             # A device list refreshed since describe() (a headset plugged in, the Settings tab) may have renumbered
             # the devices: open the one describe() saw, never whatever holds its old index now.
-            if self._device_name and sd.query_devices(self._device)["name"] != self._device_name:
-                dev = find_input_device(sd, self._device_name, "Meeting microphone")
-                if dev["name"] != self._device_name:
+            if self._device_name and not self._still_listed(sd):
+                index = self._refind(sd)
+                if index is None:
+                    refresh_devices(sd, force=True)  # plugged in again since the last list
+                    index = self._refind(sd)
+                if index is None:
                     raise OSError(f"The meeting microphone {self._device_name!r} is no longer available")
-                self._device = int(dev["index"])
+                self._device = index
             stream = sd.RawInputStream(
                 device=self._device, samplerate=fmt.sample_rate, channels=fmt.channels, dtype="int16", callback=callback
             )
@@ -153,11 +177,10 @@ class MicSource:
         return float(self._stream.latency) if self._stream is not None else 0.0
 
     def stop(self) -> None:
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
-            audio_state.stream_closed()
+        """Stop and close the stream; it counts as closed even when PortAudio raises (a headset unplugged)."""
+        stream, self._stream = self._stream, None
+        if stream is not None:
+            audio_state.close_stream(stream)
 
 
 class LoopbackSource:
@@ -179,9 +202,8 @@ class LoopbackSource:
         wasapi = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
         speakers = pa.get_device_info_by_index(wasapi["defaultOutputDevice"])
         if self._output:
-            for i in range(wasapi["deviceCount"]):
-                dev = pa.get_device_info_by_host_api_device_index(wasapi["index"], i)
-                if dev["name"] == self._output and dev["maxOutputChannels"] > 0 and not dev.get("isLoopbackDevice"):
+            for dev in _wasapi_outputs(pa, pyaudio):
+                if dev["name"] == self._output:
                     speakers = dev
                     break
             else:
@@ -240,14 +262,19 @@ class LoopbackSource:
         return float(self._stream.get_input_latency()) if self._stream is not None else 0.0
 
     def stop(self) -> None:
-        if self._stream is not None:
-            self._stream.stop_stream()
-            self._stream.close()
-            self._stream = None
-        if self._pa is not None:
-            self._pa.terminate()
-            self._pa = None
+        """Close the stream and PyAudio; PyAudio is terminated even when closing the stream raises."""
+        stream, self._stream = self._stream, None
+        pa, self._pa = self._pa, None
         self._dev = None
+        try:
+            if stream is not None:
+                try:
+                    stream.stop_stream()
+                finally:
+                    stream.close()
+        finally:
+            if pa is not None:
+                pa.terminate()
 
 
 class TrackWriter:
@@ -323,40 +350,44 @@ class _Track:
         self.source = source
         self.writer = writer
         self._clock = clock
-        self._queue: queue.Queue[tuple[float, bytes] | None] = queue.Queue(QUEUE_CHUNKS)
+        # (arrival, data, frames lost to a full queue just before this block)
+        self._queue: queue.Queue[tuple[float, bytes, int] | None] = queue.Queue(QUEUE_CHUNKS)
         self._thread = threading.Thread(target=self._run, name=f"meeting-{name}", daemon=True)
         self._lock = threading.Lock()
-        self._lost_frames = 0
+        self._lost_frames = 0  # dropped since the last block that made it into the queue
         self.dropped = 0
         self.error: str | None = None
         self.latency_s: float | None = None
 
     def sink(self, data: bytes) -> None:
-        """Runs on the audio thread: never blocks, a full queue drops the block."""
+        """Runs on the audio thread: never blocks, a full queue drops the block.
+
+        The frames of dropped blocks ride along with the next block that is queued, because that is where they were
+        lost in the timeline: the writer pads exactly that many frames right before it, also a loss shorter than the
+        jitter tolerance. Blocks still queued arrived before the loss and are written first; a loss at the very end
+        is covered by `finish()`, which pads to the stop time.
+        """
         if self._tap is not None:
             try:
                 self._tap(data)
             except Exception:  # the live preview must never cost a recorded block
                 logger.exception("Meeting %s audio tap failed", self.name)
-        try:
-            self._queue.put_nowait((self._clock(), data))
-        except queue.Full:
-            with self._lock:
+        with self._lock:
+            try:
+                self._queue.put_nowait((self._clock(), data, self._lost_frames))
+            except queue.Full:
                 self.dropped += 1
                 self._lost_frames += len(data) // self.writer.frame_bytes
-
-    def _take_lost(self) -> int:
-        with self._lock:
-            lost, self._lost_frames = self._lost_frames, 0
-        return lost
+            else:
+                self._lost_frames = 0
 
     def _run(self) -> None:
         while (item := self._queue.get()) is not None:
             if self.error is None:
                 try:
-                    # Blocks lost to a full queue were part of the timeline: put their silence back first.
-                    self.writer.pad(self._take_lost())
-                    self.writer.write(item[1], item[0])
+                    arrival, data, lost = item
+                    self.writer.pad(lost)
+                    self.writer.write(data, arrival)
                 except Exception as exc:  # disk full, file removed: keep draining, report at the end
                     self.error = str(exc)
                     logger.error("Meeting %s track failed: %s", self.name, exc)
@@ -385,8 +416,6 @@ class _Track:
             self._queue.put(None)
             self._thread.join()
         try:
-            if self.error is None:
-                self.writer.pad(self._take_lost())
             self.writer.finish(end)
         except Exception as exc:
             self.error = self.error or str(exc)

@@ -497,6 +497,67 @@ def test_a_meeting_microphone_that_was_renumbered_is_opened_by_name(monkeypatch)
         gone.start(lambda chunk: None)
 
 
+def _meeting_sd(layout: dict, opened: list[int]):
+    """A sounddevice whose device list the test swaps; a lookup past the end of the list raises like PortAudio."""
+
+    class Sd:
+        query_hostapis = staticmethod(lambda: [{"name": "MME"}, {"name": "Windows WASAPI"}])
+        _terminate = staticmethod(lambda: None)
+        _initialize = staticmethod(lambda: None)
+
+        @staticmethod
+        def query_devices(device=None, kind=None):
+            if kind == "input":
+                return layout["default"]
+            if device is not None:
+                if device >= len(layout["devices"]):
+                    raise ValueError(f"Error querying device {device}")
+                return layout["devices"][device]
+            return layout["devices"]
+
+        @staticmethod
+        def RawInputStream(**kw):
+            opened.append(kw["device"])
+            return MagicMock()
+
+    return Sd
+
+
+def test_a_meeting_microphone_whose_index_vanished_is_found_again_by_name(monkeypatch):
+    from nexusvox.meetings.recorder import MicSource
+
+    opened: list[int] = []
+    headset = _device("Headset", 1, 1, 2, 48000)
+    layout = {"devices": [_device("A", 1, 1, 0, 48000), _device("B", 1, 1, 1, 48000), headset], "default": headset}
+    monkeypatch.setitem(sys.modules, "sounddevice", _meeting_sd(layout, opened))
+    source = MicSource("Headset")
+    source.describe()  # index 2
+    layout["devices"] = [_device("Headset", 1, 1, 0, 48000)]  # the list shrank: index 2 no longer exists
+    source.start(lambda chunk: None)
+    source.stop()
+    assert opened == [0]
+
+
+def test_a_renumbered_mme_default_microphone_stays_on_mme(monkeypatch):
+    from nexusvox.meetings.recorder import MicSource
+
+    opened: list[int] = []
+    mme_default = _device("Mic", 1, 0, 0, 44100)
+    layout = {"devices": [mme_default, _device("Mic", 1, 1, 1, 48000)], "default": mme_default}
+    monkeypatch.setitem(sys.modules, "sounddevice", _meeting_sd(layout, opened))
+    source = MicSource()  # the default input, which is an MME device
+    assert source.describe().sample_rate == 44100
+    # Renumbered: the WASAPI "Mic" (another rate) is listed first now, the MME one moved to index 2.
+    layout["devices"] = [
+        _device("Mic", 1, 1, 0, 48000),
+        _device("Other", 1, 0, 1, 48000),
+        _device("Mic", 1, 0, 2, 44100),
+    ]
+    source.start(lambda chunk: None)
+    source.stop()
+    assert opened == [2]  # the MME device at the rate the WAV header says, not the WASAPI one
+
+
 def test_a_failed_dashboard_open_on_first_start_is_logged(monkeypatch, caplog):
     try:
         from nexusvox.app.core import NexusVoxApp

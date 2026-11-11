@@ -310,3 +310,41 @@ async def test_engines_without_speaker_detection_refuse_to_diarize():
     assert OpenAIHttpTranscriber.supports_diarization is True
     with pytest.raises(NotImplementedError):
         await VoxtralRealtimeTranscriber(InferenceConfig()).diarize(b"", timeout=1.0)
+
+
+class _FakeWs:
+    def __init__(self, messages):
+        self._messages = list(messages)
+        self.closed = False
+        self.state = None
+
+    async def recv(self):
+        return self._messages.pop(0)
+
+    async def send(self, _data):
+        pass
+
+    async def close(self):
+        self.closed = True
+
+
+async def test_voxtral_connect_closes_the_socket_when_session_created_is_missing(monkeypatch):
+    ws = _FakeWs(['{"type": "oops"}'])
+
+    async def fake_connect(_url):
+        return ws
+
+    monkeypatch.setattr("nexusvox.transcription.transcriber.websockets.connect", fake_connect)
+    transcriber = VoxtralRealtimeTranscriber(InferenceConfig())
+    with pytest.raises(RuntimeError):
+        await transcriber.connect()
+    assert ws.closed and not transcriber.connected
+
+
+async def test_voxtral_finish_closes_the_socket_on_a_server_error():
+    ws = _FakeWs(['{"type": "error", "error": "boom"}'])
+    transcriber = VoxtralRealtimeTranscriber(InferenceConfig())
+    transcriber._ws = ws
+    with pytest.raises(RuntimeError):
+        await transcriber.finish()
+    assert ws.closed and not transcriber.connected

@@ -8,15 +8,8 @@ import wave
 import pytest
 from pydub.exceptions import CouldntDecodeError
 
-from nexusvox.transcription.file_transcribe import ALLOWED_EXTENSIONS, _get_extension, convert_to_wav
+from nexusvox.transcription.file_transcribe import ALLOWED_EXTENSIONS, convert_to_wav
 from nexusvox.transcription.transcriber import Word
-
-
-def test_get_extension():
-    assert _get_extension("test.wav") == ".wav"
-    assert _get_extension("music.MP3") == ".mp3"
-    assert _get_extension("noext") == ""
-    assert _get_extension("multi.dots.flac") == ".flac"
 
 
 def test_allowed_extensions_set():
@@ -634,3 +627,18 @@ async def test_a_job_that_wants_speakers_waits_for_a_cold_server_to_warm_up(monk
     transcriber._script.append(("Again.", [Word("Again.", 0.1, 0.3)], True))
     await ft.transcribe_file([_silent_wav(1.0)], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=False)
     assert waited == []  # plain transcription does not wait
+
+
+@pytest.mark.asyncio
+async def test_speaker_detection_is_not_requested_when_words_are_incomplete(monkeypatch):
+    import nexusvox.transcription.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+    from nexusvox.transcription.transcriber import SpeakerTurn
+
+    transcriber = _DiarizingTranscriber([("hello there", [Word("hello", 0.1, 0.2)], True)], [SpeakerTurn(0, 0.0, 1.0)])
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+
+    result = await ft.transcribe_file([_silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True)
+
+    assert transcriber.diarize_calls == []
+    assert any("without timing" in n for n in result.notes)

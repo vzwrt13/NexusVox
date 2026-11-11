@@ -8,10 +8,11 @@ import logging
 import threading
 import wave
 from collections.abc import Callable
+from pathlib import Path
 
 from ..config import MODEL_REGISTRY, InferenceConfig
 from .diarization import diarization_timeout, format_transcript, label_words, speaker_detection_models
-from .transcriber import BaseTranscriber, SpeakerTurn, TranscriptionResult, Word, create_transcriber
+from .transcriber import BaseTranscriber, SpeakerTurn, TranscriptionResult, Word, create_transcriber, pcm16_to_wav_bytes
 
 logger = logging.getLogger("nexusvox.file_transcribe")
 
@@ -28,13 +29,7 @@ _DIARIZE_LOCK = threading.Lock()
 
 def _segment_to_wav(segment) -> bytes:
     """Build a minimal WAV from a pydub AudioSegment (no extra metadata chunks)."""
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(16_000)
-        wf.writeframes(segment.raw_data)
-    return buf.getvalue()
+    return pcm16_to_wav_bytes(segment.raw_data)
 
 
 def convert_to_wav(file_bytes: bytes, filename: str) -> tuple[list[bytes], int]:
@@ -45,14 +40,7 @@ def convert_to_wav(file_bytes: bytes, filename: str) -> tuple[list[bytes], int]:
     """
     from pydub import AudioSegment
 
-    ext = _get_extension(filename)
-    format_hint = {
-        ".wav": "wav",
-        ".mp3": "mp3",
-        ".flac": "flac",
-        ".ogg": "ogg",
-        ".webm": "webm",
-    }.get(ext, ext.lstrip("."))
+    format_hint = Path(filename).suffix.lower().lstrip(".")
 
     audio = AudioSegment.from_file(io.BytesIO(file_bytes), format=format_hint)
     audio = audio.set_frame_rate(16_000).set_channels(1).set_sample_width(2)
@@ -121,8 +109,7 @@ async def transcribe_file(
     notes: list[str] = []
     words_complete = True  # every word of every chunk's text came back with its timing
     offset_s = 0.0  # start of the current chunk on the file's timeline
-    # Speaker detection does not need the transcript, so it runs while the chunks are transcribed.
-    speakers = asyncio.create_task(_diarize_file(transcriber, wav_chunks)) if wants_speakers else None
+    speakers: asyncio.Task | None = None
     try:
         for i, wav_bytes in enumerate(wav_chunks):
             logger.info("Transcribing chunk %d/%d", i + 1, len(wav_chunks))
@@ -152,18 +139,23 @@ async def transcribe_file(
         if diarize and not wants_speakers:
             if explain_no_speakers:
                 notes.append(_unavailable_note(entry, transcriber))
-        elif speakers is not None and text:
-            if on_progress and not speakers.done():
-                on_progress("diarizing")
-            turns, problem = await speakers
+        elif wants_speakers and text:
             if not words_complete:
-                # Labelled paragraphs are built from the words; a word without timing would vanish.
+                # Labelled paragraphs are built from the words; a word without timing would vanish,
+                # so the turns would be thrown away: do not ask the server for them.
                 notes.append("Speaker detection skipped: some words came back without timing.")
-            elif problem:
-                notes.append(problem)
             else:
-                words = label_words(words, turns)
-                text = format_transcript(words)
+                # Only now: the server runs transcription and speaker detection one after the other on
+                # one GPU, so a request made alongside the chunks would eat into a chunk's timeout.
+                if on_progress:
+                    on_progress("diarizing")
+                speakers = asyncio.create_task(_diarize_file(transcriber, wav_chunks))
+                turns, problem = await speakers
+                if problem:
+                    notes.append(problem)
+                else:
+                    words = label_words(words, turns)
+                    text = format_transcript(words)
     finally:
         if speakers is not None and not speakers.done():
             speakers.cancel()
@@ -188,7 +180,7 @@ async def _diarize_file(transcriber: BaseTranscriber, wav_chunks: list[bytes]) -
     while not _DIARIZE_LOCK.acquire(blocking=False):  # polled, so a cancelled task never holds it
         await asyncio.sleep(0.2)
     try:
-        wav, duration_s = _whole_file_wav(wav_chunks)
+        wav, duration_s = await asyncio.to_thread(_whole_file_wav, wav_chunks)
         timeout = diarization_timeout(duration_s)
         try:
             turns = await transcriber.diarize(wav, timeout=timeout)
@@ -207,18 +199,11 @@ async def _diarize_file(transcriber: BaseTranscriber, wav_chunks: list[bytes]) -
 
 def _whole_file_wav(wav_chunks: list[bytes]) -> tuple[io.BytesIO, float]:
     """The chunks as one WAV file (written chunk by chunk, no second copy of the PCM) and its length in seconds."""
-    buf = io.BytesIO()
-    frames = 0
-    with wave.open(buf, "wb") as out:
-        out.setnchannels(1)
-        out.setsampwidth(2)
-        out.setframerate(16_000)
-        for chunk in wav_chunks:
-            with wave.open(io.BytesIO(chunk), "rb") as wf:
-                frames += wf.getnframes()
-                out.writeframes(wf.readframes(wf.getnframes()))
-    buf.seek(0)
-    return buf, frames / 16_000
+    pcm = bytearray()
+    for chunk in wav_chunks:
+        with wave.open(io.BytesIO(chunk), "rb") as wf:
+            pcm += wf.readframes(wf.getnframes())
+    return io.BytesIO(pcm16_to_wav_bytes(bytes(pcm))), len(pcm) / 2 / 16_000
 
 
 def _unavailable_note(entry: dict, transcriber: BaseTranscriber) -> str:
@@ -230,11 +215,3 @@ def _unavailable_note(entry: dict, transcriber: BaseTranscriber) -> str:
         return f"Speaker detection is not available with this server; {NO_SPEAKER_LABELS}"
     names = " or ".join(speaker_detection_models()) or "a model with speaker detection"
     return f"Speaker detection needs {names} as the active model; {NO_SPEAKER_LABELS}"
-
-
-def _get_extension(filename: str) -> str:
-    """Return the lowercase file extension including the dot."""
-    dot = filename.rfind(".")
-    if dot == -1:
-        return ""
-    return filename[dot:].lower()

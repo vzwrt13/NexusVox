@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
+import sys
 import time
 from collections.abc import Callable
 from logging.handlers import TimedRotatingFileHandler
@@ -80,6 +81,22 @@ def _fence(value: object, full: bool) -> object:
         return value
     text = str.__str__(value).replace(TEXT_START, "").replace(TEXT_END, "")  # the fences stay unambiguous
     return _Fenced(text, repr(text)) if full else _Fenced(shorten(text), shorten(text))
+
+
+def harden_console_streams() -> None:
+    """Make the console never fail on a character it cannot encode.
+
+    A legacy Windows console (cp1252, cp850) refuses some characters of a log line (a path with an accent, a
+    transcript); the logging handler then prints a bare `--- Logging error ---` instead of the line. Unencodable
+    characters become `?`. A windowed app has no stream (None): nothing to do.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(errors="replace")
+            except (OSError, ValueError):
+                pass
 
 
 def log_dir() -> Path:

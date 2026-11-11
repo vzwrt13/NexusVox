@@ -607,3 +607,30 @@ async def test_progress_is_reported_per_chunk(monkeypatch):
     )
 
     assert seen == [("transcribing", 1, 3), ("transcribing", 2, 3), ("transcribing", 3, 3)]
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_wants_speakers_waits_for_a_cold_server_to_warm_up(monkeypatch):
+    """A fresh transcriber starts cold: the job waits for the warm-up instead of running on the CPU without speakers."""
+    import nexusvox.transcription.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+    from nexusvox.transcription.transcriber import SpeakerTurn, Word
+
+    script = [("Hello there.", [Word("Hello", 0.1, 0.3), Word("there.", 0.35, 0.6)], True)]
+    transcriber = _DiarizingTranscriber(script, [SpeakerTurn(0, 0.0, 1.0)])
+    waited: list[bool] = []
+
+    async def wait_until_warm():
+        waited.append(True)
+
+    transcriber.wait_until_warm = wait_until_warm
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+
+    result = await ft.transcribe_file([_silent_wav(1.0)], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True)
+    assert waited == [True]
+    assert result.text.startswith("Speaker 1:")
+
+    waited.clear()
+    transcriber._script.append(("Again.", [Word("Again.", 0.1, 0.3)], True))
+    await ft.transcribe_file([_silent_wav(1.0)], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=False)
+    assert waited == []  # plain transcription does not wait

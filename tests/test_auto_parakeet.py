@@ -57,6 +57,14 @@ class FakeCpu(BaseTranscriber):
 REAL_PRELOAD_CPU = AutoParakeetTranscriber._preload_cpu
 
 
+@pytest.fixture(autouse=True)
+def _no_warm_servers():
+    """The warm state is process-wide: no test inherits a warm server from another."""
+    auto_parakeet._servers.clear()
+    yield
+    auto_parakeet._servers.clear()
+
+
 @pytest.fixture
 def server(monkeypatch):
     """A switchable Parakeet server: `state["up"]` decides what the health probe sees."""
@@ -93,7 +101,7 @@ def make(warm: bool = True) -> tuple[AutoParakeetTranscriber, FakeCpu]:
     """A transcriber with a fake CPU engine; `warm=True` means the server was already warmed up."""
     cpu = FakeCpu()
     transcriber = AutoParakeetTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"), cpu=cpu)
-    transcriber._warm = warm
+    auto_parakeet._set_warm(transcriber._health_url, warm)
     return transcriber, cpu
 
 
@@ -136,6 +144,7 @@ async def test_cpu_used_when_server_unreachable(server):
 async def test_cpu_engine_has_no_docker_profile_to_stop(server):
     server["up"] = False
     transcriber, _ = make()
+    await transcriber.prepare()
     assert transcriber.needs_docker is False
 
 
@@ -214,7 +223,7 @@ async def test_cold_server_is_not_used_until_warmed_up(server):
     transcriber, cpu = make(warm=False)
     await transcriber.prepare()  # reachable, but cold: warm-up starts in the background
     assert transcriber.engine == CPU
-    assert transcriber.supports_diarization is False
+    assert transcriber.supports_diarization is True  # a job waits for the warm-up and gets speakers
     assert await cycle(transcriber) == "from cpu"  # a dictation during the warm-up
     assert cpu.connects >= 1
     gate.set()
@@ -227,7 +236,9 @@ async def test_server_returning_after_an_outage_is_warmed_before_use(server):
     transcriber, _ = make(warm=True)
     server["up"] = False
     transcriber._apply(False)
-    assert transcriber._warm is False  # an outage may be a restart: the server must be warmed again
+    assert not auto_parakeet._is_warm(
+        transcriber._health_url
+    )  # an outage may be a restart: the server must be warmed again
     server["up"] = True
     transcriber._apply(True)
     assert transcriber.engine == CPU
@@ -261,7 +272,7 @@ async def test_warm_up_result_is_void_if_the_server_went_down_meanwhile(server):
     transcriber._apply(False)  # seen down while the warm-up request is still running
     gate.set()
     join_warm_up(transcriber)
-    assert transcriber._warm is False
+    assert not auto_parakeet._is_warm(transcriber._health_url)
     assert transcriber.engine == CPU
 
 
@@ -345,7 +356,8 @@ async def test_state_change_mid_cycle_keeps_the_running_cycle_on_its_engine(serv
     class Loader:
         """Stands in for the throw-away preload instance; the shared CPU engine must not be touched."""
 
-        def __init__(self, config):
+        def __init__(self, config, *, retry_failed_load=True):
+            self.retry_failed_load = retry_failed_load
             loaders.append(self)
             self.connected_ = False
 
@@ -369,8 +381,166 @@ async def test_state_change_mid_cycle_keeps_the_running_cycle_on_its_engine(serv
     assert (await transcriber.finish()).text == "from cpu"
     assert len(cpu.buffer) == 400  # both chunks, nothing lost
     assert len(loaders) == 1  # the model load went through its own instance
+    assert loaders[0].retry_failed_load is False  # a failed download is not retried on every flip to the CPU
     gate.set()
     join_warm_up(transcriber)
     await transcriber.disconnect()
     assert transcriber.engine == GPU  # the new state applies from the next cycle
     assert await cycle(transcriber) == "from gpu"
+
+
+async def test_a_fresh_transcriber_uses_a_server_an_earlier_one_warmed(server):
+    """Every upload and meeting builds its own transcriber: a warm server must not look cold to it."""
+    first, _ = make(warm=False)
+    await first.prepare()
+    join_warm_up(first)  # the first instance's own warm-up request is what makes the server warm
+    assert first.engine == GPU
+    cpu = FakeCpu()
+    second = AutoParakeetTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"), cpu=cpu)  # as a job builds it
+    assert not second._warm_thread  # never warmed by itself
+    await second.prepare()
+    assert second.engine == GPU
+    assert second.supports_diarization is True
+    assert server["posted"] == 1  # only the first instance warmed the server
+    assert cpu.connects == 0
+
+
+async def test_an_outage_makes_the_server_cold_for_every_instance(server):
+    first, _ = make(warm=True)
+    second, _ = make(warm=True)
+    first._apply(False)
+    second._apply(True)
+    assert second.engine == CPU
+
+
+async def test_properties_never_probe(server):
+    transcriber, _ = make(warm=False)
+    _ = (
+        transcriber.engine,
+        transcriber.needs_docker,
+        transcriber.supports_diarization,
+        transcriber.no_diarization_reason,
+    )
+    assert server["probes"] == 0
+
+
+async def test_diarize_never_probes(server, monkeypatch):
+    async def fake_diarize(self, wav, timeout):
+        return []
+
+    monkeypatch.setattr(OpenAIHttpTranscriber, "diarize", fake_diarize)
+    transcriber, _ = make(warm=True)
+    assert await transcriber.diarize(b"", 1.0) == []  # engine defaults to the GPU until a probe says otherwise
+    assert server["probes"] == 0
+
+
+async def test_a_job_waits_for_a_cold_server_to_warm_up(server):
+    gate = threading.Event()
+    server["hold"] = gate
+    transcriber, _ = make(warm=False)
+    await transcriber.prepare()
+    assert transcriber.engine == CPU
+    assert "warming up" in transcriber.no_diarization_reason
+    threading.Timer(0.2, gate.set).start()
+    await transcriber.wait_until_warm()
+    assert transcriber.engine == GPU
+    assert transcriber.supports_diarization is True
+
+
+async def test_waiting_does_nothing_when_the_server_is_down(server):
+    server["up"] = False
+    transcriber, _ = make(warm=False)
+    await transcriber.prepare()
+    await transcriber.wait_until_warm()
+    assert transcriber.engine == CPU
+    assert "warming up" not in transcriber.no_diarization_reason
+
+
+async def test_only_one_warm_up_runs_for_all_the_transcribers_of_a_server(server):
+    gate = threading.Event()
+    server["hold"] = gate
+    dictation, _ = make(warm=False)
+    upload, _ = make(warm=False)
+    meeting, _ = make(warm=False)
+    for transcriber in (dictation, upload, meeting):
+        await transcriber.prepare()
+    gate.set()
+    join_warm_up(dictation)
+    assert server["posted"] == 1
+
+
+async def test_a_job_does_not_preload_the_cpu_model_when_it_waits_for_the_gpu(server):
+    transcriber, _ = make(warm=False)
+    transcriber.preload_cpu = False
+    await transcriber.prepare()
+    assert server["preloads"] == 0
+
+
+async def test_a_failed_take_on_a_busy_server_does_not_make_it_cold_for_the_others(server):
+    job, _ = make(warm=True)
+    dictation, _ = make(warm=True)
+    server["hang"] = True
+    await job.connect()
+    await job.send_audio_chunk(b"\x00\x01" * 100)
+    await job.finish()  # no result: this instance goes to the CPU
+    assert job.engine == CPU
+    assert auto_parakeet._is_warm(job._health_url)  # but the server is not cold for the dictation
+    dictation._apply(True)
+    assert dictation.engine == GPU
+
+
+async def test_one_instances_outage_voids_anothers_running_warm_up(server):
+    gate = threading.Event()
+    server["hold"] = gate
+    a, _ = make(warm=False)
+    b, _ = make(warm=False)
+    await a.prepare()  # starts the warm-up
+    b._apply(False)  # an outage seen by another instance
+    gate.set()
+    join_warm_up(a)
+    assert not auto_parakeet._is_warm(a._health_url)
+
+
+async def test_a_failed_warm_up_is_not_waited_for_again_and_keeps_the_cpu_reason(server, monkeypatch):
+    async def boom(self, timeout: float = 30.0):
+        raise RuntimeError("model still loading")
+
+    monkeypatch.setattr(OpenAIHttpTranscriber, "finish", boom)
+    transcriber, _ = make(warm=False)
+    await transcriber.prepare()
+    await transcriber.wait_until_warm()
+    assert server["posted"] == 0  # the failing finish never counted as a posted request
+    assert transcriber.engine == CPU
+    assert transcriber.supports_diarization is False
+    assert "warming up" not in transcriber.no_diarization_reason  # nothing is warming up any more
+    assert transcriber._warm_thread is not None
+    assert transcriber._warming is False  # and wait_until_warm started no second warm-up
+
+
+async def test_the_dashboard_view_while_cold_allows_speakers_because_a_job_waits(server):
+    gate = threading.Event()
+    server["hold"] = gate
+    transcriber, _ = make(warm=False)
+    await transcriber.prepare()
+    assert transcriber.supports_diarization is True  # warming: a job waits and gets them
+    assert "ran on the CPU" not in transcriber.no_diarization_reason
+    gate.set()
+    join_warm_up(transcriber)
+
+
+async def test_an_unprobed_transcriber_does_not_claim_the_gpu_or_docker(server):
+    """The CPU-fallback transcriber (Docker down) must not make a model switch stop a profile before its first probe."""
+    transcriber = AutoParakeetTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"), cpu=FakeCpu())
+    assert transcriber.needs_docker is False
+    assert transcriber.supports_diarization is False
+    assert server["probes"] == 0
+
+
+async def test_a_restarted_engine_warms_the_server_again(server):
+    """A container stopped and started again (a model switch back) is cold: warm_up does not trust old state."""
+    old, _ = make(warm=True)
+    assert auto_parakeet._is_warm(old._health_url)
+    fresh = AutoParakeetTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"), cpu=FakeCpu())
+    await fresh.warm_up()
+    assert server["posted"] == 1
+    assert fresh.engine == GPU

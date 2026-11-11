@@ -98,6 +98,8 @@ async def transcribe_file(
         device=device,
         auto_fallback=config.device == "auto",
     )
+    if diarize and hasattr(transcriber, "preload_cpu"):
+        transcriber.preload_cpu = False  # this job waits for the GPU server: no 670 MB CPU model load for it
     # An engine that chooses between a server and the CPU settles on one before its flags are read.
     await transcriber.prepare()
     if diarize:

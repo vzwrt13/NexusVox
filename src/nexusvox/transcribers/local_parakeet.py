@@ -44,6 +44,9 @@ _MIN_PAUSE_S = 0.2
 # between pauses of the same length (the later cut wins, so segments come out long); a real sentence
 # pause always beats a gap between words.
 _LATE_CUT_BONUS = 0.002
+# The first load may be a 670 MB download. It does not share the transcription timeout (it would lose the first
+# dictation), but it is bounded too: a stalled download must not hold a dictation, and the app with it, for good.
+MODEL_LOAD_TIMEOUT_S = 300.0
 # Less than this is silence for all practical purposes and trips the feature extractor.
 _MIN_SAMPLES = SAMPLE_RATE // 10
 # One encoder frame: a 10 ms feature step times the model's subsampling factor of 8.
@@ -353,7 +356,10 @@ class LocalParakeetTranscriber(BaseTranscriber):
             if len(samples) >= _MIN_SAMPLES:
                 # The (first) model load or download is not transcription: it gets no part of the timeout, or the
                 # first dictation after a start would time out and lose its text.
-                await loop.run_in_executor(None, self._get_model, self._onnx_model, self._quantization)
+                await asyncio.wait_for(
+                    loop.run_in_executor(None, self._get_model, self._onnx_model, self._quantization),
+                    timeout=max(timeout, MODEL_LOAD_TIMEOUT_S),
+                )
             text, words = await asyncio.wait_for(
                 loop.run_in_executor(self._executor, self._recognize, samples, cancelled), timeout=timeout
             )

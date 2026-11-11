@@ -935,3 +935,26 @@ def test_analyse_returns_the_same_shape_for_empty_and_normal_audio():
 
     assert len(empty) == len(normal) == 2
     assert empty[1].dtype == normal[1].dtype == bool
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_model_load_is_bounded_and_returns_not_done(monkeypatch):
+    """A stuck download must not hold the dictation (and the app's transcriber lock) for good."""
+    import threading
+
+    from nexusvox.transcribers import local_parakeet
+
+    release = threading.Event()
+    monkeypatch.setattr(local_parakeet, "MODEL_LOAD_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(
+        LocalParakeetTranscriber, "_get_model", classmethod(lambda cls, *a: release.wait(5) and _FakeModel())
+    )
+    t = _make()
+    await t.connect()
+    await t.send_audio_chunk(_pcm(1.0))
+
+    result = await t.finish(timeout=0.05)
+
+    release.set()
+    assert result.done is False
+    assert t.connected is False

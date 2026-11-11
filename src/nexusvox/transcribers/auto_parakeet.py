@@ -47,23 +47,36 @@ _WARM_UP_TIMEOUT_S = 90.0
 GPU = "gpu"
 CPU = "cpu"
 
-# Servers that have answered a warm-up request, by health URL. Process-wide: every upload and meeting job builds a
-# transcriber of its own, and a server that has been up for hours must not look cold to each of them.
-_warm_servers: set[str] = set()
-_warm_servers_lock = threading.Lock()
+
+class _ServerState:
+    """What every transcriber of this process knows about one server: shared, because every upload and meeting job
+    builds a transcriber of its own and must not start cold on a server that has been up for hours, nor start a
+    second warm-up while the dictation's is running."""
+
+    def __init__(self) -> None:
+        self.warm = False
+        self.warming = False
+        self.generation = 0  # bumped when the server is seen down, so a warm-up that began earlier is void
+        self.thread: threading.Thread | None = None
+
+
+_servers: dict[str, _ServerState] = {}
+_servers_lock = threading.Lock()
+
+
+def _state(health_url: str) -> _ServerState:
+    """The shared state of a server; the caller holds `_servers_lock`."""
+    return _servers.setdefault(health_url, _ServerState())
 
 
 def _is_warm(health_url: str) -> bool:
-    with _warm_servers_lock:
-        return health_url in _warm_servers
+    with _servers_lock:
+        return _state(health_url).warm
 
 
 def _set_warm(health_url: str, warm: bool) -> None:
-    with _warm_servers_lock:
-        if warm:
-            _warm_servers.add(health_url)
-        else:
-            _warm_servers.discard(health_url)
+    with _servers_lock:
+        _state(health_url).warm = warm
 
 
 async def warm_up_server(config: InferenceConfig) -> bool:
@@ -141,14 +154,14 @@ class AutoParakeetTranscriber(BaseTranscriber):
         self._config = config
         self._gpu: BaseTranscriber = OpenAIHttpTranscriber(config)
         self._cpu = cpu
-        self._engine = GPU  # until the first probe says otherwise
+        self._engine = CPU  # until the first probe says otherwise (`_current_engine` reads the shared state meanwhile)
+        # Whether a take on the CPU may start loading the CPU model; a job that waits for the GPU turns it off.
+        self.preload_cpu = True
         self._last_logged: tuple[str, str] | None = None
         # Reachable and warmed up (`_is_warm`, process-wide): the only state in which the GPU engine is chosen.
-        self._warming = False
         self._reachable = False
         self._warm_thread: threading.Thread | None = None
         self._preload_thread: threading.Thread | None = None
-        self._generation = 0  # bumped when the server is seen down, so a warm-up that began earlier is void
         self._probed_at: float | None = None  # None: never probed
         self._word_timestamps = False
         self._monitor_started = False
@@ -167,46 +180,61 @@ class AutoParakeetTranscriber(BaseTranscriber):
         return self._current_engine()
 
     def _current_engine(self) -> str:
-        """The engine the last probe chose (GPU before the first one); never probes, so it never blocks the loop."""
+        """The engine the last probe chose; never probes, so it never blocks the loop.
+
+        Before the first probe it follows the shared state: the GPU only for a server that has been warmed up.
+        """
+        if self._probed_at is None:
+            return GPU if _is_warm(self._health_url) else CPU
         return self._engine
+
+    @property
+    def _warming(self) -> bool:
+        with _servers_lock:
+            return _state(self._health_url).warming
 
     def _stale(self) -> bool:
         return self._probed_at is None or time.monotonic() - self._probed_at >= PROBE_TTL_S
 
-    def _apply(self, reachable: bool) -> None:
+    def _apply(self, reachable: bool, *, outage: bool = True) -> None:
         """Take a probe answer: choose the engine, log a change, load the CPU model or warm the server as needed.
 
         The GPU needs the server reachable *and* warmed up; a reachable cold server starts a background warm-up
-        and takes go to the CPU until it has succeeded.
+        (one per server in the process) and takes go to the CPU until it has succeeded. `outage=False` is a failed
+        request on a server that may be fine (a busy one): this instance goes to the CPU, the shared state stays.
         """
         start_warm = False
-        with self._lock:
+        with _servers_lock:
+            state = _state(self._health_url)
             self._probed_at = time.monotonic()
             self._reachable = reachable
             if not reachable:
-                _set_warm(self._health_url, False)
-                self._generation += 1
+                if outage:
+                    state.warm = False
+                    state.generation += 1
                 engine, note = CPU, "Parakeet server not reachable, transcribing on the CPU (no speakers)"
-            elif _is_warm(self._health_url):
+            elif state.warm:
                 engine, note = GPU, "Parakeet server warmed up, transcribing on the GPU"
             else:
                 engine, note = CPU, "Parakeet server reachable but cold, transcribing on the CPU until it is warmed up"
-                if not self._warming:
-                    self._warming = True
+                if not state.warming:
+                    state.warming = True
                     start_warm = True
+            generation = state.generation
             self._engine = engine
             changed = self._last_logged != (engine, note)
             self._last_logged = (engine, note)
-            generation = self._generation
+            if start_warm:
+                thread = threading.Thread(
+                    target=self._run_warm_up, args=(generation,), name="auto-engine-warm-up", daemon=True
+                )
+                state.thread = self._warm_thread = thread
         if changed:
             logger.info("Auto engine: %s", note)
-            if engine == CPU:
+            if engine == CPU and self.preload_cpu:
                 self._preload_cpu()
         if start_warm:
-            self._warm_thread = threading.Thread(
-                target=self._run_warm_up, args=(generation,), name="auto-engine-warm-up", daemon=True
-            )
-            self._warm_thread.start()
+            thread.start()
 
     async def _warm_request(self) -> bool:
         return await warm_up_server(self._config)
@@ -220,11 +248,12 @@ class AutoParakeetTranscriber(BaseTranscriber):
                 logger.warning("Parakeet server warm-up returned no result; staying on the CPU")
         except Exception:
             logger.warning("Parakeet server warm-up failed; staying on the CPU", exc_info=True)
-        with self._lock:
-            self._warming = False
-            current = generation == self._generation  # the server was not seen down meanwhile
+        with _servers_lock:
+            state = _state(self._health_url)
+            state.warming = False
+            current = generation == state.generation  # the server was not seen down meanwhile
             if ok and current:
-                _set_warm(self._health_url, True)
+                state.warm = True
         if ok and current:
             self._apply(True)
 
@@ -275,15 +304,20 @@ class AutoParakeetTranscriber(BaseTranscriber):
         self.device = self._gpu.device if self._engine == GPU else CPU  # the server's: local or remote
 
     async def wait_until_warm(self, timeout: float = _WARM_UP_TIMEOUT_S) -> None:
-        """For a job that needs speaker detection: let a reachable but cold server finish warming, then settle again.
+        """For a job that needs speaker detection: let a reachable but cold server finish warming, then take the GPU.
 
-        Does nothing when the server is down or already warm. A failed warm-up leaves the engine on the CPU.
+        Waits for the warm-up that runs (this instance's or another's); starts none. Does nothing when the server
+        is down or warm. A failed warm-up leaves the engine on the CPU, with the reason of the CPU engine.
         """
-        thread = self._warm_thread
-        if self._engine == GPU or not self._reachable or thread is None:
+        if self._engine == GPU or not self._reachable:
             return
-        await asyncio.get_running_loop().run_in_executor(None, thread.join, timeout)
-        await self.prepare()
+        with _servers_lock:
+            thread = _state(self._health_url).thread
+        if thread is not None:
+            await asyncio.get_running_loop().run_in_executor(None, thread.join, timeout)
+        if _is_warm(self._health_url):
+            self._apply(True)
+            await self.prepare()
 
     # ---- Properties that follow the engine ----------------------------------
 
@@ -305,14 +339,15 @@ class AutoParakeetTranscriber(BaseTranscriber):
 
     @property
     def supports_diarization(self) -> bool:  # type: ignore[override]
-        return self._current_engine() == GPU
+        """The GPU server detects speakers; a job waits for one that is warming up (`wait_until_warm`) and gets them."""
+        return self._current_engine() == GPU or (self._reachable and self._warming)
 
     @property
     def no_diarization_reason(self) -> str:  # type: ignore[override]
         if self._current_engine() == GPU:
             return ""
-        if self._reachable:
-            return "The Parakeet server is still warming up, so this ran on the CPU"
+        if self._reachable and self._warming:
+            return "The Parakeet server is still warming up"
         return self._cpu_transcriber().no_diarization_reason
 
     def load_status(self) -> dict[str, str | None] | None:
@@ -355,7 +390,7 @@ class AutoParakeetTranscriber(BaseTranscriber):
             logger.warning("Parakeet server returned no result; replaying the take on the CPU")
         except Exception:
             logger.warning("Parakeet server failed; replaying the take on the CPU", exc_info=True)
-        self._apply(False)
+        self._apply(False, outage=False)
         self.device = CPU  # the take is stored with the engine that produced its text
         cpu = self._cpu_transcriber()
         await cpu.connect()
@@ -386,9 +421,14 @@ class AutoParakeetTranscriber(BaseTranscriber):
         ~17 s) warm-up keeps its buffer and goes to the CPU. Never raises; the app runs it as a background task.
         """
         try:
+            with _servers_lock:
+                state = _state(self._health_url)
+                if not state.warming:
+                    state.warm = False  # a (re)started engine: the container may have been restarted, warm it again
             await self.prepare()
             self._start_monitor()
-            thread = self._warm_thread
+            with _servers_lock:
+                thread = _state(self._health_url).thread
             if thread is not None:
                 await asyncio.get_running_loop().run_in_executor(None, thread.join)
         except Exception:

@@ -17,6 +17,7 @@ def docker(monkeypatch):
     monkeypatch.setattr(sf, "_warm_up", warm)
     ctl.warm = warm
     monkeypatch.setattr(sf, "cuda_available", lambda: True)
+    monkeypatch.setattr(sf, "resolve_device", lambda requested: "cpu" if requested == "cpu" else "cuda")
     return ctl
 
 
@@ -75,8 +76,7 @@ def test_container_stopped_when_the_job_raises(docker, monkeypatch):
 
 
 def test_container_kept_when_dictation_switched_to_parakeet(docker, monkeypatch):
-    answers = iter([False, True])  # down when the job starts, up (the job started it) when it ends
-    monkeypatch.setattr(sf, "probe_server", lambda url: next(answers))
+    monkeypatch.setattr(sf, "probe_server", lambda url: False)
     with sf.speaker_detection_job(_config(), wanted=True, active_model=lambda: "parakeet-tdt-0.6b"):
         pass
     docker.start_profile.assert_called_once()
@@ -156,14 +156,32 @@ def test_parakeet_on_the_cpu_takes_the_container_path(docker, monkeypatch):
 
 
 def test_auto_parakeet_with_the_server_down_starts_the_container(docker, monkeypatch):
-    answers = iter([False, False, True])  # engine check, availability check, exit check
-    monkeypatch.setattr(sf, "probe_server", lambda url: next(answers, True))
+    monkeypatch.setattr(sf, "probe_server", lambda url: False)
     with sf.speaker_detection_job(
         _config("parakeet-tdt-0.6b"), wanted=True, active_model=lambda: "whisper-large-v3-turbo"
     ) as job:
         assert job.started_container is True
     docker.start_profile.assert_called_once()
     docker.stop_profile.assert_called_once_with("parakeet")
+
+
+def test_container_a_job_started_for_auto_parakeet_is_stopped_although_the_server_now_answers(docker, monkeypatch):
+    """Dictation stays on Parakeet (auto, server down at the start): the exit must not probe the job's own container."""
+    answers = iter([False, False])  # the engine check and the availability check; any later probe would be True
+    monkeypatch.setattr(sf, "probe_server", lambda url: next(answers, True))
+    with sf.speaker_detection_job(
+        _config("parakeet-tdt-0.6b"), wanted=True, active_model=lambda: "parakeet-tdt-0.6b"
+    ) as job:
+        assert job.started_container is True
+    docker.stop_profile.assert_called_once_with("parakeet")
+
+
+def test_a_cpu_only_machine_with_a_reachable_server_still_takes_the_container_path(docker, monkeypatch):
+    """`create_transcriber` runs device "auto" in-process on a machine without CUDA, whatever answers on the URL."""
+    monkeypatch.setattr(sf, "resolve_device", lambda requested: "cpu")
+    monkeypatch.setattr(sf, "probe_server", lambda url: True)
+    with sf.speaker_detection_job(_config("parakeet-tdt-0.6b"), wanted=True, what="upload") as job:
+        assert job.notice == "This upload uses Parakeet for speaker detection."
 
 
 def test_container_stopped_when_dictation_runs_parakeet_on_the_cpu(docker, monkeypatch):

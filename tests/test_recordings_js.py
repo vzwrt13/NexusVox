@@ -36,6 +36,7 @@ const runningUploadActions = new Set();
 const extensionPanels = {};
 const formatClock = (s) => Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
 const setStatus = () => {};
+const parseServerTime = (v) => new Date(/(Z|[+-]\d\d:?\d\d)$/.test(v) ? v : v + "Z");
 for (const f of ["openExtensionPanel", "loadPendingMeetings", "openMeetingRecording", "refreshDiarizeToggle",
   "resumeUploadJob", "activateTab", "downloadExport", "runUploadAction"]) globalThis[f] = () => {};
 const loadLlmStatus = () => Promise.resolve();

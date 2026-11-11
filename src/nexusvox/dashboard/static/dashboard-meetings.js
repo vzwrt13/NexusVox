@@ -144,6 +144,8 @@ async function startMeeting() {
     if (!result.ok) showMeetingStatus("✕ " + result.error, "down");
     else showMeetingStatus("● Recording. Dictation still works.", "ok");
     await refreshMeetingStatus();
+  } catch (err) {
+    showMeetingStatus("✕ The meeting did not start: " + err.message, "down");
   } finally {
     meetingToggleBtn.disabled = false;
   }
@@ -162,6 +164,9 @@ async function stopMeeting() {
     } else {
       trackMeetingJob(result.job_id);
     }
+  } catch (err) {
+    showMeetingStatus("✕ The meeting did not stop: " + err.message, "down");
+    refreshMeetingStatus();
   } finally {
     meetingToggleBtn.disabled = false;
   }
@@ -172,8 +177,9 @@ async function stopMeeting() {
 function trackMeetingJob(jobId) {
   clearInterval(meetingJobTimer);
   meetingProgress.style.display = "";
+  let timer = null;
   const stop = () => {
-    clearInterval(meetingJobTimer);
+    clearInterval(timer); // only this job's own timer: a newer job keeps its progress
     meetingProgress.style.display = "none";
     loadFileTranscriptions();
   };
@@ -184,6 +190,7 @@ function trackMeetingJob(jobId) {
     } catch (err) {
       return; // no contact for a moment: retried on the next tick
     }
+    if (timer !== meetingJobTimer) return; // a newer job took over while this poll was in flight
     if (!resp.ok) {
       // The job is gone (the app restarted, or it dropped out of the last ten): nothing says it succeeded.
       stop();
@@ -191,6 +198,7 @@ function trackMeetingJob(jobId) {
       return;
     }
     const job = await resp.json();
+    if (timer !== meetingJobTimer) return;
     meetingProgressBar.value = Math.round((job.percent || 0) * 100);
     if (job.state === "running") {
       showMeetingStatus(job.message || "Transcribing...", "");
@@ -202,7 +210,7 @@ function trackMeetingJob(jobId) {
     if (job.state === "done") showMeetingStatus("● Meeting transcribed.", "ok");
     else showMeetingStatus("✕ " + (job.error || "Transcription failed"), "down");
   };
-  meetingJobTimer = setInterval(poll, 1000);
+  timer = meetingJobTimer = setInterval(poll, 1000);
   poll();
 }
 

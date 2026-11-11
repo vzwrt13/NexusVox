@@ -93,12 +93,12 @@ function renderHomeHotkey(s) {
       : "Hold your hotkey, speak, release to type.";
 }
 
-// At page start the settings are the ones the Settings page just fetched; later visits ask again, as the hotkey
-// may have been changed on the way.
-async function loadHomeHotkey(settingsAlreadyKnown, atPageStart) {
+// Every visit asks for the current settings: the page-start `lastSettings` may be older than a hotkey change
+// made elsewhere (after the first load of the Settings page).
+async function loadHomeHotkey(settingsAlreadyKnown) {
   try {
     await settingsAlreadyKnown;
-    const s = atPageStart && lastSettings ? lastSettings : await fetch("/api/settings").then((r) => r.json());
+    const s = await fetch("/api/settings").then((r) => r.json());
     renderHomeHotkey(s);
   } catch (err) {
     console.error("Could not load the hotkey:", err);
@@ -174,7 +174,7 @@ function openHomeTab() {
   const known = atPageStart ? settingsReady.catch(() => {}) : Promise.resolve();
   homeFirstOpen = false;
   loadHomeStatus(known);
-  loadHomeHotkey(known, atPageStart);
+  loadHomeHotkey(known);
   loadHomeRecent();
   loadHomeWeek();
 }

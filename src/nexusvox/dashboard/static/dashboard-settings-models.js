@@ -853,8 +853,13 @@ modelSelect.addEventListener("change", async () => {
     const data = await res.json();
     if (!data.ok) {
       modelSelect.value = prev;
-      hideModelStatus();
       modelSelect.disabled = false;
+      if (data.error) {
+        showModelStatus("Error: " + data.error);
+        setTimeout(hideModelStatus, 5000);
+      } else {
+        hideModelStatus();
+      }
       return;
     }
     pollModelStatus(prev);

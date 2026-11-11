@@ -935,3 +935,48 @@ def test_a_meeting_json_that_is_no_object_does_not_stop_the_leftover_sweep(env, 
     api.sweep_meeting_leftovers()
 
     assert not (later / "mic.wav").exists() and (bad / "mic.wav").exists()
+
+
+def test_a_job_that_finishes_during_the_pending_read_is_not_listed_as_pending(env, monkeypatch):
+    _, api, db, tmp_path, _ = env
+    folder = _meeting_folder(tmp_path)
+
+    # The job is running when its name is read and saved to the database right after: it must not be listed.
+    def running():
+        db.save_file_transcription("Me: hi", "en", 1000, folder.name, kind="meeting")
+        return folder.name
+
+    monkeypatch.setattr(api._file_jobs, "running_filename", running)
+
+    assert api.get_pending_meetings() == []
+
+
+def test_set_model_reports_a_switch_that_cannot_start(session_factory, db, no_config_save):
+    def refuse(model_id):
+        raise RuntimeError("The app is not running yet")
+
+    api = DashboardAPI(session_factory, Config(), db=db, on_model_switch=refuse)
+    from nexusvox.config import MODEL_REGISTRY
+
+    model_id = next(iter(MODEL_REGISTRY))
+
+    result = api.set_model(model_id)
+
+    assert result["ok"] is False and "not running yet" in result["error"]
+
+
+def test_the_pending_list_waits_for_a_meeting_stop_in_progress(env, monkeypatch):
+    _, api, db, tmp_path, _ = env
+    folder = _meeting_folder(tmp_path)
+    result: list = []
+    api._meeting_lock.acquire()  # a stop is between the end of the recording and the start of the job
+    thread = threading.Thread(target=lambda: result.append(api.get_pending_meetings()))
+    thread.start()
+    thread.join(0.3)
+    assert thread.is_alive()  # the list does not read the half-way state
+
+    monkeypatch.setattr(api._file_jobs, "running_filename", lambda: folder.name)
+    api._meeting_lock.release()
+    thread.join(3)
+
+    assert result == [[]]

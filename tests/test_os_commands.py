@@ -207,3 +207,75 @@ def test_execute_unknown_app_returns_false(mock_wm):
     cmd = NexusCommand(action="open", app_name="unknown")
     assert execute_nexus_command(cmd, config) is False
     mock_wm.open_app.assert_not_called()
+
+
+# --- Parsing: punctuation, a comma after "nexus", German verbs ---
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Nexus open Chrome.", "Nexus, open Chrome", "nexus, open chrome!", "Nexus open, Chrome.", "nexus open chrome?"],
+)
+def test_parse_survives_the_models_punctuation(text):
+    assert parse_nexus_command(text) == NexusCommand(action="open", app_name="chrome")
+
+
+@pytest.mark.parametrize("text", ["Nexus flag.", "Nexus, flag", "nexus flag!", "Nexus, markiere."])
+def test_parse_flag_survives_punctuation(text):
+    assert parse_nexus_command(text) == NexusCommand(action="flag", app_name=None)
+
+
+@pytest.mark.parametrize(
+    ("text", "action", "app"),
+    [
+        ("Nexus öffne Chrome", "open", "chrome"),
+        ("Nexus, starte Spotify.", "open", "spotify"),
+        ("Nexus schließe Spotify", "close", "spotify"),
+        ("Nexus schliesse Spotify.", "close", "spotify"),
+        ("Nexus fokussiere Terminal", "focus", "terminal"),
+        ("Nexus Vollbild Chrome", "fullscreen", "chrome"),
+        ("Nexus minimiere Discord", "minimize", "discord"),
+        ("Nexus snap links Terminal", "snap left", "terminal"),
+        ("Nexus, docke rechts Code.", "snap right", "code"),
+        ("Nexus snap left terminal.", "snap left", "terminal"),
+    ],
+)
+def test_parse_german_verbs(text, action, app):
+    assert parse_nexus_command(text) == NexusCommand(action=action, app_name=app)
+
+
+@pytest.mark.parametrize("text", ["Nexus markieren", "Nexus markiere", "nexus markieren."])
+def test_parse_german_flag(text):
+    assert parse_nexus_command(text) == NexusCommand(action="flag", app_name=None)
+
+
+def test_parse_german_mid_sentence_returns_none():
+    assert parse_nexus_command("Ich sagte, nexus öffne Chrome") is None
+
+
+@pytest.mark.parametrize(
+    "text", ["Nexus. Open Chrome.", "Nexus! Öffne Chrome", "Nexus open Chrome…", "Nexus öffne den Chrome."]
+)
+def test_parse_more_model_punctuation_and_articles(text):
+    assert parse_nexus_command(text) == NexusCommand(action="open", app_name="chrome")
+
+
+@pytest.mark.parametrize(
+    "text", ["Nexus, starte das Meeting um drei Uhr nachher.", "Nexus open the thing we talked about."]
+)
+def test_a_sentence_that_only_starts_like_a_command_is_not_one(text):
+    assert parse_nexus_command(text) is None
+
+
+@pytest.mark.parametrize("action", ["open", "close", "focus", "fullscreen", "minimize", "snap left"])
+def test_execute_is_false_when_the_action_did_nothing(mock_wm, action):
+    for name in WINDOW_ACTIONS:
+        getattr(mock_wm, name).return_value = False
+    config = OSCommandsConfig(enabled=True, apps={"chrome": "chrome.exe"})
+    assert execute_nexus_command(NexusCommand(action=action, app_name="chrome"), config) is False
+
+
+def test_execute_is_false_when_the_launch_raises(mock_wm):
+    mock_wm.open_app.side_effect = OSError("not a valid Win32 application")
+    config = OSCommandsConfig(enabled=True, apps={"chrome": "chrome.exe"})
+    assert execute_nexus_command(NexusCommand(action="open", app_name="chrome"), config) is False

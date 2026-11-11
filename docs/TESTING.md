@@ -92,6 +92,7 @@ tests/
 ├── test_recordings_js.py          # Recordings tab under Node (stand-in DOM fake_dom.js): list, upload dialog, extension tabs
 ├── test_extensions.py             # Extension interface: entry points, failing extensions, the three hooks (dummy extension)
 ├── test_os_commands.py            # Nexus OS command parsing and dispatch
+├── test_window_manager.py         # Which windows an action may touch, close and open
 ├── test_experimental.py           # [experimental] dashboard side: endpoints not registered and elements hidden by default, back with the flag
 ├── test_experimental_voice.py     # [experimental] voice side: OS commands and "nexus flag" typed as text by default
 ├── test_hotkey.py                 # Hotkey modes, bindings, swallowing, command and paste marker keys
@@ -131,6 +132,7 @@ tests/
 | `test_dashboard_scripts.py` | `dashboard/static/dashboard-*.js` | The fixed load order in `index.html`, no script left out, no function declared twice, and all scripts running together under Node against a stand-in page, `DOMContentLoaded` included: a name used before a later file defines it, or an id missing from `index.html` and used at load, fails. Code that runs only after a reply or a user action is not exercised |
 | `test_extensions.py` | `extensions.py` | Entry-point loading, a failing / mis-versioned / badly named extension skipped, the upload hook with a dummy extension, the dictation hook (order, chaining, failure and timeout fallback) and the selected-text command hook, panel static files and blueprint, export download |
 | `test_os_commands.py` | `dictation/os_commands.py` | Nexus command parsing, action dispatch, unknown app handling |
+| `test_window_manager.py` | `system/window_manager.py` | Window matching by process, close never kills a prompting app, open with special paths (Windows only) |
 | `test_experimental.py` | `config.py`, `dashboard/routes_*.py` | `[experimental]` flags: strict bool parsing, endpoints not registered and page elements hidden by default, each flag bringing back only its feature |
 | `test_experimental_voice.py` | `app/commands.py` | The voice commands "nexus <window action>" and "nexus flag" are typed as text by default and run with their flag |
 | `test_hotkey.py` | `dictation/hotkey.py` | Hold/toggle modes, key bindings and swallowing, the command key and the paste key (first marker wins, typed normally outside a recording) |

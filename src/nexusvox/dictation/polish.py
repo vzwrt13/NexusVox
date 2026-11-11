@@ -94,7 +94,10 @@ def split_whitespace(text: str) -> tuple[str, str, str]:
 
 def polish(selection: str, instruction: str, config: LlmConfig) -> str:
     """The selection rewritten by the instruction, with the selection's own leading and
-    trailing whitespace kept (a selected line's newline must survive). Raises `llm.LlmError`."""
+    trailing whitespace kept (a selected line's newline must survive). Raises `llm.LlmError`.
+
+    A selection of only whitespace is returned unchanged without asking the model. `App._polish_selection` stops
+    such a selection earlier (error cue); this guard keeps any other caller from doubling the whitespace."""
     lead, core, trail = split_whitespace(selection)
     if not core:
         return selection  # nothing but whitespace: there is nothing to rewrite, and no model to ask

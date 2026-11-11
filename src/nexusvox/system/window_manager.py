@@ -153,30 +153,45 @@ def foreground_app() -> tuple[str, str]:
     return os.path.basename(exe) if exe else "", _window_title(hwnd)
 
 
+# UWP apps (Calculator, Settings, Photos) show their windows through this host process, not their own exe.
+_UWP_HOST = "applicationframehost"
+
+
+def _stem(name: str) -> str:
+    return os.path.splitext(os.path.basename(name.strip().strip('"')))[0].lower()
+
+
 def find_window(app_name: str, exe_path: str | None = None) -> int | None:
     """Find a visible top-level window belonging to an app.
 
-    Matches only by the owning process: its executable basename contains the configured file name or the
-    app alias. The window title is never used: a browser tab titled "Claude Code" is not VS Code.
+    A window matches when the file name of its process is the configured exe or the alias (whole name, not a
+    substring: "edge" is not msedgewebview2.exe, "word" is not wordpad.exe). The window title is used only where
+    the process cannot say: a window of the UWP frame host, and any window when the configured target is a
+    launcher rather than the exe itself (a shortcut, "Update.exe --processStart ..."). Otherwise a browser tab
+    titled "Claude Code" would be taken for VS Code.
     """
+    wanted = {_stem(app_name)}
+    target = _stem(exe_path.split(" --")[0]) if exe_path else ""
+    if target:
+        wanted.add(target)
+    launcher = bool(exe_path) and (
+        not exe_path.strip().strip('"').lower().endswith(".exe") or target in ("update", "cmd", "powershell")
+    )
+    alias = app_name.lower()
     result: list[int] = []
-
-    # Derive expected exe basename from the configured path
-    if exe_path:
-        exe_basename = os.path.basename(exe_path).lower()
-    else:
-        exe_basename = app_name.lower()
 
     def callback(hwnd: int, _lparam: int) -> bool:
         if not user32.IsWindowVisible(hwnd):
             return True  # continue enumeration
 
         proc_exe = _window_exe(hwnd)
-        if proc_exe:
-            proc_basename = os.path.basename(proc_exe).lower()
-            if exe_basename in proc_basename or app_name.lower() in proc_basename:
-                result.append(hwnd)
-                return False  # stop enumeration
+        proc = _stem(proc_exe) if proc_exe else ""
+        if proc and proc in wanted:
+            result.append(hwnd)
+            return False  # stop enumeration
+        if (launcher or proc == _UWP_HOST) and alias in _window_title(hwnd).lower():
+            result.append(hwnd)
+            return False
 
         return True
 
@@ -248,30 +263,42 @@ def force_foreground(hwnd: int) -> bool:
 # --- Public API ---
 
 
-def open_app(exe_path: str) -> None:
-    """Launch an application."""
+def open_app(exe_path: str) -> bool:
+    """Launch an application. Raises OSError when it cannot be started."""
     logger.info("Opening: %s", exe_path)
-    # An existing file is started directly: cmd would strip the quotes round a path with "(" or "&". Anything
-    # else (a command with arguments, a shell name such as "calc") still goes through the shell.
-    direct = os.path.isfile(exe_path)
+    path = exe_path.strip().strip('"')  # a path with spaces is often written in quotes
+    if os.path.isfile(path):
+        if path.lower().endswith((".exe", ".com")):
+            # Started directly: cmd would strip the quotes round a path with "(" or "&".
+            subprocess.Popen(
+                [path],
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+            )
+        else:
+            os.startfile(path)  # a shortcut, .url or document: through its file association, as cmd did
+        return True
+    # Not a file: a command with arguments or a shell name such as "calc" still goes through the shell.
     subprocess.Popen(
-        [exe_path] if direct else exe_path,
-        shell=not direct,
+        exe_path,
+        shell=True,
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         close_fds=True,
     )
+    return True
 
 
-def close_app(app_name: str, exe_path: str) -> None:
-    """Close an application gracefully via WM_CLOSE.
+def close_app(app_name: str, exe_path: str) -> bool:
+    """Close an application's window via WM_CLOSE. True when the window went away.
 
-    A window that is still there afterwards is usually asking ("Save changes?"), so it is left alone: killing
-    the process would lose unsaved work and every other window of the app. Only a window that does not answer
-    messages at all (hung) is force-killed."""
+    A window that is still visible afterwards is usually asking ("Save changes?"), so it is left alone and the
+    close counts as not done: killing the process would lose unsaved work and every other window of the app.
+    A window that is only hidden (an app that minimises to the tray on close) counts as closed; the app keeps
+    running. Only a window that does not answer messages at all (hung) is force-killed."""
     hwnd = find_window(app_name, exe_path)
     if not hwnd:
         logger.warning("close_app: no window found for '%s'", Text(app_name))
-        return
+        return False
 
     logger.info("Closing '%s' (hwnd=%s) via WM_CLOSE", Text(app_name), hex(hwnd))
     user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
@@ -279,18 +306,15 @@ def close_app(app_name: str, exe_path: str) -> None:
     # Give the app time to close gracefully
     time.sleep(0.5)
 
-    # Check if still alive
-    if user32.IsWindow(hwnd) and not user32.IsHungAppWindow(hwnd):
+    if not user32.IsWindow(hwnd) or not user32.IsWindowVisible(hwnd):
+        return True
+    if not user32.IsHungAppWindow(hwnd):
         logger.info("Window still open after WM_CLOSE (probably asking to save); leaving the app running")
-        return
-    if user32.IsWindow(hwnd):
-        logger.info("Window is not responding, falling back to taskkill")
-        exe_basename = os.path.basename(exe_path) if exe_path else f"{app_name}.exe"
-        subprocess.run(
-            ["taskkill", "/f", "/im", exe_basename],
-            capture_output=True,
-            text=True,
-        )
+        return False
+    logger.info("Window is not responding, falling back to taskkill")
+    exe_basename = os.path.basename(exe_path.strip().strip('"')) if exe_path else f"{app_name}.exe"
+    subprocess.run(["taskkill", "/f", "/im", exe_basename], capture_output=True, text=True)
+    return True
 
 
 def focus_app(app_name: str, exe_path: str | None = None) -> bool:
@@ -302,32 +326,34 @@ def focus_app(app_name: str, exe_path: str | None = None) -> bool:
     return force_foreground(hwnd)
 
 
-def fullscreen_app(app_name: str, exe_path: str | None = None) -> None:
+def fullscreen_app(app_name: str, exe_path: str | None = None) -> bool:
     """Focus the app and send F11 to toggle fullscreen."""
     if not focus_app(app_name, exe_path):
-        return
+        return False
     time.sleep(0.1)
     _press_release_key(VK_F11, SCAN_F11)
     logger.info("Sent F11 to '%s'", Text(app_name))
+    return True
 
 
-def minimize_app(app_name: str, exe_path: str | None = None) -> None:
+def minimize_app(app_name: str, exe_path: str | None = None) -> bool:
     """Minimize an app's window."""
     hwnd = find_window(app_name, exe_path)
     if not hwnd:
         logger.warning("minimize_app: no window found for '%s'", Text(app_name))
-        return
+        return False
     user32.ShowWindow(hwnd, SW_MINIMIZE)
     logger.info("Minimized '%s'", Text(app_name))
+    return True
 
 
-def snap_app(app_name: str, direction: str, exe_path: str | None = None) -> None:
+def snap_app(app_name: str, direction: str, exe_path: str | None = None) -> bool:
     """Snap an app's window left or right (Win+Arrow)."""
     # A Win key-down while the dictation chord's Ctrl or Win is still held would restart a recording and send
     # Ctrl+Win+Arrow (virtual desktop switch) instead of snapping.
     wait_for_physical_release()
     if not focus_app(app_name, exe_path):
-        return
+        return False
     time.sleep(0.1)
 
     vk_arrow = VK_LEFT if direction == "left" else VK_RIGHT
@@ -342,3 +368,4 @@ def snap_app(app_name: str, direction: str, exe_path: str | None = None) -> None
         ]
     )
     logger.info("Snapped '%s' %s", Text(app_name), direction)
+    return True

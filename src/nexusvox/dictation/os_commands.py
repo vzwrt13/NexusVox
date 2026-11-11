@@ -47,17 +47,17 @@ _VERBS: dict[str, str] = {
 _SNAP_SIDES = {"left": "left", "links": "left", "right": "right", "rechts": "right"}
 _FLAG_VERBS = ("flag", "markiere", "markieren")
 
-_TRAILING_PUNCT = r"[\s.!?,;:]*"
+_TRAILING_PUNCT = r"[\s.!?,;:…]*"
 _ALTERNATIVES = "|".join(sorted(map(re.escape, _VERBS), key=len, reverse=True))
 
 _NEXUS_PATTERN = re.compile(
-    rf"^\s*nexus,?\s+(?:(?P<snap>(?:snap|docke)\s+(?P<side>{'|'.join(_SNAP_SIDES)}))|(?P<verb>{_ALTERNATIVES}))"
+    rf"^\s*nexus[,.!:;…]?\s+(?:(?P<snap>(?:snap|docke)\s+(?P<side>{'|'.join(_SNAP_SIDES)}))|(?P<verb>{_ALTERNATIVES}))"
     rf",?\s+(?P<app>.+?){_TRAILING_PUNCT}$",
     re.IGNORECASE,
 )
 
 _NEXUS_FLAG_PATTERN = re.compile(
-    rf"^\s*nexus,?\s+(?:{'|'.join(_FLAG_VERBS)}){_TRAILING_PUNCT}$",
+    rf"^\s*nexus[,.!:;…]?\s+(?:{'|'.join(_FLAG_VERBS)}){_TRAILING_PUNCT}$",
     re.IGNORECASE,
 )
 
@@ -66,6 +66,20 @@ _NEXUS_FLAG_PATTERN = re.compile(
 class NexusCommand:
     action: str  # e.g. "open", "snap left", "flag"
     app_name: str | None  # e.g. "chrome", None for flag
+
+
+_ARTICLES = ("the", "a", "an", "den", "das", "dem", "die", "der", "mein", "meinen")
+_MAX_APP_WORDS = 3  # an app alias is short; a longer rest is a sentence that only starts like a command
+
+
+def _app_name(spoken: str) -> str | None:
+    """The app alias from what followed the verb: lower case, no article, None when it is too long to be one."""
+    words = spoken.lower().strip().rstrip(".!?,;:…").split()
+    if words and words[0] in _ARTICLES:
+        words = words[1:]
+    if not words or len(words) > _MAX_APP_WORDS:
+        return None
+    return " ".join(words)
 
 
 def parse_nexus_command(text: str) -> NexusCommand | None:
@@ -83,12 +97,17 @@ def parse_nexus_command(text: str) -> NexusCommand | None:
         action = f"snap {_SNAP_SIDES[m.group('side').lower()]}"
     else:
         action = _VERBS[m.group("verb").lower()]
-    app_name = m.group("app").lower().strip()
+    app_name = _app_name(m.group("app"))
+    if not app_name:
+        return None
     return NexusCommand(action=action, app_name=app_name)
 
 
 def execute_nexus_command(command: NexusCommand, config: OSCommandsConfig) -> bool:
-    """Execute a window-management nexus command. Returns True if executed, False if app not found."""
+    """Execute a window-management nexus command.
+
+    Returns False when the app is not registered or the action did nothing (no window found, the app refused to
+    close, the launch failed), so the caller can play the error cue."""
     from ..system import window_manager
 
     if command.app_name is None:
@@ -101,21 +120,29 @@ def execute_nexus_command(command: NexusCommand, config: OSCommandsConfig) -> bo
         return False
 
     logger.info("Nexus command: %s %s (exe=%s)", command.action, Text(command.app_name), exe_path)
+    try:
+        return _run_window_action(window_manager, command, exe_path)
+    except OSError as exc:
+        logger.warning("Nexus command: %s %s failed (%s)", command.action, Text(command.app_name), exc)
+        return False
 
+
+def _run_window_action(window_manager, command: NexusCommand, exe_path: str) -> bool:
     match command.action:
         case "open":
-            window_manager.open_app(exe_path)
+            done = window_manager.open_app(exe_path)
         case "close":
-            window_manager.close_app(command.app_name, exe_path)
+            done = window_manager.close_app(command.app_name, exe_path)
         case "focus":
-            window_manager.focus_app(command.app_name, exe_path)
+            done = window_manager.focus_app(command.app_name, exe_path)
         case "fullscreen":
-            window_manager.fullscreen_app(command.app_name, exe_path)
+            done = window_manager.fullscreen_app(command.app_name, exe_path)
         case "minimize":
-            window_manager.minimize_app(command.app_name, exe_path)
+            done = window_manager.minimize_app(command.app_name, exe_path)
         case "snap left":
-            window_manager.snap_app(command.app_name, "left", exe_path)
+            done = window_manager.snap_app(command.app_name, "left", exe_path)
         case "snap right":
-            window_manager.snap_app(command.app_name, "right", exe_path)
-
-    return True
+            done = window_manager.snap_app(command.app_name, "right", exe_path)
+        case _:
+            done = False
+    return bool(done)

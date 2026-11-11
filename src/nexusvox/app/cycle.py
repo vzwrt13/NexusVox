@@ -319,8 +319,6 @@ class TranscriptionCycle:
             if not raw_text:
                 logger.info("Empty transcription, nothing to inject")
                 return
-            loop = asyncio.get_running_loop()
-
             self._hook_budget_s = HOOK_TIMEOUT_S
             # A phone recording only wants its text back, never a PC action.
             if not remote:

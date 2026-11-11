@@ -423,6 +423,11 @@ class MeetingRecorder:
     def recording(self) -> bool:
         return bool(self._tracks)
 
+    @property
+    def t0(self) -> float:
+        """The clock reading of the recording's zero (taken after the devices were resolved); 0 before `start()`."""
+        return self._t0
+
     def set_tap(self, tap: Callable[[str, AudioFormat, bytes], None] | None) -> None:
         """Hand every block of every track to `tap(track, format, data)` as well (the live transcript). Set before
         `start()`; it runs on the audio thread and must not block."""

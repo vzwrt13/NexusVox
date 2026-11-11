@@ -13,12 +13,10 @@ filter, so the microphone may repeat what the speakers play.
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import queue
 import threading
 import time
-import wave
 from collections.abc import Callable
 
 import numpy as np
@@ -26,7 +24,7 @@ import numpy as np
 from ..config import DEFAULT_OWN_VOICE_LABEL
 from ..transcription.transcriber import BaseTranscriber
 from .recorder import AudioFormat
-from .transcribe import _resample, _wav_bytes, block_power, downmix
+from .transcribe import block_power, downmix, resample
 
 logger = logging.getLogger("nexusvox.meeting_live")
 
@@ -91,16 +89,17 @@ class WindowTranscriber:
         self._transcriber: BaseTranscriber | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
-    def __call__(self, wav: bytes) -> str:
+    def __call__(self, pcm: bytes) -> str:
+        # The transcriber first: when `make` raises (the server is not ready yet) nothing is half set up, and the
+        # next window tries again.
+        if self._transcriber is None:
+            self._transcriber = self._make()
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
-            self._transcriber = self._make()
-        return self._loop.run_until_complete(self._one(wav))
+        return self._loop.run_until_complete(self._one(pcm))
 
-    async def _one(self, wav: bytes) -> str:
+    async def _one(self, pcm: bytes) -> str:
         assert self._transcriber is not None
-        with wave.open(io.BytesIO(wav), "rb") as wf:
-            pcm = wf.readframes(wf.getnframes())
         await self._transcriber.connect()
         for offset in range(0, len(pcm), _SEND_CHUNK_BYTES):
             await self._transcriber.send_audio_chunk(pcm[offset : offset + _SEND_CHUNK_BYTES])
@@ -110,20 +109,22 @@ class WindowTranscriber:
         return result.text
 
     def close(self) -> None:
-        if self._loop is None:
+        loop, transcriber = self._loop, self._transcriber
+        self._loop = self._transcriber = None
+        if loop is None:
             return
         try:
-            if self._transcriber is not None:
-                self._loop.run_until_complete(self._transcriber.disconnect())
+            if transcriber is not None:
+                loop.run_until_complete(transcriber.disconnect())
         finally:
-            self._loop.close()
-            self._loop = self._transcriber = None
+            loop.close()
 
 
 class LiveTranscriber:
     """Collects both tracks and transcribes them window by window on one worker thread.
 
-    `transcribe(wav_bytes)` is blocking and returns the text of 16 kHz mono PCM16 WAV bytes; it may raise.
+    `transcribe(pcm)` is blocking and returns the text of 16 kHz mono PCM16 bytes (raw samples, no WAV header); it
+    may raise.
     """
 
     def __init__(
@@ -140,14 +141,17 @@ class LiveTranscriber:
         self._window_s = window_s
         # Unbounded on purpose (`put` never blocks the audio thread): the worker drains it before every window, so it
         # holds at most the audio of one transcription call, and the backlog limit is applied on the drained audio.
-        self._queue: queue.SimpleQueue[tuple[str, AudioFormat, bytes, float]] = queue.SimpleQueue()
+        self._queue: queue.SimpleQueue[tuple[str, AudioFormat, bytes, float]] = queue.SimpleQueue()  # raw clock
         self._pause: Callable[[], bool] = lambda: False
         self._pending: dict[str, _Pending] = {}
         self._segments: list[dict] = []
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="meeting-live", daemon=True)
-        self._t0 = clock()  # the meeting's clock zero: the recorder feeds blocks before `start()` runs
+        # The meeting's clock zero. Blocks are stamped with the raw clock when they arrive (the recorder feeds them
+        # before `start()` runs); `start(t0)` sets the recorder's own zero, which is taken after it resolved the
+        # devices, so live timestamps line up with mic.wav and system.wav.
+        self._t0 = clock()
         self._busy_s = 0.0
         self._windows = 0
         self._skipped_s = 0.0
@@ -157,7 +161,11 @@ class LiveTranscriber:
     def active(self) -> bool:
         return self._thread.is_alive()
 
-    def start(self) -> None:
+    def start(self, t0: float | None = None) -> None:
+        """Start the worker. `t0` is the recording's clock zero (on this transcriber's clock); omitted, it is the
+        moment the transcriber was created."""
+        if t0 is not None:
+            self._t0 = t0
         self._thread.start()
 
     def pause_while(self, paused: Callable[[], bool]) -> None:
@@ -173,7 +181,7 @@ class LiveTranscriber:
     def feed(self, name: str, fmt: AudioFormat, data: bytes) -> None:
         """Audio-thread entry: never blocks."""
         if not self._stop.is_set():
-            self._queue.put((name, fmt, data, self._clock() - self._t0))
+            self._queue.put((name, fmt, data, self._clock()))
 
     def segments_since(self, after: int = 0) -> list[dict]:
         with self._lock:
@@ -198,9 +206,9 @@ class LiveTranscriber:
         """Move the fed blocks into the per-track pending audio, then drop what a track is too far behind with."""
         try:
             while True:
-                name, fmt, data, end_s = self._queue.get_nowait()
+                name, fmt, data, arrived = self._queue.get_nowait()
                 pending = self._pending.setdefault(name, _Pending(fmt.sample_rate))
-                pending.add(downmix(data, fmt.channels), end_s)
+                pending.add(downmix(data, fmt.channels), arrived - self._t0)
         except queue.Empty:
             pass
         for pending in self._pending.values():
@@ -244,13 +252,28 @@ class LiveTranscriber:
                 at_s = pending.at_s
                 window = pending.take(self._cut(pending))
                 self._transcribe_window(name, window, pending.rate, at_s)
+        except Exception as exc:
+            # Stopping makes `feed` drop its blocks: a dead worker must not leave the queue growing for the meeting.
+            logger.exception("The live transcript worker stopped")
+            with self._lock:
+                self._error = f"The live transcript stopped: {exc}"
+            self._stop.set()
         finally:
+            self._discard_queued()
             close = getattr(self._transcribe, "close", None)
             if close is not None:
                 try:
                     close()
                 except Exception:
                     logger.exception("Closing the live transcriber failed")
+
+    def _discard_queued(self) -> None:
+        try:
+            while True:
+                self._queue.get_nowait()
+        except queue.Empty:
+            pass
+        self._pending.clear()
 
     def _transcribe_window(self, name: str, window: np.ndarray, rate: int, at_s: float) -> None:
         block = max(1, int(BLOCK_S * rate))
@@ -259,7 +282,7 @@ class LiveTranscriber:
             return
         started = self._clock()
         try:
-            text = self._transcribe(_wav_bytes(_resample(window, rate))).strip()
+            text = self._transcribe(resample(window, rate).tobytes()).strip()
             error = None
         except Exception as exc:  # a failed window is lost, the next one may work
             logger.warning("Live transcription of a %s window failed: %s", name, exc)

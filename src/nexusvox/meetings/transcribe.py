@@ -30,7 +30,7 @@ import numpy as np
 from ..config import DEFAULT_OWN_VOICE_LABEL
 from ..transcription.diarization import format_transcript
 from ..transcription.file_transcribe import MAX_CHUNK_MS
-from ..transcription.transcriber import Word
+from ..transcription.transcriber import Word, pcm16_to_wav_bytes
 from .recorder import META_FILENAME, read_meeting_meta
 
 logger = logging.getLogger("nexusvox.meeting_transcribe")
@@ -178,6 +178,20 @@ def _find_header_fix(f) -> tuple[int, int, int] | None:
     raise ValueError("no data chunk")
 
 
+def _refuse_if_recording(path: Path, *, stale_after_s: float = STALE_AFTER_S) -> None:
+    """Raise when a track of a meeting without an end was written to a moment ago.
+
+    The recorder's WAV writer keeps the header consistent while it records, so the header cannot tell a running
+    meeting from a killed one: only the file's age can. A missing file is left to the caller.
+    """
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return
+    if age < stale_after_s:
+        raise ValueError(f"{path.name} was written to a moment ago; the meeting may still be recording")
+
+
 def _parse_dictations(raw) -> list[tuple[float, float]]:
     """The `dictations` list of `meeting.json` as sorted (start, end) pairs; entries that are not usable are skipped."""
     ranges: list[tuple[float, float]] = []
@@ -221,6 +235,8 @@ def load_meeting(folder: str | Path) -> Meeting:
             if 0 <= latency <= MAX_LATENCY_S:
                 meeting.latency[name] = float(latency)
         try:
+            if meeting.interrupted:
+                _refuse_if_recording(path)
             if repair_wav_header(path):
                 meeting.notes.append(f"The {label} track's header was repaired from the file size.")
             with wave.open(str(path), "rb") as wf:
@@ -235,18 +251,6 @@ def load_meeting(folder: str | Path) -> Meeting:
 
 
 # ---- Audio ------------------------------------------------------------------
-
-
-def _wav_bytes(pcm: np.ndarray) -> bytes:
-    import io
-
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(TARGET_RATE)
-        wf.writeframes(pcm.tobytes())
-    return buf.getvalue()
 
 
 def downmix(raw: bytes, channels: int) -> np.ndarray:
@@ -275,10 +279,10 @@ def iter_track_chunks(track: MeetingTrack) -> Iterator[np.ndarray]:
     window = track.sample_rate * (MAX_CHUNK_MS // 1000)
     with wave.open(str(track.path), "rb") as wf:
         while raw := wf.readframes(window):
-            yield _resample(downmix(raw, track.channels), track.sample_rate)
+            yield resample(downmix(raw, track.channels), track.sample_rate)
 
 
-def _resample(samples: np.ndarray, rate: int) -> np.ndarray:
+def resample(samples: np.ndarray, rate: int) -> np.ndarray:
     if len(samples) == 0:
         return np.zeros(0, dtype=np.int16)
     if rate != TARGET_RATE:
@@ -302,7 +306,7 @@ def convert_track(track: MeetingTrack, out_path: Path, levels: list[np.ndarray] 
         wf.setsampwidth(2)
         wf.setframerate(TARGET_RATE)
         for array in iter_track_chunks(track):
-            chunks.append(_wav_bytes(array))
+            chunks.append(pcm16_to_wav_bytes(array.tobytes(), TARGET_RATE))
             wf.writeframes(array.tobytes())
             if levels is not None:
                 levels.append(loudness_steps(array))
@@ -314,15 +318,6 @@ def _read_windows(path: Path) -> Iterator[np.ndarray]:
     with wave.open(str(path), "rb") as wf:
         while raw := wf.readframes(window):
             yield np.frombuffer(raw, dtype="<i2")
-
-
-def speech_rms(chunks: Iterable[np.ndarray]) -> float:
-    """RMS of the track's speech: the 50 ms blocks within 20 dB of its loud blocks and above the noise floor.
-
-    Silence and room noise between sentences would otherwise pull the level down and make a quiet,
-    mostly idle track look quieter than it sounds when someone talks. 0 when nothing is audible.
-    """
-    return _analyse(chunks)[0]
 
 
 def _analyse(chunks: Iterable[np.ndarray]) -> tuple[float, int]:
@@ -348,11 +343,6 @@ def _gain_for(level: float) -> float:
     return float(min(max(TARGET_RMS / level, MIN_GAIN), MAX_GAIN))
 
 
-def balance_gain(chunks: Iterable[np.ndarray]) -> float:
-    """The factor that brings the track's speech to `TARGET_RMS`, capped so a near-silent track stays quiet."""
-    return _gain_for(speech_rms(chunks))
-
-
 def _shifted(path: Path, frames: int) -> Iterator[np.ndarray]:
     """`_read_windows(path)` behind `frames` of leading silence. The windows keep their size, so the mix adds up the
     same stretch of time from every track."""
@@ -373,9 +363,9 @@ def _shifted(path: Path, frames: int) -> Iterator[np.ndarray]:
 def mix_tracks(paths: list[Path], out_path: Path, offsets: list[float] | None = None) -> float:
     """Mix 16 kHz mono WAV tracks into one mono WAV at `out_path`; returns its length in seconds.
 
-    Each track is first brought to the same speech level (`balance_gain`), so a loud system track cannot
-    drown the microphone. The sum is scaled so that even coinciding peaks stay under `PEAK_LIMIT`: the bound
-    is the sum of the tracks' gained peaks, known from the analysis pass, so the mix itself is a single pass.
+    Each track is first brought to the same speech level (`_gain_for` of its `_analyse` level), so a loud system
+    track cannot drown the microphone. The sum is scaled so that even coinciding peaks stay under `PEAK_LIMIT`:
+    the bound is the sum of the tracks' gained peaks, known from the analysis pass, so the mix itself is a single pass.
     The tracks start together, each delayed by its entry in `offsets` (seconds, 0 or more: the shift the
     transcript gave that track's words); the shorter one is padded with silence. The inputs are not changed.
     The mix is written to a temporary file and moved into place, so a failure leaves no partial `out_path`.
@@ -581,14 +571,11 @@ def merge_words(
     timing noise cannot split a turn change between them.
     """
     mic_shift, system_shift = track_shifts(system_offset)
-    others = sorted(
-        (
-            Word(w.word, w.start + system_shift, w.end + system_shift, SPEAKER_FIRST_SYSTEM - 1 + (w.speaker or 1))
-            for w in others
-        ),
-        key=lambda w: w.start,
-    )
-    me = sorted((Word(w.word, w.start + mic_shift, w.end + mic_shift) for w in me), key=lambda w: w.start)
+    others = [
+        Word(w.word, w.start + system_shift, w.end + system_shift, SPEAKER_FIRST_SYSTEM - 1 + (w.speaker or 1))
+        for w in others
+    ]
+    me = [Word(w.word, w.start + mic_shift, w.end + mic_shift) for w in me]
     me = drop_echo(me, others)
     if dictations:
         # After the echo filter: taking dictated words out first could join two short echo runs into one.

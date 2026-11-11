@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import threading
 import time
 import wave
@@ -43,10 +42,8 @@ def _live(transcribe, window_s=1.0):
 def test_each_track_is_sent_in_windows_and_labelled_with_speaker_numbers():
     sent: list[float] = []
 
-    def transcribe(wav: bytes) -> str:
-        with wave.open(io.BytesIO(wav)) as w:
-            assert (w.getframerate(), w.getnchannels()) == (16_000, 1)
-            sent.append(w.getnframes() / 16_000)
+    def transcribe(pcm: bytes) -> str:
+        sent.append(len(pcm) / 2 / 16_000)  # raw 16 kHz mono PCM16, no WAV header
         return f"window {len(sent)}"
 
     live = _live(transcribe)
@@ -325,25 +322,63 @@ class _Transcriber:
 
 def test_window_transcriber_reuses_one_transcriber_and_loop_and_closes_them():
     from nexusvox.meetings.live import WindowTranscriber
-    from nexusvox.meetings.transcribe import _wav_bytes
 
     made = []
     t = _Transcriber()
     wt = WindowTranscriber(lambda: made.append(1) or t)
-    wav = _wav_bytes(np.zeros(1600, dtype=np.int16))
+    wav = bytes(3200)
     assert wt(wav) == "hi" and wt(wav) == "hi"
     assert len(made) == 1 and t.connects == 2 and len(t.loops) == 1
     wt.close()
     assert t.disconnects == 1
 
 
+def test_a_failed_transcriber_start_is_retried_on_the_next_window():
+    from nexusvox.meetings.live import WindowTranscriber
+
+    attempts = []
+
+    def make():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise ConnectionError("server not ready")
+        return _Transcriber()
+
+    wt = WindowTranscriber(make)
+    with pytest.raises(ConnectionError):
+        wt(bytes(3200))
+    assert wt(bytes(3200)) == "hi"  # no assert on a missing transcriber: the next window starts it again
+    wt.close()
+    assert len(attempts) == 2
+
+
+def test_live_times_follow_the_recorders_clock_zero_not_the_creation_time():
+    now = [100.0]
+    live = LiveTranscriber(lambda pcm: "hi", clock=lambda: now[0], window_s=1.0)
+    now[0] = 102.7  # the first 1.2 s block arrives; the recorder took its zero at 101.5 (after resolving devices)
+    live.feed("mic", AudioFormat(RATE, 1), _tone(1.2))
+    live.start(t0=101.5)
+    assert _wait(lambda: live.segments_since())
+    live.stop()
+    assert live.segments_since()[0]["at_s"] == 0  # from the creation time (100.0) it would be 1 s late
+
+
+def test_a_worker_that_dies_stops_the_queue_from_growing():
+    live = LiveTranscriber(lambda pcm: "x", window_s=1.0)
+    live._ready = lambda: (_ for _ in ()).throw(RuntimeError("boom"))  # an error outside the per-window try
+    live.start()
+    assert _wait(lambda: not live.active)
+    assert "boom" in live.status()["error"]
+    live.feed("mic", AudioFormat(RATE, 1), _tone(0.5))
+    assert live._queue.empty()  # `feed` stopped queueing: memory stays flat for the rest of the meeting
+
+
 def test_a_window_the_server_did_not_finish_is_an_error_not_a_silent_success():
     from nexusvox.meetings.live import WindowTranscriber
-    from nexusvox.meetings.transcribe import _wav_bytes
 
     wt = WindowTranscriber(lambda: _Transcriber(done=False, text=""))
     with pytest.raises(TimeoutError):
-        wt(_wav_bytes(np.zeros(1600, dtype=np.int16)))
+        wt(bytes(3200))
     wt.close()
 
     live = _live(wt_raising := (lambda wav: (_ for _ in ()).throw(TimeoutError("slow"))))

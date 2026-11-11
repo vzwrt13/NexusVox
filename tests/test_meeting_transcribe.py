@@ -23,7 +23,8 @@ from nexusvox.meetings.transcribe import (
     TARGET_RMS,
     TURN_SLACK_S,
     MeetingTrack,
-    balance_gain,
+    _analyse,
+    _gain_for,
     convert_track,
     drop_dictation,
     drop_echo,
@@ -35,7 +36,6 @@ from nexusvox.meetings.transcribe import (
     merge_words,
     mix_tracks,
     repair_wav_header,
-    speech_rms,
     track_offset,
     track_shifts,
 )
@@ -54,6 +54,14 @@ def write_wav(path: Path, samples: np.ndarray, rate: int = 16_000, channels: int
 def tone(seconds: float, amplitude: float, rate: int = 16_000) -> np.ndarray:
     t = np.arange(int(seconds * rate)) / rate
     return (amplitude * np.sin(2 * np.pi * 220 * t)).astype(np.int16)
+
+
+def speech_rms(chunks) -> float:
+    return _analyse(chunks)[0]
+
+
+def balance_gain(chunks) -> float:
+    return _gain_for(speech_rms(chunks))
 
 
 def zero_header(path: Path, *, age_s: float = 3600) -> None:
@@ -688,6 +696,7 @@ def test_transcribe_meeting_stores_one_me_others_transcript_and_a_mix(meeting_ap
     folder = tmp_path / "meeting-20261026-100000"
     write_meeting(folder, tone(5, 300), tone(5, 12_000))
     zero_header(folder / "mic.wav")  # killed before the header was written
+    zero_header(folder / "system.wav")  # ... long ago: a fresh file would be a running recording
     meta = json.loads((folder / "meeting.json").read_text())
     meta["ended_at"] = None
     (folder / "meeting.json").write_text(json.dumps(meta))
@@ -1233,3 +1242,33 @@ def test_a_skipped_speaker_detection_says_that_everyone_is_speaker_2(meeting_api
     result = api.transcribe_meeting(folder)
 
     assert any("everyone on it is shown as Speaker 2" in n for n in result["notes"])
+
+
+def test_meeting_without_an_end_is_refused_while_its_header_is_consistent(tmp_path):
+    # `wave` keeps the header right while recording, so only the file's age can tell a running meeting.
+    folder = tmp_path / "live"
+    write_meeting(folder, tone(1, 1000), tone(1, 1000), ended=False)
+    before = [(folder / n).read_bytes() for n in ("mic.wav", "system.wav")]
+
+    with pytest.raises(ValueError, match="still be recording"):
+        load_meeting(folder)
+
+    assert [(folder / n).read_bytes() for n in ("mic.wav", "system.wav")] == before
+
+
+def test_interrupted_meeting_with_old_files_is_recovered(tmp_path):
+    folder = tmp_path / "dead"
+    write_meeting(folder, tone(1, 1000), tone(1, 1000), ended=False)
+    old = time.time() - 3600
+    for name in ("mic.wav", "system.wav"):
+        os.utime(folder / name, (old, old))
+
+    meeting = load_meeting(folder)
+
+    assert meeting.interrupted and set(meeting.tracks) == {"mic", "system"}
+
+
+def test_a_track_keeps_the_engines_word_order_even_when_starts_are_not_monotonic():
+    me = [Word("one", 1.0, 1.2), Word("two", 0.9, 1.1), Word("three", 1.3, 1.5)]
+
+    assert [w.word for w in merge_words(me, [])] == ["one", "two", "three"]

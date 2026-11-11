@@ -8,6 +8,7 @@ import unicodedata
 from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, func, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from ..config import DatabaseConfig
@@ -29,6 +30,12 @@ if TYPE_CHECKING:
     from ..transcription.transcriber import Word
 
 logger = logging.getLogger("nexusvox.db")
+
+
+def _first_matching(rows, wrong: str):
+    """The first row whose ``wrong`` equals the phrase ignoring case (Python folds umlauts, SQLite lower() does not)."""
+    key = wrong.casefold()
+    return next((r for r in rows if r.wrong.casefold() == key), None)
 
 
 def _word_json(word: Word) -> dict:
@@ -84,8 +91,13 @@ class Database:
                 try:
                     conn.execute(text(sql))
                     conn.commit()
+                except OperationalError as exc:
+                    conn.rollback()
+                    if "duplicate column" not in str(exc).lower():
+                        logger.warning("Schema migration failed (%s): %s", sql, exc)
                 except Exception:
                     conn.rollback()
+                    logger.exception("Schema migration failed: %s", sql)
 
     def save_transcription(
         self,
@@ -253,13 +265,16 @@ class Database:
         if not wrong or not right:
             return None
         with self._session_factory() as session:
-            row = (
-                session.query(DictionaryEntryRow).filter(func.lower(DictionaryEntryRow.wrong) == wrong.lower()).first()
-            )
-            if row is None:
+            key = wrong.casefold()
+            same = [r for r in session.query(DictionaryEntryRow).all() if r.wrong.casefold() == key]
+            if not same:
                 row = DictionaryEntryRow(wrong=wrong, right=right)
                 session.add(row)
             else:
+                row = same[0]
+                for duplicate in same[1:]:  # case variants stored before matching folded umlauts
+                    session.delete(duplicate)
+                session.flush()  # free the unique `wrong` before the survivor takes the new spelling
                 row.wrong = wrong
                 row.right = right
             session.commit()
@@ -280,25 +295,19 @@ class Database:
         """Queue suggestions, skipping ones already pending or in the dictionary. Returns how many were added."""
         added = 0
         with self._session_factory() as session:
+            entry_keys = {r.wrong.casefold() for r in session.query(DictionaryEntryRow).all()}
+            pending = {(r.wrong.casefold(), r.right) for r in session.query(DictionarySuggestionRow).all()}
             for entry in entries:
                 wrong = " ".join(entry.wrong.split())
                 right = entry.right.strip()
                 if not wrong or not right:
                     continue
-                known = (
-                    session.query(DictionaryEntryRow)
-                    .filter(func.lower(DictionaryEntryRow.wrong) == wrong.lower())
-                    .first()
-                    or session.query(DictionarySuggestionRow)
-                    .filter(
-                        func.lower(DictionarySuggestionRow.wrong) == wrong.lower(),
-                        DictionarySuggestionRow.right == right,
-                    )
-                    .first()
-                )
-                if known is None:
-                    session.add(DictionarySuggestionRow(wrong=wrong, right=right))
-                    added += 1
+                key = wrong.casefold()
+                if key in entry_keys or (key, right) in pending:
+                    continue
+                session.add(DictionarySuggestionRow(wrong=wrong, right=right))
+                pending.add((key, right))
+                added += 1
             session.commit()
         return added
 
@@ -322,9 +331,9 @@ class Database:
         entry = self.add_dictionary_entry(wrong, right)
         if entry is not None:
             with self._session_factory() as session:
-                session.query(DictionarySuggestionRow).filter(
-                    func.lower(DictionarySuggestionRow.wrong) == wrong.lower()
-                ).delete(synchronize_session=False)
+                for stale in session.query(DictionarySuggestionRow).all():
+                    if stale.wrong.casefold() == wrong.casefold():
+                        session.delete(stale)
                 session.add(LearnEventRow(outcome=ACCEPTED_EVENT))
                 session.commit()
         return entry
@@ -337,7 +346,8 @@ class Database:
             return
         with self._session_factory() as session:
             # SQLite's `localtime` converts the naive UTC clock with the offset of that date.
-            day = session.query(func.strftime("%Y-%m-%d", utc_now(), "localtime")).scalar()
+            now = utc_now().isoformat(sep=" ")
+            day = session.query(func.strftime("%Y-%m-%d", now, "localtime")).scalar()
             for entry, count in hits.items():
                 key = usage_key(entry.wrong)
                 row = session.query(DictionaryUsageRow).filter_by(wrong=key, day=day).first()

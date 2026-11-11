@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import time
 
 from ..config import (
@@ -16,9 +15,7 @@ from ..config import (
 )
 from ..system.paths import models_dir
 from ..transcription.diarization import speaker_detection_models
-from .api_base import DashboardState
-
-logger = logging.getLogger(__name__)
+from .api_base import DashboardState, logger
 
 # How long a model's downloaded-or-not answer is reused (seconds).
 DOWNLOAD_STATE_TTL_S = 10.0

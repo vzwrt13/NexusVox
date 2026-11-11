@@ -84,7 +84,12 @@ def run_recordings(body: str, prelude: str = ""):
     source = dashboard_source()
     pending = _section(source, "// ── Pending and failed states", "// ── end of pending and failed states")
     recordings = (STATIC / "dashboard-recordings.js").read_text(encoding="utf-8")
-    parts = [prelude, FAKE_DOM, RECORDINGS_STUBS, pending, recordings, f"const ROWS = {json.dumps(ROWS)};", body]
+    core = _section(
+        (STATIC / "dashboard-core.js").read_text(encoding="utf-8"),
+        "function parseServerTime",
+        "function formatDuration",
+    )
+    parts = [prelude, FAKE_DOM, RECORDINGS_STUBS, pending, core, recordings, f"const ROWS = {json.dumps(ROWS)};", body]
     script = "\n".join(parts)
     out = _node(script)
     assert out.returncode == 0, out.stderr

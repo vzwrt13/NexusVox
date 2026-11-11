@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify
 
-from .routes_base import _json_object, _switch
+from .routes_base import _json_object, _switch, _typed_list, _typed_map
 
 if TYPE_CHECKING:
     from .api import DashboardAPI
@@ -38,7 +38,7 @@ def register(app: Flask, api: DashboardAPI) -> None:
     @app.route("/api/voice-commands/symbols", methods=["POST"])
     def set_voice_commands_symbols():
         data = _json_object()
-        return jsonify(api.set_voice_commands_symbols(data.get("symbols", [])))
+        return jsonify(api.set_voice_commands_symbols(_typed_list(data, "symbols", str)))
 
     @app.route("/api/voice-commands/bypass-symbols", methods=["POST"])
     def set_voice_commands_bypass_symbols():
@@ -48,7 +48,7 @@ def register(app: Flask, api: DashboardAPI) -> None:
     @app.route("/api/voice-commands/structural", methods=["POST"])
     def set_voice_commands_structural():
         data = _json_object()
-        return jsonify(api.set_voice_commands_structural(data.get("structural", [])))
+        return jsonify(api.set_voice_commands_structural(_typed_list(data, "structural", str)))
 
     @app.route("/api/voice-commands/bypass-structural", methods=["POST"])
     def set_voice_commands_bypass_structural():
@@ -71,4 +71,4 @@ def register(app: Flask, api: DashboardAPI) -> None:
         @app.route("/api/os-commands/apps", methods=["POST"])
         def set_os_commands_apps():
             data = _json_object()
-            return jsonify(api.set_os_commands_apps(data.get("apps", {})))
+            return jsonify(api.set_os_commands_apps(_typed_map(data, "apps", str, str)))

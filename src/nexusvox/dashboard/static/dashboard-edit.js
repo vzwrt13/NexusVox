@@ -13,7 +13,7 @@ async function loadFlaggedTranscriptions() {
   container.innerHTML = data.map((item) => `
     <div class="flagged-card" data-id="${item.id}">
       <div class="flagged-meta">
-        <span>${item.created_at ? new Date(item.created_at).toLocaleString() : ""}</span>
+        <span>${item.created_at ? parseServerTime(item.created_at).toLocaleString() : ""}</span>
         <span class="flagged-lang">${(item.language || "").toUpperCase()}</span>
         ${item.confidence != null ? `<span class="flagged-conf">${(item.confidence * 100).toFixed(1)}%</span>` : ""}
       </div>
@@ -40,11 +40,18 @@ async function saveCorrection(id, btn) {
   btn.disabled = true;
   btn.textContent = "Saving...";
   try {
-    await fetch(`/api/flagged/${id}/correct`, {
+    const res = await fetch(`/api/flagged/${id}/correct`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ corrected_text: text }),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      btn.textContent = "Error";
+      btn.title = data.error || "";
+      btn.disabled = false;
+      return;
+    }
     btn.textContent = "Saved";
     setTimeout(() => { btn.textContent = "Save"; btn.disabled = false; }, 1500);
   } catch {

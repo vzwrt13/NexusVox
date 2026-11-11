@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .app.core import NexusVoxApp
 from .config import load_config
-from .system.logsetup import set_file_log_level, setup_file_logging
+from .system.logsetup import harden_console_streams, set_file_log_level, setup_file_logging
 from .system.paths import apply_models_dir, default_config_path, ensure_dirs
 from .system.single_instance import SingleInstance, show_message
 
@@ -79,6 +79,7 @@ def main() -> None:
         # Logging first, so what `load_config` has to say (a config moved aside, a model that is gone) reaches the
         # file too: the windowed app has no console. The level and the full-text switch are in the config, which is
         # not read yet; they are applied right after it.
+        harden_console_streams()
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

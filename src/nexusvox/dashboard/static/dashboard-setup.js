@@ -130,6 +130,7 @@ for (const radio of setupEl.querySelectorAll('input[name="setup-mode"]')) {
     try {
       const s = await postSetting("/api/settings/hotkey-mode", { mode: radio.value }).then((r) => r.json());
       // The Settings page shows the same choice.
+      rememberSettings(s);
       hotkeyModeSelect.value = s.hotkey_mode;
       renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers, s.hotkey_key);
       renderSetupHotkey(s);

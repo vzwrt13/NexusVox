@@ -52,7 +52,7 @@ class VocabularyMixin(DashboardState):
         """Add a preset, or change the one with ``preset_id``. Read on every polish, so this is live."""
         if self._db is None:
             return {"ok": False, "error": "DB not available"}
-        saved = self._db.save_polish_preset(preset_id, PolishPreset(str(name), str(instruction), bool(is_default)))
+        saved = self._db.save_polish_preset(preset_id, PolishPreset(name, instruction, is_default))
         if saved is None:
             return {"ok": False, "error": "A unique name of up to 5 words and an instruction are required"}
         return {"ok": True, "preset": saved}

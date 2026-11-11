@@ -189,6 +189,8 @@ function activateTab(name, { keepScroll = false } = {}) {
   panel.classList.add("active");
   if (!keepScroll) window.scrollTo(0, 0);
 
+  if (name !== "review") stopReviewAudio();
+
   if (name === "home") openHomeTab();
   if (name === "analytics") openAnalyticsTab();
   if (name === "edit") loadFlaggedTranscriptions();
@@ -357,6 +359,12 @@ function escapeHtml(s) {
   div.textContent = s;
   // innerHTML leaves quotes alone, and callers put the result in quoted attributes too.
   return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// The server stores `created_at` as naive UTC ("2026-11-06T14:30:00"); new Date() would read that as local time.
+function parseServerTime(value) {
+  const text = String(value);
+  return new Date(/(Z|[+-]\d\d:?\d\d)$/i.test(text) ? text : text + "Z");
 }
 
 function formatDuration(ms) {

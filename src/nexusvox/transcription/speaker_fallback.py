@@ -19,7 +19,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
-from ..config import DEFAULT_MODEL, MODEL_REGISTRY, InferenceConfig, cuda_available
+from ..config import DEFAULT_MODEL, MODEL_REGISTRY, InferenceConfig, cuda_available, resolve_device
 from ..system import docker_ctl
 from ..transcribers.auto_parakeet import health_url_for, probe_server, warm_up_server
 from .file_transcribe import NO_SPEAKER_LABELS
@@ -43,6 +43,20 @@ class SpeakerJob:
 def supports_speaker_detection(config: InferenceConfig) -> bool:
     """Whether the active model detects speakers by itself (registry flag `diarization`)."""
     return bool(MODEL_REGISTRY.get(config.model, {}).get("diarization"))
+
+
+def can_use_gpu_server(config: InferenceConfig) -> bool:
+    """Whether `create_transcriber` would put `config` on the GPU server (when it answers): the model's flag, and a
+    device that resolves to CUDA (a CPU-only machine with device "auto" runs Parakeet in-process). Never probes."""
+    return supports_speaker_detection(config) and resolve_device(config.device) == "cuda"
+
+
+def runs_with_speaker_detection(config: InferenceConfig) -> bool:
+    """Whether the engine that will run `config` detects speakers. With device "auto" that is the GPU server only
+    while it answers (blocking probe), else the CPU engine."""
+    if not can_use_gpu_server(config):
+        return False
+    return config.device != "auto" or probe_server(health_url_for(config))
 
 
 def _warm_up(config: InferenceConfig) -> None:
@@ -87,13 +101,14 @@ def speaker_detection_job(
 ) -> Iterator[SpeakerJob]:
     """Settle which model audio that wants speaker detection is transcribed with; blocking.
 
-    Unchanged (the active `config`) when the job does not want speakers or the active model detects them. Else
+    Unchanged (the active `config`) when the job does not want speakers or the engine that will run detects them
+    (Parakeet on the CPU does not, so it takes the container path like Whisper). Else
     Parakeet on its GPU container, when it answers or can be started (stopped again on exit if started here), or
     the unchanged `config` with a notice saying why not. `what` ("meeting", "upload") goes into the notice.
     `active_model()` names the dictation model at exit: when the user switched to Parakeet meanwhile, the
     container is now dictation's server and stays up.
     """
-    if not wanted or supports_speaker_detection(config):
+    if not wanted or runs_with_speaker_detection(config):
         yield SpeakerJob(config)
         return
 
@@ -118,7 +133,11 @@ def speaker_detection_job(
         yield SpeakerJob(gpu, f"This {what} uses Parakeet for speaker detection.", bool(started))
     finally:
         if started:
-            switched = active_model is not None and supports_speaker_detection(replace(config, model=active_model()))
+            # No probe here: the server answers because this job started it. Only a switch of the dictation model
+            # to Parakeet on the GPU makes the container dictation's; dictation that was on Parakeet already (the
+            # server down, device auto) did not want it, so it goes again.
+            now = active_model() if active_model is not None else config.model
+            switched = now != config.model and can_use_gpu_server(replace(config, model=now))
             if switched:
                 logger.info("Dictation switched to Parakeet during the job: its container stays up")
             else:

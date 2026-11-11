@@ -10,7 +10,7 @@ import pytest
 import nexusvox
 
 PACKAGE = Path(nexusvox.__file__).parent
-SUBPACKAGES = ("app", "audio", "dictation", "meetings", "storage", "system", "transcription")
+SUBPACKAGES = ("app", "audio", "dictation", "meetings", "storage", "system", "transcribers", "transcription")
 # The lowest layers: everything may use them, so they use none of the packages built on top of them.
 LOW_LAYERS = ("storage", "system")
 HIGHER_LAYERS = {"app", "audio", "dashboard", "dictation", "meetings", "transcribers", "transcription"}
@@ -104,3 +104,26 @@ def test_a_package_init_is_a_docstring_only(package):
 @pytest.mark.parametrize("module", ["config", "extensions", "llm", "snippets", "file_cleanup"])
 def test_the_paths_nexusvox_pro_imports_stay_real_modules(module):
     assert (PACKAGE / f"{module}.py").is_file()
+
+
+def test_the_console_never_fails_on_a_character_it_cannot_encode():
+    """A cp1252 console used to turn such a log line into a bare `--- Logging error ---`."""
+    import io
+    import logging
+    import sys
+
+    from nexusvox.system.logsetup import harden_console_streams
+
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+    saved = sys.stdout, sys.stderr
+    sys.stdout = sys.stderr = stream
+    try:
+        harden_console_streams()
+        handler = logging.StreamHandler(stream)
+        handler.handleError = lambda record: pytest.fail("the handler failed to emit")
+        handler.emit(logging.makeLogRecord({"msg": "Loading → model 中", "levelno": logging.INFO}))
+        stream.flush()
+    finally:
+        sys.stdout, sys.stderr = saved
+    assert b"Loading" in raw.getvalue()

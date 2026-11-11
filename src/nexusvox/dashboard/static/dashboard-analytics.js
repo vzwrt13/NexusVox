@@ -327,7 +327,11 @@ document.getElementById("btn-clear-dates").addEventListener("click", () => {
 });
 
 // ── Analytics Loading ────────────────────────────────────────────────
+let analyticsLoadSeq = 0;
+let timelineLoadSeq = 0;
+
 async function loadAnalytics() {
+  const seq = ++analyticsLoadSeq;
   const [overview, lang, hours, words, heatmap, models, apps, speed, transcription] = await Promise.all([
     api("/api/overview"),
     api("/api/language-distribution"),
@@ -339,6 +343,7 @@ async function loadAnalytics() {
     api("/api/model-speed"),
     api("/api/transcription-speed"),
   ]);
+  if (seq !== analyticsLoadSeq) return; // a newer load replaced this one
 
   renderOverview(overview);
   renderLanguage(lang);
@@ -353,11 +358,13 @@ async function loadAnalytics() {
 }
 
 async function loadTimeline() {
+  const seq = ++timelineLoadSeq;
   const [timeline, latency, accuracy] = await Promise.all([
     api("/api/transcriptions-over-time?period=" + currentPeriod),
     api("/api/latency-trend?period=" + currentPeriod),
     api("/api/accuracy?period=" + currentPeriod),
   ]);
+  if (seq !== timelineLoadSeq) return; // the period changed meanwhile: a slower answer must not overwrite it
   renderTimeline(withPeriodLabels(timeline));
   renderLatency(withPeriodLabels(latency));
   renderAccuracy(withPeriodLabels(accuracy));

@@ -50,20 +50,23 @@ class El {
   click() { this.dispatch("click"); }
   all() { return this.children.flatMap((c) => [c, ...c.all()]); }
   querySelectorAll(sel) { const direct = sel.startsWith(":scope > "); const s = direct ? sel.slice(9) : sel;
+    const parts = s.trim().split(/\s+/);  // `ancestor descendant`: the last compound inside one matching the first
+    if (parts.length === 2) return this.all().filter((e) => matches(e, parts[1]) && ancestor(e, parts[0]));
     return (direct ? this.children : this.all()).filter((e) => matches(e, s)); }
   querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
 }
+function ancestor(el, sel) { for (let x = el.parent; x; x = x.parent) if (matches(x, sel)) return true; return false; }
 function matches(el, sel) {
-  const m = /^([a-z]*)((?:[.#][\w-]+)*)((?:\[[\w-]+="[^"]*"\])*)$/i.exec(sel.trim());
+  const m = /^([a-z]*)((?:[.#][\w-]+)*)((?:\[[\w-]+(?:="[^"]*")?\])*)$/i.exec(sel.trim());
   if (!m) throw new Error("selector not supported: " + sel);
   if (m[1] && el.tagName !== m[1].toUpperCase()) return false;
   for (const part of m[2].match(/[.#][\w-]+/g) || []) {
     if (part[0] === "." && !el.classList.contains(part.slice(1))) return false;
     if (part[0] === "#" && el.id !== part.slice(1)) return false;
   }
-  for (const [, k, v] of m[3].matchAll(/\[([\w-]+)="([^"]*)"\]/g)) {
+  for (const [, k, v] of m[3].matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)) {
     const have = k.startsWith("data-") ? el.dataset[k.slice(5).replace(/-(\w)/g, (_, c) => c.toUpperCase())] : el.getAttribute(k);
-    if (String(have) !== v) return false;
+    if (v === undefined ? have === undefined || have === null : String(have) !== v) return false;
   }
   return true;
 }

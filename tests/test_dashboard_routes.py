@@ -21,6 +21,6 @@ def test_every_routes_module_puts_its_routes_on_the_app(session_factory):
 def test_a_route_reads_its_json_body_through_the_helper_that_refuses_a_non_object():
     modules = Path(dashboard.__file__).parent.glob("routes_*.py")
 
-    forced = [p.name for p in modules if p.stem != "routes_base" and "get_json(force=True)" in p.read_text("utf-8")]
+    forced = [p.name for p in modules if p.stem != "routes_base" and "get_json(" in p.read_text("utf-8")]
 
     assert forced == []

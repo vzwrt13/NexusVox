@@ -24,7 +24,10 @@ def list_benchmarks(benchmarks_dir: Path) -> list[dict]:
     for path in sorted(benchmarks_dir.glob("*.json")):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            s = data.get("summary", {})
+            s = data.get("summary", {}) if isinstance(data, dict) else None
+            if not isinstance(s, dict) or not isinstance(s.get("lang", ""), str):
+                logger.warning("Skipping benchmark file %s: no usable summary object", path.name)
+                continue
             results.append(
                 {
                     "filename": path.name,
@@ -46,7 +49,7 @@ def list_benchmarks(benchmarks_dir: Path) -> list[dict]:
                     "wer_stddev": s.get("wer_stddev", 0),
                 }
             )
-        except (json.JSONDecodeError, OSError) as exc:
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
             logger.warning("Skipping invalid benchmark file %s: %s", path.name, exc)
 
     return results
@@ -60,7 +63,7 @@ def load_benchmark(benchmarks_dir: Path, filename: str) -> dict | None:
     path = (benchmarks_dir / filename).resolve()
 
     # Ensure the resolved path is still inside benchmarks_dir (path traversal guard).
-    if not str(path).startswith(str(benchmarks_dir.resolve())):
+    if not path.is_relative_to(benchmarks_dir.resolve()):
         return None
 
     if not path.is_file():
@@ -68,7 +71,7 @@ def load_benchmark(benchmarks_dir: Path, filename: str) -> dict | None:
 
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
         logger.warning("Failed to load benchmark %s: %s", filename, exc)
         return None
 
@@ -95,7 +98,9 @@ def compare_benchmarks(benchmarks_dir: Path) -> dict:
         lang = item.get("lang", "")
         target = WER_TARGETS.get(lang)
         item["wer_target"] = target
-        item["passes_target"] = item["wer_mean"] <= target if target is not None else None
+        wer = item["wer_mean"]
+        comparable = target is not None and isinstance(wer, (int, float)) and not isinstance(wer, bool)
+        item["passes_target"] = wer <= target if comparable else None
 
     return {
         "targets": WER_TARGETS,

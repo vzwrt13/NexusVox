@@ -18,25 +18,31 @@ class ReviewMixin(DashboardState):
     def get_flagged_transcriptions(self) -> list[dict]:
         return analytics.get_flagged_transcriptions(self._sf)
 
-    def get_audio_file_path(self, tid: int) -> str | None:
-        """Resolve the absolute path to a transcription's audio file."""
+    def _recording_audio_path(self, tid: int) -> Path | None:
+        """Where a transcription's audio file is meant to be, whether or not it still exists."""
         if self._db is None:
             return None
         from ..storage.models import Transcription
 
         with self._sf() as session:
             row = session.get(Transcription, tid)
-            if row and row.audio_path:
-                return str(self._db_dir() / row.audio_path)
-        return None
+            return self._db_dir() / row.audio_path if row and row.audio_path else None
+
+    def get_audio_file_path(self, tid: int) -> str | None:
+        """Resolve the absolute path to a transcription's audio file, None when it has none or the file is gone."""
+        path = self._recording_audio_path(tid)
+        return str(path) if path is not None and path.is_file() else None
 
     def retry_transcription(self, tid: int) -> dict:
         """Transcribe a recording's stored WAV again with the current model. Saves nothing."""
-        path = self.get_audio_file_path(tid)
-        if path is None:
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
+        stored = self._recording_audio_path(tid)
+        if stored is None:
             return {"ok": False, "error": "No stored audio for this recording - turn on Store Audio Recordings"}
-        if not Path(path).is_file():
+        if not stored.is_file():
             return {"ok": False, "error": "The stored audio file for this recording is missing"}
+        path = str(stored)
         try:
             wav_chunks, _ = convert_to_wav(Path(path).read_bytes(), "recording.wav")
             result = self._transcribe_wav_chunks(wav_chunks)

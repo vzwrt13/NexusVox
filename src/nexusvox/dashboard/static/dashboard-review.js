@@ -7,11 +7,15 @@
 let reviewSessionCount = 0;
 let reviewRemainingOlder = 0;
 let reviewAudio = null;
+let reviewLoadGeneration = 0;
 
 async function loadReviewTranscriptions() {
   const container = document.getElementById("review-list");
+  stopReviewAudio();
   container.innerHTML = "";
+  document.getElementById("review-load-more").disabled = false; // an older, now stale load may have left it off
   reviewSessionCount = 0;
+  reviewLoadGeneration += 1;
   await loadMoreReviewTranscriptions();
 }
 
@@ -114,6 +118,16 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     toggleReviewAudio(card);
   } else if (e.key === "Enter") {
+    // Enter on a button the keyboard focused activates that button; a button focused by a mouse click does not
+    // keep Enter from accepting the card.
+    if (e.target.closest("button") && e.target.matches(":focus-visible")) return;
+    // A typed correction is never discarded: Enter submits it as typed.
+    const typed = card.querySelector(".review-correction").value.trim();
+    if (!card.querySelector(".review-correct-cb").checked && typed) {
+      e.preventDefault();
+      submitReview(card.dataset.id, card.querySelector(".flagged-save-btn"));
+      return;
+    }
     e.preventDefault();
     markReviewCorrect(card);
     submitReview(card.dataset.id, card.querySelector(".flagged-save-btn"));
@@ -126,12 +140,22 @@ document.addEventListener("keydown", (e) => {
 async function loadMoreReviewTranscriptions() {
   const container = document.getElementById("review-list");
   const loadMore = document.getElementById("review-load-more");
+  if (loadMore.disabled) return; // a load is already running (a double click on 'Load more')
+  const generation = reviewLoadGeneration;
   const cards = container.querySelectorAll(".flagged-card[data-id]");
   const lastId = cards.length ? cards[cards.length - 1].dataset.id : null;
   const url = lastId ? `/api/review?before_id=${lastId}` : "/api/review";
 
   loadMore.disabled = true;
-  const { items: data, remaining } = await fetch(url).then((r) => r.json());
+  let reply;
+  try {
+    reply = await fetch(url).then((r) => r.json());
+  } catch (err) {
+    if (generation === reviewLoadGeneration) loadMore.disabled = false;
+    throw err;
+  }
+  if (generation !== reviewLoadGeneration) return; // the tab was reloaded meanwhile: its load owns the list
+  const { items: data, remaining } = reply;
 
   loadMore.hidden = remaining === 0;
   loadMore.disabled = false;
@@ -150,7 +174,7 @@ async function loadMoreReviewTranscriptions() {
     return `
     <div class="flagged-card${isFlagged ? " review-card-flagged" : ""}" data-id="${item.id}">
       <div class="flagged-meta">
-        <span>${item.created_at ? new Date(item.created_at).toLocaleString() : ""}</span>
+        <span>${item.created_at ? parseServerTime(item.created_at).toLocaleString() : ""}</span>
         <span class="flagged-lang">${(item.language || "").toUpperCase()}</span>
         ${item.confidence != null ? `<span class="flagged-conf">${(item.confidence * 100).toFixed(1)}%</span>` : ""}
         <span class="review-duration">${formatDuration(item.duration_ms)}</span>
@@ -232,10 +256,12 @@ async function submitReview(id, btn) {
           await loadMoreReviewTranscriptions();
         }
         updateReviewProgress();
-        activateTopReviewCard(true);
+        // No autoplay once the user has left the tab within the fade.
+        activateTopReviewCard(document.getElementById("tab-review").classList.contains("active"));
       }, 300);
     } else {
       btn.textContent = "Error";
+      btn.title = data.error || "";
       btn.disabled = false;
     }
   } catch {

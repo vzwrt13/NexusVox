@@ -80,6 +80,7 @@ const document = {
   querySelectorAll: (sel) => document.body.querySelectorAll(sel),
   querySelector: (sel) => document.body.querySelector(sel),
   addEventListener: (type, fn) => { (docListeners[type] ||= []).push(fn); },
+  removeEventListener: (type, fn) => { docListeners[type] = (docListeners[type] || []).filter((f) => f !== fn); },
   hidden: false, visibilityState: "visible",
 };
 // The elements index.html gives the scripts under test, all attached to the page.

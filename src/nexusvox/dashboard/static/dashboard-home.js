@@ -197,7 +197,7 @@ document.getElementById("home-record").addEventListener("click", async () => {
 
 document.getElementById("home-upload").addEventListener("click", () => {
   goToTab("recordings"); // opening the tab already refreshes what the dialog shows
-  if (!uploadDialog.open) uploadDialog.showModal();
+  openUploadDialog();
 });
 
 document.querySelectorAll("[data-home-go]").forEach((link) => {

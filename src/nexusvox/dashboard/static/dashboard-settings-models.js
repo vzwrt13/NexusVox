@@ -166,6 +166,9 @@ const llmPullCancel = document.getElementById("llm-pull-cancel");
 const llmPullSelected = document.getElementById("llm-pull-selected");
 let llmSavedModel = "";
 let llmPullTimer = null;
+let llmPullHideTimer = null;
+const llmPullConfirm = document.getElementById("llm-pull-confirm");
+const llmPullDecline = document.getElementById("llm-pull-decline");
 
 // ── LLM card refresh (pure helpers, run under Node in tests) ─────────
 const LLM_REFRESH_MS = 5000;
@@ -413,7 +416,7 @@ function fillLlmSelect(select, groups) {
     }
     for (const o of group.options) {
       const opt = new Option(o.label, o.value);
-      if (o.muted) opt.style.color = "var(--text-muted, gray)";
+      if (o.muted) opt.style.color = "var(--text-faint)";
       if (o.down) setStatus(opt, "down");
       opt.disabled = Boolean(o.disabled);
       parent.append(opt);
@@ -501,7 +504,6 @@ function renderLlmModels(data, rebuildOptions) {
   llmSavedModel = data.selected;
   lastLlmModels = data;
   refreshLlmHints();
-  loadLlmStatus().catch(() => {}); // the hints follow the live status, fetched on its own
   renderLlmServers(data.servers || [], data.ollama || null);
   llmSlowHint.hidden = !data.slow_hint;
   renderLlmRoles(data, rebuildOptions);
@@ -688,22 +690,37 @@ document.addEventListener("visibilitychange", () => {
 async function saveLlmModel(name) {
   const resp = await postSetting("/api/settings/llm-model", { model: name });
   const s = await resp.json();
-  if (s.error) alert(s.error);
+  if (s.error) {
+    showLlmPull(s.error, null, false, "down");
+    hideLlmPullLater();
+  }
   llmSavedModel = s.llm_model;
   await loadLlmModels();
   loadLlmStatus();
 }
 
-function showLlmPull(text, pct, busy) {
+// The pull box is the card's one status line for a download: its progress, its result, a refusal, and the
+// "Download it now?" question (`confirm` shows the two buttons).
+function showLlmPull(text, pct, busy, state, confirm = false) {
   llmPullBox.style.display = "flex";
-  llmPullText.textContent = text;
+  setStatus(llmPullText, state, text);
   llmPullProgress.hidden = pct === null;
   if (pct !== null) llmPullProgress.value = pct;
   llmPullCancel.hidden = !busy;
+  llmPullConfirm.hidden = !confirm;
+  llmPullDecline.hidden = !confirm;
+}
+
+function hideLlmPullLater() {
+  clearTimeout(llmPullHideTimer);
+  llmPullHideTimer = setTimeout(() => {
+    if (!llmPullTimer) llmPullBox.style.display = "none"; // a pull started meanwhile keeps its box
+  }, 5000);
 }
 
 function pollLlmPull() {
   clearInterval(llmPullTimer);
+  clearTimeout(llmPullHideTimer);
   llmPullTimer = setInterval(async () => {
     let p;
     try {
@@ -717,31 +734,45 @@ function pollLlmPull() {
       return;
     }
     clearInterval(llmPullTimer);
+    llmPullTimer = null;
     llmModelSelect.disabled = false;
     if (p.status === "done") {
-      showLlmPull(`${p.model} downloaded.`, null, false);
+      showLlmPull(`${p.model} downloaded.`, null, false, "ok");
       await saveLlmModel(p.model); // selected only now that the pull succeeded
     } else if (p.status === "cancelled") {
       showLlmPull("Download cancelled.", null, false);
       await loadLlmModels();
     } else if (p.status === "error") {
-      showLlmPull(`Download failed: ${p.error || "unknown error"}`, null, false);
+      showLlmPull(`Download failed: ${p.error || "unknown error"}`, null, false, "down");
       await loadLlmModels();
     }
-    setTimeout(() => {
-      if (!llmPullTimer || p.status !== "pulling") llmPullBox.style.display = "none";
-    }, 5000);
+    hideLlmPullLater();
   }, 1000);
 }
 
-// Asks, then downloads `name` through Ollama; the model is selected only after the pull succeeded.
-async function startLlmPull(name, sizeGb) {
+// Asks in the card, then downloads `name` through Ollama; the model is selected only after the pull succeeded.
+let llmPullAsked = null;
+function startLlmPull(name, sizeGb) {
   const size = sizeGb ? ` (${sizeGb} GB)` : "";
-  if (!confirm(`${name} is not installed. Download it now${size} through Ollama?`)) return;
-  const resp = await postSetting("/api/settings/llm-pull", { model: name });
-  const p = await resp.json();
+  llmPullAsked = name;
+  clearTimeout(llmPullHideTimer);
+  showLlmPull(`${name} is not installed. Download it now${size} through Ollama?`, null, false, "warn", true);
+}
+
+async function confirmLlmPull() {
+  const name = llmPullAsked;
+  llmPullAsked = null;
+  if (!name) return;
+  let p;
+  try {
+    const resp = await postSetting("/api/settings/llm-pull", { model: name });
+    p = await resp.json();
+  } catch {
+    showLlmPull("The dashboard could not reach the app. Try again.", null, false, "down");
+    return;
+  }
   if (p.error && p.status !== "pulling") {
-    alert(p.error);
+    showLlmPull(p.error, null, false, "down");
     return;
   }
   llmModelSelect.disabled = true;
@@ -749,6 +780,19 @@ async function startLlmPull(name, sizeGb) {
   showLlmPull(`Downloading ${name}...`, null, true);
   pollLlmPull();
 }
+
+function declineLlmPull() {
+  llmPullAsked = null;
+  llmPullBox.style.display = "none";
+}
+
+// Picking another model drops an open download question and an old result line; a running pull keeps its box.
+function dismissLlmPullBox() {
+  if (llmPullTimer) return;
+  declineLlmPull();
+}
+llmPullConfirm.addEventListener("click", confirmLlmPull);
+llmPullDecline.addEventListener("click", declineLlmPull);
 
 // A model of another saved server: that server and the model become the one in use.
 async function selectServerModel(url, model) {
@@ -761,6 +805,7 @@ async function selectServerModel(url, model) {
 
 llmModelSelect.addEventListener("change", async () => {
   const name = llmModelSelect.value;
+  dismissLlmPullBox();
   const choice = llmServerChoice(name);
   if (choice) {
     llmModelSelect.value = llmSavedModel; // until the switch is saved
@@ -773,7 +818,7 @@ llmModelSelect.addEventListener("change", async () => {
     return;
   }
   llmModelSelect.value = llmSavedModel; // the old model stays selected until the pull succeeded
-  await startLlmPull(name, missing[name]);
+  startLlmPull(name, missing[name]);
 });
 // The saved model itself can be missing (a fresh Ollama): selecting it again fires no change, so it has a button.
 llmPullSelected.addEventListener("click", () => startLlmPull(llmSavedModel, Number(llmPullSelected.dataset.sizeGb) || null));
@@ -799,6 +844,7 @@ async function loadModelSwitcher() {
   modelSelect.innerHTML = models.map((m) =>
     `<option value="${m.id}"${m.id === current.model ? " selected" : ""}>${m.name}${modelDownloadMark(m)}</option>`
   ).join("");
+  modelSelect.dataset.prev = current.model; // what a refused or failed switch goes back to
   renderModelOverview(current.model);
   // An in-process model (Parakeet on CPU) may still be downloading or loading from the start.
   const status = await fetch("/api/models/status").then((r) => r.json()).catch(() => null);
@@ -845,18 +891,15 @@ modelSelect.addEventListener("change", async () => {
   showModelStatus("Initiating switch...");
 
   try {
-    const res = await fetch("/api/models/switch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: modelSelect.value }),
-    });
+    const res = await postSetting("/api/models/switch", { model: modelSelect.value });
     const data = await res.json();
     if (!data.ok) {
       modelSelect.value = prev;
+      renderModelOverview(prev);
       modelSelect.disabled = false;
       if (data.error) {
         showModelStatus("Error: " + data.error);
-        setTimeout(hideModelStatus, 5000);
+        hideModelStatusLater(5000);
       } else {
         hideModelStatus();
       }
@@ -865,15 +908,24 @@ modelSelect.addEventListener("change", async () => {
     pollModelStatus(prev);
   } catch {
     modelSelect.value = prev;
-    hideModelStatus();
+    renderModelOverview(prev);
     modelSelect.disabled = false;
+    showModelStatus("Error: the dashboard could not reach the app.");
+    hideModelStatusLater(5000);
   }
 });
 
+let modelHideTimer = null;
 function showModelStatus(text) {
+  clearTimeout(modelHideTimer); // an older hide timer must not cut a newer message short
   const el = document.getElementById("model-switch-status");
   document.getElementById("model-status-text").textContent = text;
   el.style.display = "flex";
+}
+
+function hideModelStatusLater(ms) {
+  clearTimeout(modelHideTimer);
+  modelHideTimer = setTimeout(hideModelStatus, ms);
 }
 
 function hideModelStatus() {
@@ -904,16 +956,18 @@ function pollModelStatus(prevModel) {
         modelSelect.disabled = false;
         // The switch downloaded the model: redraw the list so its mark follows.
         loadModelSwitcher();
-        setTimeout(hideModelStatus, data.note ? 5000 : 2000);
+        hideModelStatusLater(data.note ? 5000 : 2000);
       } else if (data.status === "error") {
         clearInterval(interval);
         modelSelect.value = prevModel;
+        renderModelOverview(prevModel);
         modelSelect.disabled = false;
         showModelStatus("Error: " + (data.error || "Unknown"));
-        setTimeout(hideModelStatus, 5000);
+        hideModelStatusLater(5000);
       } else if (data.status === "idle") {
         // Switch already completed or was no-op
         clearInterval(interval);
+        modelSelect.dataset.prev = modelSelect.value;
         modelSelect.disabled = false;
         hideModelStatus();
       }

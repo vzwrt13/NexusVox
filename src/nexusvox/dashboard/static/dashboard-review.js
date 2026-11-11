@@ -74,9 +74,10 @@ async function retryReviewTranscription(card, btn) {
     btn.textContent = "\u21BB Retry";
   }
   if (!res.ok) {
-    alert(res.error);
+    showNotice(card.querySelector(".review-correction"), "down", res.error);
     return;
   }
+  showNotice(card.querySelector(".review-correction"), "down", "");
   // The new transcript goes into the correction box; submitting it is the user's call.
   markReviewWrong(card);
   card.querySelector(".review-correction").value = res.text;
@@ -211,7 +212,7 @@ function showReviewSuggestions(suggestions) {
 
 async function acceptReviewSuggestion(btn) {
   btn.disabled = true;
-  if (await addDictionaryEntry(btn.dataset.wrong, btn.dataset.right)) {
+  if (await addDictionaryEntry(btn.dataset.wrong, btn.dataset.right, document.getElementById("review-suggestions"))) {
     btn.textContent = "Added";
   } else {
     btn.disabled = false;
@@ -222,6 +223,7 @@ function dismissReviewSuggestions() {
   const box = document.getElementById("review-suggestions");
   box.hidden = true;
   box.innerHTML = "";
+  showNotice(box, "", "");
 }
 
 function toggleReviewTextarea(cb) {

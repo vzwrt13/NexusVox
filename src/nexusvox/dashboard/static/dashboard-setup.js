@@ -216,6 +216,7 @@ function openSetup() {
 }
 
 function closeSetup() {
+  cancelHotkeyRecording();
   stopSetupMeter();
   fetch("/api/setup/mic-level/stop", { method: "POST" }).catch(() => {});
   setupEl.hidden = true;

@@ -112,14 +112,14 @@ def test_the_console_never_fails_on_a_character_it_cannot_encode():
     import logging
     import sys
 
-    from nexusvox.__main__ import _harden_console_streams
+    from nexusvox.system.logsetup import harden_console_streams
 
     raw = io.BytesIO()
     stream = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
     saved = sys.stdout, sys.stderr
     sys.stdout = sys.stderr = stream
     try:
-        _harden_console_streams()
+        harden_console_streams()
         handler = logging.StreamHandler(stream)
         handler.handleError = lambda record: pytest.fail("the handler failed to emit")
         handler.emit(logging.makeLogRecord({"msg": "Loading → model 中", "levelno": logging.INFO}))

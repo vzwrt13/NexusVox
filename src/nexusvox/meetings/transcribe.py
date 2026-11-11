@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import bisect
 import difflib
+import itertools
 import logging
 import math
 import os
@@ -123,6 +124,24 @@ class Meeting:
     notes: list[str] = field(default_factory=list)
 
 
+class StillRecordingError(ValueError):
+    """A meeting folder that is probably still being recorded."""
+
+
+def refuse_if_recent(path: Path, *, stale_after_s: float = STALE_AFTER_S) -> None:
+    """Raise `StillRecordingError` when `path` was written to less than `stale_after_s` seconds ago.
+
+    A missing file is left to the caller. The mtime is only a hint (a writer that keeps a file open may not update
+    it on NTFS, and a loopback track is idle during silence), so the session also refuses its running meeting.
+    """
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return
+    if age < stale_after_s:
+        raise StillRecordingError(f"{path.name} was written to a moment ago; the meeting may still be recording")
+
+
 def repair_wav_header(path: Path, *, stale_after_s: float = STALE_AFTER_S) -> bool:
     """Rewrite the RIFF and data chunk sizes of a WAV whose header does not match the file; True when changed.
 
@@ -135,8 +154,7 @@ def repair_wav_header(path: Path, *, stale_after_s: float = STALE_AFTER_S) -> bo
         fix = _find_header_fix(f)
     if fix is None:
         return False
-    if time.time() - path.stat().st_mtime < stale_after_s:
-        raise ValueError(f"{path.name} was written to a moment ago; the meeting may still be recording")
+    refuse_if_recent(path, stale_after_s=stale_after_s)
     data_size_pos, data_size, end = fix
     with path.open("r+b") as f:
         f.seek(data_size_pos)
@@ -176,20 +194,6 @@ def _find_header_fix(f) -> tuple[int, int, int] | None:
             return pos + 4, data_size, body + data_size
         pos = body + chunk_size + (chunk_size & 1)
     raise ValueError("no data chunk")
-
-
-def _refuse_if_recording(path: Path, *, stale_after_s: float = STALE_AFTER_S) -> None:
-    """Raise when a track of a meeting without an end was written to a moment ago.
-
-    The recorder's WAV writer keeps the header consistent while it records, so the header cannot tell a running
-    meeting from a killed one: only the file's age can. A missing file is left to the caller.
-    """
-    try:
-        age = time.time() - path.stat().st_mtime
-    except OSError:
-        return
-    if age < stale_after_s:
-        raise ValueError(f"{path.name} was written to a moment ago; the meeting may still be recording")
 
 
 def _parse_dictations(raw) -> list[tuple[float, float]]:
@@ -236,7 +240,7 @@ def load_meeting(folder: str | Path) -> Meeting:
                 meeting.latency[name] = float(latency)
         try:
             if meeting.interrupted:
-                _refuse_if_recording(path)
+                refuse_if_recent(path)
             if repair_wav_header(path):
                 meeting.notes.append(f"The {label} track's header was repaired from the file size.")
             with wave.open(str(path), "rb") as wf:
@@ -244,8 +248,8 @@ def load_meeting(folder: str | Path) -> Meeting:
                     raise ValueError("not PCM16")
                 meeting.tracks[name] = MeetingTrack(name, path, wf.getframerate(), wf.getnchannels(), wf.getnframes())
         except (OSError, ValueError, wave.Error, EOFError) as exc:
-            if meeting.interrupted and "may still be recording" in str(exc):
-                raise ValueError(f"{folder.name} may still be recording: {exc}") from exc
+            if isinstance(exc, StillRecordingError):
+                raise StillRecordingError(f"{folder.name} may still be recording: {exc}") from exc
             meeting.notes.append(f"The {label} track could not be read and is left out: {exc}")
     return meeting
 
@@ -530,14 +534,20 @@ def drop_dictation(
 
 
 def interleave(me: list[Word], others: list[Word], slack: float = TURN_SLACK_S) -> list[Word]:
-    """Two time-sorted word lists as one, in time order except at a turn change: the track whose word came last
-    keeps the turn while it is still speaking - its last word ended no more than `slack` before the other track's
-    next word - and its next word starts no later than `slack` after that one."""
+    """Two word lists (each in spoken order, its starts non-decreasing up to small steps back) as one, in time
+    order except at a turn change: the track whose word came last keeps the turn while it is still speaking - its
+    last word ended no more than `slack` before the other track's next word - and its next word starts no later
+    than `slack` after that one."""
     merged: list[Word] = []
     i = j = 0
     mine: bool | None = None  # which track has the turn; nobody before the first word
+    # A track keeps the engine's word order, where a start can step back a little (chunk overlaps): its time key
+    # never decreases, so the comparison below still sees a sorted list and a backwards word cannot pull the other
+    # track's words into the middle of a run.
+    keys_me = list(itertools.accumulate((w.start for w in me), max))
+    keys_others = list(itertools.accumulate((w.start for w in others), max))
     while i < len(me) and j < len(others):
-        a, b = me[i].start, others[j].start
+        a, b = keys_me[i], keys_others[j]
         if mine is None:
             mine = a <= b
         elif mine:

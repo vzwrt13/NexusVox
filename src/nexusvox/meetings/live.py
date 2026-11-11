@@ -31,11 +31,14 @@ logger = logging.getLogger("nexusvox.meeting_live")
 WINDOW_S = 6.0  # audio sent per request; with the request time this is the delay of the live text
 CUT_SEARCH_S = 2.0  # the window is cut at the quietest block within its last seconds
 BLOCK_S = 0.05
+GAP_TOLERANCE_S = 0.25  # a pause between blocks longer than this is a gap in the recording, as in `TrackWriter`
 MAX_BACKLOG_S = 30.0  # a track further behind than this drops its oldest audio instead of falling behind for good
 SILENCE_RMS = 100.0  # a window whose loudest 50 ms block stays below this is not sent
 IDLE_WAIT_S = 0.25
 LIVE_TIMEOUT_S = 20.0  # a live window the server has not answered by then is lost; the worker moves on
 _SEND_CHUNK_BYTES = 4096
+MAKE_RETRY_S = 5.0  # first wait before the transcriber is made again after a failed start
+MAKE_RETRY_MAX_S = 60.0
 
 
 # Live only: the system track has no speaker detection while recording and may hold several people, so it gets one
@@ -61,11 +64,25 @@ class _Pending:
         self.frames = 0
         self.at_s = 0.0  # time of the first pending sample, seconds into the meeting
 
-    def add(self, samples: np.ndarray, end_s: float) -> None:
+    def add(self, samples: np.ndarray, end_s: float) -> float:
+        """Append a block that ended `end_s` seconds into the meeting and keep the recording's timeline: a loopback
+        that sent nothing during silence leaves a gap that `TrackWriter` fills with zeros, so it is filled here too.
+        A gap beyond `MAX_BACKLOG_S` drops the audio still pending instead; returns the seconds dropped."""
+        start_s = max(0.0, end_s - len(samples) / self.rate)
+        dropped = 0.0
         if self.frames == 0:
-            self.at_s = max(0.0, end_s - len(samples) / self.rate)
+            self.at_s = start_s
+        else:
+            gap = start_s - (self.at_s + self.frames / self.rate)
+            if gap > MAX_BACKLOG_S:
+                dropped = self.frames / self.rate
+                self.chunks, self.frames, self.at_s = [], 0, start_s
+            elif gap > GAP_TOLERANCE_S:
+                self.chunks.append(np.zeros(int(gap * self.rate), dtype=np.float32))
+                self.frames += len(self.chunks[-1])
         self.chunks.append(samples)
         self.frames += len(samples)
+        return dropped
 
     def take(self, frames: int) -> np.ndarray:
         data = np.concatenate(self.chunks) if len(self.chunks) > 1 else self.chunks[0]
@@ -83,9 +100,19 @@ class WindowTranscriber:
     worker ends. A window the server answers late or incompletely raises, so it counts as failed.
     """
 
-    def __init__(self, make: Callable[[], BaseTranscriber], timeout: float = LIVE_TIMEOUT_S) -> None:
+    def __init__(
+        self,
+        make: Callable[[], BaseTranscriber],
+        timeout: float = LIVE_TIMEOUT_S,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._make = make
         self._timeout = timeout
+        self._clock = clock
+        self._retry_at = 0.0  # no new attempt to make the transcriber before this time
+        self._backoff_s = 0.0
+        self._make_error: Exception | None = None
         self._transcriber: BaseTranscriber | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -93,10 +120,26 @@ class WindowTranscriber:
         # The transcriber first: when `make` raises (the server is not ready yet) nothing is half set up, and the
         # next window tries again.
         if self._transcriber is None:
-            self._transcriber = self._make()
+            self._transcriber = self._make_with_backoff()
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
         return self._loop.run_until_complete(self._one(pcm))
+
+    def _make_with_backoff(self) -> BaseTranscriber:
+        """Try to make the transcriber; after a failure the next attempts wait (`MAKE_RETRY_S`, doubling up to
+        `MAKE_RETRY_MAX_S`) and raise the last error at once, so a server that stays down does not cost a new
+        transcriber (and a log line) for every window."""
+        if self._make_error is not None and self._clock() < self._retry_at:
+            raise self._make_error
+        try:
+            transcriber = self._make()
+        except Exception as exc:
+            self._backoff_s = min(max(self._backoff_s * 2, MAKE_RETRY_S), MAKE_RETRY_MAX_S)
+            self._retry_at = self._clock() + self._backoff_s
+            self._make_error = exc
+            raise
+        self._make_error, self._backoff_s = None, 0.0
+        return transcriber
 
     async def _one(self, pcm: bytes) -> str:
         assert self._transcriber is not None
@@ -182,6 +225,8 @@ class LiveTranscriber:
         """Audio-thread entry: never blocks."""
         if not self._stop.is_set():
             self._queue.put((name, fmt, data, self._clock()))
+            if self._stop.is_set():  # the worker ended between the check and the put: nobody drains this block
+                self._drain_queue()
 
     def segments_since(self, after: int = 0) -> list[dict]:
         with self._lock:
@@ -208,7 +253,10 @@ class LiveTranscriber:
             while True:
                 name, fmt, data, arrived = self._queue.get_nowait()
                 pending = self._pending.setdefault(name, _Pending(fmt.sample_rate))
-                pending.add(downmix(data, fmt.channels), arrived - self._t0)
+                lost = pending.add(downmix(data, fmt.channels), arrived - self._t0)
+                if lost:
+                    with self._lock:
+                        self._skipped_s += lost
         except queue.Empty:
             pass
         for pending in self._pending.values():
@@ -267,12 +315,15 @@ class LiveTranscriber:
                 except Exception:
                     logger.exception("Closing the live transcriber failed")
 
-    def _discard_queued(self) -> None:
+    def _drain_queue(self) -> None:
         try:
             while True:
                 self._queue.get_nowait()
         except queue.Empty:
             pass
+
+    def _discard_queued(self) -> None:
+        self._drain_queue()
         self._pending.clear()
 
     def _transcribe_window(self, name: str, window: np.ndarray, rate: int, at_s: float) -> None:

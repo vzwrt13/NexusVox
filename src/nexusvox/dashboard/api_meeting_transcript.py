@@ -61,6 +61,9 @@ class MeetingTranscriptMixin(DashboardState):
         logger.info("Meeting transcription started: %s", folder.name)
         if progress:
             progress("converting")
+        if self._meeting.is_recording(folder):  # the file times alone cannot tell (see `refuse_if_recent`)
+            logger.error("Meeting %s is still being recorded", folder.name)
+            return {"ok": False, "error": f"Could not load the meeting: {folder.name} is still being recorded"}
         try:
             meeting = load_meeting(folder)
         except Exception as exc:

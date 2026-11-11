@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import queue
 import threading
 import time
 import wave
@@ -344,9 +345,11 @@ def test_a_failed_transcriber_start_is_retried_on_the_next_window():
             raise ConnectionError("server not ready")
         return _Transcriber()
 
-    wt = WindowTranscriber(make)
+    now = [0.0]
+    wt = WindowTranscriber(make, clock=lambda: now[0])
     with pytest.raises(ConnectionError):
         wt(bytes(3200))
+    now[0] += 60.0  # after the wait
     assert wt(bytes(3200)) == "hi"  # no assert on a missing transcriber: the next window starts it again
     wt.close()
     assert len(attempts) == 2
@@ -452,3 +455,77 @@ def test_the_dashboard_labels_the_live_system_track_others_but_the_stored_one_st
     api = DashboardAPI(None, config)
     assert api._live_labels() == {"mic": "Vincent", "system": "Others"}
     assert SPEAKER_FIRST_SYSTEM == 2  # the stored transcript still numbers the system track from Speaker 2
+
+
+def test_a_silence_gap_in_a_track_keeps_later_times_on_the_recordings_timeline():
+    from nexusvox.meetings.live import _Pending
+
+    pending = _Pending(RATE)
+    pending.add(np.ones(RATE * 2, dtype=np.float32), end_s=2.0)  # 0..2 s
+    pending.add(np.ones(RATE, dtype=np.float32), end_s=23.0)  # loopback sent nothing from 2 s to 22 s
+    assert pending.frames == 23 * RATE  # the gap is zeros, as `TrackWriter` writes it
+    assert pending.take(22 * RATE).shape[0] == 22 * RATE
+    assert pending.at_s == pytest.approx(22.0)  # the last block starts at 22 s, as in system.wav
+
+
+def test_a_gap_longer_than_the_backlog_limit_drops_the_stale_pending_audio():
+    from nexusvox.meetings.live import MAX_BACKLOG_S, _Pending
+
+    pending = _Pending(RATE)
+    pending.add(np.ones(RATE, dtype=np.float32), end_s=1.0)
+    dropped = pending.add(np.ones(RATE, dtype=np.float32), end_s=MAX_BACKLOG_S + 10)
+    assert dropped == pytest.approx(1.0) and pending.frames == RATE
+    assert pending.at_s == pytest.approx(MAX_BACKLOG_S + 9)
+
+
+def test_a_server_that_stays_down_is_not_retried_on_every_window():
+    from nexusvox.meetings.live import MAKE_RETRY_S, WindowTranscriber
+
+    now = [0.0]
+    attempts = []
+
+    def make():
+        attempts.append(1)
+        raise ConnectionError("down")
+
+    wt = WindowTranscriber(make, clock=lambda: now[0])
+    for _ in range(3):  # three windows within the wait: one attempt, the same error each time
+        with pytest.raises(ConnectionError):
+            wt(bytes(3200))
+    assert len(attempts) == 1
+    now[0] += MAKE_RETRY_S + 0.1
+    with pytest.raises(ConnectionError):
+        wt(bytes(3200))
+    assert len(attempts) == 2
+
+
+def test_a_block_fed_just_as_the_worker_dies_does_not_stay_queued():
+    live = LiveTranscriber(lambda pcm: "x", window_s=1.0)
+
+    class Racy(threading.Event):
+        calls = 0
+
+        def is_set(self):  # the worker ends right after `feed` looked
+            Racy.calls += 1
+            return super().is_set()
+
+    live._stop = Racy()
+
+    class Queue(queue.SimpleQueue):
+        def put(self, item, *args, **kwargs):
+            super().put(item, *args, **kwargs)
+            live._stop.set()  # the worker ended right after the block was queued
+
+    live._queue = Queue()
+    live.feed("mic", AudioFormat(RATE, 1), _tone(0.5))
+    assert live._queue.empty()
+
+
+def test_the_session_knows_the_folder_it_is_recording(tmp_path):
+    rec = _Recorder()
+    session, _ = _session(False, rec)
+    assert not session.is_recording("meeting-x")
+    session.start()
+    assert session.is_recording("meeting-x") and not session.is_recording("meeting-y")
+    session.stop()
+    assert not session.is_recording("meeting-x")

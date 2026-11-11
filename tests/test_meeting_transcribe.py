@@ -23,8 +23,6 @@ from nexusvox.meetings.transcribe import (
     TARGET_RMS,
     TURN_SLACK_S,
     MeetingTrack,
-    _analyse,
-    _gain_for,
     convert_track,
     drop_dictation,
     drop_echo,
@@ -54,14 +52,6 @@ def write_wav(path: Path, samples: np.ndarray, rate: int = 16_000, channels: int
 def tone(seconds: float, amplitude: float, rate: int = 16_000) -> np.ndarray:
     t = np.arange(int(seconds * rate)) / rate
     return (amplitude * np.sin(2 * np.pi * 220 * t)).astype(np.int16)
-
-
-def speech_rms(chunks) -> float:
-    return _analyse(chunks)[0]
-
-
-def balance_gain(chunks) -> float:
-    return _gain_for(speech_rms(chunks))
 
 
 def zero_header(path: Path, *, age_s: float = 3600) -> None:
@@ -554,34 +544,43 @@ def test_mix_balances_a_quiet_microphone_against_loud_system_audio(tmp_path):
     mix_tracks([quiet_path, loud_path], out)
 
     assert quiet_path.read_bytes() == quiet_bytes and loud_path.read_bytes() == loud_bytes  # inputs unchanged
-    assert balance_gain([quiet]) > 3 > balance_gain([loud])
-    assert speech_rms([quiet * balance_gain([quiet])]) == pytest.approx(TARGET_RMS, rel=0.05)
     mixed = read_wav(out)
     assert len(mixed) == 160_000
     assert np.abs(mixed).max() <= PEAK_LIMIT + 1  # does not clip
+
+
+def level(samples: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
 
 
 def test_each_track_alone_in_the_mix_reaches_the_target_level(tmp_path):
     for amplitude in (900, 3000, 12_000):
         out = tmp_path / f"m{amplitude}.wav"
         mix_tracks([wav16(tmp_path, f"t{amplitude}", tone(5, amplitude))], out)
-        assert speech_rms([read_wav(out)]) == pytest.approx(TARGET_RMS, rel=0.05)
+        assert level(read_wav(out)) == pytest.approx(TARGET_RMS, rel=0.05)
 
 
-def test_near_silent_track_is_not_boosted_into_noise():
-    hiss = [(np.random.default_rng(1).normal(0, 20, 160_000)).astype(np.int16)]  # below the noise floor
+def test_near_silent_track_is_not_boosted_into_noise(tmp_path):
+    hiss = (np.random.default_rng(1).normal(0, 20, 160_000)).astype(np.int16)  # below the noise floor
+    out = tmp_path / "hiss.wav"
+    mix_tracks([wav16(tmp_path, "hiss", hiss)], out)
 
-    assert speech_rms(hiss) == 0.0
-    assert balance_gain(hiss) == 1.0
-    faint = [tone(5, 150)]  # audible but very quiet: boosted, never past the cap
-    assert balance_gain(faint) == MAX_GAIN
+    assert np.array_equal(read_wav(out), hiss)  # gain 1: left as it is
+
+    out = tmp_path / "faint.wav"  # audible but very quiet: boosted, never past the cap
+    faint = tone(5, 150)
+    mix_tracks([wav16(tmp_path, "faint", faint)], out)
+
+    assert level(read_wav(out)) == pytest.approx(level(faint) * MAX_GAIN, rel=0.05)
 
 
-def test_pauses_do_not_lower_a_tracks_speech_level():
-    talking = tone(2, 3000)
-    padded = [np.concatenate([talking, np.zeros(16_000 * 18, dtype=np.int16)])]
+def test_pauses_do_not_lower_a_tracks_speech_level(tmp_path):
+    padded = np.concatenate([tone(2, 3000), np.zeros(16_000 * 18, dtype=np.int16)])
+    out = tmp_path / "padded.wav"
 
-    assert speech_rms(padded) == pytest.approx(speech_rms([talking]), rel=0.05)
+    mix_tracks([wav16(tmp_path, "padded", padded)], out)
+
+    assert level(read_wav(out)[: 16_000 * 2]) == pytest.approx(TARGET_RMS, rel=0.05)
 
 
 def test_mix_pads_the_shorter_track(tmp_path):
@@ -1272,3 +1271,37 @@ def test_a_track_keeps_the_engines_word_order_even_when_starts_are_not_monotonic
     me = [Word("one", 1.0, 1.2), Word("two", 0.9, 1.1), Word("three", 1.3, 1.5)]
 
     assert [w.word for w in merge_words(me, [])] == ["one", "two", "three"]
+
+
+def test_a_running_meeting_is_told_apart_by_its_own_error_type(tmp_path):
+    from nexusvox.meetings.transcribe import StillRecordingError
+
+    folder = tmp_path / "live"
+    write_meeting(folder, tone(1, 1000), tone(1, 1000), ended=False)
+
+    with pytest.raises(StillRecordingError):
+        load_meeting(folder)
+
+
+def test_a_word_stepping_back_cannot_pull_the_other_tracks_words_into_a_run():
+    me = [Word("one", 1.0, 1.2), Word("two", 0.9, 1.1), Word("three", 1.3, 1.5)]
+    others = [Word("mid", 0.95, 1.0, 2)]
+
+    merged = [w.word for w in merge_words(me, others)]
+
+    assert merged.index("mid") in (0, 3)  # before the run or after it, never inside
+
+
+def test_transcribing_the_folder_being_recorded_is_refused_whatever_the_file_times_say(meeting_api, tmp_path):
+    api, _ = meeting_api
+    folder = tmp_path / "meeting-20261026-100000"
+    write_meeting(folder, tone(1, 1000), tone(1, 1000), ended=False)
+    old = time.time() - 3600
+    for name in ("mic.wav", "system.wav"):
+        os.utime(folder / name, (old, old))  # an open writer on NTFS may leave an old mtime
+    api._meeting.is_recording = lambda f: True
+
+    result = api.transcribe_meeting(folder)
+
+    assert not result["ok"] and "still being recorded" in result["error"]
+    assert (folder / "mic.wav").exists() and (folder / "system.wav").exists()

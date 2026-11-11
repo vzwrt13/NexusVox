@@ -232,6 +232,7 @@ class FilesMixin(DashboardState):
             logger.error("Deleting the audio of file transcription %s failed: %s", tid, exc)
             return {"ok": False, "error": f"Could not delete the audio files: {exc}"}
         self._db.delete_file_transcription(tid)
+        self.extensions.forget_upload(tid)
         return {"ok": True}
 
     def get_file_audio_path(self, tid: int) -> str | None:

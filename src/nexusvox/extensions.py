@@ -19,7 +19,8 @@ import os
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -407,6 +408,9 @@ class ExtensionRegistry:
     _last_pending: dict[tuple[str, str, int], dict] = field(default_factory=dict)
     _stuck: dict[tuple[str, str], threading.Thread] = field(default_factory=dict)
     _stuck_lock: threading.Lock = field(default_factory=threading.Lock)  # the dashboard calls hooks from many threads
+    _pending_lock: threading.Lock = field(default_factory=threading.Lock)  # guards the three fields below
+    _checking: dict[int, int] = field(default_factory=dict)  # upload id -> availability checks running for it
+    _forgotten: set[int] = field(default_factory=set)  # ids deleted while one of their checks ran
 
     # ---- Loading -----------------------------------------------------------
 
@@ -429,7 +433,7 @@ class ExtensionRegistry:
         for point in sorted(found, key=lambda p: p.name):
             try:
                 self.add(point.load(), source=point.name)
-            except Exception:
+            except (Exception, SystemExit):  # an extension that calls sys.exit() at import must not stop the app
                 logger.exception("Extension %r could not be loaded and is skipped", point.name)
 
     def add(self, loaded: object, *, source: str = "") -> bool:
@@ -470,7 +474,7 @@ class ExtensionRegistry:
                 "upload action",
                 lambda action: _problem_with_action(action, own_panels),
             )
-        except Exception:
+        except (Exception, SystemExit):  # sys.exit() in a factory must not stop the app
             logger.exception("Extension %r failed while registering and is skipped", source or loaded)
             return False
         self._panels.update({p.id: p for p in panels})
@@ -523,9 +527,9 @@ class ExtensionRegistry:
                 if not isinstance(result, dict):
                     raise TypeError(f"expected a dict, got {type(result).__name__}")
                 json.dumps(result, sort_keys=True)  # what jsonify does: mixed key types would fail every poll
-            except Exception as exc:
+            except (Exception, SystemExit) as exc:  # a SystemExit must not end the upload worker
                 logger.exception("Extension %s failed on file transcription %s", extension.name, transcript.id)
-                notes.append(f"Extension {extension.name} failed: {exc}")
+                notes.append(f"Extension {extension.name} failed: {type(exc).__name__}: {exc}"[:200])
                 continue
             results[extension.name] = result
             if isinstance(result.get("note"), str) and result["note"]:
@@ -663,6 +667,8 @@ class ExtensionRegistry:
         """
         deadline = time.monotonic() + (HOOK_TIMEOUT_S if budget_s is None else budget_s)
         for extension in self.extensions:
+            if not self._overrides_hook(extension, "on_dictation"):
+                continue
             result = self._text_hook(extension, "on_dictation", deadline, text, app)
             if result is not None:
                 text = result
@@ -685,6 +691,8 @@ class ExtensionRegistry:
         if deadline is None:
             deadline = time.monotonic() + HOOK_TIMEOUT_S + DISPLAY_TEXT_S * len(out)
         for extension in self.extensions:
+            if not self._overrides_hook(extension, "display_text"):
+                continue
             current = list(out)
             answers = self._guarded(
                 (extension.name, "display_text"),
@@ -731,6 +739,8 @@ class ExtensionRegistry:
         if deadline is None:
             deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
         for extension in self.extensions:
+            if not self._overrides_hook(extension, "on_selection_command"):
+                continue
             result = self._text_hook(extension, "on_selection_command", deadline, selection, command, app)
             if result is not None:
                 logger.info("Extension %s handled the selection command %r", extension.name, Text(command))
@@ -742,9 +752,14 @@ class ExtensionRegistry:
         """A `time.monotonic()` deadline `SELECTION_COMMAND_TIMEOUT_S` from now, for the polish hooks to share."""
         return time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
 
+    @staticmethod
+    def _overrides_hook(extension: Extension, hook: str) -> bool:
+        """True when *extension* overrides *hook*; the default does nothing, so it is not worth a thread."""
+        return getattr(type(extension), hook) is not getattr(Extension, hook)
+
     def _overrides(self, hook: str) -> bool:
         """True when any loaded extension overrides *hook*; with none, asking costs nothing."""
-        return any(getattr(type(e), hook) is not getattr(Extension, hook) for e in self.extensions)
+        return any(self._overrides_hook(e, hook) for e in self.extensions)
 
     def _chain_text(self, hook: str, text: str, *args: Any, deadline: float | None) -> str:
         """*text* as every overriding extension's *hook* leaves it, in load order; *args* follow the text.
@@ -756,7 +771,7 @@ class ExtensionRegistry:
         if deadline is None:
             deadline = time.monotonic() + SELECTION_COMMAND_TIMEOUT_S
         for extension in self.extensions:
-            if getattr(type(extension), hook) is getattr(Extension, hook):
+            if not self._overrides_hook(extension, hook):
                 continue
             answer = self._text_hook(extension, hook, deadline, text, *args)
             if answer is not None and answer.strip():
@@ -870,6 +885,12 @@ class ExtensionRegistry:
     def _unavailable(
         self, items, transcription_id: int, what: str, deadline: float | None, owners: dict[str, str]
     ) -> dict[str, str | dict]:
+        with self._check_running(transcription_id):  # a delete meanwhile keeps this run from remembering a state
+            return self._run_checks(items, transcription_id, what, deadline, owners)
+
+    def _run_checks(
+        self, items, transcription_id: int, what: str, deadline: float | None, owners: dict[str, str]
+    ) -> dict[str, str | dict]:
         if deadline is None:
             deadline = time.monotonic() + HOOK_TIMEOUT_S
         unavailable: dict[str, str | dict] = {}
@@ -892,11 +913,14 @@ class ExtensionRegistry:
                 logger.exception("%s failed its availability check", who)
                 continue
             if outcome is None:
-                if memo in self._last_pending:
-                    unavailable[item.id] = self._last_pending[memo]
+                with self._pending_lock:
+                    remembered = self._last_pending.get(memo)
+                if remembered is not None:
+                    unavailable[item.id] = remembered
                 continue
             answer = outcome[0]
-            self._last_pending.pop(memo, None)
+            with self._pending_lock:
+                self._last_pending.pop(memo, None)
             if isinstance(answer, dict):
                 state = _availability_state(answer)
                 if isinstance(state, dict) and "retry" in state:
@@ -909,13 +933,39 @@ class ExtensionRegistry:
                         )
                         del state["retry"]
                 if isinstance(state, dict) and "pending" in state:
-                    self._last_pending[memo] = state
+                    with self._pending_lock:
+                        if transcription_id not in self._forgotten:  # the upload was deleted while this ran
+                            self._last_pending[memo] = state
                 unavailable[item.id] = state
             elif isinstance(answer, str):
                 unavailable[item.id] = answer or "Not available"
             elif answer is not None and not answer:
                 unavailable[item.id] = "Not available"
         return unavailable
+
+    def forget_upload(self, transcription_id: int) -> None:
+        """Drop what the availability checks remembered for a deleted upload, and what a check still running for it
+        would remember once it ends."""
+        with self._pending_lock:
+            for memo in [m for m in self._last_pending if m[2] == transcription_id]:
+                del self._last_pending[memo]
+            if transcription_id in self._checking:
+                self._forgotten.add(transcription_id)
+
+    @contextmanager
+    def _check_running(self, transcription_id: int) -> Iterator[None]:
+        with self._pending_lock:
+            self._checking[transcription_id] = self._checking.get(transcription_id, 0) + 1
+        try:
+            yield
+        finally:
+            with self._pending_lock:
+                left = self._checking[transcription_id] - 1
+                if left:
+                    self._checking[transcription_id] = left
+                else:
+                    del self._checking[transcription_id]
+                    self._forgotten.discard(transcription_id)
 
     def describe(self) -> dict:
         """What the dashboard needs to show the extensions' panels and export links."""

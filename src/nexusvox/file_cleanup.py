@@ -15,10 +15,11 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from time import monotonic
 
 from . import llm as llm_module
 from .config import CleanupConfig, LlmConfig
-from .dictation.cleanup import PROMPTS, cleanup
+from .dictation.cleanup import PROMPTS, RELOADING, cleanup
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,9 @@ MIN_PIECE_WORDS = 2
 # Consecutive pieces the model failed on (not merely answered implausibly) before the rest is skipped:
 # a server that is down would otherwise cost `[llm].timeout_s` for every remaining piece.
 MAX_CONSECUTIVE_FAILURES = 3
+# How long one upload waits for model reloads in all. A model that hangs starts a new reload at every timeout,
+# so a wait per piece would cost the give-up rule `MAX_CONSECUTIVE_FAILURES` times this much instead of once.
+RELOAD_WAIT_BUDGET_S = llm_module.RELOAD_DEADLINE_S
 
 _SPEAKER_RE = re.compile(r"(Speaker \d+: )(.*)", re.DOTALL)
 _PARAGRAPH_GAP_RE = re.compile(r"(\n\s*\n)")
@@ -185,6 +189,7 @@ def clean_transcript(
         return TranscriptCleanup(text, total, 0, 0)
     config = CleanupConfig(level=level, timeout_s=llm.timeout_s)
     done = failed = skipped = streak = 0
+    wait_left = RELOAD_WAIT_BUDGET_S
     changed = False
     cleaned_paragraphs: list[str] = []
     with llm_module.background():
@@ -199,12 +204,31 @@ def clean_transcript(
                 if on_progress:
                     on_progress("cleaning", done, total)
                 result = cleanup(piece, config, llm, MIN_PIECE_WORDS)
+                load_gave_up = False
+                while result.error == RELOADING:
+                    # No request went out: the model is loading (a timeout, or the warm-up at start). An upload is
+                    # not in a hurry, so it waits for the load and asks again, as often as a new reload (a live
+                    # dictation that timed out) gets in the way, within the upload's wait budget.
+                    if wait_left <= 0:
+                        load_gave_up = True  # the model is as good as down
+                        break
+                    if on_progress:
+                        on_progress("waiting", done, total)
+                    began = monotonic()
+                    loaded = llm_module.wait_for_reload(llm, wait_left)
+                    wait_left -= monotonic() - began
+                    if not loaded:
+                        load_gave_up = True
+                        break
+                    if on_progress:
+                        on_progress("cleaning", done, total)
+                    result = cleanup(piece, config, llm, MIN_PIECE_WORDS)
                 if result.error:
                     failed += 1
                 if result.ms is not None:
                     streak = 0  # the model answered, sensibly or not
-                elif result.error:
-                    streak += 1  # the request failed; a piece too short to send changes nothing
+                elif result.error and (result.error != RELOADING or load_gave_up):
+                    streak += 1  # the request failed; a piece too short to send or a loading model is no failure
                 changed = changed or result.text != piece
                 cleaned_pieces.append(result.text)
             cleaned_paragraphs.append(_join(paragraph, cleaned_pieces))

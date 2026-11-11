@@ -38,6 +38,7 @@ from ..llm import LlmError, detect_server, ollama_executable, server_models
 from ..llm import active_models as llm_active_models
 from ..llm import build_model_list as llm_build_model_list
 from ..llm import keep_in_use as llm_keep_in_use
+from ..llm import listed_name as llm_listed_name
 from ..llm import loaded_model as llm_loaded_model
 from ..llm import model_key as llm_model_key
 from ..llm import model_pull as llm_pull
@@ -294,8 +295,9 @@ class SettingsMixin(DashboardState):
             others = pool.submit(self._llm_server_lists)  # while the server in use is asked
             models = llm_build_model_list(self._config.llm, cuda, gpu_vram_gb() if cuda else None)
             ollama, servers = others.result()
-        selected = self._config.llm.model
         known = [*models["recommended"], *models["other"]]
+        # The saved "llama3" is listed as "llama3:latest": the dropdown's option, and so `selected`, carries that name.
+        selected = llm_listed_name(self._config.llm.model, known) or self._config.llm.model
         for entry in (ollama, *servers):
             if entry["active"]:  # already asked above: not again
                 entry.update(reachable=models["reachable"], models=[m for m in known if m["installed"]])

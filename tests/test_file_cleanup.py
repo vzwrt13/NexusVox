@@ -7,6 +7,7 @@ import pytest
 from nexusvox.config import LlmConfig
 from nexusvox.file_cleanup import (
     MAX_CONSECUTIVE_FAILURES,
+    RELOAD_WAIT_BUDGET_S,
     _sentence_spans,
     _split,
     clean_transcript,
@@ -274,3 +275,134 @@ def test_a_sentence_does_not_end_at_an_abbreviation(text, second):
     spans = _sentence_spans(text)
 
     assert [text[a:b] for a, b in spans][1] == second and len(spans) == 2
+
+
+def _reloading_model(monkeypatch, *, wait_succeeds: bool):
+    """A model that is reloading: `cleanup` sends nothing until `wait_for_reload` has returned (when it succeeds)."""
+    state = {"reloading": True, "waits": 0}
+
+    def wait(config, *args, **kwargs):
+        state["waits"] += 1
+        if wait_succeeds:
+            state["reloading"] = False
+        return wait_succeeds
+
+    monkeypatch.setattr("nexusvox.dictation.cleanup.reload_running", lambda config: state["reloading"])
+    monkeypatch.setattr("nexusvox.llm.wait_for_reload", wait)
+    return state
+
+
+def test_an_upload_waits_for_a_reload_instead_of_giving_up(monkeypatch):
+    state = _reloading_model(monkeypatch, wait_succeeds=True)
+    calls = _fake_model(monkeypatch, lambda text: text.replace("um ", ""))
+    text = "\n\n".join(f"Speaker 1: um block {i} of the talk goes here." for i in range(10))
+
+    result = clean_transcript(text, "medium", LLM)
+
+    assert len(calls) == 10  # every piece reached the model
+    assert (result.failed, result.skipped) == (0, 0)
+    assert "um " not in result.text
+    assert state["waits"] == 1  # only the first piece had to wait
+
+
+def test_a_reload_that_outlasts_the_wait_counts_as_a_failure(monkeypatch):
+    _reloading_model(monkeypatch, wait_succeeds=False)
+    calls = _fake_model(monkeypatch, lambda text: text)
+    text = "\n\n".join(f"Speaker 1: block {i} of the talk goes here." for i in range(10))
+
+    result = clean_transcript(text, "medium", LLM)
+
+    assert calls == []
+    assert result.text == text
+    assert result.skipped == 10 - MAX_CONSECUTIVE_FAILURES  # given up on, not waited for again and again
+
+
+def test_a_reload_that_ends_while_waiting_does_not_trip_the_give_up_rule(monkeypatch):
+    # Every piece finds the model reloading again (a fresh timeout started a new reload) but each wait ends.
+    waits = []
+
+    def wait(config, *args, **kwargs):
+        waits.append(1)
+        return True
+
+    monkeypatch.setattr("nexusvox.dictation.cleanup.reload_running", lambda config: len(waits) % 2 == 0)
+    monkeypatch.setattr("nexusvox.llm.wait_for_reload", wait)
+    calls = _fake_model(monkeypatch, lambda text: text)
+    text = "\n\n".join(f"Speaker 1: block {i} of the talk goes here." for i in range(6))
+
+    result = clean_transcript(text, "medium", LLM)
+
+    assert result.skipped == 0
+    assert len(calls) == 6
+
+
+def _hanging_model(monkeypatch, *, reload_takes_s: float):
+    """A model that accepts requests and never answers: every request times out and starts a reload, which ends
+    `reload_takes_s` seconds later (a fake clock that only the waits move)."""
+    clock = [0.0]
+    state = {"reloading": False, "waits": [], "requests": 0}
+
+    def wait(config, timeout_s=180.0):
+        state["waits"].append(timeout_s)
+        if timeout_s >= reload_takes_s:
+            clock[0] += reload_takes_s
+            state["reloading"] = False
+            return True
+        clock[0] += timeout_s
+        return False
+
+    def complete(config, system, user):
+        state["requests"] += 1
+        raise LlmError("timed out", timed_out=True)
+
+    def start_reload(config, *args, **kwargs):
+        state["reloading"] = True
+        return True
+
+    monkeypatch.setattr("nexusvox.file_cleanup.monotonic", lambda: clock[0])
+    monkeypatch.setattr("nexusvox.llm.wait_for_reload", wait)
+    monkeypatch.setattr("nexusvox.dictation.cleanup.reload_running", lambda config: state["reloading"])
+    monkeypatch.setattr("nexusvox.dictation.cleanup.reload_in_background", start_reload)
+    monkeypatch.setattr("nexusvox.dictation.cleanup.complete", complete)
+    return clock, state
+
+
+def test_a_hanging_model_costs_one_wait_budget_not_one_per_piece(monkeypatch):
+    clock, state = _hanging_model(monkeypatch, reload_takes_s=150.0)
+    text = "\n\n".join(f"Speaker 1: block {i} of the talk goes here." for i in range(10))
+
+    result = clean_transcript(text, "medium", LLM)
+
+    assert result.text == text
+    assert state["requests"] == 2  # piece 1, and piece 2 after its wait; piece 3 found the budget used up
+    assert len(state["waits"]) == 2 and state["waits"][1] < state["waits"][0]
+    assert clock[0] <= RELOAD_WAIT_BUDGET_S
+    assert result.skipped == 10 - MAX_CONSECUTIVE_FAILURES
+
+
+def test_the_wait_goes_on_when_a_new_reload_gets_in_the_way(monkeypatch):
+    waits = []
+    reloading = iter([True, True])  # the first check and the retry both find a reload; the third does not
+
+    monkeypatch.setattr("nexusvox.dictation.cleanup.reload_running", lambda config: next(reloading, False))
+    monkeypatch.setattr("nexusvox.llm.wait_for_reload", lambda config, timeout_s=180.0: waits.append(timeout_s) or True)
+    calls = _fake_model(monkeypatch, lambda text: text.replace("um ", ""))
+
+    result = clean_transcript("Speaker 1: um this is one block of the talk.", "medium", LLM)
+
+    assert len(waits) == 2  # waited, asked again, found a reload again, waited again
+    assert len(calls) == 1
+    assert result.failed == 0 and "um " not in result.text
+
+
+def test_the_progress_says_when_the_cleanup_waits_for_the_model(monkeypatch):
+    state = _reloading_model(monkeypatch, wait_succeeds=True)
+    _fake_model(monkeypatch, lambda text: text)
+    stages = []
+
+    clean_transcript(
+        "Speaker 1: this is one block of the talk.", "medium", LLM, on_progress=lambda *args: stages.append(args)
+    )
+
+    assert state["waits"] == 1
+    assert stages == [("cleaning", 1, 1), ("waiting", 1, 1), ("cleaning", 1, 1)]

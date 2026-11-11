@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import sys
 import threading
 import time
 from pathlib import Path
@@ -1440,3 +1441,142 @@ def test_has_polish_result_hook_only_for_an_override():
     assert not ExtensionRegistry().has_polish_result_hook()
     assert not _registry(Suffix("a", "!")).has_polish_result_hook()
     assert _registry(Suffix("a", "!"), ResultChanger("e", "a", "b")).has_polish_result_hook()
+
+
+# -- Misbehaving extensions never stop the app or a job ----------------------------------------------
+
+
+def test_an_extension_that_exits_at_import_or_in_its_factory_is_skipped():
+    def at_import():
+        raise SystemExit(1)
+
+    class Fine(V1Extension):
+        name = "fine"
+
+    def in_factory():
+        raise SystemExit(2)
+
+    registry = ExtensionRegistry()
+    registry.load(
+        [
+            SimpleNamespace(name="a", load=at_import),
+            SimpleNamespace(name="b", load=lambda: in_factory),
+            SimpleNamespace(name="c", load=lambda: Fine),
+        ]
+    )
+
+    assert [e.name for e in registry.extensions] == ["fine"]
+    assert registry.add(in_factory) is False
+
+
+def test_a_file_hook_that_exits_does_not_end_the_upload_worker():
+    class Quitter(V1Extension):
+        name = "quitter"
+
+        def on_file_transcribed(self, transcript):
+            raise SystemExit(1)
+
+    class After(V1Extension):
+        name = "after"
+
+        def on_file_transcribed(self, transcript):
+            return {"ok": True}
+
+    results, notes = _registry(Quitter(), After()).file_transcribed(SimpleNamespace(id=1, text="hi"))
+
+    assert results == {"after": {"ok": True}}
+    assert any("quitter" in n for n in notes)
+
+
+def test_pending_states_are_dropped_with_their_upload():
+    reg = _summary_registry(lambda tid: {"pending": "x"})
+    reg.unavailable_exports(1)
+    reg.unavailable_exports(2)
+    assert {memo[2] for memo in reg._last_pending} == {1, 2}
+
+    reg.forget_upload(1)
+
+    assert {memo[2] for memo in reg._last_pending} == {2}
+
+
+def test_pending_states_survive_concurrent_checks():
+    reg = _summary_registry(lambda tid: {"pending": "x"} if tid % 2 else True)
+    errors: list[BaseException] = []
+
+    def poll(start: int) -> None:
+        try:
+            for tid in range(start, start + 200):
+                reg.unavailable_exports(tid)
+                reg.unavailable_exports(tid + 1)
+                reg.forget_upload(tid)
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=poll, args=(i * 10,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+
+
+def test_deleting_an_upload_forgets_its_pending_state(db, session_factory):
+    reg = _summary_registry(lambda tid: {"pending": "x"})
+    record = db.save_file_transcription("one", "en", 1000, "a.wav")
+    api = DashboardAPI(session_factory, Config(), db=db, extensions=reg)
+    reg.unavailable_exports(record.id)
+    assert reg._last_pending
+
+    assert api.delete_file_transcription(record.id) == {"ok": True}
+
+    assert reg._last_pending == {}
+
+
+def test_extensions_without_an_override_get_no_thread(monkeypatch):
+    class Plain(V1Extension):
+        name = "plain"
+
+    started: list[object] = []
+    real = ext._start_call
+
+    def counting(fn, *args):
+        started.append(fn)
+        return real(fn, *args)
+
+    registry = _registry(Plain())
+    transcript = SimpleNamespace(id=1, text="hi")
+    monkeypatch.setattr(ext, "_start_call", counting)
+
+    assert registry.dictation("hi", APP) == "hi"
+    assert registry.selection_command("s", "c", APP) is None
+    assert registry.display_texts(transcript, ["a", "b"]) == ["a", "b"]
+    assert started == []
+
+
+def test_a_job_note_names_the_exception_even_when_it_has_no_message():
+    class Quitter(V1Extension):
+        name = "quitter"
+
+        def on_file_transcribed(self, transcript):
+            sys.exit()
+
+    _, notes = _registry(Quitter()).file_transcribed(SimpleNamespace(id=1, text="hi"))
+
+    assert notes == ["Extension quitter failed: SystemExit: "]
+
+
+def test_an_upload_deleted_while_its_check_runs_leaves_no_pending_state():
+    holder = {}
+
+    def check(tid):
+        holder["registry"].forget_upload(tid)  # the user deletes the upload while the poll is inside its check
+        return {"pending": "Summarising"}
+
+    reg = holder["registry"] = _summary_registry(check)
+
+    assert reg.unavailable_exports(42) == {"gated-md": {"pending": "Summarising"}}  # this poll still answers
+
+    assert reg._last_pending == {}
+    assert reg._checking == {} and reg._forgotten == set()  # nothing is kept for the next upload with this id
+    assert reg.unavailable_exports(43) == {"gated-md": {"pending": "Summarising"}}

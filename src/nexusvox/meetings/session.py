@@ -60,7 +60,8 @@ class MeetingSession:
                 live.pause_while(lambda: bool(getattr(recorder, "dictating", False)))
             folder = recorder.start()
             if live is not None:
-                live.start()
+                # The recorder's own zero (taken after it resolved the devices), so live times match the files.
+                live.start(getattr(recorder, "t0", None) or None)
             self._live = live
             self._recorder = recorder
             self._started = self._clock()
@@ -98,6 +99,12 @@ class MeetingSession:
         with self._lock:
             if self._recorder is not None:
                 self._recorder.end_dictation(token, start, end)
+
+    def is_recording(self, folder: str | Path) -> bool:
+        """Whether `folder` is the folder of the meeting being recorded right now."""
+        with self._lock:
+            active = self._recorder.folder if self._recorder is not None else None
+        return active is not None and Path(folder).resolve() == Path(active).resolve()
 
     def status(self) -> dict:
         """`{recording, elapsed_s, folder}` for the dashboard's timer."""

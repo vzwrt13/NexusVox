@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import bisect
 import difflib
+import itertools
 import logging
 import math
 import os
@@ -30,7 +31,7 @@ import numpy as np
 from ..config import DEFAULT_OWN_VOICE_LABEL
 from ..transcription.diarization import format_transcript
 from ..transcription.file_transcribe import MAX_CHUNK_MS
-from ..transcription.transcriber import Word
+from ..transcription.transcriber import Word, pcm16_to_wav_bytes
 from .recorder import META_FILENAME, read_meeting_meta
 
 logger = logging.getLogger("nexusvox.meeting_transcribe")
@@ -123,6 +124,24 @@ class Meeting:
     notes: list[str] = field(default_factory=list)
 
 
+class StillRecordingError(ValueError):
+    """A meeting folder that is probably still being recorded."""
+
+
+def refuse_if_recent(path: Path, *, stale_after_s: float = STALE_AFTER_S) -> None:
+    """Raise `StillRecordingError` when `path` was written to less than `stale_after_s` seconds ago.
+
+    A missing file is left to the caller. The mtime is only a hint (a writer that keeps a file open may not update
+    it on NTFS, and a loopback track is idle during silence), so the session also refuses its running meeting.
+    """
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return
+    if age < stale_after_s:
+        raise StillRecordingError(f"{path.name} was written to a moment ago; the meeting may still be recording")
+
+
 def repair_wav_header(path: Path, *, stale_after_s: float = STALE_AFTER_S) -> bool:
     """Rewrite the RIFF and data chunk sizes of a WAV whose header does not match the file; True when changed.
 
@@ -135,8 +154,7 @@ def repair_wav_header(path: Path, *, stale_after_s: float = STALE_AFTER_S) -> bo
         fix = _find_header_fix(f)
     if fix is None:
         return False
-    if time.time() - path.stat().st_mtime < stale_after_s:
-        raise ValueError(f"{path.name} was written to a moment ago; the meeting may still be recording")
+    refuse_if_recent(path, stale_after_s=stale_after_s)
     data_size_pos, data_size, end = fix
     with path.open("r+b") as f:
         f.seek(data_size_pos)
@@ -221,6 +239,8 @@ def load_meeting(folder: str | Path) -> Meeting:
             if 0 <= latency <= MAX_LATENCY_S:
                 meeting.latency[name] = float(latency)
         try:
+            if meeting.interrupted:
+                refuse_if_recent(path)
             if repair_wav_header(path):
                 meeting.notes.append(f"The {label} track's header was repaired from the file size.")
             with wave.open(str(path), "rb") as wf:
@@ -228,25 +248,13 @@ def load_meeting(folder: str | Path) -> Meeting:
                     raise ValueError("not PCM16")
                 meeting.tracks[name] = MeetingTrack(name, path, wf.getframerate(), wf.getnchannels(), wf.getnframes())
         except (OSError, ValueError, wave.Error, EOFError) as exc:
-            if meeting.interrupted and "may still be recording" in str(exc):
-                raise ValueError(f"{folder.name} may still be recording: {exc}") from exc
+            if isinstance(exc, StillRecordingError):
+                raise StillRecordingError(f"{folder.name} may still be recording: {exc}") from exc
             meeting.notes.append(f"The {label} track could not be read and is left out: {exc}")
     return meeting
 
 
 # ---- Audio ------------------------------------------------------------------
-
-
-def _wav_bytes(pcm: np.ndarray) -> bytes:
-    import io
-
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(TARGET_RATE)
-        wf.writeframes(pcm.tobytes())
-    return buf.getvalue()
 
 
 def downmix(raw: bytes, channels: int) -> np.ndarray:
@@ -275,10 +283,10 @@ def iter_track_chunks(track: MeetingTrack) -> Iterator[np.ndarray]:
     window = track.sample_rate * (MAX_CHUNK_MS // 1000)
     with wave.open(str(track.path), "rb") as wf:
         while raw := wf.readframes(window):
-            yield _resample(downmix(raw, track.channels), track.sample_rate)
+            yield resample(downmix(raw, track.channels), track.sample_rate)
 
 
-def _resample(samples: np.ndarray, rate: int) -> np.ndarray:
+def resample(samples: np.ndarray, rate: int) -> np.ndarray:
     if len(samples) == 0:
         return np.zeros(0, dtype=np.int16)
     if rate != TARGET_RATE:
@@ -302,7 +310,7 @@ def convert_track(track: MeetingTrack, out_path: Path, levels: list[np.ndarray] 
         wf.setsampwidth(2)
         wf.setframerate(TARGET_RATE)
         for array in iter_track_chunks(track):
-            chunks.append(_wav_bytes(array))
+            chunks.append(pcm16_to_wav_bytes(array.tobytes(), TARGET_RATE))
             wf.writeframes(array.tobytes())
             if levels is not None:
                 levels.append(loudness_steps(array))
@@ -314,15 +322,6 @@ def _read_windows(path: Path) -> Iterator[np.ndarray]:
     with wave.open(str(path), "rb") as wf:
         while raw := wf.readframes(window):
             yield np.frombuffer(raw, dtype="<i2")
-
-
-def speech_rms(chunks: Iterable[np.ndarray]) -> float:
-    """RMS of the track's speech: the 50 ms blocks within 20 dB of its loud blocks and above the noise floor.
-
-    Silence and room noise between sentences would otherwise pull the level down and make a quiet,
-    mostly idle track look quieter than it sounds when someone talks. 0 when nothing is audible.
-    """
-    return _analyse(chunks)[0]
 
 
 def _analyse(chunks: Iterable[np.ndarray]) -> tuple[float, int]:
@@ -348,11 +347,6 @@ def _gain_for(level: float) -> float:
     return float(min(max(TARGET_RMS / level, MIN_GAIN), MAX_GAIN))
 
 
-def balance_gain(chunks: Iterable[np.ndarray]) -> float:
-    """The factor that brings the track's speech to `TARGET_RMS`, capped so a near-silent track stays quiet."""
-    return _gain_for(speech_rms(chunks))
-
-
 def _shifted(path: Path, frames: int) -> Iterator[np.ndarray]:
     """`_read_windows(path)` behind `frames` of leading silence. The windows keep their size, so the mix adds up the
     same stretch of time from every track."""
@@ -373,9 +367,9 @@ def _shifted(path: Path, frames: int) -> Iterator[np.ndarray]:
 def mix_tracks(paths: list[Path], out_path: Path, offsets: list[float] | None = None) -> float:
     """Mix 16 kHz mono WAV tracks into one mono WAV at `out_path`; returns its length in seconds.
 
-    Each track is first brought to the same speech level (`balance_gain`), so a loud system track cannot
-    drown the microphone. The sum is scaled so that even coinciding peaks stay under `PEAK_LIMIT`: the bound
-    is the sum of the tracks' gained peaks, known from the analysis pass, so the mix itself is a single pass.
+    Each track is first brought to the same speech level (`_gain_for` of its `_analyse` level), so a loud system
+    track cannot drown the microphone. The sum is scaled so that even coinciding peaks stay under `PEAK_LIMIT`:
+    the bound is the sum of the tracks' gained peaks, known from the analysis pass, so the mix itself is a single pass.
     The tracks start together, each delayed by its entry in `offsets` (seconds, 0 or more: the shift the
     transcript gave that track's words); the shorter one is padded with silence. The inputs are not changed.
     The mix is written to a temporary file and moved into place, so a failure leaves no partial `out_path`.
@@ -540,14 +534,20 @@ def drop_dictation(
 
 
 def interleave(me: list[Word], others: list[Word], slack: float = TURN_SLACK_S) -> list[Word]:
-    """Two time-sorted word lists as one, in time order except at a turn change: the track whose word came last
-    keeps the turn while it is still speaking - its last word ended no more than `slack` before the other track's
-    next word - and its next word starts no later than `slack` after that one."""
+    """Two word lists (each in spoken order, its starts non-decreasing up to small steps back) as one, in time
+    order except at a turn change: the track whose word came last keeps the turn while it is still speaking - its
+    last word ended no more than `slack` before the other track's next word - and its next word starts no later
+    than `slack` after that one."""
     merged: list[Word] = []
     i = j = 0
     mine: bool | None = None  # which track has the turn; nobody before the first word
+    # A track keeps the engine's word order, where a start can step back a little (chunk overlaps): its time key
+    # never decreases, so the comparison below still sees a sorted list and a backwards word cannot pull the other
+    # track's words into the middle of a run.
+    keys_me = list(itertools.accumulate((w.start for w in me), max))
+    keys_others = list(itertools.accumulate((w.start for w in others), max))
     while i < len(me) and j < len(others):
-        a, b = me[i].start, others[j].start
+        a, b = keys_me[i], keys_others[j]
         if mine is None:
             mine = a <= b
         elif mine:
@@ -581,14 +581,11 @@ def merge_words(
     timing noise cannot split a turn change between them.
     """
     mic_shift, system_shift = track_shifts(system_offset)
-    others = sorted(
-        (
-            Word(w.word, w.start + system_shift, w.end + system_shift, SPEAKER_FIRST_SYSTEM - 1 + (w.speaker or 1))
-            for w in others
-        ),
-        key=lambda w: w.start,
-    )
-    me = sorted((Word(w.word, w.start + mic_shift, w.end + mic_shift) for w in me), key=lambda w: w.start)
+    others = [
+        Word(w.word, w.start + system_shift, w.end + system_shift, SPEAKER_FIRST_SYSTEM - 1 + (w.speaker or 1))
+        for w in others
+    ]
+    me = [Word(w.word, w.start + mic_shift, w.end + mic_shift) for w in me]
     me = drop_echo(me, others)
     if dictations:
         # After the echo filter: taking dictated words out first could join two short echo runs into one.

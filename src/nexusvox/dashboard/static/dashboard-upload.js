@@ -385,8 +385,11 @@ async function resumeUploadJob() {
     return; // the next look tries again
   }
   if (!job || uploadRunning) return;
-  // The transcription Stop starts for a meeting is tracked by the meeting card, never as an upload.
-  if (/^meeting-[0-9A-Za-z-]+$/.test(job.filename || "")) return;
+  // The transcription Stop starts for a meeting is tracked (and its ending shown) by the meeting card.
+  if (job.kind === "meeting") {
+    resumeMeetingJob(job);
+    return;
+  }
   uploadErrorEl.style.display = "none";
   uploadNoteEl.style.display = "none";
   if (job.state === "running") {

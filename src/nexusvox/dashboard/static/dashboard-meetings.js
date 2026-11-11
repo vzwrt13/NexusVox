@@ -172,25 +172,48 @@ async function stopMeeting() {
   }
 }
 
+// A page opened or reloaded mid-job (or a second window) picks the meeting's job up again; a job that ended while
+// the page was away is shown once, since the server counts it as read from here on.
+let meetingTrackedJobId = null;
+function resumeMeetingJob(job) {
+  if (meetingTrackedJobId === job.job_id) return;
+  trackMeetingJob(job.job_id, job);
+}
+
 // Stop starts the transcription job; its progress is shown here until the meeting appears in the list, where
 // it then opens in the detail pane.
-function trackMeetingJob(jobId) {
+function trackMeetingJob(jobId, firstReply = null) {
   clearInterval(meetingJobTimer);
+  meetingTrackedJobId = jobId;
   meetingProgress.style.display = "";
   let timer = null;
+  let polling = false; // a slow answer never overlaps the next poll
+  let ended = false;
   const stop = () => {
+    ended = true;
     clearInterval(timer); // only this job's own timer: a newer job keeps its progress
     meetingProgress.style.display = "none";
     loadFileTranscriptions();
   };
   const poll = async () => {
-    let resp;
+    if (polling || ended) return;
+    polling = true;
     try {
-      resp = await fetch(`/api/file-transcribe/${jobId}`);
+      await pollOnce();
+    } finally {
+      polling = false;
+    }
+  };
+  const pollOnce = async () => {
+    let resp;
+    const known = firstReply; // the snapshot a reloaded page got from /current: the first look needs no request
+    firstReply = null;
+    try {
+      resp = known ? { ok: true, json: async () => known } : await fetch(`/api/file-transcribe/${jobId}`);
     } catch (err) {
       return; // no contact for a moment: retried on the next tick
     }
-    if (timer !== meetingJobTimer) return; // a newer job took over while this poll was in flight
+    if (ended || timer !== meetingJobTimer) return; // a newer job took over while this poll was in flight
     if (!resp.ok) {
       // The job is gone (the app restarted, or it dropped out of the last ten): nothing says it succeeded.
       stop();
@@ -198,7 +221,7 @@ function trackMeetingJob(jobId) {
       return;
     }
     const job = await resp.json();
-    if (timer !== meetingJobTimer) return;
+    if (ended || timer !== meetingJobTimer) return;
     meetingProgressBar.value = Math.round((job.percent || 0) * 100);
     if (job.state === "running") {
       showMeetingStatus(job.message || "Transcribing...", "");
@@ -222,7 +245,7 @@ async function loadPendingMeetings() {
   block.hidden = !pending.length;
   list.innerHTML = pending.map((p) => `
     <div class="flagged-card" data-name="${escapeHtml(p.name)}">
-      <div class="flagged-meta"><span>${p.started_at ? new Date(p.started_at).toLocaleString() : ""}</span></div>
+      <div class="flagged-meta"><span>${p.started_at ? parseServerTime(p.started_at).toLocaleString() : ""}</span></div>
       <div class="upload-filename">${escapeHtml(p.name)}</div>
       <div class="upload-delete-row">
         <button type="button" class="period-btn pending-transcribe">Transcribe</button>

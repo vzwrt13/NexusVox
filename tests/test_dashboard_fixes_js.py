@@ -164,16 +164,41 @@ def test_enter_on_a_button_is_left_to_the_button_and_a_typed_correction_is_submi
         const ev = { key: "Enter", target, preventDefault() {}, ctrlKey: false, altKey: false, metaKey: false };
         docListeners.keydown.forEach((fn) => fn(ev));
       };
-      const onButton = { matches: () => false, closest: (s) => (s === "button" ? {} : null) };
-      press(onButton);                  // Enter on Play, Retry or Load more: the button handles it itself
+      const keyButton = { matches: (s) => s === ":focus-visible", closest: (s) => (s === "button" ? {} : null) };
+      press(keyButton);                 // Enter on a keyboard-focused Play, Retry or Load more: the button handles it
       await new Promise((r) => setTimeout(r, 0));
       const afterButton = [posted.length, area.value, cb.checked];
-      press({ matches: () => false, closest: () => null });   // Enter elsewhere: the typed text is sent
+      // A button focused by a mouse click does not keep Enter from accepting the card.
+      press({ matches: () => false, closest: (s) => (s === "button" ? {} : null) });
       await new Promise((r) => setTimeout(r, 0));
       out([afterButton, posted]);
     """
     )
     assert result == [[0, "my fix", False], [{"is_correct": False, "corrected_text": "my fix"}]]
+
+
+def test_no_autoplay_after_submit_when_the_user_left_the_tab():
+    result = _review(
+        """
+      const list = document.getElementById("review-list");
+      const card = document.createElement("div"); card.className = "flagged-card"; card.dataset.id = "4";
+      const cb = document.createElement("input"); cb.className = "review-correct-cb"; cb.checked = true;
+      const area = document.createElement("textarea"); area.className = "review-correction";
+      const submit = document.createElement("button"); submit.className = "flagged-save-btn";
+      const play = document.createElement("button"); play.className = "flagged-play-btn";
+      const next = document.createElement("div"); next.className = "flagged-card"; next.dataset.id = "5";
+      const nextPlay = document.createElement("button"); nextPlay.className = "flagged-play-btn"; next.append(nextPlay);
+      card.append(cb, area, play, submit); list.append(card, next);
+      fetch = async () => ({ json: async () => ({ ok: true, items: [], remaining: 0 }) });
+      submit.closest = () => card;
+      const done = submitReview(4, submit);
+      await done;
+      document.getElementById("tab-review").classList.remove("active");   // the user switched tabs
+      await new Promise((r) => setTimeout(r, 400));
+      out(reviewAudio);
+    """
+    )
+    assert result is None
 
 
 # -- Meetings -----------------------------------------------------------------------------------------
@@ -194,6 +219,7 @@ def _meetings(body: str):
     const loadFileTranscriptions = () => {};
     let recSelectedId = null;
     let meetingJobTimer = null;
+    let meetingTrackedJobId = null;
     // Timers by hand: setInterval returns an id and ticks run only when a test says so.
     const timers = new Map(); let nextTimer = 1;
     const setInterval = (fn) => { const id = nextTimer++; timers.set(id, fn); return id; };
@@ -234,6 +260,42 @@ def test_an_older_jobs_late_poll_does_not_end_a_newer_jobs_progress():
     assert result == ["", 1, False]
 
 
+def test_overlapping_polls_of_one_job_end_it_once():
+    result = _meetings(
+        """
+      const releases = [];
+      let loads = 0;
+      globalThis.loadFileTranscriptions = () => { loads += 1; };
+      globalThis.fetch = () => new Promise((resolve) => {
+        releases.push(() => resolve({ ok: true, json: async () => ({ state: "done", result: { id: 2 } }) }));
+      });
+      trackMeetingJob("j");
+      [...timers.values()][0]();          // the next tick while the first poll is still waiting
+      await new Promise((r) => setTimeout(r, 0));
+      releases.forEach((r) => r());
+      await new Promise((r) => setTimeout(r, 0));
+      out([releases.length, messages.filter((m) => m[0] === "● Meeting transcribed.").length]);
+    """
+    )
+    assert result == [1, 1]
+
+
+def test_a_reloaded_page_picks_up_the_meeting_job_from_the_server():
+    source = _source("dashboard-meetings.js")
+    result = _meetings(
+        _fn(source, "resumeMeetingJob")
+        + """
+      globalThis.fetch = async () => { throw new Error("the first look comes from /current"); };
+      resumeMeetingJob({ job_id: "j", kind: "meeting", state: "error", error: "disk full" });
+      await new Promise((r) => setTimeout(r, 0));
+      resumeMeetingJob({ job_id: "j", kind: "meeting", state: "error", error: "disk full" });   // the next watch tick
+      await new Promise((r) => setTimeout(r, 0));
+      out([messages.map((m) => m[0]), meetingProgress.style.display, timers.size]);
+    """
+    )
+    assert result == [["✕ disk full"], "none", 0]
+
+
 # -- Analytics ----------------------------------------------------------------------------------------
 
 
@@ -271,7 +333,7 @@ def test_a_slower_weekly_answer_does_not_overwrite_monthly():
 # -- Upload -------------------------------------------------------------------------------------------
 
 
-def test_the_meeting_transcription_started_by_stop_is_not_adopted_as_an_upload():
+def test_the_meeting_transcription_started_by_stop_goes_to_the_meeting_card_not_the_upload_tracker():
     source = _source("dashboard-upload.js")
     script = (
         OUT
@@ -279,8 +341,9 @@ def test_the_meeting_transcription_started_by_stop_is_not_adopted_as_an_upload()
     let uploadRunning = false; const calls = [];
     const uploadErrorEl = { style: {} }, uploadNoteEl = { style: {} };
     const fetchJobJson = async () => ({
-      ok: true, body: { job: { job_id: "j", filename: "meeting-20261106-100000", state: "running" } },
+      ok: true, body: { job: { job_id: "j", filename: "meeting-notes", kind: "meeting", state: "running" } },
     });
+    const resumeMeetingJob = (job) => calls.push("meeting:" + job.job_id);
     const showUploadProgress = () => calls.push("progress");
     const trackUploadJob = async () => calls.push("track");
     const showUploadOutcome = () => calls.push("outcome");
@@ -288,7 +351,7 @@ def test_the_meeting_transcription_started_by_stop_is_not_adopted_as_an_upload()
         + _fn(source, "resumeUploadJob", True)
         + "(async () => { await resumeUploadJob(); out(calls); })();"
     )
-    assert run(script) == []
+    assert run(script) == ["meeting:j"]
 
 
 def test_the_export_blob_url_is_revoked_after_a_delay():

@@ -48,6 +48,7 @@ async function saveCorrection(id, btn) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) {
       btn.textContent = "Error";
+      btn.title = data.error || "";
       btn.disabled = false;
       return;
     }

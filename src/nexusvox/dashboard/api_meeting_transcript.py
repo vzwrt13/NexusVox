@@ -47,7 +47,7 @@ class MeetingTranscriptMixin(DashboardState):
         if self._db is None:
             return {"ok": False, "error": "DB not available"}
         folder = Path(folder)
-        job = self._file_jobs.start(folder.name, lambda job: self.transcribe_meeting(folder, job=job))
+        job = self._file_jobs.start(folder.name, lambda job: self.transcribe_meeting(folder, job=job), kind="meeting")
         if job is None:
             return {"ok": False, "busy": True, "error": "Another file is still being transcribed"}
         return {"ok": True, "job_id": job.id}

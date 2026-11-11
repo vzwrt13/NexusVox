@@ -118,8 +118,9 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     toggleReviewAudio(card);
   } else if (e.key === "Enter") {
-    // Enter on a focused button activates that button (Play, Retry, Load more, Submit).
-    if (e.target.closest("button")) return;
+    // Enter on a button the keyboard focused activates that button; a button focused by a mouse click does not
+    // keep Enter from accepting the card.
+    if (e.target.closest("button") && e.target.matches(":focus-visible")) return;
     // A typed correction is never discarded: Enter submits it as typed.
     const typed = card.querySelector(".review-correction").value.trim();
     if (!card.querySelector(".review-correct-cb").checked && typed) {
@@ -255,10 +256,12 @@ async function submitReview(id, btn) {
           await loadMoreReviewTranscriptions();
         }
         updateReviewProgress();
-        activateTopReviewCard(true);
+        // No autoplay once the user has left the tab within the fade.
+        activateTopReviewCard(document.getElementById("tab-review").classList.contains("active"));
       }, 300);
     } else {
       btn.textContent = "Error";
+      btn.title = data.error || "";
       btn.disabled = false;
     }
   } catch {

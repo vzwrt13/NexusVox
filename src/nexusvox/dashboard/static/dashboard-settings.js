@@ -83,7 +83,14 @@ function isDefaultHotkey(modifiers, key) {
   return key === hotkeyDefault.key && modifiers.join("+") === hotkeyDefault.modifiers.join("+");
 }
 
+// The settings fetched at page start are what the Home card reads until it asks again: a hotkey or mode change
+// saved since then goes in too.
+function rememberSettings(s) {
+  if (s && !s.error) lastSettings = { ...(lastSettings || {}), ...s };
+}
+
 function renderHotkey(s) {
+  rememberSettings(s);
   if (s.hotkey_default) hotkeyDefault = s.hotkey_default;
   hotkeyDefaultName.textContent = describeHotkey(hotkeyDefault.modifiers, hotkeyDefault.key);
   const key = s.hotkey_key || "";
@@ -261,6 +268,7 @@ polishTerminalsToggle.addEventListener("change", () => postSetting("/api/setting
 hotkeyModeSelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/hotkey-mode", { mode: hotkeyModeSelect.value });
   const s = await resp.json();
+  rememberSettings(s);
   hotkeyModeSelect.value = s.hotkey_mode;
   renderHotkeyHint(s.hotkey_mode, s.hotkey_modifiers, s.hotkey_key);
 });

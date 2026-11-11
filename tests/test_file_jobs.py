@@ -98,3 +98,8 @@ def test_finished_jobs_are_pruned():
         _join_workers()
 
     assert len(jobs._jobs) == 11  # the last ten that ended and the one started after pruning
+
+
+def test_a_job_says_whether_it_is_a_meeting_transcription():
+    assert FileJob("a.wav").snapshot()["kind"] == "upload"
+    assert FileJob("meeting-1", "meeting").snapshot()["kind"] == "meeting"

@@ -626,7 +626,9 @@ function editFileTitle(detail) {
       return restore("Rename failed: " + err.message);
     }
     // The head shows the new title right away, so a failed reload cannot leave the disabled input behind.
-    item.title = typed === item.original_filename ? "" : typed;
+    const title = typed === item.original_filename ? "" : typed;
+    item.title = title;
+    if (detail._item) detail._item.title = title; // a poll may have swapped the item while the rename ran
     detail._signature = null;
     restore();
     loadFileTranscriptions();

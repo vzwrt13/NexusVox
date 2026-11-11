@@ -18,9 +18,10 @@ _KEEP_FINISHED = 10
 class FileJob:
     """One upload being transcribed. Updated from the worker thread, read from request threads."""
 
-    def __init__(self, filename: str) -> None:
+    def __init__(self, filename: str, kind: str = "upload") -> None:
         self.id = uuid.uuid4().hex
         self.filename = filename
+        self.kind = kind  # upload | meeting: the page tracks a meeting's transcription on the meeting card
         self.state = "running"  # running | done | error
         self.stage = "converting"
         self.current = 0
@@ -66,6 +67,7 @@ class FileJob:
             return {
                 "job_id": self.id,
                 "filename": self.filename,
+                "kind": self.kind,
                 "state": self.state,
                 "stage": self.stage,
                 "current": self.current,
@@ -101,7 +103,7 @@ class FileJobs:
         self._lock = threading.Lock()
         self._jobs: dict[str, FileJob] = {}
 
-    def start(self, filename: str, work: Callable[[FileJob], dict]) -> FileJob | None:
+    def start(self, filename: str, work: Callable[[FileJob], dict], kind: str = "upload") -> FileJob | None:
         """Run `work(job)` on a thread; None when another job is still running.
 
         `work` returns the result dict for `FileJob.finish`; an exception ends the job as an error.
@@ -109,7 +111,7 @@ class FileJobs:
         with self._lock:
             if any(j.state == "running" for j in self._jobs.values()):
                 return None
-            job = FileJob(filename)
+            job = FileJob(filename, kind)
             self._jobs[job.id] = job
             for old in [j for j in self._jobs.values() if j.state != "running"][:-_KEEP_FINISHED]:
                 del self._jobs[old.id]

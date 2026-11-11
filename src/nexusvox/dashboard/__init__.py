@@ -128,12 +128,6 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     return app
 
 
-def _log_switch_failure(future) -> None:
-    """Log the exception of a model switch that ran on the app loop; nobody awaits that future."""
-    if not future.cancelled() and (exc := future.exception()) is not None:
-        logger.error("Model switch from the dashboard failed: %s", exc, exc_info=exc)
-
-
 def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None = None) -> DashboardAPI:
     """Start the Flask server (once) without opening the browser, and return its API object."""
     global _server_started, _api, _guard, _port, _start_failed
@@ -150,10 +144,30 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
 
                 def on_model_switch(model_id: str) -> None:
                     loop = app._loop
-                    if loop is None:
-                        raise RuntimeError("The app is not running yet, so the model cannot be switched")
-                    future = asyncio.run_coroutine_threadsafe(app.switch_model(model_id), loop)
-                    future.add_done_callback(_log_switch_failure)
+                    if loop is None or loop.is_closed():
+                        raise RuntimeError("The app is not running, so the model cannot be switched")
+                    coro = app.switch_model(model_id)
+                    try:
+                        future = asyncio.run_coroutine_threadsafe(coro, loop)
+                    except RuntimeError:
+                        coro.close()  # never scheduled: no "never awaited" warning
+                        raise
+
+                    def settle() -> None:
+                        # `switch_model` raises before it settles the status when it refuses (Docker out of
+                        # reach, a switch in flight, ...): the page would read the idle status as "done".
+                        status = app.get_switch_status()["status"]
+                        if status in ("idle", "ready"):
+                            app._end_switch("error", str(future.exception()))
+
+                    def on_done(done) -> None:
+                        if done.cancelled() or (exc := done.exception()) is None:
+                            return
+                        logger.error("Model switch from the dashboard failed: %s", exc, exc_info=exc)
+                        if not loop.is_closed():
+                            loop.call_soon_threadsafe(settle)
+
+                    future.add_done_callback(on_done)
 
                 get_switch_status = app.get_switch_status
                 get_learn_status = app.get_learn_status

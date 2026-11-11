@@ -963,3 +963,20 @@ def test_set_model_reports_a_switch_that_cannot_start(session_factory, db, no_co
     result = api.set_model(model_id)
 
     assert result["ok"] is False and "not running yet" in result["error"]
+
+
+def test_the_pending_list_waits_for_a_meeting_stop_in_progress(env, monkeypatch):
+    _, api, db, tmp_path, _ = env
+    folder = _meeting_folder(tmp_path)
+    result: list = []
+    api._meeting_lock.acquire()  # a stop is between the end of the recording and the start of the job
+    thread = threading.Thread(target=lambda: result.append(api.get_pending_meetings()))
+    thread.start()
+    thread.join(0.3)
+    assert thread.is_alive()  # the list does not read the half-way state
+
+    monkeypatch.setattr(api._file_jobs, "running_filename", lambda: folder.name)
+    api._meeting_lock.release()
+    thread.join(3)
+
+    assert result == [[]]

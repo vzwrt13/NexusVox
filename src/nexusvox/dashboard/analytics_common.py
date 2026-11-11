@@ -11,7 +11,7 @@ from ..storage.models import COMMAND_APP, Transcription
 
 
 def _apply_date_filter(
-    query, start: str | None, end: str | None, model=Transcription, *, polish: bool = False, dictations: bool = False
+    query, start: str | None, end: str | None, model=Transcription, *, polish: bool = False, commands: bool = False
 ):
     """Filter a query by optional ISO date bounds (inclusive), read as the user's local days.
 
@@ -21,11 +21,12 @@ def _apply_date_filter(
     Rows of polish attempts (`polish_status` set) are no dictations - no audio, no model, the label as
     text - so they stay out of every dictation statistic unless the query is for polish (`polish=True`).
 
-    Command rows (`app == COMMAND_APP`) are voice commands, not dictations: `dictations=True` leaves them out too.
+    Command rows (`app == COMMAND_APP`) are voice commands, not dictations: they stay out too, unless the query
+    is about commands (`commands=True`). A new statistic gets dictations only, without remembering a flag.
     """
     if model is Transcription and not polish:
         query = query.filter(Transcription.polish_status.is_(None))
-    if dictations and model is Transcription:
+    if not commands and model is Transcription:
         query = query.filter(Transcription.app.is_(None) | (Transcription.app != COMMAND_APP))
     if start or end:
         local_day = func.strftime("%Y-%m-%d", model.created_at, "localtime")

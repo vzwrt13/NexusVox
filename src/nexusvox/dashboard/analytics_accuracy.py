@@ -40,7 +40,7 @@ def get_accuracy_over_time(
 
     with session_factory() as session:
         query = session.query(period_col, Transcription.text, Transcription.corrected_text)
-        rows = _apply_date_filter(query, start, end, dictations=True).all()
+        rows = _apply_date_filter(query, start, end).all()
         event_period = period_bucket(period, LearnEventRow.created_at)
         event_query = session.query(event_period, func.count()).filter(LearnEventRow.outcome == ACCEPTED_EVENT)
         accepted = dict(_apply_date_filter(event_query, start, end, LearnEventRow).group_by(event_period).all())

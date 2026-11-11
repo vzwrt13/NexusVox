@@ -25,7 +25,7 @@ def time_saved_minutes(words: int, duration_ms: int) -> float:
 
 def _dictations(query, start: str | None, end: str | None):
     """The date-filtered query without command rows: a command is no dictation, so no total counts it."""
-    return _apply_date_filter(query, start, end, dictations=True)
+    return _apply_date_filter(query, start, end)
 
 
 def get_overview(session_factory: sessionmaker, *, start: str | None = None, end: str | None = None) -> dict:
@@ -183,7 +183,7 @@ def _command_row_stats(session_factory: sessionmaker, start: str | None, end: st
     """
     with session_factory() as session:
         query = session.query(Transcription.polish_status, Transcription.polish_ms, Transcription.text)
-        query = _apply_date_filter(query, start, end, polish=True).filter(
+        query = _apply_date_filter(query, start, end, polish=True, commands=True).filter(
             Transcription.polish_status.isnot(None) | (Transcription.app == COMMAND_APP)
         )
         rows = query.all()
@@ -256,7 +256,11 @@ def get_model_speed(session_factory: sessionmaker, *, start: str | None = None, 
             Transcription.polish_status,
             Transcription.polish_ms,
         )
-        rows = _apply_date_filter(query, start, end, polish=True).filter(Transcription.llm_model.isnot(None)).all()
+        rows = (
+            _apply_date_filter(query, start, end, polish=True, commands=True)
+            .filter(Transcription.llm_model.isnot(None))
+            .all()
+        )
     groups: dict[tuple[str, str | None, str, str | None], list] = {}
     for model, url, level, device, c_status, c_ms, p_status, p_ms in rows:
         if p_status is not None:

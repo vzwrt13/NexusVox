@@ -1301,3 +1301,35 @@ def test_words_per_day_caps_a_user_supplied_start(session_factory):
 
     assert len(result["labels"]) == MAX_WORDS_PER_DAY_SPAN
     assert result["labels"][-1] == date.today().isoformat()
+
+
+def test_words_per_day_survives_a_range_near_the_start_of_the_calendar(session_factory):
+    from nexusvox.dashboard.analytics import get_words_per_day
+
+    result = get_words_per_day(session_factory, start="0001-01-01", end="0002-01-01")
+
+    assert result["labels"][0] == "0001-01-01" and result["labels"][-1] == "0002-01-01"
+
+
+def test_words_per_day_does_not_read_rows_older_than_the_cap(session_factory):
+    from nexusvox.dashboard.analytics import get_words_per_day
+
+    _seed(
+        session_factory,
+        [{"text": "old words here", "language": "en", "duration_ms": 1, "created_at": datetime(2001, 1, 1, 12)}],
+    )
+
+    result = get_words_per_day(session_factory, start="1999-01-01", end="2026-11-01")
+
+    assert sum(result["values"]) == 0 and result["labels"][0] > "2016-01-01"
+
+
+def test_most_corrected_and_new_queries_leave_command_rows_out_by_default(session_factory):
+    from nexusvox.dashboard.analytics_common import _apply_date_filter
+
+    _seed(session_factory, _mixed_rows())
+    with session_factory() as session:
+        default = _apply_date_filter(session.query(Transcription), None, None).count()
+        with_commands = _apply_date_filter(session.query(Transcription), None, None, commands=True).count()
+
+    assert (default, with_commands) == (1, 2)

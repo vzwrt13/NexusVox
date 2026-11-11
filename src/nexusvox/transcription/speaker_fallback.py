@@ -45,6 +45,20 @@ def supports_speaker_detection(config: InferenceConfig) -> bool:
     return bool(MODEL_REGISTRY.get(config.model, {}).get("diarization"))
 
 
+def runs_with_speaker_detection(config: InferenceConfig) -> bool:
+    """Whether the engine that will run `config` detects speakers: the model's flag, and not Parakeet on the CPU.
+
+    With device "auto" the engine is the GPU server only while it answers (blocking probe), else the CPU.
+    """
+    if not supports_speaker_detection(config):
+        return False
+    if config.device == "cpu":
+        return False
+    if config.device == "auto":
+        return probe_server(health_url_for(config))
+    return True
+
+
 def _warm_up(config: InferenceConfig) -> None:
     """Load the model of a server this job just started (~17 s); best effort, the detection request has its own wait."""
     try:
@@ -87,13 +101,14 @@ def speaker_detection_job(
 ) -> Iterator[SpeakerJob]:
     """Settle which model audio that wants speaker detection is transcribed with; blocking.
 
-    Unchanged (the active `config`) when the job does not want speakers or the active model detects them. Else
+    Unchanged (the active `config`) when the job does not want speakers or the engine that will run detects them
+    (Parakeet on the CPU does not, so it takes the container path like Whisper). Else
     Parakeet on its GPU container, when it answers or can be started (stopped again on exit if started here), or
     the unchanged `config` with a notice saying why not. `what` ("meeting", "upload") goes into the notice.
     `active_model()` names the dictation model at exit: when the user switched to Parakeet meanwhile, the
     container is now dictation's server and stays up.
     """
-    if not wanted or supports_speaker_detection(config):
+    if not wanted or runs_with_speaker_detection(config):
         yield SpeakerJob(config)
         return
 
@@ -118,7 +133,7 @@ def speaker_detection_job(
         yield SpeakerJob(gpu, f"This {what} uses Parakeet for speaker detection.", bool(started))
     finally:
         if started:
-            switched = active_model is not None and supports_speaker_detection(replace(config, model=active_model()))
+            switched = active_model is not None and runs_with_speaker_detection(replace(config, model=active_model()))
             if switched:
                 logger.info("Dictation switched to Parakeet during the job: its container stays up")
             else:

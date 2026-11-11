@@ -100,6 +100,11 @@ async def transcribe_file(
     )
     # An engine that chooses between a server and the CPU settles on one before its flags are read.
     await transcriber.prepare()
+    if diarize:
+        # A reachable but cold GPU server is worth the wait (~17 s): the CPU engine cannot detect speakers.
+        wait_until_warm = getattr(transcriber, "wait_until_warm", None)
+        if wait_until_warm is not None:
+            await wait_until_warm()
     # Both the model's registry entry and the client must support words; a custom server
     # shares the Parakeet client but never sees the fields.
     entry = MODEL_REGISTRY.get(config.model, {})

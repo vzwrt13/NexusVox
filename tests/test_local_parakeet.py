@@ -891,3 +891,47 @@ def test_parakeet_is_listed_and_switchable_on_cpu(db, session_factory, monkeypat
 
     assert models["parakeet-tdt-0.6b"]["inprocess_supported"] is True
     assert "voxtral-mini-4b" not in models
+
+
+@pytest.mark.asyncio
+async def test_model_loading_does_not_count_against_the_transcription_timeout(monkeypatch):
+    """The first dictation after a start loads (or downloads) the model: that must not eat its timeout."""
+    import time
+
+    loaded = {"n": 0}
+
+    model = _FakeModel()
+
+    def slow_load(cls, *a):
+        if not loaded["n"]:
+            loaded["n"] += 1
+            time.sleep(0.4)  # longer than the timeout below; later calls are cache hits, as in the real loader
+        return model
+
+    monkeypatch.setattr(LocalParakeetTranscriber, "_get_model", classmethod(slow_load))
+    t = _make()
+    await t.connect()
+    await t.send_audio_chunk(_pcm(1.0))
+
+    result = await t.finish(timeout=0.2)
+
+    assert result.done is True
+    assert loaded["n"] >= 1
+
+
+def test_a_background_preloader_does_not_clear_a_failed_load():
+    LocalParakeetTranscriber._set_status("error", "offline")
+
+    LocalParakeetTranscriber(InferenceConfig(model="parakeet-tdt-0.6b"), retry_failed_load=False)
+
+    assert LocalParakeetTranscriber.load_status() == {"state": "error", "error": "offline"}
+
+
+def test_analyse_returns_the_same_shape_for_empty_and_normal_audio():
+    from nexusvox.transcribers.local_parakeet import _analyse
+
+    empty = _analyse(np.zeros(10, dtype=np.float32), None, None)
+    normal = _analyse(np.full(SAMPLE_RATE, 0.1, dtype=np.float32), None, None)
+
+    assert len(empty) == len(normal) == 2
+    assert empty[1].dtype == normal[1].dtype == bool

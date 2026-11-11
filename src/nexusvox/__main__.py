@@ -65,6 +65,22 @@ def is_autostart(argv: list[str]) -> bool:
     return AUTOSTART_FLAG in argv
 
 
+def _harden_console_streams() -> None:
+    """Make the console never fail on a character it cannot encode.
+
+    A legacy Windows console (cp1252, cp850) refuses some characters of a log line (a path with an accent, a
+    transcript); the logging handler then prints a bare `--- Logging error ---` instead of the line. Unencodable
+    characters become `?`. A windowed app has no stream (None): nothing to do.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
 def main() -> None:
     # Before anything heavy: a second start must not build a second tray icon or hotkey hook.
     instance = SingleInstance()
@@ -79,6 +95,7 @@ def main() -> None:
         # Logging first, so what `load_config` has to say (a config moved aside, a model that is gone) reaches the
         # file too: the windowed app has no console. The level and the full-text switch are in the config, which is
         # not read yet; they are applied right after it.
+        _harden_console_streams()
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

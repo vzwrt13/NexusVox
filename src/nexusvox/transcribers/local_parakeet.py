@@ -98,10 +98,8 @@ def _frame_levels(samples: np.ndarray) -> np.ndarray:
     return np.sqrt(np.mean(block * block, axis=1))
 
 
-def _analyse(
-    samples: np.ndarray, max_s: float | None, min_s: float | None
-) -> tuple[list[tuple[int, int]], np.ndarray, np.ndarray]:
-    """Segment ranges, the frame levels and the per-frame "speech" flags of the audio."""
+def _analyse(samples: np.ndarray, max_s: float | None, min_s: float | None) -> tuple[list[tuple[int, int]], np.ndarray]:
+    """Segment ranges and the per-frame "speech" flags of the audio."""
     max_s = MAX_DIRECT_S if max_s is None else max_s
     min_s = MIN_SEGMENT_S if min_s is None else min_s
     min_s = min(max(min_s, 1 / 50), max_s / 2)  # at least one frame, so every cut moves forward
@@ -111,13 +109,13 @@ def _analyse(
 
     level = _frame_levels(samples)
     if len(level) == 0:
-        return [(0, total)], level, np.zeros(0, dtype=bool)
+        return [(0, total)], np.zeros(0, dtype=bool)
     floor, loud = np.percentile(level, [10, 90])
     pause_level = min(max(floor * 3.0, 0.002), max(loud * 0.3, 0.002))
     quiet = level < pause_level
     speech = level >= max(pause_level, _SPEECH_RMS)
     if total <= max_len:
-        return [(0, total)], quiet, speech
+        return [(0, total)], speech
 
     min_pause = max(1, round(_MIN_PAUSE_S * SAMPLE_RATE / _PAUSE_FRAME))
     frames_per_s = SAMPLE_RATE / _PAUSE_FRAME
@@ -133,7 +131,7 @@ def _analyse(
         ranges.append((start, end))
         start = end
     ranges.append((start, total))
-    return ranges, quiet, speech
+    return ranges, speech
 
 
 def split_at_pauses(
@@ -154,7 +152,7 @@ def speech_segments(
     samples: np.ndarray, max_s: float | None = None, min_s: float | None = None
 ) -> list[tuple[int, int]]:
     """`split_at_pauses` without the segments that hold no speech (silence, hum, room noise)."""
-    ranges, _, speech = _analyse(samples, max_s, min_s)
+    ranges, speech = _analyse(samples, max_s, min_s)
     return [
         (a, b)
         for a, b in ranges
@@ -206,17 +204,20 @@ class LocalParakeetTranscriber(BaseTranscriber):
     _preloading = False
     _state_lock = threading.Lock()
 
-    def __init__(self, config: InferenceConfig) -> None:
+    def __init__(self, config: InferenceConfig, *, retry_failed_load: bool = True) -> None:
         registry = MODEL_REGISTRY[config.model]
         self._onnx_model = str(registry["onnx_model"])
         self._quantization = str(registry["onnx_quantization"])
         self._audio_buffer = bytearray()
         self._connected = False
         self.model = str(registry["hf_name"])
-        # A new transcriber (start, model switch) gets a fresh try after an earlier failed load.
-        with self._state_lock:
-            if self._status["state"] == "error":
-                self._set_status("idle")
+        # A new transcriber (start, model switch) gets a fresh try after an earlier failed load. A background
+        # preloader (`retry_failed_load=False`) does not: it is built on every flip to the CPU, and a failed
+        # download would be retried each time instead of once per press.
+        if retry_failed_load:
+            with self._state_lock:
+                if self._status["state"] == "error":
+                    self._set_status("idle")
 
     # ---- Model loading ------------------------------------------------------
 
@@ -349,6 +350,10 @@ class LocalParakeetTranscriber(BaseTranscriber):
         loop = asyncio.get_event_loop()
         cancelled = threading.Event()
         try:
+            if len(samples) >= _MIN_SAMPLES:
+                # The (first) model load or download is not transcription: it gets no part of the timeout, or the
+                # first dictation after a start would time out and lose its text.
+                await loop.run_in_executor(None, self._get_model, self._onnx_model, self._quantization)
             text, words = await asyncio.wait_for(
                 loop.run_in_executor(self._executor, self._recognize, samples, cancelled), timeout=timeout
             )

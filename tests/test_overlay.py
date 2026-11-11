@@ -190,3 +190,92 @@ def test_switching_to_visual_builds_the_window():
     app._overlay.warm_up.assert_not_called()
     app.on_feedback_mode("both")
     app._overlay.warm_up.assert_called_once()
+
+
+# -- the pill is drawn once and then only updated ---------------------------------------------------------
+
+
+class FakeCanvas:
+    """Counts what the pill asks of a Tk canvas."""
+
+    def __init__(self):
+        self.items = {}
+        self.created = 0
+        self.deleted = 0
+        self.moves = 0
+        self.configs = 0
+
+    def _create(self, kind, *coords, **options):
+        self.created += 1
+        self.items[self.created] = {"kind": kind, "coords": list(coords), **options}
+        return self.created
+
+    create_oval = lambda self, *a, **k: self._create("oval", *a, **k)  # noqa: E731
+    create_rectangle = lambda self, *a, **k: self._create("rectangle", *a, **k)  # noqa: E731
+    create_line = lambda self, *a, **k: self._create("line", *a, **k)  # noqa: E731
+
+    def coords(self, item, *coords):
+        self.moves += 1
+        self.items[item]["coords"] = list(coords)
+
+    def itemconfigure(self, item, **options):
+        self.configs += 1
+        self.items[item].update(options)
+
+    def delete(self, *args):
+        self.deleted += 1
+
+
+def _pill():
+    from nexusvox.dictation.overlay import BARS, _Pill
+
+    canvas = FakeCanvas()
+    return _Pill(canvas), canvas, BARS
+
+
+def test_the_pill_creates_its_items_once_and_never_deletes_them():
+    pill, canvas, bars = _pill()
+    created = canvas.created
+    assert created == 3 + 1 + bars  # background, the error mark, the bars
+    for state in (RECORDING, RECORDING, PROCESSING, RECORDING, ERROR, CONFIRMED, RECORDING):
+        pill.draw(state, [0.5] * bars)
+    assert canvas.created == created and canvas.deleted == 0
+
+
+def test_a_moving_state_updates_every_bar_on_every_tick():
+    pill, canvas, bars = _pill()
+    pill.draw(RECORDING, [0.2] * bars)
+    first = canvas.moves
+    assert first == bars
+    pill.draw(RECORDING, [0.9] * bars)
+    assert canvas.moves == 2 * bars
+    visible = [i for i in canvas.items.values() if i["kind"] == "line" and i.get("state") == "normal"]
+    assert len(visible) == bars
+
+
+@pytest.mark.parametrize("state", [ERROR, CONFIRMED])
+def test_a_static_state_is_not_redrawn(state):
+    pill, canvas, bars = _pill()
+    pill.draw(state, [0.0] * bars)
+    moves, configs = canvas.moves, canvas.configs
+    for _ in range(30):  # 30 ticks of 33 ms
+        pill.draw(state, [0.0] * bars)
+    assert (canvas.moves, canvas.configs) == (moves, configs)
+    visible = [i for i in canvas.items.values() if i["kind"] == "line" and i.get("state") == "normal"]
+    assert len(visible) == 1  # just the mark
+
+
+def test_a_state_change_recolours_the_pill():
+    from nexusvox.dictation.overlay import _COLORS
+
+    pill, canvas, bars = _pill()
+    pill.draw(RECORDING, [0.5] * bars)
+    pill.draw(ERROR, [0.5] * bars)
+    background, accent = _COLORS[ERROR]
+    shapes = [i for i in canvas.items.values() if i["kind"] in ("oval", "rectangle")]
+    assert {s["fill"] for s in shapes} == {background}
+    mark = [i for i in canvas.items.values() if i["kind"] == "line" and i.get("state") == "normal"]
+    assert [m["fill"] for m in mark] == [accent]
+    pill.draw(RECORDING, [0.5] * bars)  # back to the bars
+    visible = [i for i in canvas.items.values() if i["kind"] == "line" and i.get("state") == "normal"]
+    assert len(visible) == bars and all(v["fill"] != accent for v in visible)

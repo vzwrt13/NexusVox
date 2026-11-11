@@ -176,6 +176,43 @@ def test_modifiers_whose_key_up_was_lost_do_not_stay_held():
     assert toggles == [] and hk._pressed_modifiers == set()
 
 
+def test_the_meeting_chord_sends_the_menu_mask_when_it_holds_alt_or_win():
+    # the chord key is swallowed: without a mask key the Alt release opens the app's menu on every toggle
+    hk, toggles, config = _hotkey()
+    masks: list[str] = []
+    hk._mask_sender = lambda: masks.append("mask")
+    config.modifiers, config.key = ["ctrl", "alt"], "M"
+    hk._handle(LCTRL, True)
+    hk._handle(LALT, True)
+    assert hk._handle(VK_M, True) is True and toggles == [1]
+    assert masks == ["mask"]
+    assert hk._handle(VK_M, True) is True  # auto-repeat: no second mask
+    assert masks == ["mask"]
+
+
+def test_the_meeting_chord_without_alt_or_win_sends_no_mask():
+    hk, toggles, _ = _hotkey()  # Ctrl+Shift+F9
+    masks: list[str] = []
+    hk._mask_sender = lambda: masks.append("mask")
+    hk._handle(LCTRL, True)
+    hk._handle(LSHIFT, True)
+    hk._handle(VK_F9, True)
+    assert toggles == [1] and masks == []
+
+
+def test_a_failing_mask_sender_does_not_stop_the_toggle():
+    hk, toggles, config = _hotkey()
+    config.modifiers, config.key = ["win", "shift"], "M"
+
+    def broken():
+        raise OSError("SendInput failed")
+
+    hk._mask_sender = broken
+    hk._handle(0x5B, True)  # Left Win
+    hk._handle(LSHIFT, True)
+    assert hk._handle(VK_M, True) is True and toggles == [1]
+
+
 # -- session --------------------------------------------------------------------------------------
 
 

@@ -838,3 +838,99 @@ def test_a_dictation_after_the_polish_is_watched_normally():
     _wait_until(lambda: watcher.status()["counts"].get("suggested"))
     watcher.stop()
     assert watcher.status()["counts"] == {"polished": 1, "suggested": 1}
+
+
+# --- every paste ends in one outcome, and the worker keeps what it took off the queue ---
+
+
+def _wait_for(condition, timeout_s: float = 3.0) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while not condition() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return condition()
+
+
+def test_a_failing_judge_still_records_one_outcome(monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("diff blew up")
+
+    monkeypatch.setattr(edit_watch, "judge", broken)
+    status = _outcome(lambda: FakeField(["I use nexus fox", "I use NexusVox"]))
+    assert status["counts"] == {"failed": 1}
+    assert status["last"]["message"] == OUTCOMES["failed"]
+    assert "failed" not in edit_watch.WATCHED  # a skipped watch, not a watched one
+
+
+def test_a_field_that_raises_while_polling_records_one_outcome(caplog):
+    class RaisingField:
+        def __init__(self):
+            self.reads = 0
+
+        def read(self):
+            self.reads += 1
+            if self.reads > 1:  # the first read finds the paste, the poll then blows up
+                raise RuntimeError("UI Automation failed")
+            return "I use nexus fox"
+
+    status = _outcome(RaisingField)
+    assert status["counts"] == {"failed": 1}
+    assert "see the log" in status["last"]["message"]  # not a claim about the comparison: the field failed
+
+
+def test_a_watch_that_fails_after_taking_the_next_item_still_processes_it():
+    """Regression: `_run` took the next item with `queue.get()` again and lost the one the failed watch had."""
+    fields = iter([FakeField(["I use nexus fox", "I use NexusVox"]), FakeField(["second dictation"])])
+    calls = []
+
+    def on_suggestions(suggestions):
+        calls.append(suggestions)
+        raise RuntimeError("the dashboard store is down")
+
+    watcher = EditWatcher(on_suggestions, lambda: [], field_factory=lambda: next(fields))
+    watcher.watch("I use nexus fox", 60)
+    time.sleep(0.15)
+    watcher.watch("second dictation", 0.05)  # ends the first watch early, which then fails while reporting
+    assert _wait_for(lambda: sum(watcher.status()["counts"].values()) == 2)
+    watcher.stop()
+    assert watcher.status()["counts"] == {"suggested": 1, "unchanged": 1}  # exactly one outcome per paste
+    assert len(calls) == 1
+
+
+def test_a_watch_that_fails_after_taking_the_stop_sentinel_still_stops():
+    """Regression: the lost sentinel left the worker blocked on an empty queue for good."""
+    field = FakeField(["I use nexus fox", "I use NexusVox"])
+
+    def on_suggestions(suggestions):
+        raise RuntimeError("the dashboard store is down")
+
+    watcher = EditWatcher(on_suggestions, lambda: [], field_factory=lambda: field)
+    watcher.watch("I use nexus fox", 60)
+    time.sleep(0.15)
+    watcher.stop()  # the running watch takes the sentinel, then fails while reporting
+    assert _wait_for(lambda: watcher._thread is not None and not watcher._thread.is_alive())
+
+
+def test_the_paste_is_located_once_per_watch_not_on_every_poll(monkeypatch):
+    real = edit_watch._find_last
+    calls = []
+    monkeypatch.setattr(edit_watch, "_find_last", lambda text, injected: calls.append(1) or real(text, injected))
+
+    def finds_for(window_s: float) -> int:
+        calls.clear()
+        texts = ["I use nexus fox"] * 30 + ["I use NexusVox"]
+        watcher = EditWatcher(lambda s: None, lambda: [], field_factory=lambda: FakeField(texts))
+        watcher.watch("I use nexus fox", window_s)
+        assert _wait_for(lambda: sum(watcher.status()["counts"].values()) == 1)
+        watcher.stop()
+        return len(calls)
+
+    short, long = finds_for(0.05), finds_for(0.4)
+    assert short == long  # eight times the polls, the same number of searches
+
+
+def test_extract_edit_takes_the_span_it_was_given():
+    before = "Hi Anna, I use nexus fox daily"
+    span = edit_watch._find_last(before, "I use nexus fox daily")
+    after = "Hi Anna, I use NexusVox daily"
+    assert extract_edit(before, "I use nexus fox daily", after, span) == "I use NexusVox daily"
+    assert edit_watch.judge(before, "I use nexus fox daily", after, [], None, span).outcome == "suggested"

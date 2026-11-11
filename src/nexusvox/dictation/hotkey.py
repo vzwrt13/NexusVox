@@ -60,6 +60,27 @@ STOP_GRACE_S = 0.3
 _MENU_MODIFIERS = frozenset({"alt", "win"})
 
 
+def _send_menu_mask(modifiers, sender: Callable[[], object] | None) -> None:
+    """Send the menu mask key when the chord holds Alt or Win (see `HotkeyListener._mask_menu_keys`)."""
+    if not set(modifiers) & _MENU_MODIFIERS or sender is None:
+        return
+    try:
+        sender()
+    except Exception:
+        logger.exception("Could not send the menu mask key")
+
+
+def _load_mask_sender() -> Callable[[], object] | None:
+    try:
+        # Imported here (injector binds Win32 at import) and outside the hook, which has a tight timeout.
+        from .injector import send_menu_mask
+
+        return send_menu_mask
+    except Exception:
+        logger.exception("Menu mask key unavailable; releasing Alt or Win last may open a menu")
+        return None
+
+
 class HotkeyListener:
     """Listens for a modifier combo, optionally completed by one ordinary key.
 
@@ -181,6 +202,27 @@ class HotkeyListener:
         self._modifier_vks_down = set()
 
     # -- core -----------------------------------------------------------------
+
+    def _heal_modifiers(self, keep: str | None = None) -> None:
+        """Forget tracked modifiers that are no longer physically down.
+
+        A key-up the hook never saw (Ctrl+Alt+Del, the lock screen) leaves a modifier "held" in the tracked
+        set. With a key in the binding the next plain press of that key would start a recording and swallow
+        the letter; with a modifier-only binding the next lone press of the other modifier (Win, to open
+        Start) would complete the chord. Asked before a press decides, like `MeetingHotkey` does.
+        `keep` is the modifier being pressed right now: inside the hook its key state is not updated yet.
+        """
+        if not self._pressed_modifiers:
+            return
+        try:
+            physical = self._physical_modifiers()
+        except Exception:
+            return  # no Win32 (a headless runner): nothing to compare with
+        stale = self._pressed_modifiers - physical - {keep}
+        if stale:
+            logger.debug("Dropped modifiers without a key-up: %s", ", ".join(sorted(stale)))
+            self._pressed_modifiers -= stale
+            self._modifier_vks_down = {vk for vk in self._modifier_vks_down if _VK_TO_MODIFIER[vk] not in stale}
 
     def _extra_modifiers_down(self) -> bool:
         """A modifier outside the binding is already held as the chord completes: another shortcut.
@@ -343,6 +385,7 @@ class HotkeyListener:
             if pressed:
                 if self._key_swallowed:
                     return True  # auto-repeat while held as part of the combo
+                self._heal_modifiers()
                 if self._combo_down or not self._modifiers <= self._pressed_modifiers:
                     return False  # plain typing: the modifiers are not (all) down
                 if self._extra_modifiers_down():
@@ -361,6 +404,8 @@ class HotkeyListener:
                 self._discard_on_foreign_key()
             return False  # the key itself always reaches the application
         repeat = pressed and vk in self._modifier_vks_down  # a held key repeats its key-down every ~31 ms
+        if pressed and not repeat:
+            self._heal_modifiers(keep=modifier)
         if pressed:
             self._modifier_vks_down.add(vk)
         else:
@@ -401,12 +446,7 @@ class HotkeyListener:
         key). It is sent when the combo completes, not at the release: from inside the hook it would
         queue behind the very key-up it must precede.
         """
-        if not self._modifiers & _MENU_MODIFIERS or self._mask_sender is None:
-            return
-        try:
-            self._mask_sender()
-        except Exception:
-            logger.exception("Could not send the menu mask key")
+        _send_menu_mask(self._modifiers, self._mask_sender)
 
     def _win32_event_filter(self, msg: int, data) -> None:
         """pynput hook callback, runs synchronously inside WH_KEYBOARD_LL."""
@@ -453,13 +493,7 @@ class HotkeyListener:
 
     def start(self) -> None:
         """Start listening for the hotkey. Runs the listener in a daemon thread."""
-        try:
-            # Imported here (injector binds Win32 at import) and outside the hook, which has a tight timeout.
-            from .injector import send_menu_mask
-
-            self._mask_sender = send_menu_mask
-        except Exception:
-            logger.exception("Menu mask key unavailable; releasing Alt or Win last may open a menu")
+        self._mask_sender = _load_mask_sender()
         self._listener = keyboard.Listener(win32_event_filter=self._win32_event_filter)
         self._listener.daemon = True
         self._listener.start()
@@ -498,6 +532,7 @@ class MeetingHotkey:
         self._physical_modifiers = physical_modifiers or _physical_modifiers
         self._pressed_modifiers: set[str] = set()
         self._key_swallowed = False  # the key is held since a swallowed key-down
+        self._mask_sender: Callable[[], object] | None = None  # set by start(); tests leave it unset
         self._listener: keyboard.Listener | None = None
 
     def _handle(self, vk: int, pressed: bool) -> bool:
@@ -514,6 +549,9 @@ class MeetingHotkey:
                 if self._pressed_modifiers != set(self._config.modifiers):
                     return False  # plain typing or another chord
                 self._key_swallowed = True
+                # The chord key is swallowed, so Alt or Win is released after a keystroke nobody saw: without a
+                # mask key the app's menu (Alt) or the Start menu (Win) would open on every toggle.
+                _send_menu_mask(self._pressed_modifiers, self._mask_sender)
                 self._on_toggle()
                 return True
             swallowed, self._key_swallowed = self._key_swallowed, False
@@ -532,6 +570,7 @@ class MeetingHotkey:
             self._listener.suppress_event()
 
     def start(self) -> None:
+        self._mask_sender = _load_mask_sender()
         self._listener = keyboard.Listener(win32_event_filter=self._win32_event_filter)
         self._listener.daemon = True
         self._listener.start()

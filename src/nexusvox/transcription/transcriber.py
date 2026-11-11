@@ -226,7 +226,14 @@ class VoxtralRealtimeTranscriber(BaseTranscriber):
             await self.disconnect()
 
         self._ws = await websockets.connect(self._server_url)
+        try:
+            await self._start_session()
+        except BaseException:
+            await self.disconnect()  # never leave a half-open socket behind
+            raise
 
+    async def _start_session(self) -> None:
+        """Wait for session.created, configure the session and start the generation engine."""
         # Receive session.created
         msg = json.loads(await self._ws.recv())
         if msg.get("type") != "session.created":
@@ -279,53 +286,58 @@ class VoxtralRealtimeTranscriber(BaseTranscriber):
         if self._ws is None:
             raise RuntimeError("Not connected")
 
-        # Signal end of audio
-        logger.info("Committing audio buffer to server")
-        await self._ws.send(
-            json.dumps(
-                {
-                    "type": "input_audio_buffer.commit",
-                    "final": True,
-                }
-            )
-        )
-
-        # Collect transcription tokens
-        result = TranscriptionResult()
         try:
-            while not result.done:
-                raw = await asyncio.wait_for(self._ws.recv(), timeout=timeout)
-                msg = json.loads(raw)
-                msg_type = msg.get("type", "")
+            # Signal end of audio
+            logger.info("Committing audio buffer to server")
+            await self._ws.send(
+                json.dumps(
+                    {
+                        "type": "input_audio_buffer.commit",
+                        "final": True,
+                    }
+                )
+            )
 
-                if msg_type == "transcription.delta":
-                    delta = msg.get("delta", "")
-                    logprob = msg.get("logprob")
-                    result.append(delta, logprob=logprob)
-                    logger.debug("Delta: %s (logprob=%s)", Text(delta), logprob)
+            # Collect transcription tokens
+            result = TranscriptionResult()
+            try:
+                while not result.done:
+                    raw = await asyncio.wait_for(self._ws.recv(), timeout=timeout)
+                    msg = json.loads(raw)
+                    msg_type = msg.get("type", "")
 
-                elif msg_type == "transcription.done":
-                    logger.debug(
-                        "transcription.done payload: %s, text: %s",
-                        json.dumps({k: v for k, v in msg.items() if k != "text"}),
-                        Text(msg.get("text", "")),
-                    )
-                    result.finalize(
-                        text=msg.get("text", result.text),
-                        usage=msg.get("usage"),
-                        logprobs=msg.get("logprobs"),
-                    )
-                    logger.info("Transcription done: %s", Text(result.text))
+                    if msg_type == "transcription.delta":
+                        delta = msg.get("delta", "")
+                        logprob = msg.get("logprob")
+                        result.append(delta, logprob=logprob)
+                        logger.debug("Delta: %s (logprob=%s)", Text(delta), logprob)
 
-                elif msg_type == "error":
-                    error = msg.get("error", "Unknown error")
-                    logger.error("Server error: %s", error)
-                    raise RuntimeError(f"Transcription error: {error}")
+                    elif msg_type == "transcription.done":
+                        logger.debug(
+                            "transcription.done payload: %s, text: %s",
+                            json.dumps({k: v for k, v in msg.items() if k != "text"}),
+                            Text(msg.get("text", "")),
+                        )
+                        result.finalize(
+                            text=msg.get("text", result.text),
+                            usage=msg.get("usage"),
+                            logprobs=msg.get("logprobs"),
+                        )
+                        logger.info("Transcription done: %s", Text(result.text))
 
-                else:
-                    logger.info("Server message: %s", msg_type)
-        except TimeoutError:
-            logger.warning("Transcription timed out after %.0fs", timeout)
+                    elif msg_type == "error":
+                        error = msg.get("error", "Unknown error")
+                        logger.error("Server error: %s", error)
+                        raise RuntimeError(f"Transcription error: {error}")
+
+                    else:
+                        logger.info("Server message: %s", msg_type)
+            except TimeoutError:
+                logger.warning("Transcription timed out after %.0fs", timeout)
+
+        except BaseException:
+            await self.disconnect()  # a server error or a dropped socket must not leave it open
+            raise
 
         await self.disconnect()
         return result
@@ -333,11 +345,11 @@ class VoxtralRealtimeTranscriber(BaseTranscriber):
     async def disconnect(self) -> None:
         """Close the WebSocket connection."""
         if self._ws is not None:
+            ws, self._ws = self._ws, None
             try:
-                await self._ws.close()
+                await asyncio.wait_for(ws.close(), timeout=2.0)  # a hung server must not hold a cancellation up
             except Exception:
                 pass
-            self._ws = None
 
     @property
     def connected(self) -> bool:

@@ -8,15 +8,8 @@ import wave
 import pytest
 from pydub.exceptions import CouldntDecodeError
 
-from nexusvox.transcription.file_transcribe import ALLOWED_EXTENSIONS, _get_extension, convert_to_wav
+from nexusvox.transcription.file_transcribe import ALLOWED_EXTENSIONS, convert_to_wav
 from nexusvox.transcription.transcriber import Word
-
-
-def test_get_extension():
-    assert _get_extension("test.wav") == ".wav"
-    assert _get_extension("music.MP3") == ".mp3"
-    assert _get_extension("noext") == ""
-    assert _get_extension("multi.dots.flac") == ".flac"
 
 
 def test_allowed_extensions_set():
@@ -497,7 +490,7 @@ async def test_speaker_requests_wait_for_each_other_and_the_timeout_starts_after
     transcriber = _DiarizingTranscriber([("hi", [Word("hi", 0.1, 0.2)], True)], [SpeakerTurn(0, 0.0, 1.0)])
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
 
-    assert ft._DIARIZE_LOCK.acquire(blocking=False)  # another upload's request is running
+    assert ft._SERVER_LOCK.acquire(blocking=False)  # another upload's request is running
     try:
         task = asyncio.create_task(
             ft.transcribe_file([_silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True)
@@ -505,7 +498,7 @@ async def test_speaker_requests_wait_for_each_other_and_the_timeout_starts_after
         await asyncio.sleep(0.5)
         assert transcriber.diarize_calls == [] and not task.done()
     finally:
-        ft._DIARIZE_LOCK.release()
+        ft._SERVER_LOCK.release()
 
     result = await asyncio.wait_for(task, timeout=5)
 
@@ -514,30 +507,65 @@ async def test_speaker_requests_wait_for_each_other_and_the_timeout_starts_after
 
 
 @pytest.mark.asyncio
-async def test_failed_transcription_cancels_speaker_detection_and_frees_the_lock(monkeypatch):
+async def test_cancelling_during_speaker_detection_frees_the_server_slot(monkeypatch):
     import asyncio
 
     import nexusvox.transcription.file_transcribe as ft
     from nexusvox.config import InferenceConfig
     from nexusvox.transcription.transcriber import SpeakerTurn
 
-    class Failing(_DiarizingTranscriber):
-        async def finish(self, timeout=120.0):
-            raise RuntimeError("Transcription error: 500")
+    class Hanging(_DiarizingTranscriber):
+        async def diarize(self, wav, timeout):
+            self.diarize_calls.append((b"", timeout))
+            await asyncio.sleep(60)
 
-    assert ft._DIARIZE_LOCK.acquire(blocking=False)  # keeps the speaker request waiting
-    transcriber = Failing([], [SpeakerTurn(0, 0.0, 1.0)])
+    transcriber = Hanging([("hi", [Word("hi", 0.1, 0.2)], True)], [SpeakerTurn(0, 0.0, 1.0)])
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
-    try:
-        with pytest.raises(RuntimeError, match="500"):
-            await ft.transcribe_file([_silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True)
-    finally:
-        ft._DIARIZE_LOCK.release()
-    await asyncio.sleep(0.3)  # a cancelled task would otherwise take the lock now
+    task = asyncio.create_task(
+        ft.transcribe_file([_silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True)
+    )
+    for _ in range(50):
+        if transcriber.diarize_calls:
+            break
+        await asyncio.sleep(0.1)
+    assert transcriber.diarize_calls  # the job is inside speaker detection and holds the slot
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
-    assert transcriber.diarize_calls == []
-    assert ft._DIARIZE_LOCK.acquire(blocking=False)
-    ft._DIARIZE_LOCK.release()
+    assert ft._SERVER_LOCK.acquire(blocking=False)
+    ft._SERVER_LOCK.release()
+
+
+@pytest.mark.asyncio
+async def test_chunks_wait_for_another_jobs_speaker_request(monkeypatch):
+    """A chunk of one upload never spends its timeout behind another job's speaker request."""
+    import asyncio
+
+    import nexusvox.transcription.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+
+    transcriber = _DiarizingTranscriber([("hi", [Word("hi", 0.1, 0.2)], True)], [])
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+    assert ft._SERVER_LOCK.acquire(blocking=False)  # another job's speaker request is running
+    try:
+        task = asyncio.create_task(ft.transcribe_file([_silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b")))
+        await asyncio.sleep(0.5)
+        assert not task.done()
+    finally:
+        ft._SERVER_LOCK.release()
+    result = await asyncio.wait_for(task, timeout=5)
+    assert result.text == "hi"
+
+
+def test_file_extension_keeps_a_name_that_is_only_an_extension():
+    from nexusvox.transcription.file_transcribe import file_extension
+
+    assert file_extension("test.wav") == ".wav"
+    assert file_extension("music.MP3") == ".mp3"
+    assert file_extension(".mp3") == ".mp3"
+    assert file_extension("noext") == ""
+    assert file_extension("multi.dots.flac") == ".flac"
 
 
 @pytest.mark.asyncio
@@ -634,3 +662,18 @@ async def test_a_job_that_wants_speakers_waits_for_a_cold_server_to_warm_up(monk
     transcriber._script.append(("Again.", [Word("Again.", 0.1, 0.3)], True))
     await ft.transcribe_file([_silent_wav(1.0)], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=False)
     assert waited == []  # plain transcription does not wait
+
+
+@pytest.mark.asyncio
+async def test_speaker_detection_is_not_requested_when_words_are_incomplete(monkeypatch):
+    import nexusvox.transcription.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+    from nexusvox.transcription.transcriber import SpeakerTurn
+
+    transcriber = _DiarizingTranscriber([("hello there", [Word("hello", 0.1, 0.2)], True)], [SpeakerTurn(0, 0.0, 1.0)])
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+
+    result = await ft.transcribe_file([_silent_wav()], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True)
+
+    assert transcriber.diarize_calls == []
+    assert any("without timing" in n for n in result.notes)

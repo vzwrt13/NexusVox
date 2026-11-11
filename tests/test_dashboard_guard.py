@@ -311,3 +311,75 @@ def test_real_every_port_held_gives_one_message_and_no_exit(db, monkeypatch):
 
     assert opened == []
     assert len(shown) == 1 and "port" in shown[0]
+
+
+def test_the_meeting_sweep_starts_even_when_every_dashboard_port_is_taken(db, monkeypatch):
+    import threading
+
+    dashboard, _, _ = _fresh_dashboard(db, monkeypatch)
+    swept = threading.Event()
+    monkeypatch.setattr(dashboard.DashboardAPI, "sweep_meeting_leftovers", lambda self: swept.set())
+    monkeypatch.setattr(dashboard, "_bind_server", lambda app: None)
+
+    dashboard.ensure_dashboard_api(db, Config())
+
+    assert swept.wait(2)
+
+
+def _switch_app(loop):
+    import types
+
+    app = types.SimpleNamespace(_loop=loop, status={"status": "idle"}, ended=[])
+    app.get_switch_status = lambda: app.status
+    app.get_learn_status = app.on_feedback_mode = app._transcriber = None
+    app._end_switch = lambda status, error=None: app.ended.append((status, error))
+    return app
+
+
+def test_a_switch_that_raises_before_settling_leaves_an_error_status(db, monkeypatch):
+    import asyncio
+
+    dashboard, _, _ = _fresh_dashboard(db, monkeypatch)
+    monkeypatch.setattr(dashboard, "_bind_server", lambda app: None)
+    loop = asyncio.new_event_loop()
+    app = _switch_app(loop)
+
+    async def refuse(model_id):
+        raise RuntimeError("Docker is not available")
+
+    app.switch_model = refuse
+    import threading
+
+    thread = threading.Thread(target=loop.run_forever, daemon=True)
+    thread.start()
+    try:
+        api = dashboard.ensure_dashboard_api(db, Config(), app)
+        api._on_model_switch("parakeet")
+        deadline = __import__("time").time() + 3
+        while not app.ended and __import__("time").time() < deadline:
+            __import__("time").sleep(0.01)
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(2)
+        loop.close()
+
+    assert app.ended == [("error", "Docker is not available")]
+
+
+def test_a_switch_on_a_closed_loop_is_refused_without_an_unawaited_coroutine(db, monkeypatch):
+    import asyncio
+    import warnings
+
+    dashboard, _, _ = _fresh_dashboard(db, monkeypatch)
+    monkeypatch.setattr(dashboard, "_bind_server", lambda app: None)
+    loop = asyncio.new_event_loop()
+    loop.close()
+    app = _switch_app(loop)
+    app.switch_model = lambda model_id: (_ for _ in ()).throw(AssertionError("must not be created"))
+    api = dashboard.ensure_dashboard_api(db, Config(), app)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = api.set_model(next(iter(__import__("nexusvox.config", fromlist=["x"]).MODEL_REGISTRY)))
+
+    assert result["ok"] is False

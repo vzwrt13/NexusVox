@@ -314,6 +314,7 @@ def test_a_slower_weekly_answer_does_not_overwrite_monthly():
       });
     };
     """
+        + _fn(source, "withPeriodLabels")
         + _fn(source, "loadTimeline", True)
         + """
     (async () => {

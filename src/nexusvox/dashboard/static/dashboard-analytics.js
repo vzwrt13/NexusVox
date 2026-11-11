@@ -365,9 +365,21 @@ async function loadTimeline() {
     analyticsApi("/api/accuracy?period=" + currentPeriod),
   ]);
   if (seq !== timelineLoadSeq) return; // the period changed meanwhile: a slower answer must not overwrite it
-  renderTimeline(timeline);
-  renderLatency(latency);
-  renderAccuracy(accuracy);
+  renderTimeline(withPeriodLabels(timeline));
+  renderLatency(withPeriodLabels(latency));
+  renderAccuracy(withPeriodLabels(accuracy));
+}
+
+// A weekly point is labelled by the Monday its week starts on (`YYYY-MM-DD`); say so instead of looking like a day.
+function withPeriodLabels(d) {
+  if (currentPeriod !== "week") return d;
+  const labels = d.labels.map((label) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(label);
+    if (!m) return label;
+    const monday = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return "Week of " + monday.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  });
+  return { ...d, labels };
 }
 
 // ── Render Functions ─────────────────────────────────────────────────

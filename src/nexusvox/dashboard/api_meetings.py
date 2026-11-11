@@ -97,10 +97,13 @@ class MeetingsMixin(DashboardState):
         base = self._meetings_dir()
         if self._db is None or not base.is_dir():
             return []
-        skip = self._db.meeting_folder_names() | {
-            self._meeting.status().get("folder"),
-            self._file_jobs.running_filename(),
-        }
+        # Read the running job before the database: a job that finishes in between is then already in the
+        # database, instead of being in neither list and showing as waiting.
+        # Both under the meeting lock: `stop_meeting` holds it from the end of the recording to the start of the
+        # job, so the folder is never in neither place.
+        with self._meeting_lock:
+            busy = {self._meeting.status().get("folder"), self._file_jobs.running_filename()}
+        skip = self._db.meeting_folder_names() | busy
         pending = []
         for folder in base.iterdir():
             if folder.name in skip or self._meeting_folder(folder.name) is None:

@@ -464,3 +464,38 @@ def test_an_existing_snippets_table_is_left_as_it_is(tmp_path):
         assert connection.execute("SELECT trigger, expansion FROM snippets").fetchall() == [
             ("meine Adresse", "Hauptstraße 1")
         ]
+
+
+def test_dictionary_entry_matches_case_insensitively_for_umlauts(db):
+    first = db.add_dictionary_entry("Über", "über")
+    second = db.add_dictionary_entry("über", "Uber")
+    assert second["id"] == first["id"]
+    assert [e.right for e in db.get_dictionary_entries()] == ["Uber"]
+
+
+def test_umlaut_suggestions_are_deduplicated_and_accepted_ones_removed(db):
+    db.add_dictionary_entry("Ärzte", "Ärzte")
+    assert db.add_dictionary_suggestions([DictionaryEntry("ärzte", "Doctors")]) == 0
+    db.add_dictionary_suggestions([DictionaryEntry("Östrogen", "Estrogen")])
+    suggestion = db.list_dictionary_suggestions()[0]
+    db.accept_dictionary_suggestion(suggestion["id"])
+    assert db.list_dictionary_suggestions() == []
+
+
+def test_record_dictionary_hits_raises_no_deprecation_warning(db):
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        db.record_dictionary_hits({DictionaryEntry("foo", "bar"): 2})
+
+
+def test_readding_an_entry_merges_case_variants_stored_by_older_versions(db):
+    from nexusvox.storage.models import DictionaryEntryRow
+
+    with db._session_factory() as session:
+        session.add_all([DictionaryEntryRow(wrong="Über", right="A"), DictionaryEntryRow(wrong="über", right="B")])
+        session.commit()
+    db.add_dictionary_entry("über", "C")
+    entries = db.get_dictionary_entries()
+    assert [(e.wrong, e.right) for e in entries] == [("über", "C")]

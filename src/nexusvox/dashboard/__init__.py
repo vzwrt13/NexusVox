@@ -151,8 +151,31 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
             if app is not None:
 
                 def on_model_switch(model_id: str) -> None:
-                    if app._loop is not None:
-                        asyncio.run_coroutine_threadsafe(app.switch_model(model_id), app._loop)
+                    loop = app._loop
+                    if loop is None or loop.is_closed():
+                        raise RuntimeError("The app is not running, so the model cannot be switched")
+                    coro = app.switch_model(model_id)
+                    try:
+                        future = asyncio.run_coroutine_threadsafe(coro, loop)
+                    except RuntimeError:
+                        coro.close()  # never scheduled: no "never awaited" warning
+                        raise
+
+                    def settle() -> None:
+                        # `switch_model` raises before it settles the status when it refuses (Docker out of
+                        # reach, a switch in flight, ...): the page would read the idle status as "done".
+                        status = app.get_switch_status()["status"]
+                        if status in ("idle", "ready"):
+                            app._end_switch("error", str(future.exception()))
+
+                    def on_done(done) -> None:
+                        if done.cancelled() or (exc := done.exception()) is None:
+                            return
+                        logger.error("Model switch from the dashboard failed: %s", exc, exc_info=exc)
+                        if not loop.is_closed():
+                            loop.call_soon_threadsafe(settle)
+
+                    future.add_done_callback(on_done)
 
                 get_switch_status = app.get_switch_status
                 get_learn_status = app.get_learn_status
@@ -176,6 +199,8 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 benchmarks_dir=benchmarks_dir,
                 extensions=load_extensions(),
             )
+            # Independent of the dashboard port: leftovers are swept even when every port is taken.
+            threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
         if not _server_started and not _start_failed:
             # The Flask app needs the port (host check), the port needs the bind: bind first, hand the
             # requests to the app once it exists.
@@ -198,7 +223,6 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
                 flask_app = _create_app(_api, port)
                 flask_holder.append(flask_app)
                 _guard = flask_app.extensions["nexusvox_guard"]
-                threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
                 threading.Thread(target=server.serve_forever, daemon=True, name="dashboard-server").start()
                 _server_started = True
                 _port = port

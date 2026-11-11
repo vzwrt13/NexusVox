@@ -897,8 +897,12 @@ modelSelect.addEventListener("change", async () => {
       modelSelect.value = prev;
       renderModelOverview(prev);
       modelSelect.disabled = false;
-      showModelStatus(data.error ? "Error: " + data.error : "The switch was refused.");
-      hideModelStatusLater(5000);
+      if (data.error) {
+        showModelStatus("Error: " + data.error);
+        hideModelStatusLater(5000);
+      } else {
+        hideModelStatus();
+      }
       return;
     }
     pollModelStatus(prev);

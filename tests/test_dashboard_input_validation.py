@@ -216,3 +216,20 @@ def test_a_retry_names_a_deleted_wav_not_the_store_audio_setting(flask_client, d
     data = flask_client.post(f"/api/review/{record.id}/retry").get_json()
 
     assert data["ok"] is False and "missing" in data["error"] and "Store Audio" not in data["error"]
+
+
+def test_the_upload_spool_deletes_its_file_unless_it_was_released(tmp_path, monkeypatch):
+    from nexusvox.dashboard.routes_files import _UploadSpool
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+
+    dropped = _UploadSpool()
+    dropped.write(b"half an upload")
+    dropped.close()  # a failed or finished request closes its streams
+    kept = _UploadSpool()
+    kept.write(b"a whole upload")
+    path = kept.release()
+    kept.close()  # the request ends after the route handed the file to a job
+
+    assert not dropped.path.exists()
+    assert path.read_bytes() == b"a whole upload"

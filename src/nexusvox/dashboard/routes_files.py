@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import os
+import io
 import re
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from flask import Flask, Response, jsonify, request, send_file
+from flask import Flask, Request, Response, jsonify, request, send_file
 
-from ..transcription.file_transcribe import file_extension
+from ..transcription.file_transcribe import ALLOWED_EXTENSIONS, TEMP_PREFIX, file_extension
 from .routes_base import _json_object
 
 if TYPE_CHECKING:
@@ -24,31 +24,74 @@ def _attachment(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename, safe='')}"
 
 
+class _UploadSpool(io.FileIO):
+    """Where Werkzeug writes an uploaded file: its own temporary file, so the body is stored once and the job can
+    read it from there (Werkzeug's default spool is a second temporary file that would have to be copied).
+
+    The file is deleted when the stream is closed - the end of the request, or a failed one (too large, dropped
+    connection) - unless `release()` handed it to a job first.
+    """
+
+    def __init__(self) -> None:
+        fd, name = tempfile.mkstemp(prefix=TEMP_PREFIX + "upload-")
+        self.path = Path(name)
+        self.keep = False
+        super().__init__(fd, "r+")
+
+    def release(self) -> Path:
+        """Close the file and hand it over: the caller deletes it."""
+        self.keep = True
+        self.close()
+        return self.path
+
+    def close(self) -> None:
+        super().close()
+        if not self.keep:
+            try:
+                self.path.unlink(missing_ok=True)
+            except OSError:  # held by a scanner: the start-up sweep takes it
+                pass
+
+
+class _DiscardStream(io.BytesIO):
+    """The body of a file that is refused by its extension: read from the socket and dropped, never stored."""
+
+    def write(self, data) -> int:
+        return len(data)
+
+
+class _UploadRequest(Request):
+    """A request whose upload route stores a file part in an `_UploadSpool`."""
+
+    def _get_file_stream(self, total_content_length, content_type, filename=None, content_length=None):
+        if self.path != "/api/file-transcribe":
+            return super()._get_file_stream(total_content_length, content_type, filename, content_length)
+        if file_extension(filename or "") not in ALLOWED_EXTENSIONS:
+            return _DiscardStream()
+        return _UploadSpool()
+
+
 def register(app: Flask, api: DashboardAPI) -> None:
     """Uploading a file, following its job, and the stored transcripts with their audio and exports."""
+    app.request_class = _UploadRequest
 
     @app.route("/api/file-transcribe", methods=["POST"])
     def file_transcribe():
-        if "file" not in request.files:
+        try:
+            files = request.files  # parses the body: the file part lands in an _UploadSpool
+        except OSError as exc:  # the disk is full
+            return jsonify({"ok": False, "error": f"Could not save the upload: {exc}"}), 500
+        if "file" not in files:
             return jsonify({"ok": False, "error": "No file provided"}), 400
-        f = request.files["file"]
+        f = files["file"]
         if not f.filename:
             return jsonify({"ok": False, "error": "No filename"}), 400
-        problem = api.check_upload_name(f.filename)  # before the body is saved: no disk space for a refused file
+        problem = api.check_upload_name(f.filename)  # a refused extension was never stored (_DiscardStream)
         if problem:
             return jsonify({"ok": False, "error": problem}), 400
-        # The body goes to a temporary file (the request is capped by MAX_CONTENT_LENGTH); the job reads it from there.
-        ext = file_extension(f.filename)
-        fd, name = tempfile.mkstemp(prefix="nexusvox-upload-", suffix=ext)
-        os.close(fd)
-        source = Path(name)
-        try:
-            f.save(name)
-        except BaseException as exc:
-            source.unlink(missing_ok=True)
-            if isinstance(exc, OSError):
-                return jsonify({"ok": False, "error": f"Could not save the upload: {exc}"}), 500
-            raise
+        if not isinstance(f.stream, _UploadSpool):
+            return jsonify({"ok": False, "error": "The upload was not stored"}), 500
+        source = f.stream.release()  # the job owns the file from here on
         diarize = request.form.get("diarize", "").lower() in ("1", "true", "on", "yes")
         cleanup_level = request.form.get("cleanup", "").strip().lower()
         result = api.start_file_transcription(source, f.filename, diarize=diarize, cleanup_level=cleanup_level)

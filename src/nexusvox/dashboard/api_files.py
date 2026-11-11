@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import tempfile
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -16,9 +17,12 @@ from ..transcription.diarization import speaker_turns
 from ..transcription.exports import NO_TIMING_HINT, SUBTITLE_TARGET_IDS
 from ..transcription.file_transcribe import (
     ALLOWED_EXTENSIONS,
+    MAX_DETECTION_S,
     MAX_UPLOAD_BYTES,
     MAX_UPLOAD_LABEL,
+    TEMP_PREFIX,
     convert_to_wav,
+    detection_too_long_note,
     file_extension,
     transcribe_file,
 )
@@ -61,6 +65,18 @@ def _remove(path: Path) -> None:
 
 class FilesMixin(DashboardState):
     """Uploads, the jobs that transcribe them, and the rows uploads and meetings share."""
+
+    def sweep_upload_leftovers(self) -> None:
+        """Delete the temporary upload and conversion files a quit or crash left behind (job threads are daemons,
+        so their cleanup never runs then). Runs at start, when no job of this process exists and a second
+        instance is refused; never raises."""
+        try:
+            for kind in ("upload", "convert"):
+                for path in Path(tempfile.gettempdir()).glob(f"{TEMP_PREFIX}{kind}-*"):
+                    if path.is_file():
+                        _remove(path)
+        except Exception:
+            logger.exception("Sweeping the leftover upload files failed")
 
     def start_file_transcription(
         self, source: Path, filename: str, *, diarize: bool = False, cleanup_level: str = ""
@@ -145,12 +161,15 @@ class FilesMixin(DashboardState):
             progress("converting")
 
         try:
-            audio = convert_to_wav(source, filename)
+            audio = convert_to_wav(source)
         except Exception as exc:
             logger.error("Audio conversion failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Audio conversion failed: {exc}"}
 
         duration_ms = audio.duration_ms
+        # A recording over the cap skips speaker detection: no switch to Parakeet (its container would start for
+        # nothing), and the job says why there are no speakers.
+        detect = diarize and duration_ms / 1000 <= MAX_DETECTION_S
         # A model without speaker detection runs this upload on Parakeet (see `speaker_fallback`). The container, if
         # the job started it, is stopped as soon as the transcription is done: the cleanup below may need the VRAM.
         # The converted audio (a temporary file) is deleted when the transcription ends, however it ends.
@@ -159,7 +178,7 @@ class FilesMixin(DashboardState):
                 audio,
                 speaker_detection_job(
                     self._config.inference,
-                    wanted=diarize,
+                    wanted=detect,
                     what="upload",
                     active_model=lambda: self._config.inference.model,
                 ) as speakers,
@@ -167,7 +186,7 @@ class FilesMixin(DashboardState):
                 result = self._transcribe_wav_chunks(
                     audio,
                     word_timestamps=True,
-                    diarize=diarize,
+                    diarize=detect,
                     on_progress=progress,
                     inference=speakers.config,
                     explain_no_speakers=not speakers.failed,
@@ -177,6 +196,8 @@ class FilesMixin(DashboardState):
             return {"ok": False, "error": f"Transcription failed: {exc}"}
 
         notes = [speakers.notice, *result.notes] if speakers.notice else list(result.notes)
+        if diarize and not detect:
+            notes.append(detection_too_long_note())
         cleaned_text = None
         if cleanup_level and result.text:
             try:

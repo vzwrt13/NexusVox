@@ -72,7 +72,7 @@ below records the main licences so the compatibility picture is on file.
 | Dependency | License |
 |---|---|
 | pynput, pystray | LGPL-3.0 |
-| sqlalchemy, alembic, flask, pydub, faster-whisper, ctranslate2, onnxruntime, onnx-asr, Pillow | MIT |
+| sqlalchemy, alembic, flask, faster-whisper, ctranslate2, onnxruntime, onnx-asr, Pillow | MIT |
 | httpx, pyperclip, sounddevice, numpy | BSD |
 | av (PyAV) | BSD for PyAV itself; its wheel bundles FFmpeg and codec libraries under LGPL and GPL, see below |
 | lingua-language-detector, tokenizers, huggingface-hub, websockets | Apache-2.0 |

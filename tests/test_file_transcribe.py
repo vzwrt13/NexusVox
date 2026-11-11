@@ -40,7 +40,7 @@ def test_convert_wav_passthrough(tmp_path, sample_wav_bytes):
     source = tmp_path / "test.wav"
     source.write_bytes(sample_wav_bytes)
 
-    with convert_to_wav(source, "test.wav") as audio:
+    with convert_to_wav(source) as audio:
         chunks = list(audio)
         duration_ms = audio.duration_ms
 
@@ -59,7 +59,7 @@ def test_convert_returns_correct_duration(tmp_path, sample_wav_bytes):
     source = tmp_path / "audio.wav"
     source.write_bytes(sample_wav_bytes)
 
-    with convert_to_wav(source, "audio.wav") as audio:
+    with convert_to_wav(source) as audio:
         assert isinstance(audio.duration_ms, int)
         assert audio.duration_ms > 0
 
@@ -67,7 +67,7 @@ def test_convert_returns_correct_duration(tmp_path, sample_wav_bytes):
 def test_convert_resamples_and_downmixes_a_stereo_wav(tmp_path):
     source = write_wav_file(tmp_path / "stereo.wav", 2, rate=44_100, channels=2)
 
-    with convert_to_wav(source, "stereo.wav") as audio:
+    with convert_to_wav(source) as audio:
         with wave.open(io.BytesIO(audio[0]), "rb") as wf:
             assert (wf.getnchannels(), wf.getframerate(), wf.getsampwidth()) == (1, 16_000, 2)
             assert wf.getnframes() == 32_000
@@ -75,59 +75,74 @@ def test_convert_resamples_and_downmixes_a_stereo_wav(tmp_path):
 
 
 def test_convert_invalid_format_raises(tmp_path):
-    """Garbage bytes raise an error and leave no temporary file behind.
-
-    Which error depends on the environment: without ffmpeg on PATH (as on CI) it is the missing-ffmpeg
-    RuntimeError, with it the decoder's ValueError.
-    """
+    """Garbage bytes raise a ValueError and leave no temporary file behind."""
     source = tmp_path / "bad.wav"
     source.write_bytes(b"not audio data at all")
     before = set(Path(tempfile.gettempdir()).glob("nexusvox-convert-*"))
 
-    with pytest.raises((RuntimeError, ValueError)):
-        convert_to_wav(source, "bad.wav")
+    with pytest.raises(ValueError, match="could not read the file as audio"):
+        convert_to_wav(source)
 
     assert set(Path(tempfile.gettempdir()).glob("nexusvox-convert-*")) == before
 
 
-def test_a_format_that_is_not_pcm16_wav_goes_through_ffmpeg(tmp_path, monkeypatch):
-    import nexusvox.transcription.file_transcribe as ft
+@pytest.mark.parametrize("width", [1, 3, 4])
+def test_a_wav_with_another_sample_size_is_converted_in_process(tmp_path, width):
+    """8-, 24- and 32-bit PCM WAVs (a DAW's output) need no ffmpeg on PATH: PyAV reads them."""
+    source = write_wav_file(tmp_path / "deep.wav", 1, rate=48_000, channels=2, width=width)
 
-    seen = []
-
-    def fake_ffmpeg(source, out):
-        seen.append(source.name)
-        write_wav_file(out, 1)
-
-    monkeypatch.setattr(ft, "_convert_with_ffmpeg", fake_ffmpeg)
-    mp3 = tmp_path / "talk.mp3"
-    mp3.write_bytes(b"x")
-    wav24 = write_wav_file(tmp_path / "deep.wav", 1, width=3)
-
-    with convert_to_wav(mp3, "talk.mp3") as audio:
-        assert audio.duration_ms == 1000
-    with convert_to_wav(wav24, "deep.wav") as audio:
-        assert audio.duration_ms == 1000
-
-    assert seen == ["talk.mp3", "deep.wav"]
+    with convert_to_wav(source) as audio:
+        assert abs(audio.duration_ms - 1000) <= 50
+        with wave.open(io.BytesIO(audio[0]), "rb") as wf:
+            assert (wf.getnchannels(), wf.getframerate(), wf.getsampwidth()) == (1, 16_000, 2)
 
 
-def test_a_missing_ffmpeg_is_said_plainly(tmp_path, monkeypatch):
-    import nexusvox.transcription.file_transcribe as ft
+def _write_flac(path: Path, seconds: int, rate: int = 44_100) -> Path:
+    import av
+    import numpy as np
 
-    monkeypatch.setattr(ft.shutil, "which", lambda _name: None)
-    mp3 = tmp_path / "talk.mp3"
-    mp3.write_bytes(b"x")
+    with av.open(str(path), "w") as container:
+        stream = container.add_stream("flac", rate=rate)
+        stream.layout = "stereo"
+        for _ in range(seconds):
+            tone = (np.sin(np.linspace(0, 2 * np.pi * 440 * rate / rate, rate)) * 8000).astype(np.int16)
+            frame = av.AudioFrame.from_ndarray(np.stack([tone, tone]).T.reshape(1, -1), format="s16", layout="stereo")
+            frame.sample_rate = rate
+            for packet in stream.encode(frame):
+                container.mux(packet)
+        for packet in stream.encode(None):
+            container.mux(packet)
+    return path
 
-    with pytest.raises(RuntimeError, match="ffmpeg was not found"):
-        convert_to_wav(mp3, "talk.mp3")
+
+def test_a_compressed_format_is_decoded_in_process(tmp_path):
+    """FLAC needs no ffmpeg on PATH; the name's extension does not pick the decoder."""
+    source = _write_flac(tmp_path / "talk.flac", 3)
+    renamed = source.rename(tmp_path / "talk.upload")
+
+    with convert_to_wav(renamed) as audio:
+        assert abs(audio.duration_ms - 3000) <= 50
+        with wave.open(io.BytesIO(audio[0]), "rb") as wf:
+            samples = wf.readframes(wf.getnframes())
+        assert any(samples)  # real audio came through, not silence
+
+
+def test_a_file_without_audio_is_refused(tmp_path):
+    import av
+
+    source = tmp_path / "video.mp4"
+    with av.open(str(source), "w") as container:
+        container.add_stream("mpeg4", rate=10)  # a video stream and no audio
+
+    with pytest.raises(ValueError):
+        convert_to_wav(source)
 
 
 def test_convert_long_audio_produces_multiple_chunks(tmp_path):
     """Audio longer than MAX_CHUNK_MS is split into multiple chunks."""
     source = write_wav_file(tmp_path / "long.wav", 90)  # 1.5x the chunk limit
 
-    with convert_to_wav(source, "long.wav") as audio:
+    with convert_to_wav(source) as audio:
         assert len(audio) == 2  # 60s + 30s
         assert 89_000 <= audio.duration_ms <= 91_000
         chunks = list(audio)
@@ -143,10 +158,24 @@ def test_convert_long_audio_produces_multiple_chunks(tmp_path):
         audio[2]
 
 
+def test_a_converted_file_that_cannot_be_deleted_does_not_fail_the_job(tmp_path, monkeypatch):
+    """A scanner holding the file on Windows must not throw a finished transcription away."""
+    source = write_wav_file(tmp_path / "a.wav", 1)
+    audio = convert_to_wav(source)
+
+    def held(self, missing_ok=False):
+        raise PermissionError(32, "The process cannot access the file")
+
+    monkeypatch.setattr(Path, "unlink", held)
+    audio.close()  # logs, does not raise
+    monkeypatch.undo()
+    audio.close()
+
+
 def test_closing_deletes_the_converted_file(tmp_path):
     source = write_wav_file(tmp_path / "a.wav", 1)
 
-    audio = convert_to_wav(source, "a.wav")
+    audio = convert_to_wav(source)
     converted = audio.path
     assert converted.exists()
     audio.close()
@@ -159,7 +188,7 @@ def _peak_memory_of_converting_and_reading(source: Path) -> tuple[int, int]:
     """(peak traced bytes, chunks) of converting `source` and walking every chunk of the result."""
     tracemalloc.start()
     try:
-        with convert_to_wav(source, source.name) as audio:
+        with convert_to_wav(source) as audio:
             for _chunk in audio:
                 pass
             return tracemalloc.get_traced_memory()[1], len(audio)
@@ -188,7 +217,7 @@ async def test_a_large_file_is_transcribed_through_the_chunk_path_and_cleaned_up
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: recorder)
     source = write_wav_file(tmp_path / "big.wav", 30 * 60, rate=16_000)  # 30 minutes: 30 chunks
 
-    with convert_to_wav(source, "big.wav") as audio:
+    with convert_to_wav(source) as audio:
         converted = audio.path
         result = await ft.transcribe_file(audio, InferenceConfig(model="whisper-large-v3-turbo"), device="cpu")
 

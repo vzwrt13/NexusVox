@@ -32,14 +32,6 @@ To stay on CPU even if you later add a GPU, open the dashboard from the tray ico
 
 **CPU path** — no additional requirements.
 
-**Optional, both paths — [ffmpeg](https://ffmpeg.org/) on your `PATH`:**
-Only uploads in the dashboard's Recordings tab need it, and only for non-WAV formats (MP3, FLAC, OGG, WEBM). Push-to-talk dictation and WAV uploads work without ffmpeg. Without it, a non-WAV upload fails with `Audio conversion failed`.
-
-```powershell
-winget install Gyan.FFmpeg    # or: choco install ffmpeg
-ffmpeg -version               # verify — open a new terminal first so PATH is picked up
-```
-
 **GPU path** (Parakeet, plus faster Whisper):
 - **NVIDIA GPU** with CUDA runtime installed (VRAM depends on model — see table below)
 - **Docker Desktop** with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
@@ -278,7 +270,7 @@ NexusVox writes its log to `%LOCALAPPDATA%\NexusVox\logs` (one file per day, the
 | No audio captured | Verify your default microphone is set correctly in Windows Sound settings. |
 | Model download fails | No model needs a token, so a failure is usually network or disk space. |
 | Text not appearing at cursor | Some applications block simulated Ctrl+V. Try a standard text editor first. |
-| `Audio conversion failed` on upload | ffmpeg is missing from your `PATH`. Install it (`winget install Gyan.FFmpeg`), then restart NexusVox. WAV files upload without ffmpeg. |
+| `Audio conversion failed` on upload | The file is damaged or is not audio. NexusVox decodes uploads itself (no extra program needed): try another copy or convert the file to WAV. |
 | Starting NexusVox again while it runs | The second start opens the running instance's dashboard and exits; there is only ever one tray icon and one hotkey hook. |
 | The dashboard does not open | Port 47392 is held by another program. NexusVox then uses the next free port in 47400-47409 and logs a warning; if all are held it shows a message and logs the reason. Dictation keeps working. |
 

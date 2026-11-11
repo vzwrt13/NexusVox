@@ -201,6 +201,7 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
             )
             # Independent of the dashboard port: leftovers are swept even when every port is taken.
             threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
+            threading.Thread(target=_api.sweep_upload_leftovers, name="upload-sweep", daemon=True).start()
         if not _server_started and not _start_failed:
             # The Flask app needs the port (host check), the port needs the bind: bind first, hand the
             # requests to the app once it exists.

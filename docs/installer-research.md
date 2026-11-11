@@ -352,8 +352,7 @@ What the build cannot do yet:
   wheel but still counts the GPU) and the app then goes for the server. Not exercised from the build.
   Users of the installer must run `device = "cpu"` until ticket 5 sets that on first start.
 - **Not exercised by a script:** the real hotkey and typing into another app, a real microphone recording,
-  a click on the tray icon, meeting recording end to end, upload conversion (needs `ffmpeg` on `PATH`, as
-  with `pip`), and the dashboard rendered in a browser (only the HTTP responses were checked).
+  a click on the tray icon, meeting recording end to end, upload conversion (PyAV decodes it in process, so no `ffmpeg` is needed), and the dashboard rendered in a browser (only the HTTP responses were checked).
 - **Unhandled start-up errors** show a PyInstaller message box and then wait for the user, with no log, because
   the file log starts after the imports. A launcher-level crash log is worth adding with ticket 2.
 - **The real Pro add-on** was not tested. A stand-in with the same entry point and panel API passed.
@@ -387,11 +386,10 @@ models (`HF_XET_CACHE`). `MinVersion` is Windows 11. CI installs, starts the ins
 it, upgrades, and uninstalls with and without the delete switches.
 
 **Open before the first public release: GPL libraries in the build.** The PyAV wheel's `av.libs` contains x264 and
-x265 (GPL-2.0-or-later) next to FFmpeg. NexusVox only needs PyAV because `faster-whisper` imports it at module level
-and uses it to decode audio; `LocalWhisperTranscriber` hands it a WAV (`io.BytesIO`), which it could pass as a
-float array instead, and the file transcription path converts with pydub and ffmpeg. The notices file now lists these libraries and where their
-source is, which is disclosure, not a licence answer. Options: ship a build without them (pass arrays to Whisper and put a stub `av` in
-the frozen app, or PyAV built against an LGPL-only FFmpeg), or have the licence combination reviewed.
+x265 (GPL-2.0-or-later) next to FFmpeg. NexusVox needs PyAV because `faster-whisper` imports it at module level
+and uses it to decode audio, and because the file transcription path (`convert_to_wav`) decodes uploads with it; `LocalWhisperTranscriber` hands it a WAV (`io.BytesIO`), which it could pass as a
+float array instead. The notices file now lists these libraries and where their
+source is, which is disclosure, not a licence answer. Options: ship a build without them (pass arrays to Whisper and decode uploads some other way, or PyAV built against an LGPL-only FFmpeg), or have the licence combination reviewed.
 
 ## Open questions
 

@@ -27,8 +27,6 @@ pip install -e ".[dev]"
 
 Python 3.11 or newer. On first run, `config.toml` is created in the working directory from the template at `src/nexusvox/config.example.toml`.
 
-Optional: [ffmpeg](https://ffmpeg.org/) on your `PATH`, needed only for uploading non-WAV audio files in the dashboard. Not required for the test suite.
-
 The GPU backends (Parakeet, Whisper in a container) additionally need Docker and an NVIDIA GPU — see [GettingStarted.md](GettingStarted.md). Most contributions don't need them: Parakeet and Whisper run in-process on CPU.
 
 ## Before you push

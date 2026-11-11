@@ -1535,3 +1535,51 @@ def test_review_retry_leaves_no_temporary_file(db, tmp_path, sample_wav_bytes, m
 
     assert api.retry_transcription(1) == {"ok": True, "text": "again", "model": api._config.inference.model}
     assert list(upload_tmp.iterdir()) == []
+
+
+def test_a_recording_over_the_detection_cap_does_not_switch_models_and_says_why(
+    flask_client, sample_wav_bytes, monkeypatch
+):
+    from nexusvox.transcription.transcriber import TranscriptionResult
+
+    result = TranscriptionResult()
+    result.finalize(text="long one")
+    asked = []
+    wanted = []
+
+    async def fake_transcribe(wav, cfg, **kwargs):
+        asked.append(kwargs["diarize"])
+        return result
+
+    from nexusvox.transcription import speaker_fallback
+
+    real_job = speaker_fallback.speaker_detection_job
+
+    def spy(config, *, wanted: bool, **kwargs):
+        wanted_calls.append(wanted)
+        return real_job(config, wanted=wanted, **kwargs)
+
+    wanted_calls = wanted
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.speaker_detection_job", spy)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.MAX_DETECTION_S", 0.1)  # the sample is 0.5 s
+
+    job = upload_file(flask_client, sample_wav_bytes, diarize="1")
+
+    assert job["state"] == "done", job["error"]
+    assert asked == [False] and wanted == [False]  # no request for speakers, no Parakeet container
+    assert any("Speaker detection skipped" in n and "longer than" in n for n in job["result"]["notes"])
+
+
+def test_the_start_sweep_deletes_what_a_quit_left_in_the_temp_folder(db, upload_tmp):
+    from nexusvox.config import Config
+    from nexusvox.dashboard.api import DashboardAPI
+
+    for name in ("nexusvox-upload-abc", "nexusvox-convert-def.wav"):
+        (upload_tmp / name).write_bytes(b"x")
+    (upload_tmp / "other.tmp").write_bytes(b"x")
+    (upload_tmp / "nexusvox-meeting-keep").mkdir()
+
+    DashboardAPI(lambda: None, Config(), db=db).sweep_upload_leftovers()
+
+    assert sorted(p.name for p in upload_tmp.iterdir()) == ["nexusvox-meeting-keep", "other.tmp"]

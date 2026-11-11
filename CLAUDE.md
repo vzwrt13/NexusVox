@@ -30,7 +30,6 @@ Hotkey (pynput hook) -> microphone capture -> transcription backend -> `pipeline
 
 - **Windows-only** — Win32 SendInput + WM_PASTE for text injection, pynput win32 hooks.
 - **NVIDIA GPU only for server-backed models** (Parakeet/Whisper in Docker). `[inference].device = "cpu"` runs faster-whisper or Parakeet (`onnx-asr`, ONNX int8) in-process: no Docker, no GPU.
-- **ffmpeg on PATH** — `convert_to_wav` runs it for non-WAV uploads (a PCM16 WAV works without it). Documented in README Requirements and GettingStarted Prerequisites.
 
 ## Configuration
 

@@ -31,12 +31,12 @@ import numpy as np
 from ..config import DEFAULT_OWN_VOICE_LABEL
 from ..transcription.diarization import format_transcript
 from ..transcription.file_transcribe import MAX_CHUNK_MS, MAX_DETECTION_S
-from ..transcription.pcm import TARGET_RATE, downmix, resample
 from ..transcription.transcriber import Word, pcm16_to_wav_bytes
 from .recorder import META_FILENAME, read_meeting_meta
 
 logger = logging.getLogger("nexusvox.meeting_transcribe")
 
+TARGET_RATE = 16_000
 MIX_FILENAME = "meeting.wav"
 TRACK_NAMES = {"mic": "Microphone", "system": "System audio"}
 # Speaker numbers stored on the words, in the same format speaker detection uses for uploads: the microphone
@@ -253,6 +253,15 @@ def load_meeting(folder: str | Path) -> Meeting:
 # ---- Audio ------------------------------------------------------------------
 
 
+def downmix(raw: bytes, channels: int) -> np.ndarray:
+    """Little-endian PCM16 frames as one float32 mono array (channels averaged, a partial last frame cut)."""
+    samples = np.frombuffer(raw[: len(raw) // 2 * 2], dtype="<i2").astype(np.float32)
+    if channels > 1:
+        samples = samples[: len(samples) // channels * channels]
+        samples = samples.reshape(-1, channels).mean(axis=1)
+    return samples
+
+
 def block_power(samples: np.ndarray, block: int) -> np.ndarray:
     """Mean square of each whole `block` of samples (empty when there is none); sqrt gives the RMS."""
     n = len(samples) // block
@@ -271,6 +280,15 @@ def iter_track_chunks(track: MeetingTrack) -> Iterator[np.ndarray]:
     with wave.open(str(track.path), "rb") as wf:
         while raw := wf.readframes(window):
             yield resample(downmix(raw, track.channels), track.sample_rate)
+
+
+def resample(samples: np.ndarray, rate: int) -> np.ndarray:
+    if len(samples) == 0:
+        return np.zeros(0, dtype=np.int16)
+    if rate != TARGET_RATE:
+        out_len = max(1, round(len(samples) * TARGET_RATE / rate))
+        samples = np.interp(np.linspace(0, len(samples) - 1, out_len), np.arange(len(samples)), samples)
+    return np.clip(np.rint(samples), -32768, 32767).astype(np.int16)
 
 
 def loudness_steps(samples: np.ndarray, hop_s: float = OFFSET_HOP_S) -> np.ndarray:

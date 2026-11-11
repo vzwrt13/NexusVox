@@ -31,7 +31,8 @@ Symbol commands do not break `all caps` mode; structural commands do. Pattern is
 
 **Experimental, off in v1** (`[experimental].os_commands` and `.flag_command`, both default false; see `ExperimentalConfig`). `dictation/os_commands.py` + `system/window_manager.py` — checked before voice commands. If transcription matches a nexus pattern, executes the command and skips text injection entirely.
 
-- Window management: `"nexus <action> <app>"` — open, close, focus, fullscreen, minimize, snap left/right
+- Window management: `"nexus <action> <app>"` — open, close, focus, fullscreen, minimize, snap left/right. German verbs work too (`öffne`/`starte`, `schließe`/`beende`, `fokussiere`, `vollbild`, `minimiere`, `snap links/rechts`; flag: `markiere`/`markieren`). A comma after "nexus" and the model's trailing punctuation are accepted. An app that is not registered plays the error cue and is saved as `[nexus failed] <action> <app>`
+- Windows are found by the owning process only (never by title). `close` sends WM_CLOSE and never force-kills an app that is still prompting to save; only a hung window is killed. `open` starts an existing file directly (no shell), so paths with `(` or `&` work
 - Requires `[experimental].os_commands = true`, `os_commands.enabled = true` and app registered under `[os_commands.apps]` in `config.toml`
 - Force-foreground uses AttachThreadInput + Alt key trick + SPI timeout fallback (Vista+ restriction workaround)
 - **"nexus flag"** needs `[experimental].flag_command = true` (independent of `os_commands.enabled`); without it the phrase is typed like any text. Flags most recent transcription for review, no DB record for the flag itself

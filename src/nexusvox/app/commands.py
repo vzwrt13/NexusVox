@@ -9,9 +9,9 @@ import time
 from collections.abc import Callable, Iterator
 
 from ..dictation.assistant import parse_assistant_command, send_to_assistant
-from ..dictation.feedback import beep_error, beep_flag
+from ..dictation.feedback import beep_error
 from ..dictation.os_commands import WINDOW_ACTIONS, NexusCommand, execute_nexus_command
-from ..dictation.overlay import CONFIRMED, ERROR
+from ..dictation.overlay import ERROR
 from ..extensions import HOOK_TIMEOUT_S, ActiveApp, loaded_extensions
 from ..system.logsetup import Text
 from .common import logger
@@ -77,15 +77,17 @@ class CommandHandling:
             return text
         return registry.dictation(text, self._active_app(), budget_s=self._hook_budget_s)
 
-    def _flag_last_transcription(self) -> None:
-        """ "nexus flag" (``[experimental].flag_command``): flags the most recent transcription for review."""
+    def _flag_last_transcription(self) -> bool:
+        """ "nexus flag" (``[experimental].flag_command``): flags the most recent transcription for review.
+
+        Runs in the executor (database I/O); True when something was flagged, for the caller to cue."""
         last_tid = self._db.get_last_transcription_id()
         if last_tid is None:
             logger.info("Nexus flag: no transcription to flag")
-            return
+            return False
         self._db.flag_transcription(last_tid)
         logger.info("Nexus flag: flagged transcription id=%d", last_tid)
-        self._cue(beep_flag, CONFIRMED)
+        return True
 
     def _extension_command(self, raw_text: str) -> tuple[str, bool] | None:
         """An extension's `on_command` answer for *raw_text* (runs in the executor), or None: nobody took it."""
@@ -133,7 +135,10 @@ class CommandHandling:
             and self._config.experimental.os_commands
             and self._config.os_commands.enabled
         ):
-            await loop.run_in_executor(None, execute_nexus_command, nexus_cmd, self._config.os_commands)
+            known = await loop.run_in_executor(None, execute_nexus_command, nexus_cmd, self._config.os_commands)
+            if not known:
+                self._cue(beep_error, ERROR)
+                return f"[nexus failed] {nexus_cmd.action} {nexus_cmd.app_name}"
             logger.info("Nexus command: %s %s", nexus_cmd.action, Text(nexus_cmd.app_name))
             return f"[nexus] {nexus_cmd.action} {nexus_cmd.app_name}"
         return None

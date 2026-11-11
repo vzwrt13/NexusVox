@@ -1210,3 +1210,25 @@ def test_an_extension_selection_command_skips_the_result_hook(monkeypatch):
     app, calls = _result_app(monkeypatch, Handles(), hook)
     asyncio.run(app._polish_selection("go", MagicMock()))
     assert calls["pasted"] == ["handled"] and hook.seen == []
+
+
+def test_an_empty_polish_reply_pastes_nothing_and_keeps_the_last_text(monkeypatch):
+    app, calls = _polish_app(monkeypatch, "hi leute", "")
+    app._last_typed = "earlier text"
+    asyncio.run(
+        app._paste_over_selection(
+            "", "hi leute", 1, "extension", "x", "x", MagicMock(), status="extension", model_ms=None
+        )
+    )
+    assert calls["pasted"] == []
+    assert calls["beeps"] == ["error"]
+    assert app._last_typed == "earlier text"
+    assert app._save_command.call_args.args[1].startswith("[extension failed]")
+
+
+def test_a_polish_of_a_whitespace_only_text_comes_back_unchanged():
+    from nexusvox.dictation.polish import polish, split_whitespace
+
+    assert split_whitespace("  \n ") == ("  \n ", "", "")
+    assert split_whitespace(" a b\n") == (" ", "a b", "\n")
+    assert polish("  \n", "shorter", LlmConfig(url="http://127.0.0.1:9")) == "  \n"

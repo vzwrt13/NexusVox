@@ -11,12 +11,12 @@ from ..audio.capture import AudioCapture
 from ..audio.remote_mic import RemoteAudioSource
 from ..dashboard import running_dashboard_api
 from ..dictation.clipboard import ClipboardError
-from ..dictation.feedback import beep_error, beep_start, beep_stop
+from ..dictation.feedback import beep_error, beep_flag, beep_start, beep_stop
 from ..dictation.hotkey import COMMAND, PASTE_LAST, POLISH
 from ..dictation.injector import inject_text
 from ..dictation.lang_detect import stored_language
 from ..dictation.os_commands import parse_nexus_command
-from ..dictation.overlay import ERROR, PROCESSING, RECORDING
+from ..dictation.overlay import CONFIRMED, ERROR, PROCESSING, RECORDING
 from ..dictation.pipeline import process_text
 from ..extensions import HOOK_TIMEOUT_S
 from ..system.logsetup import Text
@@ -300,9 +300,7 @@ class TranscriptionCycle:
                 # typed: the transcript goes to os-control, which also hides
                 # its widget again when there is nothing to act on.
                 command_text = result.text.strip()
-                reply = await asyncio.get_running_loop().run_in_executor(
-                    None, self._send_os_command, command_text or "::hide"
-                )
+                reply = await loop.run_in_executor(None, self._send_os_command, command_text or "::hide")
                 if reply is None or reply.startswith("error:"):
                     self._cue(beep_error, ERROR)
                 if command_text:
@@ -328,7 +326,8 @@ class TranscriptionCycle:
             if not remote:
                 nexus_cmd = parse_nexus_command(raw_text)
                 if nexus_cmd is not None and nexus_cmd.action == "flag" and self._config.experimental.flag_command:
-                    self._flag_last_transcription()
+                    if await loop.run_in_executor(None, self._flag_last_transcription):
+                        self._cue(beep_flag, CONFIRMED)
                     return
                 label = await self._run_command(raw_text, nexus_cmd)
                 if label is not None:

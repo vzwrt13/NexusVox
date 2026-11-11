@@ -25,13 +25,39 @@ NEXUS_ACTIONS: list[dict[str, str]] = [
 # What `execute_nexus_command` can run: the window actions. "flag" is a command too, but it is not one of these.
 WINDOW_ACTIONS = frozenset(a["action"] for a in NEXUS_ACTIONS if a["action"] != "flag")
 
+# Spoken verb -> action, English and German. The models add a trailing full stop and often a comma after "nexus".
+_VERBS: dict[str, str] = {
+    "open": "open",
+    "öffne": "open",
+    "öffnen": "open",
+    "starte": "open",
+    "close": "close",
+    "schließe": "close",
+    "schliesse": "close",
+    "schließen": "close",
+    "beende": "close",
+    "focus": "focus",
+    "fokussiere": "focus",
+    "fullscreen": "fullscreen",
+    "vollbild": "fullscreen",
+    "minimize": "minimize",
+    "minimiere": "minimize",
+    "minimieren": "minimize",
+}
+_SNAP_SIDES = {"left": "left", "links": "left", "right": "right", "rechts": "right"}
+_FLAG_VERBS = ("flag", "markiere", "markieren")
+
+_TRAILING_PUNCT = r"[\s.!?,;:]*"
+_ALTERNATIVES = "|".join(sorted(map(re.escape, _VERBS), key=len, reverse=True))
+
 _NEXUS_PATTERN = re.compile(
-    r"^\s*nexus\s+(snap\s+(?:left|right)|open|close|focus|fullscreen|minimize)\s+(.+?)\s*$",
+    rf"^\s*nexus,?\s+(?:(?P<snap>(?:snap|docke)\s+(?P<side>{'|'.join(_SNAP_SIDES)}))|(?P<verb>{_ALTERNATIVES}))"
+    rf",?\s+(?P<app>.+?){_TRAILING_PUNCT}$",
     re.IGNORECASE,
 )
 
 _NEXUS_FLAG_PATTERN = re.compile(
-    r"^\s*nexus\s+flag\s*$",
+    rf"^\s*nexus,?\s+(?:{'|'.join(_FLAG_VERBS)}){_TRAILING_PUNCT}$",
     re.IGNORECASE,
 )
 
@@ -53,8 +79,11 @@ def parse_nexus_command(text: str) -> NexusCommand | None:
     m = _NEXUS_PATTERN.match(text)
     if not m:
         return None
-    action = " ".join(m.group(1).lower().split())
-    app_name = m.group(2).lower().strip()
+    if m.group("snap"):
+        action = f"snap {_SNAP_SIDES[m.group('side').lower()]}"
+    else:
+        action = _VERBS[m.group("verb").lower()]
+    app_name = m.group("app").lower().strip()
     return NexusCommand(action=action, app_name=app_name)
 
 

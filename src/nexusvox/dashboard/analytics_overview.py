@@ -162,7 +162,7 @@ def _is_polish_label(label: str) -> bool:
 def _command_kind(label: str) -> str:
     """The kind a stored label stands for: ``[nexus] snap left x`` -> "snap left", ``[assistant] x`` -> "assistant"."""
     tag, detail = _split_label(label)
-    if tag == "nexus":
+    if tag.split(" ")[0] == "nexus":  # "nexus failed" too: the command was recognised, it just did not run
         words = detail.lower().split()
         # Longest action first, so a two-word action ("snap left") is not taken for a shorter one.
         for action in sorted((a["action"] for a in NEXUS_ACTIONS), key=len, reverse=True):

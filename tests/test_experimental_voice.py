@@ -269,3 +269,14 @@ def test_protect_and_restore_time_come_out_of_the_shared_budget_but_not_the_pipe
     assert app._hook_budget_s == after_protect
     assert restore("hello there") == "hello there"
     assert app._hook_budget_s < after_protect - 0.15
+
+
+def test_an_unknown_app_plays_the_error_cue_and_is_recorded_as_failed(monkeypatch):
+    app = _app(ExperimentalConfig(os_commands=True))
+    patch_app(monkeypatch, "loaded_extensions", lambda: None)
+    patch_app(monkeypatch, "execute_nexus_command", lambda cmd, cfg: False)
+    text = "nexus open nowhere"
+    label = asyncio.run(app._run_command(text, parse_nexus_command(text)))
+    assert label == "[nexus failed] open nowhere"
+    app._cue.assert_called_once()
+    assert app._cue.call_args.args[1] == ERROR

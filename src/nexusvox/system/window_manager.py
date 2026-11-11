@@ -156,8 +156,8 @@ def foreground_app() -> tuple[str, str]:
 def find_window(app_name: str, exe_path: str | None = None) -> int | None:
     """Find a visible top-level window belonging to an app.
 
-    Matches by checking if the process executable basename contains the app alias,
-    or if the window title contains the app name as a fallback.
+    Matches only by the owning process: its executable basename contains the configured file name or the
+    app alias. The window title is never used: a browser tab titled "Claude Code" is not VS Code.
     """
     result: list[int] = []
 
@@ -171,19 +171,12 @@ def find_window(app_name: str, exe_path: str | None = None) -> int | None:
         if not user32.IsWindowVisible(hwnd):
             return True  # continue enumeration
 
-        # Try matching by process executable
         proc_exe = _window_exe(hwnd)
         if proc_exe:
             proc_basename = os.path.basename(proc_exe).lower()
             if exe_basename in proc_basename or app_name.lower() in proc_basename:
                 result.append(hwnd)
                 return False  # stop enumeration
-
-        # Fallback: match by window title
-        title = _window_title(hwnd).lower()
-        if app_name.lower() in title:
-            result.append(hwnd)
-            return False
 
         return True
 
@@ -258,16 +251,23 @@ def force_foreground(hwnd: int) -> bool:
 def open_app(exe_path: str) -> None:
     """Launch an application."""
     logger.info("Opening: %s", exe_path)
+    # An existing file is started directly: cmd would strip the quotes round a path with "(" or "&". Anything
+    # else (a command with arguments, a shell name such as "calc") still goes through the shell.
+    direct = os.path.isfile(exe_path)
     subprocess.Popen(
-        exe_path,
-        shell=True,
+        [exe_path] if direct else exe_path,
+        shell=not direct,
         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
         close_fds=True,
     )
 
 
 def close_app(app_name: str, exe_path: str) -> None:
-    """Close an application gracefully via WM_CLOSE, falling back to taskkill."""
+    """Close an application gracefully via WM_CLOSE.
+
+    A window that is still there afterwards is usually asking ("Save changes?"), so it is left alone: killing
+    the process would lose unsaved work and every other window of the app. Only a window that does not answer
+    messages at all (hung) is force-killed."""
     hwnd = find_window(app_name, exe_path)
     if not hwnd:
         logger.warning("close_app: no window found for '%s'", Text(app_name))
@@ -280,8 +280,11 @@ def close_app(app_name: str, exe_path: str) -> None:
     time.sleep(0.5)
 
     # Check if still alive
+    if user32.IsWindow(hwnd) and not user32.IsHungAppWindow(hwnd):
+        logger.info("Window still open after WM_CLOSE (probably asking to save); leaving the app running")
+        return
     if user32.IsWindow(hwnd):
-        logger.info("Window still alive, falling back to taskkill")
+        logger.info("Window is not responding, falling back to taskkill")
         exe_basename = os.path.basename(exe_path) if exe_path else f"{app_name}.exe"
         subprocess.run(
             ["taskkill", "/f", "/im", exe_basename],

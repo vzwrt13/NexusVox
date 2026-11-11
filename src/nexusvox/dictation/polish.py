@@ -83,15 +83,25 @@ def build_user_message(selection: str, instruction: str) -> str:
     return f"{header}\n\nText:\n{selection}"
 
 
+def split_whitespace(text: str) -> tuple[str, str, str]:
+    """*text* as (leading whitespace, the text between, trailing whitespace). All whitespace is all "lead"."""
+    core = text.strip()
+    if not core:
+        return text, "", ""
+    lead = text[: len(text) - len(text.lstrip())]
+    return lead, core, text[len(text.rstrip()) :]
+
+
 def polish(selection: str, instruction: str, config: LlmConfig) -> str:
     """The selection rewritten by the instruction, with the selection's own leading and
     trailing whitespace kept (a selected line's newline must survive). Raises `llm.LlmError`."""
+    lead, core, trail = split_whitespace(selection)
+    if not core:
+        return selection  # nothing but whitespace: there is nothing to rewrite, and no model to ask
     rewritten = clean_reply(complete(config, SYSTEM_PROMPT, build_user_message(selection, instruction)))
     if not rewritten:
         raise LlmError("the model returned no text")
-    core = selection.strip()
-    start = selection.find(core)
-    return selection[:start] + rewritten + selection[start + len(core) :]
+    return lead + rewritten + trail
 
 
 def read_selection(injection_delay_ms: int, in_terminals: bool = False) -> str:

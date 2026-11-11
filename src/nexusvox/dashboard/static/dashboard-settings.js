@@ -159,6 +159,7 @@ function startHotkeyRecording({ button = hotkeyRecordBtn, report = showHotkeySta
     document.removeEventListener("keydown", onDown, true);
     document.removeEventListener("keyup", onUp, true);
     document.removeEventListener("pointerdown", onPointer, true);
+    window.removeEventListener("blur", cancel);
     if (activeHotkeyRecording === cancel) activeHotkeyRecording = null;
     button.textContent = idleLabel;
     button.classList.remove("recording");
@@ -187,6 +188,7 @@ function startHotkeyRecording({ button = hotkeyRecordBtn, report = showHotkeySta
     if (!button.contains(e.target)) finish(null); // a click anywhere else cancels
   };
   const cancel = () => finish(null);
+  window.addEventListener("blur", cancel, { once: true }); // Alt-Tab away and back must not leave it listening
   activeHotkeyRecording = cancel;
   document.addEventListener("keydown", onDown, true);
   document.addEventListener("keyup", onUp, true);

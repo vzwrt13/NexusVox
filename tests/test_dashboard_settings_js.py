@@ -69,6 +69,8 @@ def _recording(tail: str):
         + "const hotkeyMods = []; const hotkeyKeySelect = {};"
         + "const hotkeyRecordBtn = document.getElementById('rec'); const showHotkeyStatus = () => {};"
         + "const saveHotkey = async () => {};"
+        + "const winListeners = {}; const window = { addEventListener: (t, f) => { winListeners[t] = f; },"
+        + " removeEventListener: (t) => { delete winListeners[t]; } };"
         + _fn(settings, "hotkeyKeyFromEvent")
         + "let activeHotkeyRecording = null;"
         + _fn(settings, "cancelHotkeyRecording")
@@ -202,3 +204,47 @@ def test_a_new_pull_keeps_its_status_box_when_the_old_hide_timer_fires():
     assert "llmPullTimer = null" in pull
     assert "clearTimeout(llmPullHideTimer)" in pull
     assert "if (!llmPullTimer)" in _fn(MODELS, "hideLlmPullLater")
+
+
+def test_the_window_losing_focus_cancels_the_hotkey_recording():
+    result = _recording(
+        """
+    startHotkeyRecording();
+    winListeners.blur();
+    out([hotkeyRecordBtn.classList.contains("recording"), Object.keys(winListeners).length]);
+    """
+    )
+    assert result == [False, 0]
+
+
+def test_picking_another_model_drops_the_open_download_question():
+    handler = MODELS[MODELS.index('llmModelSelect.addEventListener("change"') :][:400]
+    assert "dismissLlmPullBox()" in handler
+    assert "llmPullAsked = null" in _fn(MODELS, "declineLlmPull")
+    assert "hideLlmPullLater()" in _fn(MODELS, "saveLlmModel", True)
+
+
+def test_an_idle_switch_poll_updates_the_model_to_revert_to():
+    poll = _fn(MODELS, "pollModelStatus")
+    idle = poll[poll.index('"idle"') :]
+    assert "modelSelect.dataset.prev = modelSelect.value" in idle
+
+
+def test_a_newer_model_status_message_cancels_the_older_hide_timer():
+    assert "clearTimeout(modelHideTimer)" in _fn(MODELS, "showModelStatus")
+    assert MODELS.count("setTimeout(hideModelStatus") == 1  # only inside hideModelStatusLater
+
+
+def test_the_remaining_posts_use_the_shared_helper():
+    assert "/api/models/switch" in MODELS and 'postSetting("/api/models/switch"' in MODELS
+    vocab = _source("dashboard-settings-vocabulary.js")
+    assert 'postSetting("/api/polish-presets"' in vocab
+    assert 'fetch("/api/polish-presets", {' not in vocab
+
+
+def test_a_successful_retry_or_preset_save_clears_the_old_error():
+    retry = _fn(_source("dashboard-review.js"), "retryReviewTranscription", True)
+    assert retry.count("showNotice(") == 2
+    assert 'showNotice(document.getElementById("preset-form"), "down", res.ok ? "" : res.error)' in _source(
+        "dashboard-settings-vocabulary.js"
+    )

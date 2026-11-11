@@ -174,22 +174,17 @@ document.getElementById("preset-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const id = document.getElementById("preset-id").value;
   const savedName = document.getElementById("preset-name").value.trim();
-  const res = await fetch("/api/polish-presets", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      id: id ? Number(id) : null,
-      name: document.getElementById("preset-name").value,
-      instruction: document.getElementById("preset-instruction").value,
-      is_default: document.getElementById("preset-default").checked,
-    }),
+  const res = await postSetting("/api/polish-presets", {
+    id: id ? Number(id) : null,
+    name: document.getElementById("preset-name").value,
+    instruction: document.getElementById("preset-instruction").value,
+    is_default: document.getElementById("preset-default").checked,
   }).then((r) => r.json());
+  showNotice(document.getElementById("preset-form"), "down", res.ok ? "" : res.error);
   if (res.ok) {
     resetPresetForm();
     vocabReveal("preset");
     loadPolishPresets(savedName);
-  } else {
-    showNotice(document.getElementById("preset-form"), "down", res.error);
   }
 });
 

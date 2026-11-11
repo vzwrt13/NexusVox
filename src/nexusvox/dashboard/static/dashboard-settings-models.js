@@ -690,7 +690,10 @@ document.addEventListener("visibilitychange", () => {
 async function saveLlmModel(name) {
   const resp = await postSetting("/api/settings/llm-model", { model: name });
   const s = await resp.json();
-  if (s.error) showLlmPull(s.error, null, false, "down");
+  if (s.error) {
+    showLlmPull(s.error, null, false, "down");
+    hideLlmPullLater();
+  }
   llmSavedModel = s.llm_model;
   await loadLlmModels();
   loadLlmStatus();
@@ -782,6 +785,12 @@ function declineLlmPull() {
   llmPullAsked = null;
   llmPullBox.style.display = "none";
 }
+
+// Picking another model drops an open download question and an old result line; a running pull keeps its box.
+function dismissLlmPullBox() {
+  if (llmPullTimer) return;
+  declineLlmPull();
+}
 llmPullConfirm.addEventListener("click", confirmLlmPull);
 llmPullDecline.addEventListener("click", declineLlmPull);
 
@@ -796,6 +805,7 @@ async function selectServerModel(url, model) {
 
 llmModelSelect.addEventListener("change", async () => {
   const name = llmModelSelect.value;
+  dismissLlmPullBox();
   const choice = llmServerChoice(name);
   if (choice) {
     llmModelSelect.value = llmSavedModel; // until the switch is saved
@@ -881,18 +891,14 @@ modelSelect.addEventListener("change", async () => {
   showModelStatus("Initiating switch...");
 
   try {
-    const res = await fetch("/api/models/switch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: modelSelect.value }),
-    });
+    const res = await postSetting("/api/models/switch", { model: modelSelect.value });
     const data = await res.json();
     if (!data.ok) {
       modelSelect.value = prev;
       renderModelOverview(prev);
       modelSelect.disabled = false;
       showModelStatus(data.error ? "Error: " + data.error : "The switch was refused.");
-      setTimeout(hideModelStatus, 5000);
+      hideModelStatusLater(5000);
       return;
     }
     pollModelStatus(prev);
@@ -901,14 +907,21 @@ modelSelect.addEventListener("change", async () => {
     renderModelOverview(prev);
     modelSelect.disabled = false;
     showModelStatus("Error: the dashboard could not reach the app.");
-    setTimeout(hideModelStatus, 5000);
+    hideModelStatusLater(5000);
   }
 });
 
+let modelHideTimer = null;
 function showModelStatus(text) {
+  clearTimeout(modelHideTimer); // an older hide timer must not cut a newer message short
   const el = document.getElementById("model-switch-status");
   document.getElementById("model-status-text").textContent = text;
   el.style.display = "flex";
+}
+
+function hideModelStatusLater(ms) {
+  clearTimeout(modelHideTimer);
+  modelHideTimer = setTimeout(hideModelStatus, ms);
 }
 
 function hideModelStatus() {
@@ -939,17 +952,18 @@ function pollModelStatus(prevModel) {
         modelSelect.disabled = false;
         // The switch downloaded the model: redraw the list so its mark follows.
         loadModelSwitcher();
-        setTimeout(hideModelStatus, data.note ? 5000 : 2000);
+        hideModelStatusLater(data.note ? 5000 : 2000);
       } else if (data.status === "error") {
         clearInterval(interval);
         modelSelect.value = prevModel;
         renderModelOverview(prevModel);
         modelSelect.disabled = false;
         showModelStatus("Error: " + (data.error || "Unknown"));
-        setTimeout(hideModelStatus, 5000);
+        hideModelStatusLater(5000);
       } else if (data.status === "idle") {
         // Switch already completed or was no-op
         clearInterval(interval);
+        modelSelect.dataset.prev = modelSelect.value;
         modelSelect.disabled = false;
         hideModelStatus();
       }

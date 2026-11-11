@@ -77,6 +77,7 @@ async function retryReviewTranscription(card, btn) {
     showNotice(card.querySelector(".review-correction"), "down", res.error);
     return;
   }
+  showNotice(card.querySelector(".review-correction"), "down", "");
   // The new transcript goes into the correction box; submitting it is the user's call.
   markReviewWrong(card);
   card.querySelector(".review-correction").value = res.text;

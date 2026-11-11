@@ -48,7 +48,10 @@ function showNotice(anchor, state, text) {
     line = document.createElement("p");
     line.className = "settings-hint";
     line.setAttribute("role", "status");
-    host.insertAdjacentElement("afterend", line);
+    // Inside the row's text block, so the Settings search keeps the notice with its row.
+    const info = host === anchor ? null : host.querySelector(".setting-info");
+    if (info) info.append(line);
+    else host.insertAdjacentElement("afterend", line);
     noticeLines.set(host, line);
   }
   setStatus(line, state, text || "");

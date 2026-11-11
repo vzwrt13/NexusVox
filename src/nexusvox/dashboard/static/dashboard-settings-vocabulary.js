@@ -95,12 +95,15 @@ function renderDictionary() {
     </div>`);
 }
 
-async function addDictionaryEntry(wrong, right) {
-  const res = await fetch("/api/dictionary", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ wrong, right }),
-  }).then((r) => r.json());
+// A refused entry ({ok: false, error}) shows its error under `anchor` (the dictionary form by default).
+async function addDictionaryEntry(wrong, right, anchor = document.getElementById("dict-form")) {
+  let res;
+  try {
+    res = await postSetting("/api/dictionary", { wrong, right }).then((r) => r.json());
+  } catch {
+    res = { ok: false, error: "The entry could not be saved." };
+  }
+  showNotice(anchor, "down", res.ok ? "" : res.error || "The entry was refused.");
   if (res.ok) {
     vocabReveal("dict");
     loadDictionary();
@@ -186,7 +189,7 @@ document.getElementById("preset-form").addEventListener("submit", async (e) => {
     vocabReveal("preset");
     loadPolishPresets(savedName);
   } else {
-    alert(res.error);
+    showNotice(document.getElementById("preset-form"), "down", res.error);
   }
 });
 

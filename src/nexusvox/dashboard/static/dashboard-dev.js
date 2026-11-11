@@ -304,7 +304,8 @@ function renderSampleExplorer(samples) {
   const searchFilter = document.getElementById("dev-sample-search");
 
   function render() {
-    const maxWer = parseFloat(werFilter.value) / 100 || 1;
+    const pct = parseFloat(werFilter.value); // a Max WER of 0 shows only perfect samples; empty means no limit (100%)
+    const maxWer = Number.isNaN(pct) ? 1 : pct / 100;
     const query = (searchFilter.value || "").toLowerCase();
 
     const filtered = samples.filter((s) => {
@@ -332,7 +333,7 @@ function renderSampleExplorer(samples) {
             <span class="sample-wer ${werClass}">${werPct}% WER</span>
             <span>#${s.index}</span>
             <span>ID: ${escapeHtml(String(s.id))}</span>
-            <span>${s.audio_duration_s.toFixed(1)}s audio</span>
+            <span>${s.audio_duration_s != null ? s.audio_duration_s.toFixed(1) + "s audio" : ""}</span>
             <span>${s.latency_s != null ? s.latency_s.toFixed(3) + "s latency" : ""}</span>
           </div>
           <div class="sample-text"><span class="label">Ref</span>${escapeHtml(s.reference)}</div>
@@ -346,8 +347,9 @@ function renderSampleExplorer(samples) {
     }
   }
 
-  werFilter.addEventListener("input", render);
-  searchFilter.addEventListener("input", render);
+  // Assigned, not added: opening another benchmark replaces the handler instead of stacking one per field.
+  werFilter.oninput = render;
+  searchFilter.oninput = render;
   render();
 }
 

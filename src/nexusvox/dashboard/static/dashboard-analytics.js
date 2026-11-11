@@ -333,15 +333,15 @@ let timelineLoadSeq = 0;
 async function loadAnalytics() {
   const seq = ++analyticsLoadSeq;
   const [overview, lang, hours, words, heatmap, models, apps, speed, transcription] = await Promise.all([
-    api("/api/overview"),
-    api("/api/language-distribution"),
-    api("/api/peak-usage-hours"),
-    api("/api/top-words?n=20"),
-    api("/api/activity-heatmap"),
-    api("/api/model-breakdown"),
-    api("/api/app-breakdown"),
-    api("/api/model-speed"),
-    api("/api/transcription-speed"),
+    analyticsApi("/api/overview"),
+    analyticsApi("/api/language-distribution"),
+    analyticsApi("/api/peak-usage-hours"),
+    analyticsApi("/api/top-words?n=20"),
+    analyticsApi("/api/activity-heatmap"),
+    analyticsApi("/api/model-breakdown"),
+    analyticsApi("/api/app-breakdown"),
+    analyticsApi("/api/model-speed"),
+    analyticsApi("/api/transcription-speed"),
   ]);
   if (seq !== analyticsLoadSeq) return; // a newer load replaced this one
 
@@ -360,9 +360,9 @@ async function loadAnalytics() {
 async function loadTimeline() {
   const seq = ++timelineLoadSeq;
   const [timeline, latency, accuracy] = await Promise.all([
-    api("/api/transcriptions-over-time?period=" + currentPeriod),
-    api("/api/latency-trend?period=" + currentPeriod),
-    api("/api/accuracy?period=" + currentPeriod),
+    analyticsApi("/api/transcriptions-over-time?period=" + currentPeriod),
+    analyticsApi("/api/latency-trend?period=" + currentPeriod),
+    analyticsApi("/api/accuracy?period=" + currentPeriod),
   ]);
   if (seq !== timelineLoadSeq) return; // the period changed meanwhile: a slower answer must not overwrite it
   renderTimeline(timeline);

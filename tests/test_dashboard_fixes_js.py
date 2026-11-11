@@ -307,7 +307,7 @@ def test_a_slower_weekly_answer_does_not_overwrite_monthly():
     let currentPeriod = "week"; let timelineLoadSeq = 0; const rendered = [];
     const renderTimeline = (t) => rendered.push(t); const renderLatency = () => {}; const renderAccuracy = () => {};
     const releases = {};
-    const api = (url) => {
+    const analyticsApi = (url) => {
       const period = url.split("period=")[1];
       return new Promise((resolve) => {
         if (url.includes("over-time")) releases[period] = () => resolve(period); else resolve(null);

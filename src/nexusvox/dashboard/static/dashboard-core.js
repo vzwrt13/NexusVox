@@ -12,11 +12,12 @@
       const banner = document.createElement("div");
       banner.id = "denied-banner";
       banner.setAttribute("role", "alert");
-      banner.style.cssText =
-        "position:fixed;top:0;left:0;right:0;z-index:1000;padding:12px 16px;text-align:center;" +
-        "background:#ff6b6b;color:#1a1a1a;font-weight:600;";
-      banner.textContent =
-        "This dashboard session has ended (NexusVox was restarted). Reopen the dashboard from the NexusVox tray icon.";
+      banner.className = "denied-banner";
+      setStatus(
+        banner,
+        "down",
+        "This dashboard session has ended (NexusVox was restarted). Reopen the dashboard from the NexusVox tray icon."
+      );
       document.body.prepend(banner);
     }
     return res;
@@ -33,6 +34,25 @@ function setStatus(el, state, text) {
   el.classList.remove(...STATUS_STATES);
   if (STATUS_STATES.includes(state)) el.classList.add(state);
   if (text !== undefined) el.textContent = text;
+}
+
+// ── Notice under a control ───────────────────────────────────────────
+// A refusal or failure shows as a status line under the control's row (never a browser dialog). One line per
+// anchor; an empty text hides it. `state` follows the status colour rule.
+const noticeLines = new WeakMap();
+function showNotice(anchor, state, text) {
+  const host = anchor.closest(".setting-row") || anchor;
+  let line = noticeLines.get(host);
+  if (!line) {
+    if (!text) return;
+    line = document.createElement("p");
+    line.className = "settings-hint";
+    line.setAttribute("role", "status");
+    host.insertAdjacentElement("afterend", line);
+    noticeLines.set(host, line);
+  }
+  setStatus(line, state, text || "");
+  line.hidden = !text;
 }
 
 // ── Alt hotkey hint ──────────────────────────────────────────────────
@@ -117,11 +137,15 @@ function dateParams() {
 }
 
 async function api(path) {
+  const res = await fetch(path);
+  return res.json();
+}
+
+// The Analytics From/To filter goes only onto analytics requests; settings, LLM status, pulls and the like use `api`.
+async function analyticsApi(path) {
   const dp = dateParams();
   const sep = path.includes("?") ? "&" : "?";
-  const url = dp.toString() ? path + sep + dp.toString() : path;
-  const res = await fetch(url);
-  return res.json();
+  return api(dp.toString() ? path + sep + dp.toString() : path);
 }
 
 // ── Tab Switching ────────────────────────────────────────────────────
@@ -190,6 +214,7 @@ function activateTab(name, { keepScroll = false } = {}) {
   if (!keepScroll) window.scrollTo(0, 0);
 
   if (name !== "review") stopReviewAudio();
+  if (name !== "settings") cancelHotkeyRecording(); // leaving Settings ends a recording; no key is swallowed after
 
   if (name === "home") openHomeTab();
   if (name === "analytics") openAnalyticsTab();

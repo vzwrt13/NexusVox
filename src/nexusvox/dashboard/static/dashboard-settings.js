@@ -142,8 +142,15 @@ function hotkeyKeyFromEvent(e) {
 // "Record": the next key-down in this page becomes the binding. A modifier-only combo
 // is taken when the first modifier is released, because no key completes it. The first-run setup records through
 // the same code with its own button and status line; `onSaved(settings)` runs once the new binding is stored.
+// The recording that is listening, so leaving the tab, a click elsewhere or the setup's end can cancel it.
+let activeHotkeyRecording = null;
+function cancelHotkeyRecording() {
+  if (activeHotkeyRecording) activeHotkeyRecording();
+}
+
 function startHotkeyRecording({ button = hotkeyRecordBtn, report = showHotkeyStatus, onSaved = null } = {}) {
   if (button.classList.contains("recording")) return; // a second click while listening starts nothing new
+  cancelHotkeyRecording(); // the other button's recording (Settings or setup) ends first
   const idleLabel = button.textContent;
   button.textContent = "Press keys\u2026";
   button.classList.add("recording");
@@ -151,6 +158,8 @@ function startHotkeyRecording({ button = hotkeyRecordBtn, report = showHotkeySta
   const finish = (key) => {
     document.removeEventListener("keydown", onDown, true);
     document.removeEventListener("keyup", onUp, true);
+    document.removeEventListener("pointerdown", onPointer, true);
+    if (activeHotkeyRecording === cancel) activeHotkeyRecording = null;
     button.textContent = idleLabel;
     button.classList.remove("recording");
     if (key === null) return;
@@ -174,8 +183,14 @@ function startHotkeyRecording({ button = hotkeyRecordBtn, report = showHotkeySta
     e.preventDefault();
     if (hotkeyKeyFromEvent(e) === "" && Object.values(held).some(Boolean)) finish("");
   };
+  const onPointer = (e) => {
+    if (!button.contains(e.target)) finish(null); // a click anywhere else cancels
+  };
+  const cancel = () => finish(null);
+  activeHotkeyRecording = cancel;
   document.addEventListener("keydown", onDown, true);
   document.addEventListener("keyup", onUp, true);
+  document.addEventListener("pointerdown", onPointer, true);
 }
 
 translateToggle.addEventListener("change", async () => {
@@ -277,7 +292,7 @@ hotkeyKeySelect.addEventListener("change", () => saveHotkey());
 polishKeySelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/polish-key", { key: polishKeySelect.value });
   const s = await resp.json();
-  if (s.error) alert(s.error);
+  showNotice(polishKeySelect, "down", s.error);
   polishKeySelect.value = s.polish_key;
   refreshLlmHints();
 });
@@ -285,31 +300,31 @@ meetingOwnLabelInput.addEventListener("change", async () => {
   try {
     const resp = await postSetting("/api/settings/meeting-own-voice-label", { label: meetingOwnLabelInput.value });
     const s = await resp.json();
-    if (s.error) alert(s.error);
+    showNotice(meetingOwnLabelInput, "down", s.error);
     meetingOwnLabelInput.value = meetingOwnLabelSaved = s.meeting_own_voice_label;
   } catch (err) {
-    alert("The name could not be saved.");
+    showNotice(meetingOwnLabelInput, "down", "The name could not be saved.");
     meetingOwnLabelInput.value = meetingOwnLabelSaved;
   }
 });
 feedbackModeSelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/feedback-mode", { mode: feedbackModeSelect.value });
   const s = await resp.json();
-  if (s.error) alert(s.error);
+  showNotice(feedbackModeSelect, "down", s.error);
   feedbackModeSelect.value = s.feedback_mode;
 });
 cleanupLevelSelect.addEventListener("change", async () => {
   refreshLlmHints(); // the hint follows the chosen level at once
   const resp = await postSetting("/api/settings/cleanup-level", { level: cleanupLevelSelect.value });
   const s = await resp.json();
-  if (s.error) alert(s.error);
+  showNotice(cleanupLevelSelect, "down", s.error);
   cleanupLevelSelect.value = s.cleanup_level; // the server's answer wins, and so does the hint
   refreshLlmHints();
 });
 pasteKeySelect.addEventListener("change", async () => {
   const resp = await postSetting("/api/settings/paste-key", { key: pasteKeySelect.value });
   const s = await resp.json();
-  if (s.error) alert(s.error);
+  showNotice(pasteKeySelect, "down", s.error);
   pasteKeySelect.value = s.paste_key;
 });
 hotkeyRecordBtn.addEventListener("click", () => startHotkeyRecording());
@@ -426,20 +441,17 @@ function renderDeviceHint(d) {
 if (deviceSelect) {
   deviceSelect.addEventListener("change", async () => {
     try {
-      const res = await fetch("/api/device", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device: deviceSelect.value }),
-      });
+      const res = await postSetting("/api/device", { device: deviceSelect.value });
       const data = await res.json();
       if (!data.ok) {
-        alert(data.error || "Failed to set device");
+        showNotice(deviceSelect, "down", data.error || "Failed to set device");
         await loadDeviceSettings();
         return;
       }
       renderDeviceHint(data);
-      alert("Device preference saved. Restart NexusVox for the change to take effect.");
+      showNotice(deviceSelect, "warn", "Device preference saved. Restart NexusVox for the change to take effect.");
     } catch {
+      showNotice(deviceSelect, "down", "The device preference could not be saved.");
       await loadDeviceSettings();
     }
   });
@@ -449,11 +461,7 @@ if (deviceSelect) {
 const osCommandsToggle = document.getElementById("os-commands-toggle");
 
 osCommandsToggle.addEventListener("change", async () => {
-  await fetch("/api/os-commands/enabled", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled: osCommandsToggle.checked }),
-  });
+  await postSetting("/api/os-commands/enabled", { enabled: osCommandsToggle.checked });
 });
 
 async function loadOsCommands() {
@@ -486,47 +494,27 @@ const vcNumbersToggle = document.getElementById("voice-numbers-toggle");
 const vcBypassSymbolsToggle = document.getElementById("voice-bypass-symbols-toggle");
 
 vcToggle.addEventListener("change", async () => {
-  await fetch("/api/voice-commands/enabled", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled: vcToggle.checked }),
-  });
+  await postSetting("/api/voice-commands/enabled", { enabled: vcToggle.checked });
 });
 
 vcNumbersToggle.addEventListener("change", async () => {
-  await fetch("/api/voice-commands/numbers", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled: vcNumbersToggle.checked }),
-  });
+  await postSetting("/api/voice-commands/numbers", { enabled: vcNumbersToggle.checked });
 });
 
 const vcPressEnterToggle = document.getElementById("voice-press-enter-toggle");
 
 vcPressEnterToggle.addEventListener("change", async () => {
-  await fetch("/api/voice-commands/press-enter", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled: vcPressEnterToggle.checked }),
-  });
+  await postSetting("/api/voice-commands/press-enter", { enabled: vcPressEnterToggle.checked });
 });
 
 vcBypassSymbolsToggle.addEventListener("change", async () => {
-  await fetch("/api/voice-commands/bypass-symbols", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled: vcBypassSymbolsToggle.checked }),
-  });
+  await postSetting("/api/voice-commands/bypass-symbols", { enabled: vcBypassSymbolsToggle.checked });
 });
 
 const vcBypassStructuralToggle = document.getElementById("voice-bypass-structural-toggle");
 
 vcBypassStructuralToggle.addEventListener("change", async () => {
-  await fetch("/api/voice-commands/bypass-structural", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled: vcBypassStructuralToggle.checked }),
-  });
+  await postSetting("/api/voice-commands/bypass-structural", { enabled: vcBypassStructuralToggle.checked });
 });
 
 async function loadVoiceCommands() {
@@ -561,11 +549,7 @@ function renderStructuralGrid(allStructural, activeStructural) {
 async function saveStructural() {
   const structural = [...document.querySelectorAll(".structural-checkbox:checked")]
     .map((cb) => cb.dataset.keyword);
-  await fetch("/api/voice-commands/structural", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ structural }),
-  });
+  await postSetting("/api/voice-commands/structural", { structural });
 }
 
 function renderSymbolGrid(allSymbols, activeSymbols) {
@@ -589,11 +573,7 @@ function renderSymbolGrid(allSymbols, activeSymbols) {
 async function saveSymbols() {
   const symbols = [...document.querySelectorAll(".symbol-checkbox:checked")]
     .map((cb) => cb.dataset.keyword);
-  await fetch("/api/voice-commands/symbols", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ symbols }),
-  });
+  await postSetting("/api/voice-commands/symbols", { symbols });
 }
 
 // -- Settings pages and search ------------------------------------------

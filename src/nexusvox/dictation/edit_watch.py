@@ -91,6 +91,7 @@ OUTCOMES = {
     "unreadable": "skipped: the focused element does not expose its text",
     "too_long": f"skipped: the field holds more than {MAX_FIELD_CHARS:,} characters",
     "not_found": "skipped: the pasted text did not show up in the field",
+    "failed": "skipped: the watch failed with an error (see the log)",
 }
 # Outcomes of a watch that ran to its end: every one whose message does not say "skipped".
 WATCHED = frozenset(key for key, message in OUTCOMES.items() if not message.startswith("skipped"))
@@ -194,9 +195,11 @@ class _Edit:
     found: bool = True  # False when the dictation is not in `before` at all
 
 
-def _edit_of(before: str, injected: str, after: str) -> _Edit:
+def _edit_of(before: str, injected: str, after: str, span: tuple[int, int] | None = None) -> _Edit:
+    """`span` is where `injected` sits in the normalized `before` (`_find_last`), when the caller knows it already."""
     before, after = _normalize(before), _normalize(after)
-    span = _find_last(before, injected)
+    if span is None:
+        span = _find_last(before, injected)
     if span is None:
         return _Edit(None, found=False)
     start, end = span
@@ -208,14 +211,15 @@ def _edit_of(before: str, injected: str, after: str) -> _Edit:
     return _Edit(edited if ratio >= MIN_SIMILARITY else None, before[start:end], ratio)
 
 
-def extract_edit(before: str, injected: str, after: str) -> str | None:
+def extract_edit(before: str, injected: str, after: str, span: tuple[int, int] | None = None) -> str | None:
     """The user's version of `injected`, or None when it cannot be told apart.
 
     `before` is the field text right after the paste, `after` the latest one.
     Returns None when the pasted text is not in `before`, when it was deleted,
-    or when it was rewritten beyond `MIN_SIMILARITY`.
+    or when it was rewritten beyond `MIN_SIMILARITY`. A watch that polls the same
+    `before` many times passes `span` (`_find_last` of the normalized `before`) to find it once.
     """
-    return _edit_of(before, injected, after).edited
+    return _edit_of(before, injected, after, span).edited
 
 
 @dataclass(frozen=True)
@@ -228,15 +232,21 @@ class Verdict:
 
 
 def judge(
-    before: str, injected: str, after: str, existing: list[DictionaryEntry], spoken: str | None = None
+    before: str,
+    injected: str,
+    after: str,
+    existing: list[DictionaryEntry],
+    spoken: str | None = None,
+    span: tuple[int, int] | None = None,
 ) -> Verdict:
     """Dictionary suggestions from one watched paste, or the reason there are none.
 
     `spoken` is the text the dictionary will see again (the transcript after the
     dictionary). Voice commands make the paste differ from it, so only an entry that
-    matches `spoken` is kept: one for "25" would never match a transcript.
+    matches `spoken` is kept: one for "25" would never match a transcript. `span` is
+    the paste's place in `before`, when the watch found it already (see `extract_edit`).
     """
-    edit = _edit_of(before, injected, after)
+    edit = _edit_of(before, injected, after, span)
     if not edit.found:
         return Verdict("not_found", [], "the dictation is not in the text the watch started from")
     if edit.edited is None:
@@ -530,9 +540,36 @@ class EditWatcher:
             # The first read may hold the rewrite instead of the dictation: nothing to compare against.
             self._record("polished")
             return self._queue.get()
+        # Where the paste sits in `before` is the same on every poll: find it once.
+        span = _find_last(_normalize(before), item.injected)
+        # What the poll takes off the queue (the next dictation, or the stop sentinel None) is kept here even when
+        # the poll fails: dropping it would lose a paste, or leave `stop()` blocked for good.
+        taken: list[_Watch | None] = []
+        try:
+            after, ended = self._poll(item, field, before, span, announce_dead, taken)
+        except Exception:
+            logger.exception("Learn from edits: watch failed")
+            self._record("failed", "reading the field raised an error")
+        else:
+            try:
+                self._report(before, item, after, ended, span)
+            except Exception:
+                logger.exception("Learn from edits: reporting the suggestions failed")  # the outcome is recorded
+        return taken[0] if taken else self._queue.get()
+
+    def _poll(
+        self,
+        item: _Watch,
+        field: TextField,
+        before: str,
+        span: tuple[int, int] | None,
+        announce_dead: Callable[[TextField], None],
+        taken: list[_Watch | None],
+    ) -> tuple[str, str]:
+        """Re-read the field for the watch's window; returns the last text that still held the dictation and
+        how the watch ended (a key of `_ENDED`). The next queued item, if one ends the watch, goes into `taken`."""
         after = before
         deadline = time.monotonic() + item.window_s
-        nxt: _Watch | None | bool = False
         ended = "window"
 
         def must_stop() -> bool:
@@ -540,7 +577,7 @@ class EditWatcher:
 
         while time.monotonic() < deadline and not self._is_cancelled(item):
             try:
-                nxt = self._queue.get(timeout=_POLL_S)
+                taken.append(self._queue.get(timeout=_POLL_S))
                 ended = "next_dictation"
                 break
             except queue.Empty:
@@ -566,12 +603,15 @@ class EditWatcher:
                 continue  # the rewrite may have landed while the field was read: judge only what came before
             # A field cleared on send (or the dictation deleted) keeps the last text that still held it:
             # that is where the user's fixes are. Without an edit it equals `before`, so nothing is learned.
-            if len(current) <= MAX_FIELD_CHARS and extract_edit(before, item.injected, current) is not None:
+            if (
+                span is not None
+                and len(current) <= MAX_FIELD_CHARS
+                and extract_edit(before, item.injected, current, span) is not None
+            ):
                 after = current
         if self._is_cancelled(item):
             ended = "rewrite"
-        self._report(before, item, after, ended)
-        return self._queue.get() if nxt is False else nxt
+        return after, ended
 
     def _refetch(
         self, accept: Callable[[TextField], _T | None], stop: Callable[[], bool] = lambda: False
@@ -650,11 +690,14 @@ class EditWatcher:
                 return None, reason, False
             time.sleep(_POLL_S / 5)
 
-    def _report(self, before: str, item: _Watch, after: str, ended: str = "window") -> None:
+    def _report(
+        self, before: str, item: _Watch, after: str, ended: str = "window", span: tuple[int, int] | None = None
+    ) -> None:
         try:
-            verdict = judge(before, item.injected, after, self._existing(), item.spoken)
+            verdict = judge(before, item.injected, after, self._existing(), item.spoken, span)
         except Exception:
             logger.exception("Learn from edits: diff failed")
+            self._record("failed", "comparing the texts raised an error")
             return
         outcome, detail = verdict.outcome, verdict.detail
         how = _ENDED[ended] if ended != "window" else f"{_ENDED[ended]}, {item.window_s:g} s"

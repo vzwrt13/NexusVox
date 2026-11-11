@@ -38,6 +38,8 @@ class FakeWin32:
         self.is_open = False
         self.close_calls = 0
         self.formats = {}  # format id -> bytes
+        self.unreadable = set()  # formats GetClipboardData cannot render
+        self.fail_formats = set()  # formats SetClipboardData refuses
         self.names = {}
         self.blocks = {}  # allocated, not yet handed to the clipboard
         self._next_handle = 0
@@ -74,12 +76,49 @@ class FakeWin32:
 
     def _SetClipboardData(self, fmt, handle):
         assert self.is_open, "SetClipboardData needs the clipboard to be open"
-        if "SetClipboardData" in self.fail:
+        if "SetClipboardData" in self.fail or fmt in self.fail_formats:
             return 0
         self.formats[fmt] = bytes(self.blocks.pop(handle))
         return handle
 
+    def _EnumClipboardFormats(self, fmt):
+        assert self.is_open, "EnumClipboardFormats needs the clipboard to be open"
+        ids = list(self.formats)
+        if fmt == 0:
+            return ids[0] if ids else 0
+        index = ids.index(fmt) + 1
+        return ids[index] if index < len(ids) else 0
+
+    def _GetClipboardData(self, fmt):
+        assert self.is_open, "GetClipboardData needs the clipboard to be open"
+        if fmt in self.unreadable or fmt not in self.formats:
+            return 0
+        self._next_handle += 1
+        self.blocks[self._next_handle] = bytearray(self.formats[fmt])  # the clipboard keeps owning it
+        return self._next_handle
+
+    # gdi32
+    def _GetEnhMetaFileBits(self, handle, size, buffer):
+        data = bytes(self.blocks[handle])
+        if size:
+            ctypes.memmove(buffer, data, len(data))
+        return len(data)
+
+    def _SetEnhMetaFileBits(self, size, data):
+        if "SetEnhMetaFileBits" in self.fail:
+            return 0
+        self._next_handle += 1
+        self.blocks[self._next_handle] = bytearray(data)
+        return self._next_handle
+
+    def _DeleteEnhMetaFile(self, handle):
+        self.blocks.pop(handle, None)
+        return 1
+
     # kernel32
+    def _GlobalSize(self, handle):
+        return len(self.blocks[handle])
+
     def _GlobalAlloc(self, flags, size):
         if "GlobalAlloc" in self.fail:
             return 0
@@ -162,6 +201,113 @@ def test_a_failed_write_raises_frees_memory_and_closes_the_clipboard(win32, fail
         win32.module.set_text("x")
     assert not win32.is_open and win32.close_calls == 1  # other apps can use the clipboard again
     assert win32.blocks == {}  # nothing allocated is left behind
+
+
+# -- snapshot and restore of a clipboard that holds no text ----------------------------------------------
+
+CF_DIB, CF_BITMAP, CF_HDROP = 8, 2, 15
+
+
+def test_snapshot_and_restore_bring_back_an_image_and_a_file_list(win32):
+    win32.formats.update({CF_BITMAP: b"gdi-handle", CF_DIB: b"pixels", CF_HDROP: b"files"})
+    snapshot = win32.module.snapshot_formats()
+    assert snapshot == [(CF_DIB, b"pixels"), (CF_HDROP, b"files")]  # the GDI bitmap is not memory
+    win32.module.set_text("dictation")  # what a paste does in between
+    assert CF_DIB not in win32.formats
+    win32.module.restore_formats(snapshot)
+    assert win32.formats[CF_DIB] == b"pixels" and win32.formats[CF_HDROP] == b"files"
+    assert win32.module.CF_UNICODETEXT not in win32.formats  # the dictation is gone
+    assert not win32.is_open
+
+
+def test_restored_formats_stay_out_of_the_history(win32):
+    win32.module.restore_formats([(CF_DIB, b"pixels")])
+    assert win32.formats[win32.names["CanIncludeInClipboardHistory"]] == b"\x00\x00\x00\x00"
+
+
+def test_an_empty_clipboard_snapshots_to_nothing_and_restores_empty(win32):
+    assert win32.module.snapshot_formats() == []
+    win32.module.set_text("dictation")
+    win32.module.restore_formats([])
+    assert win32.formats == {} and not win32.is_open
+
+
+def test_a_format_that_cannot_be_rendered_is_left_out(win32):
+    win32.formats.update({CF_DIB: b"pixels", CF_HDROP: b"files"})
+    win32.unreadable.add(CF_HDROP)
+    assert win32.module.snapshot_formats() == [(CF_DIB, b"pixels")]
+
+
+def test_snapshot_is_none_when_the_clipboard_cannot_be_opened(win32):
+    win32.open_fails = 10_000
+    assert win32.module.snapshot_formats() is None
+
+
+def test_restore_that_the_system_refuses_closes_the_clipboard_and_frees_memory(win32):
+    win32.fail.add("SetClipboardData")
+    win32.module.restore_formats([(CF_DIB, b"pixels")])  # logged, not raised: the caller cannot do more
+    assert not win32.is_open and win32.blocks == {} and win32.formats == {}
+
+
+def test_restore_raises_when_the_clipboard_cannot_be_emptied(win32):
+    win32.fail.add("EmptyClipboard")
+    with pytest.raises(win32.module.ClipboardError):
+        win32.module.restore_formats([(CF_DIB, b"pixels")])
+    assert not win32.is_open
+
+
+CF_TEXT, CF_OEMTEXT, CF_UNICODETEXT, CF_DIBV5, CF_ENHMETAFILE, CF_METAFILEPICT = 1, 7, 13, 17, 14, 3
+
+
+def test_formats_windows_rebuilds_are_not_copied_twice(win32):
+    win32.formats.update(
+        {CF_DIB: b"pixels", CF_BITMAP: b"handle", CF_DIBV5: b"pixels-v5", CF_UNICODETEXT: b"text", CF_TEXT: b"t",
+         CF_OEMTEXT: b"t"}
+    )  # fmt: skip
+    kept = [fmt for fmt, _ in win32.module.snapshot_formats()]
+    assert kept == [CF_DIB, CF_UNICODETEXT]  # the owner's DIB (first listed) and the Unicode text
+
+
+def test_rich_text_next_to_the_text_is_kept(win32):
+    win32.formats.update({CF_UNICODETEXT: b"abc", 0xD001: b"<b>a</b>"})
+    assert win32.module.snapshot_formats() == [(CF_UNICODETEXT, b"abc"), (0xD001, b"<b>a</b>")]
+
+
+def test_a_metafile_is_copied_as_its_bits_and_put_back(win32):
+    win32.formats.update({CF_ENHMETAFILE: b"emf-bits", CF_METAFILEPICT: b"picture-handle"})
+    snapshot = win32.module.snapshot_formats()
+    assert snapshot == [(CF_ENHMETAFILE, b"emf-bits")]  # the old-style picture is rebuilt from it
+    win32.module.set_text("dictation")
+    win32.module.restore_formats(snapshot)
+    assert win32.formats[CF_ENHMETAFILE] == b"emf-bits"
+
+
+def test_a_failing_metafile_restore_frees_the_metafile(win32):
+    win32.module._open()
+    win32.fail.add("SetClipboardData")
+    with pytest.raises(win32.module.ClipboardError):
+        win32.module._set_metafile(b"emf-bits")
+    win32._CloseClipboard()
+    assert win32.blocks == {}
+
+
+def test_private_and_gdi_object_formats_are_never_read_as_memory(win32):
+    win32.formats.update({CF_DIB: b"pixels", 0x200: b"any handle", 0x2FF: b"any handle", 0x300: b"gdi object"})
+    assert win32.module.snapshot_formats() == [(CF_DIB, b"pixels")]
+
+
+def test_restore_skips_a_refused_format_and_still_sets_the_history_exclusion(win32):
+    win32.fail_formats.add(CF_DIB)
+    win32.module.restore_formats([(CF_HDROP, b"files"), (CF_DIB, b"pixels"), (0xD001, b"rich")])
+    assert win32.formats[CF_HDROP] == b"files" and win32.formats[0xD001] == b"rich" and CF_DIB not in win32.formats
+    assert win32.formats[win32.names["CanIncludeInClipboardHistory"]] == b"\x00\x00\x00\x00"
+    assert not win32.is_open and win32.blocks == {}
+
+
+def test_restore_that_wrote_nothing_adds_no_exclusion_entries(win32):
+    win32.fail_formats.add(CF_DIB)
+    win32.module.restore_formats([(CF_DIB, b"pixels")])
+    assert win32.formats == {}
 
 
 @pytest.mark.desktop

@@ -220,6 +220,7 @@ class Overlay:
         root.configure(bg=_KEY)
         canvas = tk.Canvas(root, width=_WIDTH, height=_HEIGHT, bg=_KEY, highlightthickness=0, bd=0)
         canvas.pack()
+        pill = _Pill(canvas)
         root.update_idletasks()
 
         hwnd = user32.GetParent(root.winfo_id()) or root.winfo_id()
@@ -252,7 +253,7 @@ class Overlay:
                         place()
                         shown = True
                         placed_for = generation
-                    self._draw(canvas, state, levels)
+                    pill.draw(state, levels)
             except Exception:
                 # Tk would swallow this and never call tick again, leaving the pill on screen for good.
                 self.failed = True
@@ -267,24 +268,47 @@ class Overlay:
         tick()
         root.mainloop()
 
-    @staticmethod
-    def _draw(canvas, state: str, levels: list[float]) -> None:
-        background, accent = _COLORS[state]
-        canvas.delete("all")
+
+class _Pill:
+    """The pill on a canvas. Its items are created once and only moved or recoloured afterwards: deleting and
+    recreating about 30 items every 33 ms made the overlay thread busy for nothing. A static state (error,
+    confirmed) is drawn once and then left alone."""
+
+    def __init__(self, canvas) -> None:
+        self._canvas = canvas
         r = _HEIGHT // 2
-        canvas.create_oval(0, 0, _HEIGHT, _HEIGHT, fill=background, outline="")
-        canvas.create_oval(_WIDTH - _HEIGHT, 0, _WIDTH, _HEIGHT, fill=background, outline="")
-        canvas.create_rectangle(r, 0, _WIDTH - r, _HEIGHT, fill=background, outline="")
-        if state in (ERROR, CONFIRMED):
-            canvas.create_line(r + 4, r, _WIDTH - r - 4, r, fill=accent, width=3, capstyle="round")
-            return
+        self._background = [
+            canvas.create_oval(0, 0, _HEIGHT, _HEIGHT, outline=""),
+            canvas.create_oval(_WIDTH - _HEIGHT, 0, _WIDTH, _HEIGHT, outline=""),
+            canvas.create_rectangle(r, 0, _WIDTH - r, _HEIGHT, outline=""),
+        ]
+        self._line = canvas.create_line(
+            r + 4, r, _WIDTH - r - 4, r, width=3, capstyle="round", state="hidden"
+        )  # the error / confirmed mark
         left, right = r + 2, _WIDTH - r - 2
         step = (right - left) / BARS
+        self._xs = [left + step * (i + 0.5) for i in range(BARS)]
+        self._bars = [canvas.create_line(x, r, x, r, width=3, capstyle="round", state="hidden") for x in self._xs]
+        self._state: str | None = None  # the state the items are dressed for
+
+    def draw(self, state: str, levels: list[float]) -> None:
+        canvas = self._canvas
+        static = state in (ERROR, CONFIRMED)
+        if state != self._state:
+            background, accent = _COLORS[state]
+            for item in self._background:
+                canvas.itemconfigure(item, fill=background)
+            canvas.itemconfigure(self._line, fill=accent, state="normal" if static else "hidden")
+            for bar in self._bars:
+                canvas.itemconfigure(bar, fill=accent, state="hidden" if static else "normal")
+            self._state = state
+        if static:
+            return  # nothing moves
+        r = _HEIGHT // 2
         now = time.monotonic()
-        for i in range(BARS):
+        for i, (bar, x) in enumerate(zip(self._bars, self._xs, strict=True)):
             if state == PROCESSING:  # a calm travelling wave: still working, not listening
                 height = 4 + 8 * (0.5 + 0.5 * math.sin(now * 5 - i * 0.45))
             else:
                 height = 3 + levels[i] * (_HEIGHT - 14)
-            x = left + step * (i + 0.5)
-            canvas.create_line(x, r - height / 2, x, r + height / 2, fill=accent, width=3, capstyle="round")
+            canvas.coords(bar, x, r - height / 2, x, r + height / 2)

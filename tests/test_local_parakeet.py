@@ -766,6 +766,7 @@ def _bare_app(transcriber):
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._switch_status = "idle"
     app._switch_error = None
+    app._switch_note = None
     app._transcriber = transcriber
     return app
 

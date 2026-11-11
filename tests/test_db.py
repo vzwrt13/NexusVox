@@ -488,3 +488,14 @@ def test_record_dictionary_hits_raises_no_deprecation_warning(db):
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
         db.record_dictionary_hits({DictionaryEntry("foo", "bar"): 2})
+
+
+def test_readding_an_entry_merges_case_variants_stored_by_older_versions(db):
+    from nexusvox.storage.models import DictionaryEntryRow
+
+    with db._session_factory() as session:
+        session.add_all([DictionaryEntryRow(wrong="Über", right="A"), DictionaryEntryRow(wrong="über", right="B")])
+        session.commit()
+    db.add_dictionary_entry("über", "C")
+    entries = db.get_dictionary_entries()
+    assert [(e.wrong, e.right) for e in entries] == [("über", "C")]

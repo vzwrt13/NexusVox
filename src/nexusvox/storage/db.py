@@ -34,8 +34,8 @@ logger = logging.getLogger("nexusvox.db")
 
 def _first_matching(rows, wrong: str):
     """The first row whose ``wrong`` equals the phrase ignoring case (Python folds umlauts, SQLite lower() does not)."""
-    key = wrong.lower()
-    return next((r for r in rows if r.wrong.lower() == key), None)
+    key = wrong.casefold()
+    return next((r for r in rows if r.wrong.casefold() == key), None)
 
 
 def _word_json(word: Word) -> dict:
@@ -265,11 +265,16 @@ class Database:
         if not wrong or not right:
             return None
         with self._session_factory() as session:
-            row = _first_matching(session.query(DictionaryEntryRow).all(), wrong)
-            if row is None:
+            key = wrong.casefold()
+            same = [r for r in session.query(DictionaryEntryRow).all() if r.wrong.casefold() == key]
+            if not same:
                 row = DictionaryEntryRow(wrong=wrong, right=right)
                 session.add(row)
             else:
+                row = same[0]
+                for duplicate in same[1:]:  # case variants stored before matching folded umlauts
+                    session.delete(duplicate)
+                session.flush()  # free the unique `wrong` before the survivor takes the new spelling
                 row.wrong = wrong
                 row.right = right
             session.commit()
@@ -290,17 +295,19 @@ class Database:
         """Queue suggestions, skipping ones already pending or in the dictionary. Returns how many were added."""
         added = 0
         with self._session_factory() as session:
+            entry_keys = {r.wrong.casefold() for r in session.query(DictionaryEntryRow).all()}
+            pending = {(r.wrong.casefold(), r.right) for r in session.query(DictionarySuggestionRow).all()}
             for entry in entries:
                 wrong = " ".join(entry.wrong.split())
                 right = entry.right.strip()
                 if not wrong or not right:
                     continue
-                known = _first_matching(session.query(DictionaryEntryRow).all(), wrong) or _first_matching(
-                    session.query(DictionarySuggestionRow).filter(DictionarySuggestionRow.right == right).all(), wrong
-                )
-                if known is None:
-                    session.add(DictionarySuggestionRow(wrong=wrong, right=right))
-                    added += 1
+                key = wrong.casefold()
+                if key in entry_keys or (key, right) in pending:
+                    continue
+                session.add(DictionarySuggestionRow(wrong=wrong, right=right))
+                pending.add((key, right))
+                added += 1
             session.commit()
         return added
 
@@ -325,7 +332,7 @@ class Database:
         if entry is not None:
             with self._session_factory() as session:
                 for stale in session.query(DictionarySuggestionRow).all():
-                    if stale.wrong.lower() == wrong.lower():
+                    if stale.wrong.casefold() == wrong.casefold():
                         session.delete(stale)
                 session.add(LearnEventRow(outcome=ACCEPTED_EVENT))
                 session.commit()

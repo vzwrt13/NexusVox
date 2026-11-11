@@ -7,7 +7,8 @@ import io
 import logging
 import threading
 import wave
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from ..config import MODEL_REGISTRY, InferenceConfig
@@ -22,14 +23,31 @@ MAX_CHUNK_MS = 60_000  # 60 seconds per chunk — safe for 16 GB VRAM
 _SEND_CHUNK_BYTES = 4096
 # Ends every note that says why speaker detection gave nothing; a meeting swaps it for what its transcript does.
 NO_SPEAKER_LABELS = "the transcript has no speaker labels."
-# One speaker-detection request at a time from this app: the server runs them one after the other
-# anyway, and a request's timeout must not include the time it waits behind another upload's run.
-_DIARIZE_LOCK = threading.Lock()
+# One request at a time from this app, chunk transcription and speaker detection alike, across every job
+# (each upload and meeting runs in its own thread): the server runs them one after the other on one GPU
+# anyway, and a request's timeout must not include the time it waits behind another job's run.
+_SERVER_LOCK = threading.Lock()
+
+
+@asynccontextmanager
+async def _server_turn() -> AsyncIterator[None]:
+    """Hold the process-wide server slot. Polled, so a cancelled task never holds it."""
+    while not _SERVER_LOCK.acquire(blocking=False):
+        await asyncio.sleep(0.2)
+    try:
+        yield
+    finally:
+        _SERVER_LOCK.release()
 
 
 def _segment_to_wav(segment) -> bytes:
     """Build a minimal WAV from a pydub AudioSegment (no extra metadata chunks)."""
     return pcm16_to_wav_bytes(segment.raw_data)
+
+
+def file_extension(filename: str) -> str:
+    """The lowercase extension with its dot; a name that is only an extension (".mp3") counts as that extension."""
+    return Path("x" + filename).suffix.lower()
 
 
 def convert_to_wav(file_bytes: bytes, filename: str) -> tuple[list[bytes], int]:
@@ -40,7 +58,7 @@ def convert_to_wav(file_bytes: bytes, filename: str) -> tuple[list[bytes], int]:
     """
     from pydub import AudioSegment
 
-    format_hint = Path(filename).suffix.lower().lstrip(".")
+    format_hint = file_extension(filename).lstrip(".")
 
     audio = AudioSegment.from_file(io.BytesIO(file_bytes), format=format_hint)
     audio = audio.set_frame_rate(16_000).set_channels(1).set_sample_width(2)
@@ -109,7 +127,6 @@ async def transcribe_file(
     notes: list[str] = []
     words_complete = True  # every word of every chunk's text came back with its timing
     offset_s = 0.0  # start of the current chunk on the file's timeline
-    speakers: asyncio.Task | None = None
     try:
         for i, wav_bytes in enumerate(wav_chunks):
             logger.info("Transcribing chunk %d/%d", i + 1, len(wav_chunks))
@@ -118,10 +135,11 @@ async def transcribe_file(
             with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
                 pcm_data = wf.readframes(wf.getnframes())
 
-            await transcriber.connect()
-            for offset in range(0, len(pcm_data), _SEND_CHUNK_BYTES):
-                await transcriber.send_audio_chunk(pcm_data[offset : offset + _SEND_CHUNK_BYTES])
-            result = await transcriber.finish(timeout=120.0)
+            async with _server_turn():  # the timeout starts once no other request of this app is running
+                await transcriber.connect()
+                for offset in range(0, len(pcm_data), _SEND_CHUNK_BYTES):
+                    await transcriber.send_audio_chunk(pcm_data[offset : offset + _SEND_CHUNK_BYTES])
+                result = await transcriber.finish(timeout=120.0)
             texts.append(result.text)
 
             label = f"Chunk {i + 1} of {len(wav_chunks)}"
@@ -149,16 +167,13 @@ async def transcribe_file(
                 # one GPU, so a request made alongside the chunks would eat into a chunk's timeout.
                 if on_progress:
                     on_progress("diarizing")
-                speakers = asyncio.create_task(_diarize_file(transcriber, wav_chunks))
-                turns, problem = await speakers
+                turns, problem = await _diarize_file(transcriber, wav_chunks)
                 if problem:
                     notes.append(problem)
                 else:
                     words = label_words(words, turns)
                     text = format_transcript(words)
     finally:
-        if speakers is not None and not speakers.done():
-            speakers.cancel()
         await transcriber.disconnect()
 
     for note in notes:
@@ -177,11 +192,9 @@ async def _diarize_file(transcriber: BaseTranscriber, wav_chunks: list[bytes]) -
     The whole file goes to the server in one request, so speaker numbers stay the same across
     the 60 s transcription chunks. The timeout starts once this app's previous request is done.
     """
-    while not _DIARIZE_LOCK.acquire(blocking=False):  # polled, so a cancelled task never holds it
-        await asyncio.sleep(0.2)
-    try:
-        wav, duration_s = await asyncio.to_thread(_whole_file_wav, wav_chunks)
-        timeout = diarization_timeout(duration_s)
+    wav, duration_s = await asyncio.to_thread(_whole_file_wav, wav_chunks)
+    timeout = diarization_timeout(duration_s)
+    async with _server_turn():
         try:
             turns = await transcriber.diarize(wav, timeout=timeout)
         except Exception as exc:
@@ -190,8 +203,6 @@ async def _diarize_file(transcriber: BaseTranscriber, wav_chunks: list[bytes]) -
             reason = f"timed out after {timeout:.0f} s" if isinstance(exc, httpx.TimeoutException) else str(exc)
             reason = reason or type(exc).__name__
             return [], f"Speaker detection failed ({reason}); {NO_SPEAKER_LABELS}"
-    finally:
-        _DIARIZE_LOCK.release()
     if not turns:
         return [], f"Speaker detection found no speakers; {NO_SPEAKER_LABELS}"
     return turns, ""
@@ -199,11 +210,18 @@ async def _diarize_file(transcriber: BaseTranscriber, wav_chunks: list[bytes]) -
 
 def _whole_file_wav(wav_chunks: list[bytes]) -> tuple[io.BytesIO, float]:
     """The chunks as one WAV file (written chunk by chunk, no second copy of the PCM) and its length in seconds."""
-    pcm = bytearray()
-    for chunk in wav_chunks:
-        with wave.open(io.BytesIO(chunk), "rb") as wf:
-            pcm += wf.readframes(wf.getnframes())
-    return io.BytesIO(pcm16_to_wav_bytes(bytes(pcm))), len(pcm) / 2 / 16_000
+    buf = io.BytesIO()
+    frames = 0
+    with wave.open(buf, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(16_000)
+        for chunk in wav_chunks:
+            with wave.open(io.BytesIO(chunk), "rb") as wf:
+                frames += wf.getnframes()
+                out.writeframes(wf.readframes(wf.getnframes()))
+    buf.seek(0)
+    return buf, frames / 16_000
 
 
 def _unavailable_note(entry: dict, transcriber: BaseTranscriber) -> str:

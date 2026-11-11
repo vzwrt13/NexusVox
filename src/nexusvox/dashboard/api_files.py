@@ -81,7 +81,9 @@ class FilesMixin(DashboardState):
         """Why an uploaded file cannot be transcribed, or an empty string."""
         if self._db is None:
             return "DB not available"
-        ext = Path(filename).suffix.lower()
+        from ..transcription.file_transcribe import file_extension
+
+        ext = file_extension(filename)
         if ext not in ALLOWED_EXTENSIONS:
             return f"Unsupported format: {ext}"
         if len(file_bytes) > MAX_UPLOAD_BYTES:

@@ -345,11 +345,11 @@ class VoxtralRealtimeTranscriber(BaseTranscriber):
     async def disconnect(self) -> None:
         """Close the WebSocket connection."""
         if self._ws is not None:
+            ws, self._ws = self._ws, None
             try:
-                await self._ws.close()
+                await asyncio.wait_for(ws.close(), timeout=2.0)  # a hung server must not hold a cancellation up
             except Exception:
                 pass
-            self._ws = None
 
     @property
     def connected(self) -> bool:

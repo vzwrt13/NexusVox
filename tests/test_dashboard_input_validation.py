@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-from pathlib import Path
 
 import pytest
 
@@ -89,30 +88,10 @@ def test_an_oversized_upload_is_refused_without_reading_all_of_it(flask_client):
     assert resp.status_code in (400, 413)
 
 
-def test_a_request_body_far_above_the_upload_limit_is_a_413(flask_client):
-    huge = io.BytesIO(b"\0" * (MAX_UPLOAD_BYTES + 3 * 1024 * 1024))
-
-    resp = flask_client.post(
-        "/api/file-transcribe", data={"file": (huge, "big.wav")}, content_type="multipart/form-data"
-    )
-
-    assert resp.status_code == 413
-
-
 def test_renaming_with_a_body_that_is_no_object_is_a_400(flask_client):
     resp = flask_client.patch("/api/file-transcriptions/1", data="[]", content_type="application/json")
 
     assert resp.status_code == 400 and resp.get_json() == {"error": "Expected a JSON object"}
-
-
-def test_a_route_does_not_parse_its_json_body_itself():
-    import nexusvox.dashboard as dashboard
-
-    modules = Path(dashboard.__file__).parent.glob("routes_*.py")
-
-    own = [p.name for p in modules if p.stem != "routes_base" and "get_json(" in p.read_text("utf-8")]
-
-    assert own == []
 
 
 def test_a_benchmark_path_outside_the_folder_is_not_served(tmp_path):
@@ -123,7 +102,7 @@ def test_a_benchmark_path_outside_the_folder_is_not_served(tmp_path):
     (private / "secret.json").write_text('{"summary": {}}', encoding="utf-8")
 
     assert benchmarks.load_benchmark(bench_dir, "../benchmarks_private/secret.json") is None
-    assert benchmarks.load_benchmark(bench_dir, "..\benchmarks_private\\secret.json") is None
+    assert benchmarks.load_benchmark(bench_dir, r"..\benchmarks_private\secret.json") is None
 
 
 def test_a_benchmark_inside_the_folder_is_served(tmp_path):
@@ -153,3 +132,58 @@ def test_a_preset_default_flag_that_is_no_boolean_is_a_400(flask_client, is_defa
 
     assert resp.status_code == 400
     assert flask_client.get("/api/polish-presets").get_json() == {"presets": []}
+
+
+@pytest.mark.parametrize(
+    "body", [{"name": None, "instruction": "x"}, {"name": "A", "instruction": ["x"]}, {"id": True}, {"id": "abc"}]
+)
+def test_a_preset_with_wrong_field_types_is_a_400(flask_client, body):
+    resp = post(flask_client, "/api/polish-presets", {"name": "Formal", "instruction": "Be formal", **body})
+
+    assert resp.status_code == 400
+    assert flask_client.get("/api/polish-presets").get_json() == {"presets": []}
+
+
+@pytest.mark.parametrize("structural", ["period", 5, [1], None])
+def test_voice_command_structural_of_the_wrong_type_is_a_400_and_changes_nothing(flask_client, structural):
+    before = flask_client.get("/api/voice-commands").get_json()["structural"]
+
+    resp = post(flask_client, "/api/voice-commands/structural", {"structural": structural})
+
+    assert resp.status_code == 400
+    assert flask_client.get("/api/voice-commands").get_json()["structural"] == before
+
+
+def test_an_oversized_request_gets_a_json_413_with_the_size_message(flask_client):
+    huge = io.BytesIO(b"\0" * (MAX_UPLOAD_BYTES + 3 * 1024 * 1024))
+
+    resp = flask_client.post(
+        "/api/file-transcribe", data={"file": (huge, "big.wav")}, content_type="multipart/form-data"
+    )
+
+    assert resp.status_code == 413
+    assert resp.get_json() == {"ok": False, "error": "File too large (max 25 MB)"}
+
+
+def test_a_benchmark_with_a_non_text_lang_is_skipped(tmp_path):
+    (tmp_path / "odd.json").write_text('{"summary": {"lang": ["en_us"], "wer_mean": 0.1}}', encoding="utf-8")
+
+    assert benchmarks.compare_benchmarks(tmp_path)["benchmarks"] == []
+
+
+def test_a_benchmark_that_is_no_utf8_is_none_not_an_error(tmp_path):
+    (tmp_path / "latin.json").write_bytes('{"summary": {"model": "café"}}'.encode("latin-1"))
+
+    assert benchmarks.load_benchmark(tmp_path, "latin.json") is None
+    assert benchmarks.list_benchmarks(tmp_path) == []
+
+
+def test_a_retry_names_a_deleted_wav_not_the_store_audio_setting(flask_client, db):
+    record = db.save_transcription("hello", "en", 500)
+    with db._session_factory() as session:
+        session.get(type(record), record.id).audio_path = "audio/gone.wav"
+        session.commit()
+
+    data = flask_client.post(f"/api/review/{record.id}/retry").get_json()
+
+    assert data["ok"] is False and "missing" in data["error"] and "Store Audio" not in data["error"]

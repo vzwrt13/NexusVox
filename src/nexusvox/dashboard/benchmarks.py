@@ -25,8 +25,8 @@ def list_benchmarks(benchmarks_dir: Path) -> list[dict]:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             s = data.get("summary", {}) if isinstance(data, dict) else None
-            if not isinstance(s, dict):
-                logger.warning("Skipping benchmark file %s: no summary object", path.name)
+            if not isinstance(s, dict) or not isinstance(s.get("lang", ""), str):
+                logger.warning("Skipping benchmark file %s: no usable summary object", path.name)
                 continue
             results.append(
                 {
@@ -71,7 +71,7 @@ def load_benchmark(benchmarks_dir: Path, filename: str) -> dict | None:
 
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
         logger.warning("Failed to load benchmark %s: %s", filename, exc)
         return None
 

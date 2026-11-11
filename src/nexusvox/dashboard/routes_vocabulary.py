@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify
 
-from .routes_base import _json_object, _typed
+from .routes_base import _json_object, _optional_id, _typed
 
 if TYPE_CHECKING:
     from .api import DashboardAPI
@@ -36,10 +36,10 @@ def register(app: Flask, api: DashboardAPI) -> None:
     def save_polish_preset():
         data = _json_object()
         resp = api.save_polish_preset(
-            data.get("name", ""),
-            data.get("instruction", ""),
+            _typed(data, "name", str, "", "text"),
+            _typed(data, "instruction", str, "", "text"),
             _typed(data, "is_default", bool, False, "true or false"),
-            data.get("id"),
+            _optional_id(data, "id"),
         )
         return jsonify(resp), (200 if resp.get("ok") else 400)
 

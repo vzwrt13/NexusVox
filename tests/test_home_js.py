@@ -128,6 +128,8 @@ def test_the_actions_do_not_repeat_what_opening_recordings_loads():
     source = (STATIC / "dashboard-home.js").read_text(encoding="utf-8")
     record = re.search(r'getElementById\("home-record"\).*?^}\);', source, re.S | re.M).group(0)
     assert record.index("await refreshMeetingStatus()") < record.index("meetingToggleBtn.click()")
-    assert "openUploadDialog" not in source  # it refreshes what openRecordingsTab already refreshed
+    # the upload card opens the dialog through the shared helper, not its own showModal (ticket #329)
+    assert "openUploadDialog()" in source
+    assert "showModal" not in source
     # a recent row opens its recording through showRecording alone (it opens the tab itself)
     assert re.search(r"if \(!\(await showRecording\(item\.id\)\)\) goToTab\(\"recordings\"\)", source)

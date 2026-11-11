@@ -31,6 +31,7 @@ def run_js(body: str):
       "loadReviewTranscriptions", "loadBenchmarks", "openExtensionPanel", "markActiveSubtab", "loadMicrophones"])
       globalThis[f] = (...args) => calls.push([f, ...args]);
     globalThis.stopReviewAudio = () => {};
+    globalThis.cancelHotkeyRecording = () => {};
     """
     script = f"{stubs}\n{aliases.group(0)}{match.group(0)}\n{body}"
     out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True, timeout=30).stdout

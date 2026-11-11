@@ -3,13 +3,27 @@
 from __future__ import annotations
 
 import io
+import tempfile
+import tracemalloc
 import wave
+from pathlib import Path
 
 import pytest
-from pydub.exceptions import CouldntDecodeError
 
 from nexusvox.transcription.file_transcribe import ALLOWED_EXTENSIONS, convert_to_wav
 from nexusvox.transcription.transcriber import Word
+
+
+def write_wav_file(path: Path, seconds: float, *, rate: int = 16_000, channels: int = 1, width: int = 2) -> Path:
+    """A silent WAV on disk, written a second at a time (so a long one never sits in memory)."""
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(width)
+        wf.setframerate(rate)
+        for _ in range(int(seconds)):
+            wf.writeframes(bytes(width * channels * rate))
+        wf.writeframes(bytes(width * channels * int(rate * (seconds % 1))))
+    return path
 
 
 def test_allowed_extensions_set():
@@ -21,9 +35,14 @@ def test_allowed_extensions_set():
     assert ".exe" not in ALLOWED_EXTENSIONS
 
 
-def test_convert_wav_passthrough(sample_wav_bytes):
+def test_convert_wav_passthrough(tmp_path, sample_wav_bytes):
     """Short WAV input produces a single valid WAV chunk at 16kHz mono."""
-    chunks, duration_ms = convert_to_wav(sample_wav_bytes, "test.wav")
+    source = tmp_path / "test.wav"
+    source.write_bytes(sample_wav_bytes)
+
+    with convert_to_wav(source, "test.wav") as audio:
+        chunks = list(audio)
+        duration_ms = audio.duration_ms
 
     assert len(chunks) == 1
     with wave.open(io.BytesIO(chunks[0]), "rb") as wf:
@@ -35,46 +54,148 @@ def test_convert_wav_passthrough(sample_wav_bytes):
     assert 450 <= duration_ms <= 550
 
 
-def test_convert_returns_correct_duration(sample_wav_bytes):
+def test_convert_returns_correct_duration(tmp_path, sample_wav_bytes):
     """Duration matches the input audio length."""
-    _, duration_ms = convert_to_wav(sample_wav_bytes, "audio.wav")
-    assert isinstance(duration_ms, int)
-    assert duration_ms > 0
+    source = tmp_path / "audio.wav"
+    source.write_bytes(sample_wav_bytes)
+
+    with convert_to_wav(source, "audio.wav") as audio:
+        assert isinstance(audio.duration_ms, int)
+        assert audio.duration_ms > 0
 
 
-def test_convert_invalid_format_raises():
-    """Garbage bytes should raise an error.
+def test_convert_resamples_and_downmixes_a_stereo_wav(tmp_path):
+    source = write_wav_file(tmp_path / "stereo.wav", 2, rate=44_100, channels=2)
 
-    Which error depends on the environment, so both are accepted: with ffmpeg on
-    PATH pydub reports CouldntDecodeError, without it (as on CI) the attempt to
-    invoke ffmpeg fails first with FileNotFoundError.
+    with convert_to_wav(source, "stereo.wav") as audio:
+        with wave.open(io.BytesIO(audio[0]), "rb") as wf:
+            assert (wf.getnchannels(), wf.getframerate(), wf.getsampwidth()) == (1, 16_000, 2)
+            assert wf.getnframes() == 32_000
+        assert audio.duration_ms == 2000
+
+
+def test_convert_invalid_format_raises(tmp_path):
+    """Garbage bytes raise an error and leave no temporary file behind.
+
+    Which error depends on the environment: without ffmpeg on PATH (as on CI) it is the missing-ffmpeg
+    RuntimeError, with it the decoder's ValueError.
     """
-    with pytest.raises((CouldntDecodeError, FileNotFoundError)):
-        convert_to_wav(b"not audio data at all", "bad.wav")
+    source = tmp_path / "bad.wav"
+    source.write_bytes(b"not audio data at all")
+    before = set(Path(tempfile.gettempdir()).glob("nexusvox-convert-*"))
+
+    with pytest.raises((RuntimeError, ValueError)):
+        convert_to_wav(source, "bad.wav")
+
+    assert set(Path(tempfile.gettempdir()).glob("nexusvox-convert-*")) == before
 
 
-def test_convert_long_audio_produces_multiple_chunks():
+def test_a_format_that_is_not_pcm16_wav_goes_through_ffmpeg(tmp_path, monkeypatch):
+    import nexusvox.transcription.file_transcribe as ft
+
+    seen = []
+
+    def fake_ffmpeg(source, out):
+        seen.append(source.name)
+        write_wav_file(out, 1)
+
+    monkeypatch.setattr(ft, "_convert_with_ffmpeg", fake_ffmpeg)
+    mp3 = tmp_path / "talk.mp3"
+    mp3.write_bytes(b"x")
+    wav24 = write_wav_file(tmp_path / "deep.wav", 1, width=3)
+
+    with convert_to_wav(mp3, "talk.mp3") as audio:
+        assert audio.duration_ms == 1000
+    with convert_to_wav(wav24, "deep.wav") as audio:
+        assert audio.duration_ms == 1000
+
+    assert seen == ["talk.mp3", "deep.wav"]
+
+
+def test_a_missing_ffmpeg_is_said_plainly(tmp_path, monkeypatch):
+    import nexusvox.transcription.file_transcribe as ft
+
+    monkeypatch.setattr(ft.shutil, "which", lambda _name: None)
+    mp3 = tmp_path / "talk.mp3"
+    mp3.write_bytes(b"x")
+
+    with pytest.raises(RuntimeError, match="ffmpeg was not found"):
+        convert_to_wav(mp3, "talk.mp3")
+
+
+def test_convert_long_audio_produces_multiple_chunks(tmp_path):
     """Audio longer than MAX_CHUNK_MS is split into multiple chunks."""
-    # Generate 90 seconds of silence (1.5x the chunk limit)
-    duration_s = 90
-    sample_rate = 16_000
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(b"\x00\x00" * (sample_rate * duration_s))
+    source = write_wav_file(tmp_path / "long.wav", 90)  # 1.5x the chunk limit
 
-    chunks, total_ms = convert_to_wav(buf.getvalue(), "long.wav")
-
-    assert len(chunks) == 2  # 60s + 30s
-    assert 89_000 <= total_ms <= 91_000
+    with convert_to_wav(source, "long.wav") as audio:
+        assert len(audio) == 2  # 60s + 30s
+        assert 89_000 <= audio.duration_ms <= 91_000
+        chunks = list(audio)
+        assert list(audio) == chunks  # repeatable: speaker detection reads the chunks a second time
+        assert audio[-1] == chunks[1]
 
     # Each chunk is a valid WAV
     for chunk in chunks:
         with wave.open(io.BytesIO(chunk), "rb") as wf:
             assert wf.getnchannels() == 1
             assert wf.getframerate() == 16_000
+    with pytest.raises(IndexError):
+        audio[2]
+
+
+def test_closing_deletes_the_converted_file(tmp_path):
+    source = write_wav_file(tmp_path / "a.wav", 1)
+
+    audio = convert_to_wav(source, "a.wav")
+    converted = audio.path
+    assert converted.exists()
+    audio.close()
+
+    assert not converted.exists()
+    assert source.exists()  # the caller's own file is never touched
+
+
+def _peak_memory_of_converting_and_reading(source: Path) -> tuple[int, int]:
+    """(peak traced bytes, chunks) of converting `source` and walking every chunk of the result."""
+    tracemalloc.start()
+    try:
+        with convert_to_wav(source, source.name) as audio:
+            for _chunk in audio:
+                pass
+            return tracemalloc.get_traced_memory()[1], len(audio)
+    finally:
+        tracemalloc.stop()
+
+
+def test_peak_memory_does_not_grow_with_the_length_of_the_file(tmp_path):
+    """Ten times the audio costs no more memory: the file is converted and read one 60 s window at a time."""
+    short = write_wav_file(tmp_path / "short.wav", 2 * 60, rate=24_000)
+    long = write_wav_file(tmp_path / "long.wav", 20 * 60, rate=24_000)  # 57 MB on disk
+
+    short_peak, short_chunks = _peak_memory_of_converting_and_reading(short)
+    long_peak, long_chunks = _peak_memory_of_converting_and_reading(long)
+
+    assert (short_chunks, long_chunks) == (2, 20)
+    assert long_peak < short_peak * 1.5
+
+
+@pytest.mark.asyncio
+async def test_a_large_file_is_transcribed_through_the_chunk_path_and_cleaned_up(tmp_path, monkeypatch):
+    import nexusvox.transcription.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+
+    recorder = _RecordingTranscriber(text="ok")
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: recorder)
+    source = write_wav_file(tmp_path / "big.wav", 30 * 60, rate=16_000)  # 30 minutes: 30 chunks
+
+    with convert_to_wav(source, "big.wav") as audio:
+        converted = audio.path
+        result = await ft.transcribe_file(audio, InferenceConfig(model="whisper-large-v3-turbo"), device="cpu")
+
+    assert result.text == " ".join(["ok"] * 30)
+    assert recorder.connect_calls == 30
+    assert sum(len(c) for c in recorder.chunks) == 30 * 60 * 16_000 * 2
+    assert not converted.exists()
 
 
 class _RecordingTranscriber:
@@ -125,9 +246,8 @@ async def test_transcribe_file_dispatches_through_factory(monkeypatch, sample_wa
     recorder = _RecordingTranscriber(text="hello from cpu")
     monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: recorder)
 
-    chunks, _ = ft.convert_to_wav(sample_wav_bytes, "test.wav")
     result = await ft.transcribe_file(
-        chunks,
+        [sample_wav_bytes],
         InferenceConfig(model="whisper-large-v3-turbo"),
         device="cpu",
     )
@@ -152,9 +272,8 @@ async def test_transcribe_file_passes_device_to_factory(monkeypatch, sample_wav_
 
     monkeypatch.setattr(ft, "create_transcriber", fake_factory)
 
-    chunks, _ = ft.convert_to_wav(sample_wav_bytes, "test.wav")
     await ft.transcribe_file(
-        chunks,
+        [sample_wav_bytes],
         InferenceConfig(model="whisper-large-v3-turbo"),
         device="cpu",
     )
@@ -388,6 +507,25 @@ async def test_without_diarize_the_server_is_not_asked_for_speakers(monkeypatch)
     assert transcriber.diarize_calls == []
     assert result.text == "hi"
     assert result.words[0].speaker is None
+
+
+@pytest.mark.asyncio
+async def test_a_recording_over_the_detection_cap_skips_speaker_detection_with_a_note(monkeypatch):
+    import nexusvox.transcription.file_transcribe as ft
+    from nexusvox.config import InferenceConfig
+    from nexusvox.transcription.transcriber import Word
+
+    transcriber = _DiarizingTranscriber([("hi", [Word("hi", 0.1, 0.2)], True)], [])
+    monkeypatch.setattr(ft, "create_transcriber", lambda *a, **kw: transcriber)
+    monkeypatch.setattr(ft, "MAX_DETECTION_S", 0.5)
+
+    result = await ft.transcribe_file([_silent_wav(1.0)], InferenceConfig(model="parakeet-tdt-0.6b"), diarize=True)
+
+    assert transcriber.diarize_calls == []  # no request was sent
+    assert result.text == "hi"
+    assert len(result.notes) == 1
+    assert "Speaker detection skipped" in result.notes[0] and "longer than" in result.notes[0]
+    assert result.notes[0].endswith(ft.NO_SPEAKER_LABELS)
 
 
 @pytest.mark.asyncio

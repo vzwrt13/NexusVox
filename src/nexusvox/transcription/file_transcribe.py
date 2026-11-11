@@ -5,21 +5,31 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
+import shutil
+import subprocess
+import tempfile
 import threading
 import wave
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from ..config import MODEL_REGISTRY, InferenceConfig
 from .diarization import diarization_timeout, format_transcript, label_words, speaker_detection_models
+from .pcm import TARGET_RATE, downmix, resample
 from .transcriber import BaseTranscriber, SpeakerTurn, TranscriptionResult, Word, create_transcriber, pcm16_to_wav_bytes
 
 logger = logging.getLogger("nexusvox.file_transcribe")
 
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".webm"}
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB
+# An upload is streamed to disk and converted window by window, so the limit is about disk space, not memory.
+MAX_UPLOAD_BYTES = 2 * 1024**3
+MAX_UPLOAD_LABEL = f"{MAX_UPLOAD_BYTES // 1024**3} GB"  # how the limit is named in messages
 MAX_CHUNK_MS = 60_000  # 60 seconds per chunk — safe for 16 GB VRAM
+# Speaker detection sends the whole file to the server in one request and holds it once more as one WAV (about
+# 115 MB per hour on top of the chunks), so a longer recording skips it.
+MAX_DETECTION_S = 2 * 3600.0
 _SEND_CHUNK_BYTES = 4096
 # Ends every note that says why speaker detection gave nothing; a meeting swaps it for what its transcript does.
 NO_SPEAKER_LABELS = "the transcript has no speaker labels."
@@ -40,41 +50,119 @@ async def _server_turn() -> AsyncIterator[None]:
         _SERVER_LOCK.release()
 
 
-def _segment_to_wav(segment) -> bytes:
-    """Build a minimal WAV from a pydub AudioSegment (no extra metadata chunks)."""
-    return pcm16_to_wav_bytes(segment.raw_data)
-
-
 def file_extension(filename: str) -> str:
     """The lowercase extension with its dot; a name that is only an extension (".mp3") counts as that extension."""
     return Path("x" + filename).suffix.lower()
 
 
-def convert_to_wav(file_bytes: bytes, filename: str) -> tuple[list[bytes], int]:
-    """Decode an audio file to 16kHz mono PCM16 WAV chunks.
+class WavChunks:
+    """A converted file: 16 kHz mono PCM16 WAV on disk, handed out as WAV chunks of `MAX_CHUNK_MS`, one at a time.
 
-    Long files are split into chunks of MAX_CHUNK_MS to avoid GPU OOM.
-    Returns (wav_chunks, total_duration_ms).
+    Behaves like a list of `bytes` (length, indexing, iteration, repeatable) but holds only the chunk being read,
+    so memory does not grow with the length of the audio. No file handle stays open between chunks. Closing (or
+    leaving the `with` block) deletes the file.
     """
-    from pydub import AudioSegment
 
-    format_hint = file_extension(filename).lstrip(".")
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        with wave.open(str(path), "rb") as wf:
+            self.frames = wf.getnframes()
+        self._window = TARGET_RATE * MAX_CHUNK_MS // 1000
 
-    audio = AudioSegment.from_file(io.BytesIO(file_bytes), format=format_hint)
-    audio = audio.set_frame_rate(16_000).set_channels(1).set_sample_width(2)
-    total_duration_ms = len(audio)
+    @property
+    def duration_ms(self) -> int:
+        return self.frames * 1000 // TARGET_RATE
 
-    chunks = []
-    for start in range(0, total_duration_ms, MAX_CHUNK_MS):
-        segment = audio[start : start + MAX_CHUNK_MS]
-        chunks.append(_segment_to_wav(segment))
+    def __len__(self) -> int:
+        return -(-self.frames // self._window)
 
-    logger.info("Split %d ms audio into %d chunk(s)", total_duration_ms, len(chunks))
-    return chunks, total_duration_ms
+    def __getitem__(self, index: int) -> bytes:
+        count = len(self)
+        if not -count <= index < count:
+            raise IndexError("chunk index out of range")
+        with wave.open(str(self.path), "rb") as wf:
+            wf.setpos((index % count) * self._window)
+            return pcm16_to_wav_bytes(wf.readframes(self._window))
+
+    def __iter__(self) -> Iterator[bytes]:
+        for index in range(len(self)):
+            yield self[index]
+
+    def close(self) -> None:
+        self.path.unlink(missing_ok=True)
+
+    def __enter__(self) -> WavChunks:
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+
+def convert_to_wav(source: str | Path, filename: str) -> WavChunks:
+    """Decode an audio file on disk to a 16 kHz mono PCM16 WAV in a temporary file, window by window.
+
+    A PCM16 WAV is read and resampled in windows of `MAX_CHUNK_MS` (needs no ffmpeg); every other format is decoded
+    by ffmpeg straight into the temporary file. Either way memory stays at about one window, whatever the length.
+    The result serves the file as chunks of `MAX_CHUNK_MS` (to avoid GPU OOM); the caller closes it, which deletes
+    the temporary file. `filename` is the uploaded name: only its extension counts.
+    """
+    source = Path(source)
+    fd, name = tempfile.mkstemp(prefix="nexusvox-convert-", suffix=".wav")
+    os.close(fd)
+    out = Path(name)
+    try:
+        if file_extension(filename) != ".wav" or not _convert_pcm16_wav(source, out):
+            _convert_with_ffmpeg(source, out)
+        audio = WavChunks(out)
+    except BaseException:
+        out.unlink(missing_ok=True)
+        raise
+    logger.info("Split %d ms audio into %d chunk(s)", audio.duration_ms, len(audio))
+    return audio
+
+
+def _convert_pcm16_wav(source: Path, out: Path) -> bool:
+    """Write `source` (a PCM16 WAV) to `out` as 16 kHz mono, one window at a time; False when it is not one."""
+    try:
+        reader = wave.open(str(source), "rb")
+    except (wave.Error, EOFError):
+        return False
+    with reader as wf:
+        if wf.getsampwidth() != 2:
+            return False
+        rate, channels = wf.getframerate(), wf.getnchannels()
+        window = rate * MAX_CHUNK_MS // 1000
+        with wave.open(str(out), "wb") as dst:
+            dst.setnchannels(1)
+            dst.setsampwidth(2)
+            dst.setframerate(TARGET_RATE)
+            while raw := wf.readframes(window):
+                dst.writeframes(resample(downmix(raw, channels), rate).tobytes())
+    return True
+
+
+def _convert_with_ffmpeg(source: Path, out: Path) -> None:
+    """Decode any audio file ffmpeg reads into `out` as 16 kHz mono PCM16 WAV."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("ffmpeg was not found on PATH; it is needed to read this file format")
+    command = [ffmpeg, "-nostdin", "-v", "error", "-y", "-i", str(source), "-vn", "-ac", "1", "-ar", str(TARGET_RATE)]
+    command += ["-c:a", "pcm_s16le", "-f", "wav", str(out)]
+    done = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if done.returncode != 0:
+        lines = (done.stderr or "").strip().splitlines()
+        reason = lines[-1] if lines else f"exit code {done.returncode}"
+        raise ValueError(f"ffmpeg could not decode the file: {reason}")
 
 
 async def transcribe_file(
-    wav_chunks: list[bytes],
+    wav_chunks: Sequence[bytes],
     config: InferenceConfig,
     *,
     device: str | None = None,
@@ -85,11 +173,14 @@ async def transcribe_file(
 ) -> TranscriptionResult:
     """Transcribe WAV chunks via the shared transcriber factory and join results.
 
+    `wav_chunks` is a list of WAV `bytes`, or a `WavChunks` that reads them from disk one at a time.
+
     With `word_timestamps`, engines that support it also return per-word timing, shifted to
     the file's timeline in the joined result. With `diarize` (implies word timestamps), engines
     that support it also detect speakers once over the whole file; the text then becomes
     "Speaker 1: ..." paragraphs and each word carries its speaker. When speaker detection is not
-    possible or fails, the plain transcript comes back with a note saying why.
+    possible or fails, the plain transcript comes back with a note saying why; a recording longer than
+    `MAX_DETECTION_S` skips it with a note instead of sending one huge request.
 
     With `explain_no_speakers` False the note about missing speaker detection is left out (the caller has said why).
 
@@ -158,7 +249,12 @@ async def transcribe_file(
             if explain_no_speakers:
                 notes.append(_unavailable_note(entry, transcriber))
         elif wants_speakers and text:
-            if not words_complete:
+            if offset_s > MAX_DETECTION_S:
+                notes.append(
+                    f"Speaker detection skipped: the recording is longer than {MAX_DETECTION_S / 3600:g} hours; "
+                    f"{NO_SPEAKER_LABELS}"
+                )
+            elif not words_complete:
                 # Labelled paragraphs are built from the words; a word without timing would vanish,
                 # so the turns would be thrown away: do not ask the server for them.
                 notes.append("Speaker detection skipped: some words came back without timing.")
@@ -186,7 +282,7 @@ async def transcribe_file(
     return combined
 
 
-async def _diarize_file(transcriber: BaseTranscriber, wav_chunks: list[bytes]) -> tuple[list[SpeakerTurn], str]:
+async def _diarize_file(transcriber: BaseTranscriber, wav_chunks: Sequence[bytes]) -> tuple[list[SpeakerTurn], str]:
     """Speaker turns for the whole file, or no turns and a note saying why there are none.
 
     The whole file goes to the server in one request, so speaker numbers stay the same across
@@ -208,7 +304,7 @@ async def _diarize_file(transcriber: BaseTranscriber, wav_chunks: list[bytes]) -
     return turns, ""
 
 
-def _whole_file_wav(wav_chunks: list[bytes]) -> tuple[io.BytesIO, float]:
+def _whole_file_wav(wav_chunks: Sequence[bytes]) -> tuple[io.BytesIO, float]:
     """The chunks as one WAV file (written chunk by chunk, no second copy of the PCM) and its length in seconds."""
     buf = io.BytesIO()
     frames = 0

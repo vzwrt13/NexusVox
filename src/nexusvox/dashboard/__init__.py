@@ -20,7 +20,7 @@ from ..config import Config
 from ..extensions import load_extensions
 from ..storage.db import Database
 from ..system.single_instance import show_message
-from ..transcription.file_transcribe import MAX_UPLOAD_BYTES
+from ..transcription.file_transcribe import MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL
 from . import (
     routes_analytics,
     routes_commands,
@@ -110,7 +110,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
 
     @app.errorhandler(413)
     def too_large(_error):
-        return jsonify({"ok": False, "error": f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"}), 413
+        return jsonify({"ok": False, "error": f"File too large (max {MAX_UPLOAD_LABEL})"}), 413
 
     install_guard(app, port)  # before any route, so the extension blueprints below are covered too
 

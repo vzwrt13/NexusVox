@@ -43,7 +43,7 @@ A route reads its JSON body through `_json_object` in `routes_base.py`: valid JS
 | GET | `/api/flagged/<id>` | Get flagged transcription |
 | POST | `/api/flagged/<id>/correct` | Save correction |
 | GET | `/api/audio/<tid>` | Serve WAV audio file |
-| POST | `/api/file-transcribe` | Upload an audio file and start transcribing it in the background (form field `diarize=1` labels speakers, `cleanup=light|medium` also cleans the text up with the [llm] model); 202 `{ok, job_id}`, 400 on a bad file, 409 while another job runs, 413 `{ok, error}` for a body above the 25 MB limit plus 1 MB of framing |
+| POST | `/api/file-transcribe` | Upload an audio file and start transcribing it in the background (form field `diarize=1` labels speakers, `cleanup=light|medium` also cleans the text up with the [llm] model); 202 `{ok, job_id}`, 400 on a bad file, 409 while another job runs, 413 `{ok, error}` for a body above the 2 GB limit plus 1 MB of framing |
 | GET | `/api/file-transcribe/<job_id>` | Job status: `state` (`running`/`done`/`error`), `message`, `percent`, `result`, `error` (404 for an unknown id) |
 | GET | `/api/file-transcribe/current` | `{job}`: the running job, or the latest unread finished one, else `null` |
 | GET | `/api/file-transcriptions` | List file transcription results (`?kind=upload` / `?kind=meeting` narrows them) |

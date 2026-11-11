@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from flask import Flask, Response, jsonify, request, send_file
 
-from ..transcription.file_transcribe import MAX_UPLOAD_BYTES
+from ..transcription.file_transcribe import file_extension
 from .routes_base import _json_object
 
 if TYPE_CHECKING:
@@ -31,11 +34,24 @@ def register(app: Flask, api: DashboardAPI) -> None:
         f = request.files["file"]
         if not f.filename:
             return jsonify({"ok": False, "error": "No filename"}), 400
-        # Read one byte more than allowed: an oversized upload is refused without loading all of it.
-        file_bytes = f.stream.read(MAX_UPLOAD_BYTES + 1)
+        problem = api.check_upload_name(f.filename)  # before the body is saved: no disk space for a refused file
+        if problem:
+            return jsonify({"ok": False, "error": problem}), 400
+        # The body goes to a temporary file (the request is capped by MAX_CONTENT_LENGTH); the job reads it from there.
+        ext = file_extension(f.filename)
+        fd, name = tempfile.mkstemp(prefix="nexusvox-upload-", suffix=ext)
+        os.close(fd)
+        source = Path(name)
+        try:
+            f.save(name)
+        except BaseException as exc:
+            source.unlink(missing_ok=True)
+            if isinstance(exc, OSError):
+                return jsonify({"ok": False, "error": f"Could not save the upload: {exc}"}), 500
+            raise
         diarize = request.form.get("diarize", "").lower() in ("1", "true", "on", "yes")
         cleanup_level = request.form.get("cleanup", "").strip().lower()
-        result = api.start_file_transcription(file_bytes, f.filename, diarize=diarize, cleanup_level=cleanup_level)
+        result = api.start_file_transcription(source, f.filename, diarize=diarize, cleanup_level=cleanup_level)
         if result.get("ok"):
             return jsonify(result), 202
         return jsonify(result), 409 if result.get("busy") else 400

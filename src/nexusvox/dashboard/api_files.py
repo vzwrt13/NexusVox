@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from ..dictation.lang_detect import stored_language
@@ -14,7 +14,14 @@ from ..file_cleanup import clean_transcript
 from ..llm import config_for
 from ..transcription.diarization import speaker_turns
 from ..transcription.exports import NO_TIMING_HINT, SUBTITLE_TARGET_IDS
-from ..transcription.file_transcribe import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, convert_to_wav, transcribe_file
+from ..transcription.file_transcribe import (
+    ALLOWED_EXTENSIONS,
+    MAX_UPLOAD_BYTES,
+    MAX_UPLOAD_LABEL,
+    convert_to_wav,
+    file_extension,
+    transcribe_file,
+)
 from ..transcription.speaker_fallback import speaker_detection_job
 from .api_base import DashboardState, logger
 from .file_jobs import FileJob
@@ -44,28 +51,48 @@ def _export_stem(record) -> str:
     return _safe_stem(record.title or "") or _safe_stem(Path(record.original_filename).stem) or "transcript"
 
 
+def _remove(path: Path) -> None:
+    """Delete a temporary file; a file that is already gone, or one Windows still holds, is not an error."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Could not delete the temporary file %s: %s", path, exc)
+
+
 class FilesMixin(DashboardState):
     """Uploads, the jobs that transcribe them, and the rows uploads and meetings share."""
 
     def start_file_transcription(
-        self, file_bytes: bytes, filename: str, *, diarize: bool = False, cleanup_level: str = ""
+        self, source: Path, filename: str, *, diarize: bool = False, cleanup_level: str = ""
     ) -> dict:
         """Check an uploaded file and transcribe it in the background; `{"ok": True, "job_id"}` at once.
+
+        `source` is the upload saved to disk (never read into memory); this call owns it and deletes it when the
+        job ends or fails, or at once when the file is refused.
 
         A `cleanup_level` of `light` or `medium` also runs the transcript through the [llm] model;
         anything else is no cleanup.
 
         Progress and the outcome are read with `get_file_job` / `get_current_file_job`.
         """
-        error = self._check_upload(file_bytes, filename)
-        if error:
-            return {"ok": False, "error": error}
-        job = self._file_jobs.start(
-            filename,
-            lambda job: self.upload_and_transcribe(
-                file_bytes, filename, diarize=diarize, cleanup_level=cleanup_level, job=job
-            ),
-        )
+        job = None
+        try:
+            error = self.check_upload_name(filename) or self._check_upload_size(source)
+            if error:
+                return {"ok": False, "error": error}
+
+            def work(job: FileJob) -> dict:
+                try:
+                    return self.upload_and_transcribe(
+                        source, filename, diarize=diarize, cleanup_level=cleanup_level, job=job
+                    )
+                finally:
+                    _remove(source)
+
+            job = self._file_jobs.start(filename, work)
+        finally:
+            if job is None:  # refused, busy or failed to start: no job will remove the file
+                _remove(source)
         if job is None:
             return {"ok": False, "busy": True, "error": "Another file is still being transcribed"}
         return {"ok": True, "job_id": job.id}
@@ -77,29 +104,33 @@ class FilesMixin(DashboardState):
         """The running file job, or the latest one whose ending no client has read yet."""
         return self._file_jobs.current()
 
-    def _check_upload(self, file_bytes: bytes, filename: str) -> str:
-        """Why an uploaded file cannot be transcribed, or an empty string."""
+    def check_upload_name(self, filename: str) -> str:
+        """Why a file of this name cannot be transcribed (checked before its body is saved), or an empty string."""
         if self._db is None:
             return "DB not available"
-        from ..transcription.file_transcribe import file_extension
-
         ext = file_extension(filename)
         if ext not in ALLOWED_EXTENSIONS:
             return f"Unsupported format: {ext}"
-        if len(file_bytes) > MAX_UPLOAD_BYTES:
-            return f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"
+        return ""
+
+    @staticmethod
+    def _check_upload_size(source: Path) -> str:
+        """Why a saved upload is too big, or an empty string."""
+        if source.stat().st_size > MAX_UPLOAD_BYTES:
+            return f"File too large (max {MAX_UPLOAD_LABEL})"
         return ""
 
     def upload_and_transcribe(
         self,
-        file_bytes: bytes,
+        source: Path,
         filename: str,
         *,
         diarize: bool = False,
         cleanup_level: str = "",
         job: FileJob | None = None,
     ) -> dict:
-        """Convert an uploaded audio file, transcribe it, and save to DB (blocking); the file is already checked.
+        """Convert an uploaded audio file on disk, transcribe it, and save to DB (blocking); the file is already
+        checked and is left in place (the caller removes it).
 
         With `diarize`, the saved and returned text is labelled by speaker when the model supports it.
         With a `cleanup_level`, the transcript is also cleaned up by the [llm] model; that text is saved
@@ -107,26 +138,34 @@ class FilesMixin(DashboardState):
         """
         started = time.monotonic()
         progress = job.update if job else None
-        logger.info("File transcription started: %d KB", len(file_bytes) // 1024)
+        logger.info("File transcription started: %d KB", source.stat().st_size // 1024)
         if not diarize:
             logger.info("Speaker detection was not requested for this upload (the Detect speakers switch was off)")
         if progress:
             progress("converting")
 
         try:
-            wav_chunks, duration_ms = convert_to_wav(file_bytes, filename)
+            audio = convert_to_wav(source, filename)
         except Exception as exc:
             logger.error("Audio conversion failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Audio conversion failed: {exc}"}
 
+        duration_ms = audio.duration_ms
         # A model without speaker detection runs this upload on Parakeet (see `speaker_fallback`). The container, if
         # the job started it, is stopped as soon as the transcription is done: the cleanup below may need the VRAM.
+        # The converted audio (a temporary file) is deleted when the transcription ends, however it ends.
         try:
-            with speaker_detection_job(
-                self._config.inference, wanted=diarize, what="upload", active_model=lambda: self._config.inference.model
-            ) as speakers:
+            with (
+                audio,
+                speaker_detection_job(
+                    self._config.inference,
+                    wanted=diarize,
+                    what="upload",
+                    active_model=lambda: self._config.inference.model,
+                ) as speakers,
+            ):
                 result = self._transcribe_wav_chunks(
-                    wav_chunks,
+                    audio,
                     word_timestamps=True,
                     diarize=diarize,
                     on_progress=progress,
@@ -245,7 +284,7 @@ class FilesMixin(DashboardState):
 
     def _transcribe_wav_chunks(
         self,
-        wav_chunks: list[bytes],
+        wav_chunks: Sequence[bytes],
         *,
         word_timestamps: bool = False,
         diarize: bool = False,

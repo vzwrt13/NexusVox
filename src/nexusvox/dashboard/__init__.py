@@ -20,6 +20,7 @@ from ..config import Config
 from ..extensions import load_extensions
 from ..storage.db import Database
 from ..system.single_instance import show_message
+from ..transcription.file_transcribe import MAX_UPLOAD_BYTES
 from . import (
     routes_analytics,
     routes_commands,
@@ -104,6 +105,8 @@ def _bind_server(wsgi_app) -> tuple[int, ThreadedWSGIServer] | None:
 
 def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
     app = Flask(__name__, static_folder=str(_STATIC_DIR), static_url_path="")
+    # Werkzeug refuses a request body above this (413) before it parses a form; the slack covers multipart framing.
+    app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES + 1024 * 1024
     install_guard(app, port)  # before any route, so the extension blueprints below are covered too
 
     # Suppress Flask request logging in production.

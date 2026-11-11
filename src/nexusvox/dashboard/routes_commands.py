@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from flask import Flask, jsonify
 
-from .routes_base import _json_object, _switch
+from .routes_base import _bad_request, _json_object, _switch, _typed
 
 if TYPE_CHECKING:
     from .api import DashboardAPI
@@ -38,7 +38,10 @@ def register(app: Flask, api: DashboardAPI) -> None:
     @app.route("/api/voice-commands/symbols", methods=["POST"])
     def set_voice_commands_symbols():
         data = _json_object()
-        return jsonify(api.set_voice_commands_symbols(data.get("symbols", [])))
+        symbols = _typed(data, "symbols", list, [], "a list of text")
+        if not all(isinstance(s, str) for s in symbols):
+            _bad_request("symbols must be a list of text")
+        return jsonify(api.set_voice_commands_symbols(symbols))
 
     @app.route("/api/voice-commands/bypass-symbols", methods=["POST"])
     def set_voice_commands_bypass_symbols():
@@ -71,4 +74,7 @@ def register(app: Flask, api: DashboardAPI) -> None:
         @app.route("/api/os-commands/apps", methods=["POST"])
         def set_os_commands_apps():
             data = _json_object()
-            return jsonify(api.set_os_commands_apps(data.get("apps", {})))
+            apps = _typed(data, "apps", dict, {}, "an object of text")
+            if not all(isinstance(k, str) and isinstance(v, str) for k, v in apps.items()):
+                _bad_request("apps must be an object of text")
+            return jsonify(api.set_os_commands_apps(apps))

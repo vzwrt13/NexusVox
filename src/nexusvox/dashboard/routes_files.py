@@ -8,6 +8,9 @@ from urllib.parse import quote
 
 from flask import Flask, Response, jsonify, request, send_file
 
+from ..transcription.file_transcribe import MAX_UPLOAD_BYTES
+from .routes_base import _json_object
+
 if TYPE_CHECKING:
     from .api import DashboardAPI
 
@@ -28,7 +31,8 @@ def register(app: Flask, api: DashboardAPI) -> None:
         f = request.files["file"]
         if not f.filename:
             return jsonify({"ok": False, "error": "No filename"}), 400
-        file_bytes = f.read()
+        # Read one byte more than allowed: an oversized upload is refused without loading all of it.
+        file_bytes = f.stream.read(MAX_UPLOAD_BYTES + 1)
         diarize = request.form.get("diarize", "").lower() in ("1", "true", "on", "yes")
         cleanup_level = request.form.get("cleanup", "").strip().lower()
         result = api.start_file_transcription(file_bytes, f.filename, diarize=diarize, cleanup_level=cleanup_level)
@@ -55,8 +59,8 @@ def register(app: Flask, api: DashboardAPI) -> None:
 
     @app.route("/api/file-transcriptions/<int:tid>", methods=["PATCH"])
     def rename_file_transcription(tid):
-        body = request.get_json(silent=True)
-        if not isinstance(body, dict) or "title" not in body:
+        body = _json_object()
+        if "title" not in body:
             return jsonify({"ok": False, "error": "Expected a JSON body with a title"}), 400
         result = api.rename_file_transcription(tid, body["title"])
         return jsonify(result), (200 if result["ok"] else result["status"])

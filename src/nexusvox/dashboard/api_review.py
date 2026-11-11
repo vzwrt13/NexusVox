@@ -27,16 +27,21 @@ class ReviewMixin(DashboardState):
         with self._sf() as session:
             row = session.get(Transcription, tid)
             if row and row.audio_path:
-                return str(self._db_dir() / row.audio_path)
+                path = self._db_dir() / row.audio_path
+                if path.is_file():
+                    return str(path)
         return None
 
     def retry_transcription(self, tid: int) -> dict:
         """Transcribe a recording's stored WAV again with the current model. Saves nothing."""
+        if self._db is None:
+            return {"ok": False, "error": "DB not available"}
         path = self.get_audio_file_path(tid)
         if path is None:
-            return {"ok": False, "error": "No stored audio for this recording - turn on Store Audio Recordings"}
-        if not Path(path).is_file():
-            return {"ok": False, "error": "The stored audio file for this recording is missing"}
+            return {
+                "ok": False,
+                "error": "No stored audio for this recording (Store Audio Recordings was off or the file is gone)",
+            }
         try:
             wav_chunks, _ = convert_to_wav(Path(path).read_bytes(), "recording.wav")
             result = self._transcribe_wav_chunks(wav_chunks)

@@ -193,7 +193,12 @@ document.addEventListener("visibilitychange", () => {
 async function loadFileTranscriptions(poll = false) {
   const generation = ++recLoadGeneration;
   try {
-    const [rows] = await Promise.all([fetchRecordingRows(), poll ? null : loadPendingMeetings()]);
+    // The pending meetings are a side block: when they fail the recordings still render.
+    const pendingLoad = poll ? null : loadPendingMeetings().catch((err) => {
+      console.error("Failed to load the pending meetings:", err);
+    });
+    const rows = await fetchRecordingRows();
+    await pendingLoad;
     if (generation !== recLoadGeneration) return;
     applyRecordingRows(rows, poll);
   } catch (err) {
@@ -244,7 +249,7 @@ function recordingDate(item, withTime) {
   const options = withTime
     ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
     : { month: "short", day: "numeric" };
-  return new Date(item.created_at).toLocaleString(undefined, options);
+  return parseServerTime(item.created_at).toLocaleString(undefined, options);
 }
 
 function recordingListMeta(item) {
@@ -620,8 +625,12 @@ function editFileTitle(detail) {
     } catch (err) {
       return restore("Rename failed: " + err.message);
     }
-    detail._editing = false;
-    detail._signature = null; // the head is drawn again with the new title
+    // The head shows the new title right away, so a failed reload cannot leave the disabled input behind.
+    const title = typed === item.original_filename ? "" : typed;
+    item.title = title;
+    if (detail._item) detail._item.title = title; // a poll may have swapped the item while the rename ran
+    detail._signature = null;
+    restore();
     loadFileTranscriptions();
   };
   input.addEventListener("keydown", (event) => {
@@ -665,7 +674,6 @@ function askDeleteRecording(detail) {
     const at = shown.findIndex((i) => String(i.id) === id);
     const next = shown[at + 1] || shown[at - 1];
     recSelectedId = next ? String(next.id) : null;
-    recTurns.delete(id);
     loadFileTranscriptions();
   });
 }

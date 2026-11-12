@@ -43,7 +43,10 @@ _NOT_TEXT = {".py", ".pyc", ".pyd", ".dll", ".so", ".exe", ".h", ".c", ".cpp", "
 
 # Native libraries: file-name prefix (lower case) -> (component, licence). Matched by name, not verified against the
 # binary; the file lists the libraries that are really in the build and says so when it cannot name one.
-_FFMPEG = ("FFmpeg", "LGPL-3.0-or-later (built with --enable-version3); GPL when built with GPL parts, see https://ffmpeg.org/legal.html")
+_FFMPEG = (
+    "FFmpeg",
+    "LGPL-3.0-or-later (built with --enable-version3); GPL when built with GPL parts, see https://ffmpeg.org/legal.html",
+)
 KNOWN_BINARIES: dict[str, tuple[str, str]] = {
     "avcodec": _FFMPEG,
     "avformat": _FFMPEG,

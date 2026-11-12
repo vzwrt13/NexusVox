@@ -18,7 +18,8 @@ public thumbprint and passes nothing secret on a command line.
 - [Inno Setup](https://jrsoftware.org/isinfo.php) 6 (the version in `INNO_SETUP_VERSION` of `.github/workflows/installer.yml`).
 - A Python environment with NexusVox installed **as a regular package** (`pip install .`, not editable) and PyInstaller.
   To get the same stub as CI, build PyInstaller's bootloader from source:
-  `pip install --no-binary pyinstaller "pyinstaller>=6,<7"` (needs the Visual Studio C++ build tools).
+  `$env:PYINSTALLER_COMPILE_BOOTLOADER = "1"; pip install --no-binary pyinstaller "pyinstaller>=6,<7"` (needs the
+  Visual Studio C++ build tools; without the variable the source package installs the shared prebuilt stub).
 - Optional: set `NEXUSVOX_SIGN_THUMBPRINT` to the certificate's SHA-1 thumbprint (public data; SimplySign Desktop or
   `Get-ChildItem Cert:\CurrentUser\My` shows it). Without it the script uses the only code-signing certificate in the
   store and asks for `-Thumbprint` if there are several.

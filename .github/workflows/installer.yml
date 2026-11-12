@@ -50,10 +50,23 @@ jobs:
 
       - name: Build PyInstaller with its bootloader compiled from source
         # PyInstaller's prebuilt bootloader is one .exe that thousands of programs share, and antivirus engines
-        # flag it by its hash (docs/installer-research.md). `--no-binary` makes pip build PyInstaller from the
-        # source distribution, which compiles the bootloader with the MSVC toolchain on the runner, so the
-        # stub in NexusVox.exe is not byte-identical to the shared one. The pip log shows the waf build.
-        run: pip install -v --no-binary pyinstaller "pyinstaller>=6,<7"
+        # flag it by its hash (docs/installer-research.md). The source distribution carries that prebuilt stub
+        # too, and only compiles the bootloader when asked: PYINSTALLER_COMPILE_BOOTLOADER=1 makes its build hook
+        # run waf with the MSVC toolchain on the runner. `--no-binary` forces the source build. The step fails
+        # unless the log shows that the compile ran, so a PyInstaller release that stops honouring the variable
+        # cannot silently bring the shared stub back.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PYINSTALLER_COMPILE_BOOTLOADER = "1"
+          pip install -v --no-binary pyinstaller "pyinstaller>=6,<7" 2>&1 | Tee-Object -FilePath pyinstaller-build.log
+          if ($LASTEXITCODE -ne 0) { throw "Building PyInstaller failed" }
+          if (-not (Select-String -Path pyinstaller-build.log -Pattern "compile forced" -Quiet)) {
+            throw "PyInstaller did not compile its bootloader"
+          }
+          if (-not (Select-String -Path pyinstaller-build.log -Pattern "'all' finished successfully" -Quiet)) {
+            throw "The bootloader build did not finish successfully"
+          }
 
       - name: Build the app
         run: python packaging/build.py

@@ -96,6 +96,16 @@ Without a usable GPU, Parakeet runs in-process on the CPU (ONNX, int8 — no Doc
 
 Models download on first use (~670 MB for Parakeet on CPU, ~1.6 GB for `whisper-large-v3-turbo`) and cache under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Speaker detection for uploads needs the Parakeet GPU container.
 
+## Windows installer
+
+Each [release](https://github.com/vzwrt13/NexusVox/releases/latest) carries `NexusVox-Setup.exe`, a per-user installer
+(no administrator rights) with the CPU speech path built in. It is signed with the NightShift AI GmbH code-signing
+certificate, but Windows SmartScreen builds trust per download, so a new release can still show *"Windows protected
+your PC"*. Click **More info**, then **Run anyway**. A release published before its signature is ready says so in its
+notes and shows *Unknown publisher*; the same two clicks apply. Check a download in the file's Properties, Digital
+Signatures tab, or with `signtool verify /pa /v NexusVox-Setup.exe`. How releases are signed:
+[docs/SIGNING.md](docs/SIGNING.md).
+
 See [GettingStarted.md](GettingStarted.md) for the full setup guide including configuration, model selection, and troubleshooting.
 
 ---
@@ -173,6 +183,7 @@ Starting NexusVox from the Start menu or a shortcut opens the dashboard; the Win
 - [GettingStarted.md](GettingStarted.md) — full setup guide
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, lint, tests, PR conventions
 - [docs/TESTING.md](docs/TESTING.md) — running the test suite
+- [docs/SIGNING.md](docs/SIGNING.md) — signing a release locally with the Certum certificate
 - [docs/architecture.html](docs/architecture.html) — interactive component diagram: inputs, transcription backends, storage, dashboard and the local services NexusVox talks to (download and open in a browser)
 - [docs/text-pipeline.html](docs/text-pipeline.html) — interactive diagram of one dictation: which commands end the cycle early, the text pipeline in order, injection and learn from edits
 - [docs/TRANSLATOR.md](docs/TRANSLATOR.md) — the external translator server behind *Translate to English*

@@ -165,6 +165,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          # A draft: the installer CI built is unsigned, and the maintainer replaces it with the locally signed one
+          # before publishing (docs/SIGNING.md), so nobody can download the unsigned file in between.
+          draft: true
           # Without an explicit body, generate_release_notes produces only the
           # merged-pull-request list. That is a reasonable changelog and a poor
           # answer to "what is this and what changed"; supplying a body keeps

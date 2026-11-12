@@ -151,6 +151,9 @@ engines in the release notes if any remain.** Zero across 70 engines is not a re
 | EV certificate | **n/r**, more than OV | Microsoft says paying the EV premium only to avoid SmartScreen is no longer justified |
 | Unsigned | 0 | Publisher shows "Unknown publisher"; Defender is stricter on unsigned unpacking code |
 
+> **Decision (November 2026): Artifact Signing is out (the GmbH is too young); the release is signed locally with a
+> Certum OV cloud certificate (SimplySign). See [SIGNING.md](SIGNING.md).** The recommendation below is kept as written.
+
 Recommendation: Artifact Signing, from CI, with the signing step in the release workflow. **Open the
 identity validation now.** I could not confirm how long validation takes for a GmbH, nor whether
 NightShift AI GmbH meets the organisation-history rule that I remember from the preview (**unverified**).

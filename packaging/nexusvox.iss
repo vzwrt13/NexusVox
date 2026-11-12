@@ -7,7 +7,7 @@
 ; Per-user, no admin rights: the app goes to %LOCALAPPDATA%\Programs\NexusVox. The file name of the
 ; installer is stable on purpose (NexusVox-Setup.exe, no version): the website links to
 ; releases/latest/download/NexusVox-Setup.exe and download reputation is tracked per file name.
-; The installer is unsigned for now.
+; CI builds it unsigned; the maintainer signs the release on their PC (packaging\sign_release.ps1, docs\SIGNING.md).
 
 ; build_installer.py passes both: AppVersion is shown as it is ("1.0.0rc1" is fine), AppVersionInfo is the numeric
 ; "1.0.0.0" form that VersionInfoVersion insists on.

@@ -43,10 +43,17 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      - name: Install NexusVox and PyInstaller
+      - name: Install NexusVox
         # A regular install, not editable: the build must contain what a wheel contains. `packaging` is used by
         # the notices script directly, so it is named here instead of relying on another package pulling it in.
-        run: pip install . "pyinstaller>=6,<7" packaging
+        run: pip install . packaging
+
+      - name: Build PyInstaller with its bootloader compiled from source
+        # PyInstaller's prebuilt bootloader is one .exe that thousands of programs share, and antivirus engines
+        # flag it by its hash (docs/installer-research.md). `--no-binary` makes pip build PyInstaller from the
+        # source distribution, which compiles the bootloader with the MSVC toolchain on the runner, so the
+        # stub in NexusVox.exe is not byte-identical to the shared one. The pip log shows the waf build.
+        run: pip install -v --no-binary pyinstaller "pyinstaller>=6,<7"
 
       - name: Build the app
         run: python packaging/build.py

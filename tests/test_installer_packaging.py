@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import shutil
+import subprocess
 import sys
 from importlib import metadata
 from pathlib import Path
@@ -164,3 +167,30 @@ def test_the_installer_gets_a_numeric_only_file_version(version, expected):
 def test_a_version_without_digits_is_refused():
     with pytest.raises(ValueError):
         build_installer.numeric_version("dev")
+
+
+def _find_signtool() -> str | None:
+    if os.environ.get("SIGNTOOL"):
+        return os.environ["SIGNTOOL"]
+    on_path = shutil.which("signtool")
+    if on_path:
+        return on_path
+    kits = Path(os.environ.get("ProgramFiles(x86)", "")) / "Windows Kits" / "10" / "bin"
+    return next(iter(sorted(kits.glob("*/x64/signtool.exe"), reverse=True)), None) if kits.is_dir() else None
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="signtool and Authenticode are Windows-only")
+def test_the_release_signing_script_signs_the_exe_then_the_installer():
+    """packaging/sign_release.ps1 with a throw-away self-signed certificate: never the real certificate."""
+    if _find_signtool() is None:
+        pytest.skip("signtool.exe (Windows SDK) not installed")
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if shell is None:
+        pytest.skip("PowerShell not found")
+    result = subprocess.run(
+        [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(PACKAGING / "test_sign_release.ps1")],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

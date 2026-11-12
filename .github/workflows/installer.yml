@@ -52,21 +52,18 @@ jobs:
         # PyInstaller's prebuilt bootloader is one .exe that thousands of programs share, and antivirus engines
         # flag it by its hash (docs/installer-research.md). The source distribution carries that prebuilt stub
         # too, and only compiles the bootloader when asked: PYINSTALLER_COMPILE_BOOTLOADER=1 makes its build hook
-        # run waf with the MSVC toolchain on the runner. `--no-binary` forces the source build. The step fails
-        # unless the log shows that the compile ran, so a PyInstaller release that stops honouring the variable
-        # cannot silently bring the shared stub back.
+        # run waf with the MSVC toolchain on the runner. `--no-binary` forces the source build and `--no-cache-dir`
+        # keeps pip from reusing a cached wheel (setup-python restores pip's cache), which would carry the shared
+        # stub. check_bootloader.py then compares the installed stubs with the ones PyPI publishes and fails when
+        # they are identical, so the result is checked, not the log.
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $env:PYINSTALLER_COMPILE_BOOTLOADER = "1"
-          pip install -v --no-binary pyinstaller "pyinstaller>=6,<7" 2>&1 | Tee-Object -FilePath pyinstaller-build.log
+          pip install -v --no-cache-dir --no-binary pyinstaller "pyinstaller>=6,<7"
           if ($LASTEXITCODE -ne 0) { throw "Building PyInstaller failed" }
-          if (-not (Select-String -Path pyinstaller-build.log -Pattern "compile forced" -Quiet)) {
-            throw "PyInstaller did not compile its bootloader"
-          }
-          if (-not (Select-String -Path pyinstaller-build.log -Pattern "'all' finished successfully" -Quiet)) {
-            throw "The bootloader build did not finish successfully"
-          }
+          python packaging/check_bootloader.py
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller does not carry a bootloader built from source" }
 
       - name: Build the app
         run: python packaging/build.py

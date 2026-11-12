@@ -76,41 +76,24 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot "sign_helpers.ps1")
+
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $AppExe) { $AppExe = Join-Path $root "dist\NexusVox\NexusVox.exe" }
 if (-not $InstallerExe) { $InstallerExe = Join-Path $root "dist\installer\NexusVox-Setup.exe" }
 if (-not $BuildInstaller) {
+    # Inno Setup runs the same signtool command (--sign-command) on the uninstaller it embeds and on the setup, so
+    # the unins000.exe that lands in the user's install folder is signed too.
     $BuildInstaller = {
-        & $Python (Join-Path $root "packaging\build_installer.py")
+        & $Python (Join-Path $root "packaging\build_installer.py") --sign-command (Get-InnoSignCommand)
         if ($LASTEXITCODE -ne 0) { throw "build_installer.py failed (exit code $LASTEXITCODE)" }
     }
 }
 
-function Find-SignTool {
-    if ($SignTool) {
-        if (-not (Test-Path -LiteralPath $SignTool)) { throw "signtool not found at $SignTool" }
-        return (Resolve-Path -LiteralPath $SignTool).Path
-    }
-    $onPath = Get-Command signtool.exe -ErrorAction SilentlyContinue
-    if ($onPath) { return $onPath.Source }
-    $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-    if (Test-Path $kits) {
-        $found = Get-ChildItem -Path $kits -Directory |
-            Where-Object { $_.Name -match '^\d+(\.\d+){3}$' } |
-            Sort-Object { [version]$_.Name } -Descending |
-            ForEach-Object { Join-Path $_.FullName "x64\signtool.exe" } |
-            Where-Object { Test-Path $_ } |
-            Select-Object -First 1
-        if ($found) { return $found }
-    }
-    throw "signtool.exe not found. Install the Windows SDK (signing tools) or pass -SignTool / set SIGNTOOL."
-}
-
 function Resolve-Thumbprint {
-    if ($Thumbprint) { return ($Thumbprint -replace '\s', '').ToUpperInvariant() }
-    # Only public certificate data is read here: the thumbprint and the "has a private key" flag.
-    $candidates = @(Get-ChildItem Cert:\CurrentUser\My |
-        Where-Object { $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date) -and ($_.EnhancedKeyUsageList.ObjectId -contains "1.3.6.1.5.5.7.3.3") })
+    if ($Thumbprint) { return ConvertTo-Thumbprint $Thumbprint }
+    # Only public certificate data is read here: the thumbprint, the key flag and the key usage.
+    $candidates = @(Get-ChildItem Cert:\CurrentUser\My | Where-Object { Test-CodeSigningCertificate $_ })
     if ($candidates.Count -eq 1) { return $candidates[0].Thumbprint }
     if ($candidates.Count -eq 0) {
         throw "No code-signing certificate with a private key in Cert:\CurrentUser\My. Is SimplySign Desktop logged in?"
@@ -124,8 +107,7 @@ function Invoke-SignTool([string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "signtool failed (exit code $LASTEXITCODE): signtool $($Arguments[0])" }
 }
 
-function Sign-File([string]$Path) {
-    Write-Host "Signing $Path"
+function Get-SignArguments([string]$Target) {
     $arguments = @("sign", "/fd", "SHA256", "/d", "NexusVox", "/du", "https://nightshift-ai.de")
     if ($PfxPath) {
         $arguments += @("/f", $PfxPath)
@@ -134,8 +116,19 @@ function Sign-File([string]$Path) {
         $arguments += @("/sha1", $script:certThumbprint)
     }
     if (-not $NoTimestamp) { $arguments += @("/tr", $TimestampUrl, "/td", "SHA256") }
-    $arguments += $Path
-    Invoke-SignTool $arguments
+    return $arguments + $Target
+}
+
+function Get-InnoSignCommand {
+    # The command Inno Setup runs for each file it signs: `$f` is the file, `$q` a double quote (Inno's own syntax).
+    $parts = @('$q' + $script:signtoolPath + '$q')
+    $parts += Get-SignArguments '$f' | ForEach-Object { if ($_ -match '\s') { '$q' + $_ + '$q' } else { $_ } }
+    return $parts -join " "
+}
+
+function Sign-File([string]$Path) {
+    Write-Host "Signing $Path"
+    Invoke-SignTool (Get-SignArguments $Path)
     if (-not $SkipVerify) { Invoke-SignTool @("verify", "/pa", "/v", $Path) }
 }
 
@@ -145,7 +138,7 @@ if (($NoTimestamp -or $SkipVerify) -and -not $PfxPath) {
 }
 if ($PfxPath -and -not (Test-Path -LiteralPath $PfxPath)) { throw "Test certificate not found: $PfxPath" }
 if (-not (Test-Path -LiteralPath $AppExe)) { throw "$AppExe not found. Run 'python packaging/build.py' first." }
-$script:signtoolPath = Find-SignTool
+$script:signtoolPath = Find-SignToolPath $SignTool
 Write-Host "signtool: $script:signtoolPath"
 if (-not $PfxPath) {
     $script:certThumbprint = Resolve-Thumbprint
@@ -154,7 +147,8 @@ if (-not $PfxPath) {
     Write-Host "Certificate: $($cert.Subject) (valid until $($cert.NotAfter.ToString('yyyy-MM-dd')))"
 }
 
-# --- 1. The bundled exe, 2. the installer built from it, 3. the installer.
+# --- 1. The bundled exe, 2. the installer built from it (Inno signs the uninstaller and the setup), 3. the installer
+# again: signing is repeated on purpose so the result never depends on what the build command did.
 Sign-File $AppExe
 if (Test-Path -LiteralPath $InstallerExe) { Remove-Item -LiteralPath $InstallerExe -Force }  # never sign a stale build
 Write-Host "Building the installer"

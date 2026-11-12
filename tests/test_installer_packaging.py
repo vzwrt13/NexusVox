@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 import shutil
 import subprocess
 import sys
@@ -169,21 +168,34 @@ def test_a_version_without_digits_is_refused():
         build_installer.numeric_version("dev")
 
 
-def _find_signtool() -> str | None:
-    if os.environ.get("SIGNTOOL"):
-        return os.environ["SIGNTOOL"]
-    on_path = shutil.which("signtool")
-    if on_path:
-        return on_path
-    kits = Path(os.environ.get("ProgramFiles(x86)", "")) / "Windows Kits" / "10" / "bin"
-    return next(iter(sorted(kits.glob("*/x64/signtool.exe"), reverse=True)), None) if kits.is_dir() else None
+def test_iscc_signs_nothing_without_a_sign_command():
+    command = build_installer.iscc_command("ISCC.exe", "1.0.0")
+    assert command[0] == "ISCC.exe"
+    assert "/DAppVersion=1.0.0" in command
+    assert not any(argument.startswith(("/S", "/DSignInstaller")) for argument in command)
+
+
+def test_iscc_gets_the_sign_command_for_the_setup_and_the_uninstaller():
+    command = build_installer.iscc_command("ISCC.exe", "1.0.0", "signtool sign $f")
+    assert "/Snexusvox=signtool sign $f" in command  # the sign tool the script's SignTool= directive names
+    assert "/DSignInstaller=1" in command
+    assert command[-1].endswith("nexusvox.iss")
+    iss = (PACKAGING / "nexusvox.iss").read_text(encoding="utf-8")
+    assert "SignTool=nexusvox" in iss
+    assert "SignedUninstaller=yes" in iss
+
+
+def test_the_bootloader_check_flags_the_shared_prebuilt_stub():
+    check = _load("check_bootloader")
+    published = {"run.exe": b"shared", "runw.exe": b"shared-w"}
+    assert check.identical_stubs({"run.exe": b"shared", "runw.exe": b"shared-w"}, published) == ["run.exe", "runw.exe"]
+    assert check.identical_stubs({"run.exe": b"mine", "runw.exe": b"shared-w"}, published) == ["runw.exe"]
+    assert check.identical_stubs({"run.exe": b"mine", "runw.exe": b"mine-w"}, published) == []
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="signtool and Authenticode are Windows-only")
 def test_the_release_signing_script_signs_the_exe_then_the_installer():
-    """packaging/sign_release.ps1 with a throw-away self-signed certificate: never the real certificate."""
-    if _find_signtool() is None:
-        pytest.skip("signtool.exe (Windows SDK) not installed")
+    """packaging/sign_release.ps1 with throw-away self-signed certificates: never the real certificate."""
     shell = shutil.which("pwsh") or shutil.which("powershell")
     if shell is None:
         pytest.skip("PowerShell not found")
@@ -193,4 +205,6 @@ def test_the_release_signing_script_signs_the_exe_then_the_installer():
         text=True,
         timeout=300,
     )
+    if result.returncode == 77:  # the script's own "signtool.exe (Windows SDK) not installed"
+        pytest.skip(result.stdout.strip())
     assert result.returncode == 0, result.stdout + result.stderr

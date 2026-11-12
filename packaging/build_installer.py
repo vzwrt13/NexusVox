@@ -3,6 +3,10 @@
     python packaging/build.py            # first: build the app
     python packaging/build_installer.py  # then: dist/installer/NexusVox-Setup.exe
 
+    python packaging/build_installer.py --sign-command '$qC:/path/signtool.exe$q sign /fd SHA256 ... $f'
+        # Inno Setup runs that command on the setup and on the uninstaller it embeds (`$f` is the file, `$q` a quote;
+        # packaging/sign_release.ps1 builds the command). Without it nothing is signed.
+
 The installer is named `NexusVox-Setup.exe` for every version. The website links to
 `releases/latest/download/NexusVox-Setup.exe`, so keep the name stable. The version comes from `pyproject.toml`.
 
@@ -11,6 +15,7 @@ Inno Setup 6 is found through the ISCC environment variable, `PATH`, or its defa
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import shutil
@@ -62,7 +67,19 @@ def numeric_version(version: str) -> str:
     return ".".join(fields + ["0"] * (4 - len(fields)))
 
 
+def iscc_command(iscc: str, version: str, sign_command: str | None = None) -> list[str]:
+    """The ISCC command line. A sign command defines the `nexusvox` sign tool and turns on `SignInstaller`, which makes
+    the script sign the setup and the embedded uninstaller with it."""
+    command = [iscc, f"/DAppVersion={version}", f"/DAppVersionInfo={numeric_version(version)}"]
+    if sign_command:
+        command += [f"/Snexusvox={sign_command}", "/DSignInstaller=1"]
+    return [*command, str(SCRIPT)]
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--sign-command", help="signtool command Inno Setup runs on the setup and the uninstaller")
+    args = parser.parse_args()
     if not APP_EXE.is_file():
         print(f"{APP_EXE} not found. Run `python packaging/build.py` first.", file=sys.stderr)
         return 1
@@ -77,7 +94,7 @@ def main() -> int:
     except MissingLicenceError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
-    command = [iscc, f"/DAppVersion={version}", f"/DAppVersionInfo={numeric_version(version)}", str(SCRIPT)]
+    command = iscc_command(iscc, version, args.sign_command)
     result = subprocess.run(command, cwd=ROOT)
     if result.returncode != 0:
         return result.returncode

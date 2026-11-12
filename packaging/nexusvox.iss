@@ -18,6 +18,8 @@
   #define AppVersionInfo "0.0.0.0"
 #endif
 
+; build_installer.py --sign-command (from packaging\sign_release.ps1) defines SignInstaller and the `nexusvox` sign tool:
+; Inno signs the setup and the uninstaller stub it embeds, which ends up as unins000.exe in the install folder.
 #define AppName "NexusVox"
 #define AppExe "NexusVox.exe"
 
@@ -33,6 +35,10 @@ VersionInfoVersion={#AppVersionInfo}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
+#ifdef SignInstaller
+SignTool=nexusvox
+SignedUninstaller=yes
+#endif
 PrivilegesRequired=lowest
 ; Windows 11, the one supported system (README, pyproject classifiers): refuse earlier ones up front instead of
 ; installing an app that cannot start.

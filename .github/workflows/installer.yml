@@ -65,6 +65,8 @@ jobs:
           python packaging/check_bootloader.py
           if ($LASTEXITCODE -ne 0) { throw "PyInstaller does not carry a bootloader built from source" }
 
+      # build.py first replaces PyPI's PyAV (GPL x264/x265 in its FFmpeg) with PyAV built against the pinned LGPL
+      # FFmpeg (packaging/lgpl_av.py, MSVC from the runner), and refuses an app that still contains a GPL library.
       - name: Build the app
         run: python packaging/build.py
 

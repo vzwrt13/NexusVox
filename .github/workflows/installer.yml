@@ -43,10 +43,27 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
-      - name: Install NexusVox and PyInstaller
+      - name: Install NexusVox
         # A regular install, not editable: the build must contain what a wheel contains. `packaging` is used by
         # the notices script directly, so it is named here instead of relying on another package pulling it in.
-        run: pip install . "pyinstaller>=6,<7" packaging
+        run: pip install . packaging
+
+      - name: Build PyInstaller with its bootloader compiled from source
+        # PyInstaller's prebuilt bootloader is one .exe that thousands of programs share, and antivirus engines
+        # flag it by its hash (docs/installer-research.md). The source distribution carries that prebuilt stub
+        # too, and only compiles the bootloader when asked: PYINSTALLER_COMPILE_BOOTLOADER=1 makes its build hook
+        # run waf with the MSVC toolchain on the runner. `--no-binary` forces the source build and `--no-cache-dir`
+        # keeps pip from reusing a cached wheel (setup-python restores pip's cache), which would carry the shared
+        # stub. check_bootloader.py then compares the installed stubs with the ones PyPI publishes and fails when
+        # they are identical, so the result is checked, not the log.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:PYINSTALLER_COMPILE_BOOTLOADER = "1"
+          pip install -v --no-cache-dir --no-binary pyinstaller "pyinstaller>=6,<7"
+          if ($LASTEXITCODE -ne 0) { throw "Building PyInstaller failed" }
+          python packaging/check_bootloader.py
+          if ($LASTEXITCODE -ne 0) { throw "PyInstaller does not carry a bootloader built from source" }
 
       - name: Build the app
         run: python packaging/build.py

@@ -10,9 +10,10 @@ It covers what the tray menu and the hotkey cannot show to a script: the system 
 dashboard serves its pages and API from the bundled files, extensions found next to the exe load, and the
 CPU Parakeet model loads and transcribes a spoken sentence.
 
-`--only decode,whisper` runs just those steps after the setup (the names passed to `guarded` below). `--only decode`
-checks the bundled FFmpeg (LGPL, no GPL parts, decodes every upload format) without a tray icon, the dashboard
-port, a window or a download.
+`--only decode,whisper` runs just those steps after the setup (the names passed to `guarded` below; a model step
+brings the speech step it needs along, and an unknown or missing name fails the test). `--only decode` checks the
+bundled FFmpeg (the pinned LGPL build, no GPL parts, decodes every upload format) without a tray icon, the
+dashboard port, a window or a download.
 """
 
 from __future__ import annotations
@@ -98,7 +99,13 @@ def run(work: Path, download: bool, only: set[str] | None = None) -> NoReturn:
     work.mkdir(parents=True, exist_ok=True)
     hang_file = open(work / "hang.txt", "w")  # noqa: SIM115 - stays open for the whole run
 
+    # The model steps transcribe the sample the speech step renders, so asking for one brings that step along.
+    if only is not None and only & {"parakeet", "whisper"}:
+        only = only | {"speech"}
+    steps_seen: set[str] = set()
+
     def guarded(name: str, func, timeout: float = 120) -> None:
+        steps_seen.add(name)
         if only is not None and name != "setup" and name not in only:
             return
         crumb(f"step {name}")
@@ -152,16 +159,14 @@ def run(work: Path, download: bool, only: set[str] | None = None) -> NoReturn:
         # The bundled FFmpeg must be the LGPL build (packaging/lgpl_av.py) and still decode every upload format.
         import av
         import av._core
+        from lgpl_av import FFMPEG_VERSION, gpl_parts, is_pinned_ffmpeg  # the build's own GPL rules, not a copy
 
         from nexusvox.transcription.file_transcribe import convert_to_wav
 
-        meta = av._core.library_meta
-        licences = {name: info["license"] for name, info in meta.items()}
-        record("FFmpeg is LGPL", all("LGPL" in value for value in licences.values()), str(set(licences.values())))
-        configure = meta["libavcodec"]["configuration"].split()
-        forbidden = ("--enable-gpl", "--enable-nonfree", "--enable-libx264", "--enable-libx265")
-        gpl = [switch for switch in configure if switch in forbidden]
-        record("FFmpeg has no GPL parts", not gpl, " ".join(gpl))
+        problems = gpl_parts(av._core.library_meta)
+        record("FFmpeg has no GPL parts", not problems, "; ".join(problems))
+        version = av.ffmpeg_version_info
+        record("FFmpeg is the pinned LGPL build", is_pinned_ffmpeg(version), f"{version} (pinned: {FFMPEG_VERSION})")
         # suffix -> (container format, encoder); the formats the upload dialog takes, plus m4a (AAC)
         formats = {
             ".wav": ("wav", "pcm_s16le"),
@@ -367,6 +372,12 @@ def run(work: Path, download: bool, only: set[str] | None = None) -> NoReturn:
         record("Whisper (ctranslate2) transcribes", "hello world" in result.text.lower(), repr(result.text))
 
     guarded("whisper", whisper, timeout=300)
+
+    if only is not None:
+        # A typo or an empty list would otherwise run nothing but the setup and report success.
+        unknown = sorted(only - steps_seen)
+        detail = f"unknown steps {unknown}; known: {sorted(steps_seen)}" if unknown else ""
+        record("--only names steps", bool(only) and not unknown, detail or ("no step named" if not only else ""))
 
     finish(work, checks)
 

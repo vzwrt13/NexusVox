@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-from lgpl_av import GplError, bundle_gpl_parts, ensure_lgpl_av
+from lgpl_av import GplError, LgplBuildError, bundle_gpl_parts, ensure_lgpl_av
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "packaging" / "nexusvox.spec"
@@ -50,8 +50,11 @@ def main() -> int:
 
     try:
         ensure_lgpl_av()
-    except (GplError, RuntimeError, subprocess.CalledProcessError) as error:
+    except GplError as error:
         print(f"error: no PyAV without GPL parts: {error}", file=sys.stderr)
+        return 1
+    except (LgplBuildError, subprocess.CalledProcessError, OSError) as error:
+        print(f"error: building the LGPL PyAV failed: {error}", file=sys.stderr)
         return 1
 
     env = dict(os.environ)

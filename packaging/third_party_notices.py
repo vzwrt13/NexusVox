@@ -26,7 +26,14 @@ from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
 
-from lgpl_av import AV_VERSION, FFMPEG_SOURCE, bundle_gpl_parts, installed_av
+from lgpl_av import (
+    FFMPEG_LICENCE_FILE,
+    FFMPEG_SOURCE,
+    FFMPEG_VERSION,
+    bundle_ffmpeg,
+    bundle_gpl_parts,
+    bundle_is_pinned_ffmpeg,
+)
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
@@ -56,7 +63,6 @@ KNOWN_BINARIES: dict[str, tuple[str, str]] = {
     "swresample": _FFMPEG,
     "libx264": ("x264", "GPL-2.0-or-later"),
     "libx265": ("x265", "GPL-2.0-or-later"),
-    "postproc": ("libpostproc (FFmpeg)", "GPL-2.0-or-later"),
     "libmp3lame": ("LAME", "LGPL-2.0-or-later"),
     "libopus": ("Opus", "BSD-3-Clause"),
     "libvpx": ("libvpx", "BSD-3-Clause"),
@@ -155,24 +161,37 @@ _BUILD_OPTIONS = {
 }  # fmt: skip
 
 
-def ffmpeg_section(av: dict | None) -> str:
-    """Where the bundled FFmpeg comes from and what is linked into it, from the installed PyAV (see lgpl_av)."""
+def ffmpeg_section(bundle: Path) -> str:
+    """Where the app's FFmpeg comes from, what is linked into it and its licence text, read from the app folder
+    itself (the DLLs and PyAV's metadata in it), not from the build environment.
+
+    The LGPL requires telling recipients where the source is, so an FFmpeg other than the pinned build (whose
+    source FFMPEG_SOURCE names), or one without its licence text, is a MissingLicenceError."""
     lines = ["FFmpeg in PyAV", "--------------"]
-    if av is None:
-        return "\n".join([*lines, "(PyAV is not installed in the build environment)"])
-    configuration = av["libraries"].get("libavcodec", {}).get("configuration", "")
-    licence = av["libraries"].get("libavcodec", {}).get("license", "unknown")
+    libraries = bundle_ffmpeg(bundle)
+    if not libraries:
+        return "\n".join([*lines, f"(no FFmpeg library found in {bundle})"])
+    if not bundle_is_pinned_ffmpeg(bundle):
+        raise MissingLicenceError(
+            f"The FFmpeg in {bundle} is not the pinned build {FFMPEG_VERSION}, so the notices cannot say where its "
+            "source is. Build the app with packaging/build.py, which installs that build."
+        )
+    texts = sorted(bundle.rglob(f"av-*.dist-info/licenses/{FFMPEG_LICENCE_FILE}"))
+    if not texts:
+        raise MissingLicenceError(f"{FFMPEG_LICENCE_FILE} (FFmpeg's LGPL text) is not in {bundle}")
+    licences = sorted({info["license"] for info in libraries.values()})
+    configuration = max((info["configuration"] for info in libraries.values()), key=len)
     lines.append(
-        f"The FFmpeg libraries in PyAV {av['version']} (av.libs) report the licence '{licence}'.\n"
-        "The GNU LGPL lets you replace them with your own build of the same FFmpeg version; they are separate DLLs\n"
-        "for that reason. FFmpeg's licence text is in the av entry above."
+        f"The FFmpeg libraries in the app ({', '.join(Path(name).name for name in libraries)})\n"
+        f"report the licence {' / '.join(repr(licence) for licence in licences)}. The GNU LGPL lets you replace them\n"
+        "with your own build of the same FFmpeg version; they are separate DLLs for that reason.\n"
+        f"Source: {FFMPEG_SOURCE}."
     )
-    if av["version"] == AV_VERSION:
-        lines.append(f"Source: {FFMPEG_SOURCE}.")
     linked = sorted({name for name in _ENABLED.findall(configuration) if name not in _BUILD_OPTIONS})
     if linked:
         lines.append("\nLibraries linked into these FFmpeg DLLs, each under its own licence:")
         lines += [f"    {name} - {FFMPEG_LIBRARY_LICENCES.get(name, 'see its project')}" for name in linked]
+    lines.append(f"\n--- {FFMPEG_LICENCE_FILE} ---\n" + texts[0].read_text(encoding="utf-8", errors="replace").strip())
     return "\n".join(lines)
 
 
@@ -295,11 +314,11 @@ def _binaries_section(bundle: Path) -> tuple[str, bool]:
     lines = ["Native libraries in the app", "---------------------------"]
     if not files:
         lines.append(f"(none found in {bundle})")
-    gpl = False
     for path in files:
         component, licence = identify_binary(path.name)
-        gpl = gpl or "GPL-2.0" in licence and "LGPL" not in licence
         lines.append(f"{path.name}\n    {component} - {licence}")
+    # One GPL detector for the build, the notices and the self-test: lgpl_av (names here are for reading only).
+    gpl = bool(bundle_gpl_parts(bundle)) if bundle.is_dir() else False
     lines.append(
         "\nLicence texts for the libraries inside Python packages (PyAV's FFmpeg, sounddevice's PortAudio,\n"
         "onnxruntime, ctranslate2, numpy) are in the package entries above where the package ships them."
@@ -308,14 +327,16 @@ def _binaries_section(bundle: Path) -> tuple[str, bool]:
 
 
 def build_notices(bundle: Path = BUNDLE_DIR) -> str:
-    binaries, gpl = _binaries_section(bundle)
-    # By name (x264, x265, ...) and by the configure line inside the FFmpeg DLLs (an x264 linked in statically).
+    # By name (x264, x265, ...) and by the licence and configure line inside the FFmpeg DLLs.
     gpl_parts = bundle_gpl_parts(bundle) if bundle.is_dir() else []
-    if gpl or gpl_parts:
+    if gpl_parts:
         raise GplLibraryError(
             f"{bundle} contains GPL libraries; build it with packaging/build.py, which installs a PyAV without them.\n"
-            + "\n".join(gpl_parts or [binaries])
+            + "\n".join(gpl_parts)
         )
+    # Read before the package entries, so a wrong FFmpeg stops the build before the long part.
+    ffmpeg = ffmpeg_section(bundle)
+    binaries, _ = _binaries_section(bundle)
     own_licences = (ROOT / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
     geist = (ROOT / "src" / "nexusvox" / "dashboard" / "static" / "Geist-OFL.txt").read_text(encoding="utf-8")
     # The source-tree file ends the bundled-assets part at the first horizontal rule after its heading.
@@ -362,7 +383,7 @@ def build_notices(bundle: Path = BUNDLE_DIR) -> str:
         )
 
     parts.append(binaries)
-    parts.append(ffmpeg_section(installed_av()))
+    parts.append(ffmpeg)
     parts.append(FOOTER)
     return "\n\n".join(parts) + "\n"
 

@@ -141,8 +141,8 @@ def test_the_notices_refuse_a_gpl_bundle_before_reading_anything_else(tmp_path):
 
 def test_the_binaries_section_uses_the_same_gpl_detector(tmp_path):
     app = _app(tmp_path, {"av.libs/avcodec-62-abc.dll": _ffmpeg_dll("libavcodec", PYPI_CONFIGURE)})
-    assert notices._binaries_section(app)[1] is True
-    assert notices._binaries_section(_pinned_app(tmp_path / "pinned"))[1] is False
+    assert notices.bundle_gpl_parts is lgpl_av.bundle_gpl_parts  # the notices have no GPL rules of their own
+    assert "is built with --enable-libx264" in "\n".join(notices.bundle_gpl_parts(app))
 
 
 def test_the_ffmpeg_section_comes_from_the_bundle(tmp_path):

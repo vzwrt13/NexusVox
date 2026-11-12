@@ -334,9 +334,10 @@ def bundled_binaries(bundle: Path) -> list[Path]:
     return sorted(found, key=lambda p: p.name.lower())
 
 
-def _binaries_section(bundle: Path, gpl_parts: list[str] | None = None) -> tuple[str, bool]:
-    """The native libraries in the app, and whether any is GPL. `gpl_parts` is what bundle_gpl_parts(bundle)
-    returned, for a caller that has checked already: the check reads every FFmpeg DLL."""
+def _binaries_section(bundle: Path) -> str:
+    """The native libraries in the app, named for reading. Whether one is GPL is lgpl_av's decision
+    (bundle_gpl_parts), which build_notices asks before it writes anything: the one GPL detector for the build, the
+    notices and the self-test."""
     files = bundled_binaries(bundle)
     lines = ["Native libraries in the app", "---------------------------"]
     if not files:
@@ -344,15 +345,11 @@ def _binaries_section(bundle: Path, gpl_parts: list[str] | None = None) -> tuple
     for path in files:
         component, licence = identify_binary(path.name)
         lines.append(f"{path.name}\n    {component} - {licence}")
-    # One GPL detector for the build, the notices and the self-test: lgpl_av (names here are for reading only).
-    if gpl_parts is None:
-        gpl_parts = bundle_gpl_parts(bundle) if bundle.is_dir() else []
-    gpl = bool(gpl_parts)
     lines.append(
         "\nLicence texts for the libraries inside Python packages (PyAV's FFmpeg, sounddevice's PortAudio,\n"
         "onnxruntime, ctranslate2, numpy) are in the package entries above where the package ships them."
     )
-    return "\n".join(lines), gpl
+    return "\n".join(lines)
 
 
 def package_entry(dist: metadata.Distribution) -> str | None:
@@ -385,7 +382,7 @@ def build_notices(bundle: Path = BUNDLE_DIR) -> str:
         )
     # Read before the package entries, so a wrong FFmpeg stops the build before the long part.
     ffmpeg = ffmpeg_section(bundle, ffmpeg_dlls)
-    binaries, _ = _binaries_section(bundle, gpl_parts)
+    binaries = _binaries_section(bundle)
     own_licences = (ROOT / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
     geist = (ROOT / "src" / "nexusvox" / "dashboard" / "static" / "Geist-OFL.txt").read_text(encoding="utf-8")
     # The source-tree file ends the bundled-assets part at the first horizontal rule after its heading.

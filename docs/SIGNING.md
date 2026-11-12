@@ -29,6 +29,12 @@ public thumbprint and passes nothing secret on a command line.
   `--no-cache-dir` matters: pip otherwise reuses a cached PyInstaller wheel, which carries the shared prebuilt
   bootloader that antivirus engines flag. `check_bootloader.py` compares the installed bootloaders with the ones PyPI
   publishes and exits non-zero when they are identical. Run it again after any PyInstaller reinstall.
+
+  Use an environment only for building: `packaging/build.py` replaces the PyAV from PyPI in it (its FFmpeg carries
+  the GPL encoders x264 and x265) with PyAV built from source against an LGPL-only FFmpeg (`packaging/lgpl_av.py`).
+  The first build downloads both sources (about 100 MB, pinned by SHA-256, kept in `build\lgpl-av\`) and compiles
+  PyAV with the C++ build tools; later builds reuse the wheel. `python packaging\lgpl_av.py --check` tells whether
+  the environment already has that build. `build.py` refuses an app that still contains a GPL library.
 - Optional: set `NEXUSVOX_SIGN_THUMBPRINT` to the certificate's SHA-1 thumbprint (public data; SimplySign Desktop or
   `Get-ChildItem Cert:\CurrentUser\My` shows it; spaces and the invisible characters the Windows dialog adds are
   ignored). Without it the script uses the only code-signing certificate in the store and asks for `-Thumbprint` if

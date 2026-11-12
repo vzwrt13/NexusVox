@@ -85,8 +85,10 @@ audio (uploads, and faster-whisper's own loader). The PyAV wheels on PyPI build 
 encoders x264 and x265, so the Windows installer does not use them: `packaging/build.py` first replaces PyAV with
 the same release built from source against BtbN's LGPL build of FFmpeg (`packaging/lgpl_av.py`, both downloads
 pinned by SHA-256), and refuses an app that still contains a GPL library. That FFmpeg is LGPL-3.0-or-later (built
-with `--enable-version3`, without `--enable-gpl`, x264, x265 or any other GPL-only library). The libraries linked
-into it are permissive or LGPL; `THIRD_PARTY_NOTICES.txt` lists them, with where the FFmpeg source is. A plain
+with `--enable-version3`, without `--enable-gpl`, x264, x265 or any other GPL-only library). Most libraries
+linked into it are permissive or LGPL; libzmq and libsrt are MPL-2.0 (file-level copyleft, met by naming their
+unmodified source), libaom and SVT-AV1 add the AOM patent licence to BSD, and GMP is dual GPL/LGPL and used under
+the LGPL. `THIRD_PARTY_NOTICES.txt` lists each one with its licence, and where the FFmpeg source is. A plain
 `pip install nexusvox` still gets the PyPI wheel, which is the user's own install and not distributed by NexusVox.
 
 ---

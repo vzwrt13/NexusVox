@@ -152,23 +152,44 @@ FFMPEG_LIBRARY_LICENCES: dict[str, str] = {
     "libzvbi": "LGPL-2.0-or-later",
     "vulkan": "Apache-2.0 (Vulkan loader)",
     "opencl": "Apache-2.0 (OpenCL ICD loader)",
+    "vapoursynth": "LGPL-2.1-or-later (loaded at run time only if VapourSynth is installed; not shipped)",
 }
 _ENABLED = re.compile(r"--enable-([a-z0-9_-]+)")
-# Switches of a configure line that are build options or system interfaces, not libraries linked in.
+# Switches of a configure line that are build options or system interfaces, not libraries linked in. The notices
+# list them apart from the libraries; a switch in neither list is listed as not identified, so it cannot pass for
+# either.
 _BUILD_OPTIONS = {
-    "version3", "shared", "static", "pthreads", "cuda-llvm", "ffnvcodec", "amf", "schannel", "vaapi", "nvenc", "nvdec",
-    "mediafoundation", "d3d11va", "dxva2", "cuvid", "w32threads",
+    "version3", "shared", "static", "pthreads", "w32threads", "runtime-cpudetect", "pic", "lto", "hardcoded-tables",
+    "cuda", "cuda-llvm", "cuda-nvcc", "ffnvcodec", "nvenc", "nvdec", "cuvid", "amf", "vaapi", "vdpau", "qsv",
+    "mediafoundation", "d3d11va", "d3d12va", "dxva2", "schannel",
 }  # fmt: skip
 
 
-def ffmpeg_section(bundle: Path) -> str:
+def configure_switches(configuration: str) -> tuple[list[str], list[str], list[str]]:
+    """The --enable switches of an FFmpeg configure line, split into (libraries linked in, build options and system
+    interfaces, not identified). A `lib*` name or one in FFMPEG_LIBRARY_LICENCES is a library."""
+    libraries, options, unknown = [], [], []
+    for name in sorted(set(_ENABLED.findall(configuration))):
+        if name in FFMPEG_LIBRARY_LICENCES or name.startswith("lib"):
+            libraries.append(name)
+        elif name in _BUILD_OPTIONS:
+            options.append(name)
+        else:
+            unknown.append(name)
+    return libraries, options, unknown
+
+
+def ffmpeg_section(bundle: Path, libraries: dict[str, dict[str, str]] | None = None) -> str:
     """Where the app's FFmpeg comes from, what is linked into it and its licence text, read from the app folder
-    itself (the DLLs and PyAV's metadata in it), not from the build environment.
+    itself (the DLLs and PyAV's metadata in it), not from the build environment. `libraries` is what
+    bundle_ffmpeg(bundle) returned, for a caller that has read the DLLs already. The av package entry leaves the
+    licence text out (see build_notices), so the notices carry it once, from the app.
 
     The LGPL requires telling recipients where the source is, so an FFmpeg other than the pinned build (whose
     source FFMPEG_SOURCE names), or one without its licence text, is a MissingLicenceError."""
     lines = ["FFmpeg in PyAV", "--------------"]
-    libraries = bundle_ffmpeg(bundle)
+    if libraries is None:
+        libraries = bundle_ffmpeg(bundle)
     if not libraries:
         return "\n".join([*lines, f"(no FFmpeg library found in {bundle})"])
     if not bundle_is_pinned_ffmpeg(bundle):
@@ -187,10 +208,14 @@ def ffmpeg_section(bundle: Path) -> str:
         "with your own build of the same FFmpeg version; they are separate DLLs for that reason.\n"
         f"Source: {FFMPEG_SOURCE}."
     )
-    linked = sorted({name for name in _ENABLED.findall(configuration) if name not in _BUILD_OPTIONS})
+    linked, options, unknown = configure_switches(configuration)
     if linked:
         lines.append("\nLibraries linked into these FFmpeg DLLs, each under its own licence:")
         lines += [f"    {name} - {FFMPEG_LIBRARY_LICENCES.get(name, 'see its project')}" for name in linked]
+    if options:
+        lines.append("\nBuild options and system interfaces (not libraries): " + ", ".join(options) + ".")
+    if unknown:
+        lines.append("\nOther configure switches, not identified here: " + ", ".join(unknown) + ".")
     lines.append(f"\n--- {FFMPEG_LICENCE_FILE} ---\n" + texts[0].read_text(encoding="utf-8", errors="replace").strip())
     return "\n".join(lines)
 
@@ -309,7 +334,9 @@ def bundled_binaries(bundle: Path) -> list[Path]:
     return sorted(found, key=lambda p: p.name.lower())
 
 
-def _binaries_section(bundle: Path) -> tuple[str, bool]:
+def _binaries_section(bundle: Path, gpl_parts: list[str] | None = None) -> tuple[str, bool]:
+    """The native libraries in the app, and whether any is GPL. `gpl_parts` is what bundle_gpl_parts(bundle)
+    returned, for a caller that has checked already: the check reads every FFmpeg DLL."""
     files = bundled_binaries(bundle)
     lines = ["Native libraries in the app", "---------------------------"]
     if not files:
@@ -318,7 +345,9 @@ def _binaries_section(bundle: Path) -> tuple[str, bool]:
         component, licence = identify_binary(path.name)
         lines.append(f"{path.name}\n    {component} - {licence}")
     # One GPL detector for the build, the notices and the self-test: lgpl_av (names here are for reading only).
-    gpl = bool(bundle_gpl_parts(bundle)) if bundle.is_dir() else False
+    if gpl_parts is None:
+        gpl_parts = bundle_gpl_parts(bundle) if bundle.is_dir() else []
+    gpl = bool(gpl_parts)
     lines.append(
         "\nLicence texts for the libraries inside Python packages (PyAV's FFmpeg, sounddevice's PortAudio,\n"
         "onnxruntime, ctranslate2, numpy) are in the package entries above where the package ships them."
@@ -326,17 +355,37 @@ def _binaries_section(bundle: Path) -> tuple[str, bool]:
     return "\n".join(lines), gpl
 
 
+def package_entry(dist: metadata.Distribution) -> str | None:
+    """A package's entry in the notices: name, version, licence, homepage and its licence texts. None when it has
+    no licence text. FFmpeg's LGPL text, which PyAV's wheel carries, is left to the FFmpeg section, which prints it
+    from the app: the notices carry it once."""
+    name, version = dist.metadata["Name"], dist.version
+    entry = [f"### {name} {version}", f"Licence: {licence_summary(dist)}"]
+    if homepage(dist):
+        entry.append(f"Homepage: {homepage(dist)}")
+    texts = licence_texts(dist)
+    if any(filename == FFMPEG_LICENCE_FILE for filename, _ in texts):
+        texts = [(filename, text) for filename, text in texts if filename != FFMPEG_LICENCE_FILE]
+        entry.append(f"FFmpeg's licence text ({FFMPEG_LICENCE_FILE}) is in the 'FFmpeg in PyAV' section below.")
+    if not texts:
+        return None
+    entry += [f"\n--- {filename} ---\n{text}" for filename, text in texts]
+    return "\n".join(entry)
+
+
 def build_notices(bundle: Path = BUNDLE_DIR) -> str:
-    # By name (x264, x265, ...) and by the licence and configure line inside the FFmpeg DLLs.
-    gpl_parts = bundle_gpl_parts(bundle) if bundle.is_dir() else []
+    # By name (x264, x265, ...) and by the licence and configure line inside the FFmpeg DLLs, which are read once
+    # here for the GPL check and the FFmpeg section.
+    ffmpeg_dlls = bundle_ffmpeg(bundle) if bundle.is_dir() else {}
+    gpl_parts = bundle_gpl_parts(bundle, ffmpeg_dlls) if bundle.is_dir() else []
     if gpl_parts:
         raise GplLibraryError(
             f"{bundle} contains GPL libraries; build it with packaging/build.py, which installs a PyAV without them.\n"
             + "\n".join(gpl_parts)
         )
     # Read before the package entries, so a wrong FFmpeg stops the build before the long part.
-    ffmpeg = ffmpeg_section(bundle)
-    binaries, _ = _binaries_section(bundle)
+    ffmpeg = ffmpeg_section(bundle, ffmpeg_dlls)
+    binaries, _ = _binaries_section(bundle, gpl_parts)
     own_licences = (ROOT / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
     geist = (ROOT / "src" / "nexusvox" / "dashboard" / "static" / "Geist-OFL.txt").read_text(encoding="utf-8")
     # The source-tree file ends the bundled-assets part at the first horizontal rule after its heading.
@@ -366,16 +415,11 @@ def build_notices(bundle: Path = BUNDLE_DIR) -> str:
             raise MissingLicenceError(f"{extra} is not installed; the bundle contains its bootloader") from None
     missing = []
     for dist in sorted(distributions, key=lambda d: d.metadata["Name"].lower()):
-        name, version = dist.metadata["Name"], dist.version
-        entry = [f"### {name} {version}", f"Licence: {licence_summary(dist)}"]
-        if homepage(dist):
-            entry.append(f"Homepage: {homepage(dist)}")
-        texts = licence_texts(dist)
-        if not texts:
-            missing.append(f"{name} {version}")
-        for filename, text in texts:
-            entry.append(f"\n--- {filename} ---\n{text}")
-        parts.append("\n".join(entry))
+        entry = package_entry(dist)
+        if entry is None:
+            missing.append(f"{dist.metadata['Name']} {dist.version}")
+        else:
+            parts.append(entry)
     if missing:
         raise MissingLicenceError(
             "No licence text for: " + ", ".join(missing) + ". Add packaging/licences/<name>.txt for each "

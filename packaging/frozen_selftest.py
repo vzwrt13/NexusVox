@@ -10,10 +10,10 @@ It covers what the tray menu and the hotkey cannot show to a script: the system 
 dashboard serves its pages and API from the bundled files, extensions found next to the exe load, and the
 CPU Parakeet model loads and transcribes a spoken sentence.
 
-`--only decode,whisper` runs just those steps after the setup (the names passed to `guarded` below; a model step
-brings the speech step it needs along, and an unknown or missing name fails the test). `--only decode` checks the
-bundled FFmpeg (the pinned LGPL build, no GPL parts, decodes every upload format) without a tray icon, the
-dashboard port, a window or a download.
+`--only decode,whisper` runs just those steps after the setup (the names are in STEPS; a model step brings the
+speech step it needs along, and an unknown or missing name fails the test). `--only decode` checks the bundled
+FFmpeg (the pinned LGPL build, no GPL parts, decodes every upload format) without a tray icon, the dashboard port,
+a window or a download.
 """
 
 from __future__ import annotations
@@ -33,6 +33,14 @@ from pathlib import Path
 from typing import NoReturn
 
 SENTENCE = "Hello world. This is a test of the frozen application."
+# The steps after the setup, in the order they run: the names `--only` takes.
+STEPS = (
+    "decode", "speech", "tray", "dashboard", "parakeet",
+    "lingua", "sounddevice", "mic_guard", "loopback", "pynput", "overlay", "whisper",
+)  # fmt: skip
+USAGE = (
+    f"usage: NexusVox.exe --selftest <work-dir> [--download] [--only <step>[,<step>...]]\nsteps: {', '.join(STEPS)}\n"
+)
 
 
 def _speak(path: Path) -> None:
@@ -102,10 +110,8 @@ def run(work: Path, download: bool, only: set[str] | None = None) -> NoReturn:
     # The model steps transcribe the sample the speech step renders, so asking for one brings that step along.
     if only is not None and only & {"parakeet", "whisper"}:
         only = only | {"speech"}
-    steps_seen: set[str] = set()
 
     def guarded(name: str, func, timeout: float = 120) -> None:
-        steps_seen.add(name)
         if only is not None and name != "setup" and name not in only:
             return
         crumb(f"step {name}")
@@ -215,7 +221,7 @@ def run(work: Path, download: bool, only: set[str] | None = None) -> NoReturn:
         icon.stop()
         record("tray icon runs", alive)
 
-    guarded("tray icon runs", tray)
+    guarded("tray", tray)
 
     def dashboard() -> None:
         from nexusvox.dashboard import ensure_dashboard_api
@@ -333,8 +339,8 @@ def run(work: Path, download: bool, only: set[str] | None = None) -> NoReturn:
     for step_name, step in (
         ("lingua", lingua),
         ("sounddevice", portaudio),
-        ("mic guard", wasapi_sessions),
-        ("WASAPI loopback", loopback),
+        ("mic_guard", wasapi_sessions),
+        ("loopback", loopback),
         ("pynput", hook),
     ):
         guarded(step_name, step)
@@ -375,8 +381,8 @@ def run(work: Path, download: bool, only: set[str] | None = None) -> NoReturn:
 
     if only is not None:
         # A typo or an empty list would otherwise run nothing but the setup and report success.
-        unknown = sorted(only - steps_seen)
-        detail = f"unknown steps {unknown}; known: {sorted(steps_seen)}" if unknown else ""
+        unknown = sorted(only - set(STEPS))
+        detail = f"unknown steps {unknown}; known: {', '.join(STEPS)}" if unknown else ""
         record("--only names steps", bool(only) and not unknown, detail or ("no step named" if not only else ""))
 
     finish(work, checks)
@@ -402,10 +408,14 @@ def leave_note(name: str, text: str) -> None:
 def main(argv: list[str]) -> NoReturn:
     position = argv.index("--selftest") + 1
     if position >= len(argv) or argv[position].startswith("--"):
-        leave_note("selftest-usage.txt", "usage: NexusVox.exe --selftest <work-dir> [--download] [--only <steps>]\n")
+        leave_note("selftest-usage.txt", USAGE)
         sys.exit(2)
     only = None
     if "--only" in argv:
         steps = argv.index("--only") + 1
-        only = set(argv[steps].split(",")) if steps < len(argv) else set()
+        # `--only` needs its list: a missing one, or a flag in its place, is a usage error, not a step name.
+        if steps >= len(argv) or argv[steps].startswith("--"):
+            leave_note("selftest-usage.txt", USAGE)
+            sys.exit(2)
+        only = {name.strip() for name in argv[steps].split(",")}
     run(Path(argv[position]), "--download" in argv, only)

@@ -71,7 +71,11 @@ GPL_SWITCHES = (
 )  # fmt: skip
 _ENABLED_GPL = re.compile(r"--enable-(" + "|".join(re.escape(s) for s in GPL_SWITCHES) + r")(?=[\s'\"]|$)")
 # DLLs that are GPL whatever FFmpeg's configure line says (a wheel can bundle them next to an "LGPL" FFmpeg).
-GPL_DLL_PREFIXES = ("libx264", "libx265", "libxvid", "postproc", "librubberband", "libvidstab", "frei0r")
+# Every GPL-only library of GPL_SWITCHES that comes as a DLL of its own ("libxavs" covers libxavs2).
+GPL_DLL_PREFIXES = (
+    "libx264", "libx265", "libxvid", "libxavs", "libdavs2", "libcdio", "libdvdnav", "libdvdread",
+    "postproc", "librubberband", "libvidstab", "frei0r",
+)  # fmt: skip
 FFMPEG_DLL_PREFIXES = ("avcodec", "avformat", "avutil", "avfilter", "avdevice", "swscale", "swresample")
 
 # Strings every FFmpeg library carries: "libavcodec license: LGPL version 3 or later" (what avcodec_license()
@@ -168,24 +172,28 @@ def bundle_ffmpeg(app: Path) -> dict[str, dict[str, str]]:
 
 
 def bundle_is_pinned_ffmpeg(app: Path) -> bool:
-    """Whether the app's FFmpeg is the pinned build: its avutil (where av_version_info() lives) carries the
-    pinned version string. False when the app has no avutil."""
+    """Whether the app's FFmpeg is the pinned build: its avutil (where av_version_info() lives) carries a version
+    string that is_pinned_ffmpeg accepts, by the same rule (a longer version with the same prefix does not count).
+    False when the app has no avutil."""
     return any(
-        FFMPEG_VERSION.encode() in dll.read_bytes()
+        is_pinned_ffmpeg(word)
         for dll in app.rglob("*.dll")
         if dll.name.lower().startswith("avutil")
+        for text in _strings_containing(dll.read_bytes(), FFMPEG_VERSION.encode())
+        for word in text.split()
     )
 
 
-def bundle_gpl_parts(app: Path) -> list[str]:
+def bundle_gpl_parts(app: Path, ffmpeg: dict[str, dict[str, str]] | None = None) -> list[str]:
     """GPL libraries in a built app folder: GPL DLLs by name, and FFmpeg DLLs that report a non-LGPL licence or
-    whose embedded configure line enables a GPL or non-free part."""
+    whose embedded configure line enables a GPL or non-free part. `ffmpeg` is what bundle_ffmpeg(app) returned,
+    for a caller that has read the DLLs already (avcodec alone is about 90 MB)."""
     found = [
         f"{dll.relative_to(app)} is a GPL library"
         for dll in sorted(app.rglob("*.dll"))
         if dll.name.lower().startswith(GPL_DLL_PREFIXES)
     ]
-    return found + gpl_parts(bundle_ffmpeg(app))
+    return found + gpl_parts(bundle_ffmpeg(app) if ffmpeg is None else ffmpeg)
 
 
 def _sha256(path: Path) -> str:
@@ -226,12 +234,40 @@ def wheel_folder() -> Path:
     return WORK / "wheel" / f"{FFMPEG_VERSION}-av{AV_VERSION}-py{sys.version_info.major}{sys.version_info.minor}"
 
 
+def _the_wheel(folder: Path, pattern: str, step: str) -> Path:
+    """The one wheel `step` wrote into `folder`; LgplBuildError when it wrote none."""
+    wheels = sorted(folder.glob(pattern))
+    if not wheels:
+        raise LgplBuildError(f"{step} produced no wheel matching {pattern} in {folder}")
+    return wheels[0]
+
+
+def wheel_problem(wheel: Path) -> str | None:
+    """Why a built wheel cannot be shipped (not a readable wheel, or without FFmpeg's licence text); None when it
+    can. Checked on every build, cached wheels included: a run that died before the check may have left one."""
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            names = archive.namelist()
+            damaged = archive.testzip()
+    except (OSError, zipfile.BadZipFile) as error:
+        return f"{wheel.name} is not a readable wheel: {error}"
+    if damaged:
+        return f"{wheel.name} is damaged ({damaged})"
+    if not any(name.endswith(f".dist-info/licenses/{FFMPEG_LICENCE_FILE}") for name in names):
+        return f"{wheel.name} does not carry {FFMPEG_LICENCE_FILE}; PyAV's licence files changed"
+    return None
+
+
 def build_wheel() -> Path:
     """Build the LGPL PyAV wheel (cached in wheel_folder()) and return its path."""
     wheel_dir = wheel_folder()
     existing = sorted(wheel_dir.glob(f"av-{AV_VERSION}-*.whl"))
     if existing:
-        return existing[0]
+        problem = wheel_problem(existing[0])
+        if problem is None:
+            return existing[0]
+        print(f"Building the wheel again: the cached {problem}.")
+        shutil.rmtree(wheel_dir)
 
     ffmpeg_zip, sdist = _download(*FFMPEG_ZIP), _download(*AV_SDIST)
     raw_dir = WORK / "raw"
@@ -252,15 +288,15 @@ def build_wheel() -> Path:
     pip = [sys.executable, "-m", "pip"]
     subprocess.run([*pip, "wheel", "--no-deps", "-w", str(raw_dir), str(source)], env=env, check=True)
     subprocess.run([*pip, "install", DELVEWHEEL], check=True)
-    raw = next(raw_dir.glob("av-*.whl"))
+    raw = _the_wheel(raw_dir, "av-*.whl", "pip wheel")
     # Copies the FFmpeg DLLs into av.libs with unique names and makes `import av` find them, like the PyPI wheel.
     repair = [sys.executable, "-m", "delvewheel", "repair", "--add-path", str(ffmpeg / "bin"), "-w", str(wheel_dir)]
     subprocess.run([*repair, str(raw)], check=True)
-    wheel = next(wheel_dir.glob(f"av-{AV_VERSION}-*.whl"))
-    with zipfile.ZipFile(wheel) as archive:
-        if not any(name.endswith(f".dist-info/licenses/{FFMPEG_LICENCE_FILE}") for name in archive.namelist()):
-            shutil.rmtree(wheel_dir)
-            raise LgplBuildError(f"The built wheel does not carry {FFMPEG_LICENCE_FILE}; PyAV's licence files changed")
+    wheel = _the_wheel(wheel_dir, f"av-{AV_VERSION}-*.whl", "delvewheel repair")
+    problem = wheel_problem(wheel)  # the wheel is closed again here, so Windows lets the folder go
+    if problem:
+        shutil.rmtree(wheel_dir)
+        raise LgplBuildError(f"The built {problem}")
     return wheel
 
 

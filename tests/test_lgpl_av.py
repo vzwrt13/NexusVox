@@ -2,31 +2,19 @@
 
 from __future__ import annotations
 
-import importlib.util
 import io
+import re
 import sys
+import zipfile
+from importlib import metadata
 from pathlib import Path
 
 import pytest
+from packaging_scripts import PACKAGING, load_packaging_script
 
-PACKAGING = Path(__file__).resolve().parent.parent / "packaging"
-
-
-def _load(name: str):
-    """Import a script from packaging/ by path, as tests/test_installer_packaging.py does."""
-    spec = importlib.util.spec_from_file_location(name, PACKAGING / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    sys.path.insert(0, str(PACKAGING))
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.path.remove(str(PACKAGING))
-    return module
-
-
-lgpl_av = _load("lgpl_av")
-notices = _load("third_party_notices")
+lgpl_av = load_packaging_script("lgpl_av")
+notices = load_packaging_script("third_party_notices")
+selftest = load_packaging_script("frozen_selftest")
 
 # Shortened from the real configure lines: the PyPI wheel says LGPL but links x264 and x265; BtbN's LGPL build
 # names them only as disabled.
@@ -254,3 +242,172 @@ def test_a_download_that_matches_its_pin_is_kept_and_reused(monkeypatch, tmp_pat
     assert path.read_bytes() == b"payload"
     monkeypatch.setattr(lgpl_av.urllib.request, "urlopen", lambda *a, **k: pytest.fail("must not download again"))
     assert lgpl_av._download("https://example.invalid/av.tar.gz", digest) == path
+
+
+# -- second review pass ------------------------------------------------------------------------------------------
+
+
+def test_an_avutil_with_a_longer_version_of_the_same_prefix_is_not_the_pinned_build(tmp_path):
+    longer = f"{lgpl_av.FFMPEG_VERSION}5-20261031"
+    app = _app(tmp_path, {"av.libs/avutil-60-abc.dll": _ffmpeg_dll("libavutil", LGPL_CONFIGURE, version=longer)})
+    assert lgpl_av.bundle_is_pinned_ffmpeg(app) is False
+
+
+@pytest.mark.parametrize(
+    "dll",
+    ["libdavs2-16.dll", "libxavs-1.dll", "libxavs2-13.dll", "libcdio-19.dll", "libdvdnav-4.dll", "libdvdread-8.dll"],
+)
+def test_every_gpl_only_library_is_refused_by_its_dll_name(tmp_path, dll):
+    app = _app(tmp_path, {f"av.libs/{dll}": b"MZ"})
+    assert lgpl_av.bundle_gpl_parts(app) == [f"{Path('_internal/av.libs') / dll} is a GPL library"]
+
+
+def test_the_gpl_dll_names_cover_every_gpl_only_library_switch():
+    # Switches that are build modes or never a DLL of their own need no DLL name: avisynth and decklink are loaded
+    # from the user's system, libtls is part of LibreSSL, libfdk-aac is non-free (caught by its switch).
+    not_a_dll = {"gpl", "nonfree", "avisynth", "decklink", "libtls", "libfdk-aac"}
+    for switch in set(lgpl_av.GPL_SWITCHES) - not_a_dll:
+        assert switch.startswith(lgpl_av.GPL_DLL_PREFIXES), switch
+
+
+def test_the_gpl_check_takes_dlls_that_were_read_already(tmp_path):
+    app = _pinned_app(tmp_path)
+    already_read = {"avcodec.dll": {"license": LGPL, "configuration": "--enable-gpl"}}
+    assert lgpl_av.bundle_gpl_parts(app, already_read) == ["avcodec.dll is built with --enable-gpl"]
+
+
+def _wheel(path: Path, names: list[str]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        for name in names:
+            archive.writestr(name, "text")
+    return path
+
+
+GOOD_WHEEL = ["av/__init__.py", f"av-18.1.0.dist-info/licenses/{lgpl_av.FFMPEG_LICENCE_FILE}"]
+WHEEL_NAME = "av-18.1.0-cp311-abi3-win_amd64.whl"
+
+
+def test_a_wheel_without_the_ffmpeg_licence_or_not_a_zip_cannot_be_shipped(tmp_path):
+    assert lgpl_av.wheel_problem(_wheel(tmp_path / "good.whl", GOOD_WHEEL)) is None
+    assert "does not carry" in lgpl_av.wheel_problem(_wheel(tmp_path / "bare.whl", ["av/__init__.py"]))
+    (tmp_path / "cut.whl").write_bytes(b"PK\x03\x04 cut off")
+    assert "not a readable wheel" in lgpl_av.wheel_problem(tmp_path / "cut.whl")
+
+
+def test_a_good_cached_wheel_is_reused(monkeypatch, tmp_path):
+    monkeypatch.setattr(lgpl_av, "WORK", tmp_path)
+    wheel = _wheel(lgpl_av.wheel_folder() / WHEEL_NAME, GOOD_WHEEL)
+    monkeypatch.setattr(lgpl_av, "_download", lambda *a: pytest.fail("must not build"))
+    assert lgpl_av.build_wheel() == wheel
+
+
+def test_a_cached_wheel_left_by_a_broken_run_is_built_again(monkeypatch, tmp_path):
+    monkeypatch.setattr(lgpl_av, "WORK", tmp_path)
+    _wheel(lgpl_av.wheel_folder() / WHEEL_NAME, ["av/__init__.py"])
+
+    def download(*_):
+        raise lgpl_av.LgplBuildError("building again")
+
+    monkeypatch.setattr(lgpl_av, "_download", download)
+    with pytest.raises(lgpl_av.LgplBuildError, match="building again"):
+        lgpl_av.build_wheel()
+    assert not lgpl_av.wheel_folder().exists()
+
+
+@pytest.fixture
+def fake_build(monkeypatch, tmp_path):
+    """build_wheel with the downloads, the sdist and the subprocesses faked. The returned dict's "wheel" sets what
+    delvewheel writes: the member names of its wheel, or None for no wheel at all."""
+    monkeypatch.setattr(lgpl_av, "WORK", tmp_path)
+    ffmpeg_zip = _wheel(tmp_path / "ffmpeg.zip", [f"{lgpl_av.FFMPEG_BUILD}/LICENSE.txt"])
+    monkeypatch.setattr(lgpl_av, "_download", lambda url, sha: ffmpeg_zip if url == lgpl_av.FFMPEG_ZIP[0] else url)
+    monkeypatch.setattr(lgpl_av, "_extract_sdist", lambda sdist, into: (into / f"av-{lgpl_av.AV_VERSION}").mkdir())
+    delvewheel: dict = {"wheel": GOOD_WHEEL}
+
+    def run(command, **_):
+        if "-w" not in command:  # installing delvewheel
+            return
+        target = Path(command[command.index("-w") + 1]) / WHEEL_NAME
+        if "repair" not in command:  # pip wheel
+            _wheel(target, ["av/__init__.py"])
+        elif delvewheel["wheel"] is not None:
+            _wheel(target, delvewheel["wheel"])
+
+    monkeypatch.setattr(lgpl_av.subprocess, "run", run)
+    return delvewheel
+
+
+def test_a_built_wheel_with_the_ffmpeg_licence_is_kept(fake_build):
+    wheel = lgpl_av.build_wheel()
+    assert wheel.parent == lgpl_av.wheel_folder() and lgpl_av.wheel_problem(wheel) is None
+
+
+def test_a_built_wheel_without_the_ffmpeg_licence_is_removed_not_cached(fake_build):
+    fake_build["wheel"] = ["av/__init__.py"]
+    with pytest.raises(lgpl_av.LgplBuildError, match="does not carry"):
+        lgpl_av.build_wheel()
+    assert not lgpl_av.wheel_folder().exists()  # on Windows only possible once the wheel is closed
+
+
+def test_no_wheel_from_delvewheel_is_a_build_error_not_a_traceback(fake_build):
+    fake_build["wheel"] = None
+    with pytest.raises(lgpl_av.LgplBuildError, match="delvewheel repair produced no wheel"):
+        lgpl_av.build_wheel()
+
+
+def test_build_options_and_unknown_switches_are_not_listed_as_libraries(tmp_path):
+    configure = LGPL_CONFIGURE + " --enable-d3d12va --enable-runtime-cpudetect --enable-somethingnew --enable-libnew"
+    version = f"{lgpl_av.FFMPEG_VERSION}-20261031"
+    files = {
+        "av.libs/avcodec-62-def.dll": _ffmpeg_dll("libavcodec", configure, version=version),
+        "av.libs/avutil-60-def.dll": _ffmpeg_dll("libavutil", configure, version=version),
+        f"av-18.1.0.dist-info/licenses/{lgpl_av.FFMPEG_LICENCE_FILE}": "LGPL text",
+    }
+    section = notices.ffmpeg_section(_app(tmp_path, files))
+    assert "    libnew - see its project" in section
+    assert "Build options and system interfaces (not libraries): d3d12va, runtime-cpudetect, schannel" in section
+    assert "Other configure switches, not identified here: somethingnew." in section
+    for option in ("d3d12va", "runtime-cpudetect", "somethingnew"):
+        assert f"    {option} -" not in section
+
+
+def test_the_av_entry_leaves_the_ffmpeg_licence_text_to_the_ffmpeg_section(tmp_path):
+    info = tmp_path / "av-18.1.0.dist-info"
+    (info / "licenses").mkdir(parents=True)
+    files = {
+        "METADATA": "Name: av\nVersion: 18.1.0\n",
+        "licenses/LICENSE.txt": "PyAV BSD text",
+        f"licenses/{lgpl_av.FFMPEG_LICENCE_FILE}": "FFmpeg LGPL text",
+    }
+    for relative, content in files.items():
+        (info / relative).write_text(content, encoding="utf-8")
+    (info / "RECORD").write_text("\n".join(f"{info.name}/{name},," for name in files), encoding="utf-8")
+    entry = notices.package_entry(metadata.PathDistribution(info))
+    assert "PyAV BSD text" in entry
+    assert "FFmpeg LGPL text" not in entry
+    assert "'FFmpeg in PyAV' section below" in entry
+
+
+def test_every_selftest_step_has_the_name_that_only_takes():
+    source = (PACKAGING / "frozen_selftest.py").read_text(encoding="utf-8")
+    named = set(re.findall(r'guarded\("([^"]+)"', source)) | set(re.findall(r'\("([^"]+)", \w+\),\n', source))
+    assert named - {"setup"} == set(selftest.STEPS)
+    assert all(re.fullmatch(r"[a-z_]+", name) for name in selftest.STEPS)
+
+
+@pytest.mark.parametrize("argv", [["--only"], ["--only", "--download", "decode"]])
+def test_only_without_its_list_is_a_usage_error(argv, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(selftest, "run", lambda *a: pytest.fail("must not run"))
+    with pytest.raises(SystemExit) as exited:
+        selftest.main(["NexusVox.exe", "--selftest", "work", *argv])
+    assert exited.value.code == 2
+    assert "steps: decode, speech, tray" in (tmp_path / "selftest-usage.txt").read_text(encoding="utf-8")
+
+
+def test_only_takes_the_listed_steps(monkeypatch):
+    seen = []
+    monkeypatch.setattr(selftest, "run", lambda work, download, only: seen.append((download, only)))
+    selftest.main(["NexusVox.exe", "--selftest", "work", "--only", "tray,mic_guard", "--download"])
+    assert seen == [(True, {"tray", "mic_guard"})]

@@ -74,14 +74,15 @@ below records the main licences so the compatibility picture is on file.
 | pynput, pystray | LGPL-3.0 |
 | sqlalchemy, alembic, flask, faster-whisper, ctranslate2, onnxruntime, onnx-asr, Pillow | MIT |
 | httpx, pyperclip, sounddevice, numpy | BSD |
-| av (PyAV) | BSD for PyAV itself; its wheel bundles FFmpeg and codec libraries under LGPL and GPL, see below |
+| av (PyAV) | BSD for PyAV itself; its wheel bundles FFmpeg (LGPL-3.0-or-later) and codec libraries under LGPL and GPL, see below |
 | lingua-language-detector, tokenizers, huggingface-hub, websockets | Apache-2.0 |
 
 MIT, BSD and Apache-2.0 are permissive. LGPL-3.0 applies to `pynput` and `pystray` only, which are used as
 unmodified libraries through ordinary Python imports.
 
 **PyAV's FFmpeg libraries are the exception.** The PyAV wheels carry FFmpeg and a set of codec libraries
-(`av.libs`), among them x264 and x265, which are licensed under the GPL (version 2 or later). NexusVox does not
+(`av.libs`). The FFmpeg libraries themselves are licensed under LGPL-3.0-or-later: the bundled DLLs are built with
+`--enable-version3`, which raises FFmpeg from LGPL-2.1-or-later to version 3. Among the codecs are x264 and x265, which are licensed under the GPL (version 2 or later). NexusVox does not
 use the encoders: `faster-whisper` uses PyAV only to decode audio (the WAV it is given). In the Windows installer they are bundled
 anyway, and `THIRD_PARTY_NOTICES.txt` lists them with where their source is.
 
@@ -93,6 +94,28 @@ No model weights are distributed with NexusVox — they are downloaded from Hugg
 runtime and are covered by their own licenses, which are listed in the model table in
 [README.md](README.md). Review them before using a model, in particular for commercial use.
 
+### Whisper Large V3 Turbo
+
+- Model: `deepdml/faster-whisper-large-v3-turbo-ct2`
+  (https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2), a CTranslate2 conversion of
+  `openai/whisper-large-v3-turbo` (https://huggingface.co/openai/whisper-large-v3-turbo)
+- License: MIT, the same as the original OpenAI model
+- Used by: the Whisper container and the in-process faster-whisper backend (`[inference].device = "cpu"`).
+
+The weights are not distributed with NexusVox; they are downloaded from Hugging Face on first use. The MIT
+License allows use, modification and redistribution, commercial use included, provided the copyright notice
+of OpenAI is kept; NexusVox credits the model here and in [README.md](README.md).
+
+### Gemma 4 (cleanup and translation)
+
+- Models: `gemma4:e4b` and `gemma4:e2b` (Ollama tags), Google's Gemma 4
+- License: Apache License 2.0, https://ai.google.dev/gemma/docs/gemma_4_license
+- Used by: the optional text cleanup and translation steps, through a local Ollama server.
+
+The weights are not distributed with NexusVox; Ollama downloads them on first use. Apache-2.0 allows use,
+modification and redistribution, commercial use included. Gemma is a trademark of Google LLC. NexusVox is not
+affiliated with Google, and nothing here implies endorsement by Google.
+
 ### Parakeet TDT 0.6B v3 on CPU
 
 - Model: `nvidia/parakeet-tdt-0.6b-v3` (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
@@ -102,7 +125,7 @@ runtime and are covered by their own licenses, which are listed in the model tab
   (https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx), int8 build, same license as the
   original model
 - Runtime: onnx-asr (MIT, https://github.com/istupakov/onnx-asr), which also supplies the Silero VAD
-  (MIT) that cuts long audio into speech segments
+  (`istupakov/silero-vad-onnx`, MIT, https://huggingface.co/istupakov/silero-vad-onnx) that cuts long audio into speech segments
 - Used by: `src/nexusvox/transcribers/local_parakeet.py`, when Parakeet runs on the CPU instead of
   in the Docker container.
 

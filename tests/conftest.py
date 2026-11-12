@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import socket
 import sys
 import wave
 
@@ -14,6 +15,31 @@ from nexusvox.dashboard import _PORT, _create_app
 from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.dashboard.guard import COOKIE_NAME
 from nexusvox.storage.db import Database
+
+
+@pytest.fixture(autouse=True)
+def _tests_never_reach_a_real_llm_server(monkeypatch):
+    """A test that connects to Ollama's port fails instead of reaching the user's server.
+
+    Code that talks to an LLM (`/api/chat` loads the model into VRAM and keeps it there, `/api/tags` and `/api/ps`
+    only read) must be mocked with a fake server on another port or a patched `urlopen`; a missed mock used to
+    load the user's model as a side effect of running the suite.
+    """
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+
+    def is_ollama(address) -> bool:
+        return isinstance(address, tuple) and len(address) >= 2 and address[1] == 11434
+
+    def connect(self, address):
+        if is_ollama(address):
+            raise ConnectionRefusedError("tests must not reach a real Ollama (port 11434); mock the LLM call")
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        return 111 if is_ollama(address) else real_connect_ex(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
 
 
 @pytest.fixture(autouse=True)

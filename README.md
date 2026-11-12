@@ -68,8 +68,6 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 
 **Optional — an extension package:** NexusVox loads installed packages that register under the `nexusvox.extensions` entry-point group and can add a step after a file upload, dashboard tabs and export formats. None ships with NexusVox; [docs/EXTENSIONS.md](docs/EXTENSIONS.md) describes the interface. Without one nothing changes.
 
-**Optional — [ffmpeg](https://ffmpeg.org/) on your `PATH`:** only needed to upload non-WAV audio files (MP3, FLAC, OGG, WEBM) in the dashboard's Recordings tab. WAV uploads and push-to-talk dictation work without it. Install with `winget install Gyan.FFmpeg`, then verify with `ffmpeg -version`.
-
 ---
 
 ## Quick Start (GPU — recommended)
@@ -157,7 +155,7 @@ Starting NexusVox from the Start menu or a shortcut opens the dashboard; the Win
 | Analytics | Word count, session stats, usage charts |
 | Settings | Model switcher, config editor, voice command toggles |
 | Edit | Correct transcriptions in-line |
-| Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM — all but WAV need ffmpeg); optional speaker detection with Parakeet; optional text cleanup with the local language model; download as TXT, SRT or VTT (subtitles need Parakeet's word timing) |
+| Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM, up to 2 GB); optional speaker detection with Parakeet; optional text cleanup with the local language model; download as TXT, SRT or VTT (subtitles need Parakeet's word timing) |
 | Review | Flag and replay recordings |
 
 *(Screenshot from before the Settings tab was grouped: the compute device selector now sits on the **Advanced** page, and the language setting was removed.)*

@@ -1425,3 +1425,161 @@ def test_the_os_commands_switch_refuses_anything_but_a_boolean(experimental_clie
 
     assert resp.status_code == 400
     assert experimental_client.get("/api/os-commands").get_json()["enabled"] is False
+
+
+# ── Temporary files of an upload ─────────────────────────────────────
+
+
+@pytest.fixture
+def upload_tmp(tmp_path, monkeypatch):
+    """The folder the upload route and the converter write their temporary files to."""
+    import tempfile
+
+    folder = tmp_path / "uploads-tmp"
+    folder.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(folder))
+    return folder
+
+
+def test_an_upload_leaves_no_temporary_file_when_it_succeeds(flask_client, sample_wav_bytes, monkeypatch, upload_tmp):
+    from nexusvox.transcription.transcriber import TranscriptionResult
+
+    result = TranscriptionResult()
+    result.finalize(text="fine")
+    seen = []
+
+    async def fake_transcribe(wav_chunks, cfg, **kwargs):
+        seen.append(sorted(p.name.split("-")[1] for p in upload_tmp.iterdir()))  # during the job: both files exist
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
+
+    job = upload_file(flask_client, sample_wav_bytes)
+
+    assert job["state"] == "done"
+    assert seen == [["convert", "upload"]]
+    assert list(upload_tmp.iterdir()) == []
+
+
+def test_an_upload_leaves_no_temporary_file_when_the_job_fails(flask_client, sample_wav_bytes, monkeypatch, upload_tmp):
+    async def broken(wav_chunks, cfg, **kwargs):
+        raise RuntimeError("server went away")
+
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", broken)
+
+    assert upload_file(flask_client, sample_wav_bytes)["state"] == "error"
+    assert list(upload_tmp.iterdir()) == []
+
+
+def test_an_upload_leaves_no_temporary_file_when_conversion_fails(flask_client, upload_tmp):
+    assert upload_file(flask_client, b"this is not audio", "broken.mp3")["state"] == "error"
+    assert list(upload_tmp.iterdir()) == []
+
+
+def test_an_upload_refused_as_busy_leaves_no_temporary_file(flask_client, sample_wav_bytes, monkeypatch, upload_tmp):
+    import io
+    import threading
+    import time
+
+    from nexusvox.transcription.transcriber import TranscriptionResult
+
+    release = threading.Event()
+    result = TranscriptionResult()
+    result.finalize(text="x")
+
+    async def slow(wav_chunks, cfg, **kwargs):
+        assert release.wait(5)
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", slow)
+
+    def post():
+        return flask_client.post(
+            "/api/file-transcribe",
+            data={"file": (io.BytesIO(sample_wav_bytes), "a.wav")},
+            content_type="multipart/form-data",
+        )
+
+    first = post()
+    names_while_running = {p.name.split("-")[1] for p in upload_tmp.iterdir()}
+    assert post().status_code == 409
+    assert len(list(upload_tmp.glob("nexusvox-upload-*"))) == 1  # only the running job's file
+    release.set()
+    job_id = first.get_json()["job_id"]
+    deadline = time.monotonic() + 5
+    while flask_client.get(f"/api/file-transcribe/{job_id}").get_json()["state"] == "running":
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+
+    assert names_while_running <= {"upload", "convert"}
+    assert list(upload_tmp.iterdir()) == []
+
+
+def test_review_retry_leaves_no_temporary_file(db, tmp_path, sample_wav_bytes, monkeypatch, upload_tmp):
+    from nexusvox.config import Config
+    from nexusvox.dashboard.api import DashboardAPI
+    from nexusvox.transcription.transcriber import TranscriptionResult
+
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir()
+    (audio_dir / "a.wav").write_bytes(sample_wav_bytes)
+    api = DashboardAPI(lambda: None, Config(), db=db)
+    monkeypatch.setattr(api, "_recording_audio_path", lambda tid: audio_dir / "a.wav")
+    result = TranscriptionResult()
+    result.finalize(text="again")
+
+    async def fake_transcribe(wav_chunks, cfg, **kwargs):
+        return result
+
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
+
+    assert api.retry_transcription(1) == {"ok": True, "text": "again", "model": api._config.inference.model}
+    assert list(upload_tmp.iterdir()) == []
+
+
+def test_a_recording_over_the_detection_cap_does_not_switch_models_and_says_why(
+    flask_client, sample_wav_bytes, monkeypatch
+):
+    from nexusvox.transcription.transcriber import TranscriptionResult
+
+    result = TranscriptionResult()
+    result.finalize(text="long one")
+    asked = []
+    wanted = []
+
+    async def fake_transcribe(wav, cfg, **kwargs):
+        asked.append(kwargs["diarize"])
+        return result
+
+    from nexusvox.transcription import speaker_fallback
+
+    real_job = speaker_fallback.speaker_detection_job
+
+    def spy(config, *, wanted: bool, **kwargs):
+        wanted_calls.append(wanted)
+        return real_job(config, wanted=wanted, **kwargs)
+
+    wanted_calls = wanted
+    monkeypatch.setattr("nexusvox.dashboard.api_files.transcribe_file", fake_transcribe)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.speaker_detection_job", spy)
+    monkeypatch.setattr("nexusvox.dashboard.api_files.MAX_DETECTION_S", 0.1)  # the sample is 0.5 s
+
+    job = upload_file(flask_client, sample_wav_bytes, diarize="1")
+
+    assert job["state"] == "done", job["error"]
+    assert asked == [False] and wanted == [False]  # no request for speakers, no Parakeet container
+    assert any("Speaker detection skipped" in n and "longer than" in n for n in job["result"]["notes"])
+
+
+def test_the_start_sweep_deletes_what_a_quit_left_in_the_temp_folder(db, upload_tmp):
+    from nexusvox.config import Config
+    from nexusvox.dashboard.api import DashboardAPI
+
+    for name in ("nexusvox-upload-abc", "nexusvox-convert-def.wav"):
+        (upload_tmp / name).write_bytes(b"x")
+    (upload_tmp / "other.tmp").write_bytes(b"x")
+    (upload_tmp / "nexusvox-meeting-keep").mkdir()
+
+    DashboardAPI(lambda: None, Config(), db=db).sweep_upload_leftovers()
+
+    assert sorted(p.name for p in upload_tmp.iterdir()) == ["nexusvox-meeting-keep", "other.tmp"]

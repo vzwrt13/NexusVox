@@ -46,9 +46,8 @@ dependencies = [
     "flask>=3.0",
     "httpx>=0.27",
     "lingua-language-detector>=2.1",
-    "pydub>=0.25",
-    "audioop-lts>=0.2; python_version>='3.13'",
-    # Cap on faster-whisper's own dependency (nothing here imports av): faster-whisper <= 1.2.1 passes
+    # PyAV decodes uploaded audio (transcription/file_transcribe.py) and is faster-whisper's own dependency.
+    # Cap: faster-whisper <= 1.2.1 passes
     # `metadata_errors` to av.open(), which av 19 rejects. Drop the cap when a faster-whisper release works with
     # av 19 (clean venv, one Whisper transcription). Background: PR #187, docs/installer-research.md.
     "faster-whisper>=1.0.2",

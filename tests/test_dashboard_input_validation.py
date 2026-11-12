@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import tempfile
 
 import pytest
 
@@ -78,14 +79,36 @@ def test_a_retry_without_a_database_names_that_cause():
     assert result["ok"] is False and "Store Audio" not in result["error"]
 
 
-def test_an_oversized_upload_is_refused_without_reading_all_of_it(flask_client):
-    big = io.BytesIO(b"\0" * (MAX_UPLOAD_BYTES + 100))
+def test_an_upload_above_the_limit_is_refused_and_its_temporary_file_removed(flask_client, monkeypatch, tmp_path):
+    monkeypatch.setattr("nexusvox.dashboard.api_files.MAX_UPLOAD_BYTES", 1000)
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(uploads))
 
     resp = flask_client.post(
-        "/api/file-transcribe", data={"file": (big, "big.wav")}, content_type="multipart/form-data"
+        "/api/file-transcribe",
+        data={"file": (io.BytesIO(b"\0" * 2000), "big.wav")},
+        content_type="multipart/form-data",
     )
 
-    assert resp.status_code in (400, 413)
+    assert resp.status_code == 400
+    assert resp.get_json() == {"ok": False, "error": "File too large (max 2 GB)"}
+    assert list(uploads.iterdir()) == []
+
+
+def test_an_unsupported_upload_is_refused_before_its_body_is_saved(flask_client, monkeypatch, tmp_path):
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(uploads))
+
+    resp = flask_client.post(
+        "/api/file-transcribe",
+        data={"file": (io.BytesIO(b"MZ"), "tool.exe")},
+        content_type="multipart/form-data",
+    )
+
+    assert resp.status_code == 400 and resp.get_json()["error"] == "Unsupported format: .exe"
+    assert list(uploads.iterdir()) == []
 
 
 def test_renaming_with_a_body_that_is_no_object_is_a_400(flask_client):
@@ -155,14 +178,20 @@ def test_voice_command_structural_of_the_wrong_type_is_a_400_and_changes_nothing
 
 
 def test_an_oversized_request_gets_a_json_413_with_the_size_message(flask_client):
-    huge = io.BytesIO(b"\0" * (MAX_UPLOAD_BYTES + 3 * 1024 * 1024))
-
+    # The declared length is what Werkzeug checks before it reads a byte, so no 2 GB body is built here.
     resp = flask_client.post(
-        "/api/file-transcribe", data={"file": (huge, "big.wav")}, content_type="multipart/form-data"
+        "/api/file-transcribe",
+        data={"file": (io.BytesIO(b"\0" * 10), "big.wav")},
+        content_type="multipart/form-data",
+        environ_overrides={"CONTENT_LENGTH": str(MAX_UPLOAD_BYTES + 3 * 1024 * 1024)},
     )
 
     assert resp.status_code == 413
-    assert resp.get_json() == {"ok": False, "error": "File too large (max 25 MB)"}
+    assert resp.get_json() == {"ok": False, "error": "File too large (max 2 GB)"}
+
+
+def test_the_upload_limit_is_two_gigabytes():
+    assert MAX_UPLOAD_BYTES == 2 * 1024**3
 
 
 def test_a_benchmark_with_a_non_text_lang_is_skipped(tmp_path):
@@ -187,3 +216,20 @@ def test_a_retry_names_a_deleted_wav_not_the_store_audio_setting(flask_client, d
     data = flask_client.post(f"/api/review/{record.id}/retry").get_json()
 
     assert data["ok"] is False and "missing" in data["error"] and "Store Audio" not in data["error"]
+
+
+def test_the_upload_spool_deletes_its_file_unless_it_was_released(tmp_path, monkeypatch):
+    from nexusvox.dashboard.routes_files import _UploadSpool
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+
+    dropped = _UploadSpool()
+    dropped.write(b"half an upload")
+    dropped.close()  # a failed or finished request closes its streams
+    kept = _UploadSpool()
+    kept.write(b"a whole upload")
+    path = kept.release()
+    kept.close()  # the request ends after the route handed the file to a job
+
+    assert not dropped.path.exists()
+    assert path.read_bytes() == b"a whole upload"

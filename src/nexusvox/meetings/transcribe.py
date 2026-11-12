@@ -30,7 +30,7 @@ import numpy as np
 
 from ..config import DEFAULT_OWN_VOICE_LABEL
 from ..transcription.diarization import format_transcript
-from ..transcription.file_transcribe import MAX_CHUNK_MS
+from ..transcription.file_transcribe import MAX_CHUNK_MS, MAX_DETECTION_S
 from ..transcription.transcriber import Word, pcm16_to_wav_bytes
 from .recorder import META_FILENAME, read_meeting_meta
 
@@ -46,10 +46,6 @@ SPEAKER_FIRST_SYSTEM = 2
 
 # A track file written to this recently may still be recorded: its header is not touched.
 STALE_AFTER_S = 30.0
-
-# Speaker detection sends the whole system track to the server in one request and holds it once more as one WAV
-# (about 115 MB per hour on top of the chunks), so a longer meeting skips it.
-MAX_DETECTION_S = 2 * 3600.0
 
 # Mix balance: each track's speech is brought to this RMS (about -20 dBFS). A gain cap keeps a track that
 # is nearly silent (a muted device, room noise only) from being boosted into noise.

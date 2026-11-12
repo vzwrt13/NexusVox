@@ -44,8 +44,8 @@ class ReviewMixin(DashboardState):
             return {"ok": False, "error": "The stored audio file for this recording is missing"}
         path = str(stored)
         try:
-            wav_chunks, _ = convert_to_wav(Path(path).read_bytes(), "recording.wav")
-            result = self._transcribe_wav_chunks(wav_chunks)
+            with convert_to_wav(Path(path)) as wav_chunks:
+                result = self._transcribe_wav_chunks(wav_chunks)
         except Exception as exc:
             logger.error("Retry failed for transcription %d: %s", tid, exc)
             return {"ok": False, "error": f"Transcription failed: {exc}"}

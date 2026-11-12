@@ -20,7 +20,7 @@ from ..config import Config
 from ..extensions import load_extensions
 from ..storage.db import Database
 from ..system.single_instance import show_message
-from ..transcription.file_transcribe import MAX_UPLOAD_BYTES
+from ..transcription.file_transcribe import MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL
 from . import (
     routes_analytics,
     routes_commands,
@@ -110,7 +110,7 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
 
     @app.errorhandler(413)
     def too_large(_error):
-        return jsonify({"ok": False, "error": f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)"}), 413
+        return jsonify({"ok": False, "error": f"File too large (max {MAX_UPLOAD_LABEL})"}), 413
 
     install_guard(app, port)  # before any route, so the extension blueprints below are covered too
 
@@ -201,6 +201,7 @@ def ensure_dashboard_api(db: Database, config: Config, app: NexusVoxApp | None =
             )
             # Independent of the dashboard port: leftovers are swept even when every port is taken.
             threading.Thread(target=_api.sweep_meeting_leftovers, name="meeting-sweep", daemon=True).start()
+            threading.Thread(target=_api.sweep_upload_leftovers, name="upload-sweep", daemon=True).start()
         if not _server_started and not _start_failed:
             # The Flask app needs the port (host check), the port needs the bind: bind first, hand the
             # requests to the app once it exists.

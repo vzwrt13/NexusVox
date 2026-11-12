@@ -10,8 +10,9 @@ source-tree record; this file is what the *installer* ships. It is generated fro
   licence files its wheel carries; a package whose wheel carries none needs a text in `packaging/licences/<name>.txt`,
   or the build fails;
 - the Python runtime's licence;
-- the native libraries found in the built app folder (FFmpeg and its codecs inside PyAV, PortAudio, ...), named with
-  the licence they are known under. A GPL library in that list is called out with where its source can be had.
+- the native libraries found in the built app folder (FFmpeg inside PyAV, PortAudio, ...), named with the licence
+  they are known under, and for FFmpeg where its source is and which libraries are linked into it. A GPL library
+  in the app is an error: `packaging/build.py` installs a PyAV without them (`packaging/lgpl_av.py`).
 
 Run it with the environment that has NexusVox installed (`pip install .`, as for `packaging/build.py`), after the
 build. The output is plain text with a byte-order mark and Windows line ends, because Inno Setup shows it as it is.
@@ -25,6 +26,7 @@ from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
 
+from lgpl_av import AV_VERSION, FFMPEG_SOURCE, bundle_gpl_parts, installed_av
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
@@ -43,10 +45,7 @@ _NOT_TEXT = {".py", ".pyc", ".pyd", ".dll", ".so", ".exe", ".h", ".c", ".cpp", "
 
 # Native libraries: file-name prefix (lower case) -> (component, licence). Matched by name, not verified against the
 # binary; the file lists the libraries that are really in the build and says so when it cannot name one.
-_FFMPEG = (
-    "FFmpeg",
-    "LGPL-3.0-or-later (built with --enable-version3); GPL when built with GPL parts, see https://ffmpeg.org/legal.html",
-)
+_FFMPEG = ("FFmpeg", "LGPL-3.0-or-later (built with --enable-version3 and without GPL parts)")
 KNOWN_BINARIES: dict[str, tuple[str, str]] = {
     "avcodec": _FFMPEG,
     "avformat": _FFMPEG,
@@ -57,6 +56,7 @@ KNOWN_BINARIES: dict[str, tuple[str, str]] = {
     "swresample": _FFMPEG,
     "libx264": ("x264", "GPL-2.0-or-later"),
     "libx265": ("x265", "GPL-2.0-or-later"),
+    "postproc": ("libpostproc (FFmpeg)", "GPL-2.0-or-later"),
     "libmp3lame": ("LAME", "LGPL-2.0-or-later"),
     "libopus": ("Opus", "BSD-3-Clause"),
     "libvpx": ("libvpx", "BSD-3-Clause"),
@@ -88,16 +88,93 @@ KNOWN_BINARIES: dict[str, tuple[str, str]] = {
     "cudart": ("NVIDIA CUDA runtime", "NVIDIA proprietary licence"),
 }
 
-GPL_SOURCES = """\
-GPL libraries in this build
----------------------------
-This build contains x264 and/or x265 (video encoders inside PyAV's FFmpeg libraries). They are licensed under the
-GNU General Public License, version 2 or later (https://www.gnu.org/licenses/old-licenses/gpl-2.0.html). NexusVox does
-not use the encoders: it uses PyAV, through faster-whisper, only to decode audio. Their source code is available from
-    x264:  https://code.videolan.org/videolan/x264
-    x265:  https://bitbucket.org/multicoreware/x265_git
-and the build recipe for the exact libraries in this PyAV wheel from https://github.com/PyAV-Org/pyav-ffmpeg.
-"""
+# Libraries an FFmpeg build links in (the --enable-<name> switches of its configure line) and their licences. A name
+# missing here is listed with "see its project"; FFmpeg's GPL-only libraries never get this far (lgpl_av refuses them).
+FFMPEG_LIBRARY_LICENCES: dict[str, str] = {
+    "libdav1d": "BSD-2-Clause",
+    "libvorbis": "BSD-3-Clause",
+    "libopus": "BSD-3-Clause",
+    "libmp3lame": "LGPL-2.0-or-later",
+    "libvpx": "BSD-3-Clause",
+    "libaom": "BSD-2-Clause, with the AOM patent licence",
+    "libsvtav1": "BSD-3-Clause-Clear, with the AOM patent licence",
+    "librav1e": "BSD-2-Clause",
+    "libwebp": "BSD-3-Clause",
+    "libjxl": "BSD-3-Clause",
+    "libopenjpeg": "BSD-2-Clause",
+    "libopenh264": "BSD-2-Clause",
+    "libtheora": "BSD-3-Clause",
+    "libopencore-amrnb": "Apache-2.0",
+    "libopencore-amrwb": "Apache-2.0",
+    "libtwolame": "LGPL-2.1-or-later",
+    "libsoxr": "LGPL-2.1-or-later",
+    "libopenmpt": "BSD-3-Clause",
+    "libgme": "LGPL-2.1-or-later",
+    "libass": "ISC",
+    "libfreetype": "FreeType License",
+    "libharfbuzz": "MIT",
+    "libfribidi": "LGPL-2.1-or-later",
+    "fontconfig": "MIT-style (fontconfig licence)",
+    "libxml2": "MIT",
+    "libzimg": "WTFPL",
+    "libzmq": "MPL-2.0",
+    "libsrt": "MPL-2.0",
+    "librist": "BSD-2-Clause",
+    "libssh": "LGPL-2.1-or-later",
+    "libbluray": "LGPL-2.1-or-later",
+    "libplacebo": "LGPL-2.1-or-later",
+    "libshaderc": "Apache-2.0",
+    "libvpl": "MIT",
+    "libvmaf": "BSD-2-Clause-Patent",
+    "libsnappy": "BSD-3-Clause",
+    "libkvazaar": "BSD-3-Clause",
+    "libvvenc": "BSD-3-Clause-Clear",
+    "liboapv": "BSD-3-Clause",
+    "liblcevc-dec": "BSD-3-Clause-Clear",
+    "libaribb24": "LGPL-3.0-or-later",
+    "libaribcaption": "MIT",
+    "librsvg": "LGPL-2.1-or-later",
+    "lcms2": "MIT",
+    "lzma": "0BSD (xz)",
+    "zlib": "zlib licence",
+    "iconv": "LGPL-2.1-or-later (GNU libiconv)",
+    "gmp": "LGPL-3.0-or-later (dual-licensed with GPL-2.0-or-later; used under the LGPL)",
+    "openal": "LGPL-2.1-or-later (OpenAL Soft)",
+    "sdl2": "zlib licence",
+    "chromaprint": "LGPL-2.1-or-later",
+    "lv2": "ISC",
+    "libzvbi": "LGPL-2.0-or-later",
+    "vulkan": "Apache-2.0 (Vulkan loader)",
+    "opencl": "Apache-2.0 (OpenCL ICD loader)",
+}
+_ENABLED = re.compile(r"--enable-([a-z0-9_-]+)")
+# Switches of a configure line that are build options or system interfaces, not libraries linked in.
+_BUILD_OPTIONS = {
+    "version3", "shared", "static", "pthreads", "cuda-llvm", "ffnvcodec", "amf", "schannel", "vaapi", "nvenc", "nvdec",
+    "mediafoundation", "d3d11va", "dxva2", "cuvid", "w32threads",
+}  # fmt: skip
+
+
+def ffmpeg_section(av: dict | None) -> str:
+    """Where the bundled FFmpeg comes from and what is linked into it, from the installed PyAV (see lgpl_av)."""
+    lines = ["FFmpeg in PyAV", "--------------"]
+    if av is None:
+        return "\n".join([*lines, "(PyAV is not installed in the build environment)"])
+    configuration = av["libraries"].get("libavcodec", {}).get("configuration", "")
+    licence = av["libraries"].get("libavcodec", {}).get("license", "unknown")
+    lines.append(
+        f"The FFmpeg libraries in PyAV {av['version']} (av.libs) report the licence '{licence}'.\n"
+        "The GNU LGPL lets you replace them with your own build of the same FFmpeg version; they are separate DLLs\n"
+        "for that reason. FFmpeg's licence text is in the av entry above."
+    )
+    if av["version"] == AV_VERSION:
+        lines.append(f"Source: {FFMPEG_SOURCE}.")
+    linked = sorted({name for name in _ENABLED.findall(configuration) if name not in _BUILD_OPTIONS})
+    if linked:
+        lines.append("\nLibraries linked into these FFmpeg DLLs, each under its own licence:")
+        lines += [f"    {name} - {FFMPEG_LIBRARY_LICENCES.get(name, 'see its project')}" for name in linked]
+    return "\n".join(lines)
+
 
 FOOTER = """\
 Speech models
@@ -109,6 +186,11 @@ its own licence (for Parakeet TDT 0.6B v3: CC-BY-4.0, (c) NVIDIA). See THIRD_PAR
 
 class MissingLicenceError(RuntimeError):
     """One or more bundled packages have no licence text; the notices would be incomplete."""
+
+
+class GplLibraryError(MissingLicenceError):
+    """The app contains a GPL library, which NexusVox's licence cannot ship. A MissingLicenceError, so every caller
+    that stops on incomplete notices stops on this as well."""
 
 
 def runtime_distributions(
@@ -226,6 +308,14 @@ def _binaries_section(bundle: Path) -> tuple[str, bool]:
 
 
 def build_notices(bundle: Path = BUNDLE_DIR) -> str:
+    binaries, gpl = _binaries_section(bundle)
+    # By name (x264, x265, ...) and by the configure line inside the FFmpeg DLLs (an x264 linked in statically).
+    gpl_parts = bundle_gpl_parts(bundle) if bundle.is_dir() else []
+    if gpl or gpl_parts:
+        raise GplLibraryError(
+            f"{bundle} contains GPL libraries; build it with packaging/build.py, which installs a PyAV without them.\n"
+            + "\n".join(gpl_parts or [binaries])
+        )
     own_licences = (ROOT / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
     geist = (ROOT / "src" / "nexusvox" / "dashboard" / "static" / "Geist-OFL.txt").read_text(encoding="utf-8")
     # The source-tree file ends the bundled-assets part at the first horizontal rule after its heading.
@@ -271,11 +361,8 @@ def build_notices(bundle: Path = BUNDLE_DIR) -> str:
             "(the text from the project's repository), or drop the package from the build."
         )
 
-    binaries, gpl = _binaries_section(bundle)
     parts.append(binaries)
-    if gpl:
-        print("warning: the build contains GPL libraries (x264/x265); see the notices file", file=sys.stderr)
-        parts.append(GPL_SOURCES)
+    parts.append(ffmpeg_section(installed_av()))
     parts.append(FOOTER)
     return "\n\n".join(parts) + "\n"
 

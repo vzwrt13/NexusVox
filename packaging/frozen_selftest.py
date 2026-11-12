@@ -1,4 +1,4 @@
-"""Self-test that runs INSIDE the frozen app:  NexusVox.exe --selftest <work-dir> [--download]
+"""Self-test that runs INSIDE the frozen app:  NexusVox.exe --selftest <work-dir> [--download] [--only <steps>]
 
 A windowed build has no console, so the result goes to `<work-dir>/selftest.json` and the process exit code
 (0 = every check passed). The test never touches the user's own config, database or model cache: everything
@@ -9,6 +9,10 @@ steps fail unless an earlier run already filled <work-dir>/hf.
 It covers what the tray menu and the hotkey cannot show to a script: the system tray icon starts, the
 dashboard serves its pages and API from the bundled files, extensions found next to the exe load, and the
 CPU Parakeet model loads and transcribes a spoken sentence.
+
+`--only decode,whisper` runs just those steps after the setup (the names passed to `guarded` below). `--only decode`
+checks the bundled FFmpeg (LGPL, no GPL parts, decodes every upload format) without a tray icon, the dashboard
+port, a window or a download.
 """
 
 from __future__ import annotations
@@ -42,6 +46,21 @@ def _speak(path: Path) -> None:
     subprocess.run(["powershell", "-NoProfile", "-Command", script], check=True, creationflags=0x08000000)
 
 
+def _tone_frames(seconds: int, rate: int = 48_000) -> list:
+    """One frame per second of a 440 Hz tone, s16 mono. PyAV converts them to what each encoder takes."""
+    import av
+    import numpy as np
+
+    tone = (np.sin(2 * np.pi * 440 * np.arange(rate) / rate) * 8000).astype(np.int16).reshape(1, -1)
+    frames = []
+    for second in range(seconds):
+        frame = av.AudioFrame.from_ndarray(tone, format="s16", layout="mono")
+        frame.sample_rate = rate
+        frame.pts = second * rate
+        frames.append(frame)
+    return frames
+
+
 def _fake_pro(folder: Path) -> None:
     """A stand-in for the Pro add-on: a package with an entry point and one dashboard panel."""
     package = folder / "fake_pro"
@@ -66,7 +85,7 @@ def _fake_pro(folder: Path) -> None:
     (info / "entry_points.txt").write_text("[nexusvox.extensions]\nfake_pro = fake_pro:FakePro\n")
 
 
-def run(work: Path, download: bool) -> NoReturn:
+def run(work: Path, download: bool, only: set[str] | None = None) -> NoReturn:
     def crumb(text: str) -> None:
         with open(work / "progress.txt", "a", encoding="utf-8") as handle:
             handle.write(f"{time.strftime('%H:%M:%S')} {text}\n")
@@ -80,6 +99,8 @@ def run(work: Path, download: bool) -> NoReturn:
     hang_file = open(work / "hang.txt", "w")  # noqa: SIM115 - stays open for the whole run
 
     def guarded(name: str, func, timeout: float = 120) -> None:
+        if only is not None and name != "setup" and name not in only:
+            return
         crumb(f"step {name}")
         started = time.perf_counter()
         # A step that runs past its budget must leave a trace (a windowed build has no console to Ctrl+C in),
@@ -126,6 +147,45 @@ def run(work: Path, download: bool) -> NoReturn:
     if "config" not in state:
         finish(work, checks)
     config, db = state["config"], state["db"]
+
+    def decode() -> None:
+        # The bundled FFmpeg must be the LGPL build (packaging/lgpl_av.py) and still decode every upload format.
+        import av
+        import av._core
+
+        from nexusvox.transcription.file_transcribe import convert_to_wav
+
+        meta = av._core.library_meta
+        licences = {name: info["license"] for name, info in meta.items()}
+        record("FFmpeg is LGPL", all("LGPL" in value for value in licences.values()), str(set(licences.values())))
+        configure = meta["libavcodec"]["configuration"].split()
+        forbidden = ("--enable-gpl", "--enable-nonfree", "--enable-libx264", "--enable-libx265")
+        gpl = [switch for switch in configure if switch in forbidden]
+        record("FFmpeg has no GPL parts", not gpl, " ".join(gpl))
+        # suffix -> (container format, encoder); the formats the upload dialog takes, plus m4a (AAC)
+        formats = {
+            ".wav": ("wav", "pcm_s16le"),
+            ".mp3": ("mp3", "libmp3lame"),
+            ".flac": ("flac", "flac"),
+            ".ogg": ("ogg", "libvorbis"),
+            ".m4a": ("ipod", "aac"),
+            ".webm": ("webm", "libopus"),
+        }
+        for suffix, (container_format, codec) in formats.items():
+            path = work / f"tone{suffix}"
+            with av.open(str(path), "w", format=container_format) as container:
+                stream = container.add_stream(codec, rate=48_000)
+                stream.layout = "mono"
+                for frame in _tone_frames(seconds=2):
+                    for packet in stream.encode(frame):
+                        container.mux(packet)
+                for packet in stream.encode(None):
+                    container.mux(packet)
+            with convert_to_wav(path) as chunks:
+                duration_ms = chunks.duration_ms
+            record(f"decodes {suffix}", 1800 <= duration_ms <= 2300, f"{duration_ms} ms")
+
+    guarded("decode", decode)
 
     def speech() -> None:
         _speak(work / "speech.wav")
@@ -331,6 +391,10 @@ def leave_note(name: str, text: str) -> None:
 def main(argv: list[str]) -> NoReturn:
     position = argv.index("--selftest") + 1
     if position >= len(argv) or argv[position].startswith("--"):
-        leave_note("selftest-usage.txt", "usage: NexusVox.exe --selftest <work-dir> [--download]\n")
+        leave_note("selftest-usage.txt", "usage: NexusVox.exe --selftest <work-dir> [--download] [--only <steps>]\n")
         sys.exit(2)
-    run(Path(argv[position]), "--download" in argv)
+    only = None
+    if "--only" in argv:
+        steps = argv.index("--only") + 1
+        only = set(argv[steps].split(",")) if steps < len(argv) else set()
+    run(Path(argv[position]), "--download" in argv, only)

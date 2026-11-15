@@ -388,11 +388,21 @@ default folders only, and "delete the models" also removes the Hugging Face xet 
 models (`HF_XET_CACHE`). `MinVersion` is Windows 11. CI installs, starts the installed app, tries to install over
 it, upgrades, and uninstalls with and without the delete switches.
 
-**Open before the first public release: GPL libraries in the build.** The PyAV wheel's `av.libs` contains x264 and
-x265 (GPL-2.0-or-later) next to FFmpeg. NexusVox needs PyAV because `faster-whisper` imports it at module level
-and uses it to decode audio, and because the file transcription path (`convert_to_wav`) decodes uploads with it; `LocalWhisperTranscriber` hands it a WAV (`io.BytesIO`), which it could pass as a
-float array instead. The notices file now lists these libraries and where their
-source is, which is disclosure, not a licence answer. Options: ship a build without them (pass arrays to Whisper and decode uploads some other way, or PyAV built against an LGPL-only FFmpeg), or have the licence combination reviewed.
+**GPL libraries in the build: solved by `packaging/lgpl_av.py`.** The PyAV wheel on PyPI carries x264 and x265
+(GPL-2.0-or-later) in `av.libs` next to FFmpeg, and its FFmpeg still reports "LGPL version 3 or later"; only the
+configure line shows `--enable-libx264`. NexusVox needs PyAV because `faster-whisper` imports it at module level and
+the file transcription path (`convert_to_wav`) decodes uploads with it. Before PyInstaller runs, `packaging/build.py`
+calls `lgpl_av.ensure_lgpl_av()`: it downloads the PyAV 18.1.0 sdist and BtbN's `win64-lgpl-shared` FFmpeg 8.1.3
+(both pinned by SHA-256, about 100 MB, kept in `build/lgpl-av/`), compiles PyAV against it with the MSVC build tools,
+bundles the FFmpeg DLLs with delvewheel and installs that wheel in place of the PyPI one; the wheel is cached per
+FFmpeg build, PyAV release and Python version. After freezing, `build.py` refuses an app with a GPL DLL or a GPL or
+non-free switch in an FFmpeg DLL's configure line. `third_party_notices.py` reads FFmpeg's licence, configure line and
+version from the app's own DLLs, names the pinned source and the libraries linked in, and refuses an FFmpeg other than
+the pinned build; the frozen self-test (`--only decode`) checks the running FFmpeg the same way and decodes every
+upload format. Costs: the app is about 100 MB bigger (BtbN links many libraries into `avcodec`), and the LGPL source
+pointer depends on BtbN keeping its month-end release (the tarball is to be attached to every release, a follow-up
+ticket). A plain `pip install nexusvox` still gets PyPI's PyAV: that is the user's own install, not distributed by
+NexusVox.
 
 ## Open questions
 

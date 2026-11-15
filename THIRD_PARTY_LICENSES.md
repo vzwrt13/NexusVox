@@ -74,17 +74,22 @@ below records the main licences so the compatibility picture is on file.
 | pynput, pystray | LGPL-3.0 |
 | sqlalchemy, alembic, flask, faster-whisper, ctranslate2, onnxruntime, onnx-asr, Pillow | MIT |
 | httpx, pyperclip, sounddevice, numpy | BSD |
-| av (PyAV) | BSD for PyAV itself; its wheel bundles FFmpeg (LGPL-3.0-or-later) and codec libraries under LGPL and GPL, see below |
+| av (PyAV) | BSD for PyAV itself; it bundles FFmpeg (LGPL-3.0-or-later), see below |
 | lingua-language-detector, tokenizers, huggingface-hub, websockets | Apache-2.0 |
 
-MIT, BSD and Apache-2.0 are permissive. LGPL-3.0 applies to `pynput` and `pystray` only, which are used as
-unmodified libraries through ordinary Python imports.
+MIT, BSD and Apache-2.0 are permissive. LGPL-3.0 applies to `pynput` and `pystray`, which are used as
+unmodified libraries through ordinary Python imports, and to PyAV's FFmpeg (below). No GPL library is bundled.
 
-**PyAV's FFmpeg libraries are the exception.** The PyAV wheels carry FFmpeg and a set of codec libraries
-(`av.libs`). The FFmpeg libraries themselves are licensed under LGPL-3.0-or-later: the bundled DLLs are built with
-`--enable-version3`, which raises FFmpeg from LGPL-2.1-or-later to version 3. Among the codecs are x264 and x265, which are licensed under the GPL (version 2 or later). NexusVox does not
-use the encoders: `faster-whisper` uses PyAV only to decode audio (the WAV it is given). In the Windows installer they are bundled
-anyway, and `THIRD_PARTY_NOTICES.txt` lists them with where their source is.
+**PyAV's FFmpeg.** PyAV carries the FFmpeg libraries as DLLs (`av.libs`); NexusVox uses them only to decode
+audio (uploads, and faster-whisper's own loader). The PyAV wheels on PyPI build that FFmpeg with the GPL video
+encoders x264 and x265, so the Windows installer does not use them: `packaging/build.py` first replaces PyAV with
+the same release built from source against BtbN's LGPL build of FFmpeg (`packaging/lgpl_av.py`, both downloads
+pinned by SHA-256), and refuses an app that still contains a GPL library. That FFmpeg is LGPL-3.0-or-later (built
+with `--enable-version3`, without `--enable-gpl`, x264, x265 or any other GPL-only library). Most libraries
+linked into it are permissive or LGPL; libzmq and libsrt are MPL-2.0 (file-level copyleft, met by naming their
+unmodified source), libaom and SVT-AV1 add the AOM patent licence to BSD, and GMP is dual GPL/LGPL and used under
+the LGPL. `THIRD_PARTY_NOTICES.txt` lists each one with its licence, and where the FFmpeg source is. A plain
+`pip install nexusvox` still gets the PyPI wheel, which is the user's own install and not distributed by NexusVox.
 
 ---
 

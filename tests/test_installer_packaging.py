@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import shutil
 import subprocess
 import sys
@@ -10,26 +9,10 @@ from importlib import metadata
 from pathlib import Path
 
 import pytest
+from packaging_scripts import PACKAGING, load_packaging_script
 
-PACKAGING = Path(__file__).resolve().parent.parent / "packaging"
-
-
-def _load(name: str):
-    """Import a script from packaging/ by path. The folder is not a package, and putting the repository root on
-    sys.path would make `import packaging` ambiguous with the PyPA library the scripts use."""
-    spec = importlib.util.spec_from_file_location(name, PACKAGING / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    sys.path.insert(0, str(PACKAGING))  # build_installer imports its sibling by name, as it does when run as a script
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.path.remove(str(PACKAGING))
-    return module
-
-
-notices = _load("third_party_notices")
-build_installer = _load("build_installer")
+notices = load_packaging_script("third_party_notices")
+build_installer = load_packaging_script("build_installer")
 
 
 def make_dist(tmp_path: Path, name: str, files: dict[str, str], requires: tuple[str, ...] = (), extra_meta: str = ""):
@@ -138,15 +121,15 @@ def test_native_libraries_are_named_and_gpl_ones_are_called_out(tmp_path):
     (internal / "av.libs").mkdir(parents=True)
     (internal / "av.libs" / "libx264-165-abc.dll").write_bytes(b"")
     (internal / "python312.dll").write_bytes(b"")
-    section, gpl = notices._binaries_section(tmp_path)
-    assert gpl
-    assert "libx264-165-abc.dll" in section and "python312.dll" in section
+    section = notices._binaries_section(tmp_path)
+    assert "libx264-165-abc.dll\n    x264 - GPL-2.0-or-later" in section and "python312.dll" in section
+    assert notices.bundle_gpl_parts(tmp_path) == [f"{Path('_internal/av.libs/libx264-165-abc.dll')} is a GPL library"]
 
 
 def test_no_gpl_library_means_no_gpl_notice(tmp_path):
     (tmp_path / "_internal").mkdir()
     (tmp_path / "_internal" / "python312.dll").write_bytes(b"")
-    assert notices._binaries_section(tmp_path)[1] is False
+    assert notices.bundle_gpl_parts(tmp_path) == []
 
 
 @pytest.mark.parametrize(
@@ -186,7 +169,7 @@ def test_iscc_gets_the_sign_command_for_the_setup_and_the_uninstaller():
 
 
 def test_the_bootloader_check_flags_the_shared_prebuilt_stub():
-    check = _load("check_bootloader")
+    check = load_packaging_script("check_bootloader")
     published = {"run.exe": b"shared", "runw.exe": b"shared-w"}
     assert check.identical_stubs({"run.exe": b"shared", "runw.exe": b"shared-w"}, published) == ["run.exe", "runw.exe"]
     assert check.identical_stubs({"run.exe": b"mine", "runw.exe": b"shared-w"}, published) == ["runw.exe"]

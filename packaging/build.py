@@ -6,6 +6,10 @@
 
 Run it with the Python environment that has NexusVox and PyInstaller installed. Install NexusVox as a
 regular package (`pip install .`), not editable: the build must contain what a wheel contains.
+
+Before freezing, it replaces the PyAV from PyPI in that environment with one built against an LGPL-only FFmpeg
+(`lgpl_av.py`: the PyPI wheel carries the GPL encoders x264 and x265), and after freezing it refuses an app that
+still contains a GPL library. Use a dedicated environment for building.
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+from lgpl_av import GplError, LgplBuildError, bundle_gpl_parts, ensure_lgpl_av
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "packaging" / "nexusvox.spec"
@@ -42,6 +48,15 @@ def main() -> int:
     if args.clean:
         command.append("--clean")
 
+    try:
+        ensure_lgpl_av()
+    except GplError as error:
+        print(f"error: no PyAV without GPL parts: {error}", file=sys.stderr)
+        return 1
+    except (LgplBuildError, subprocess.CalledProcessError, OSError) as error:
+        print(f"error: building the LGPL PyAV failed: {error}", file=sys.stderr)
+        return 1
+
     env = dict(os.environ)
     if args.selftest:
         env["NEXUSVOX_BUILD_SELFTEST"] = "1"
@@ -52,6 +67,10 @@ def main() -> int:
         return result.returncode
 
     app = dist / "NexusVox"
+    gpl = bundle_gpl_parts(app)
+    if gpl:
+        print("error: the app contains GPL libraries:\n  " + "\n  ".join(gpl), file=sys.stderr)
+        return 1
     print(f"Build time: {elapsed:.0f} s")
     print(f"Folder size: {folder_size_mb(app):.0f} MB ({app})")
     return 0

@@ -1,4 +1,4 @@
-"""Self-test that runs INSIDE the frozen app:  NexusVox.exe --selftest <work-dir> [--download]
+"""Self-test that runs INSIDE the frozen app:  NexusVox.exe --selftest <work-dir> [--download] [--only <steps>]
 
 A windowed build has no console, so the result goes to `<work-dir>/selftest.json` and the process exit code
 (0 = every check passed). The test never touches the user's own config, database or model cache: everything
@@ -9,6 +9,11 @@ steps fail unless an earlier run already filled <work-dir>/hf.
 It covers what the tray menu and the hotkey cannot show to a script: the system tray icon starts, the
 dashboard serves its pages and API from the bundled files, extensions found next to the exe load, and the
 CPU Parakeet model loads and transcribes a spoken sentence.
+
+`--only decode,whisper` runs just those steps after the setup (the names are in STEPS; a model step brings the
+speech step it needs along, and an unknown or missing name fails the test). `--only decode` checks the bundled
+FFmpeg (the pinned LGPL build, no GPL parts, decodes every upload format) without a tray icon, the dashboard port,
+a window or a download.
 """
 
 from __future__ import annotations
@@ -28,6 +33,14 @@ from pathlib import Path
 from typing import NoReturn
 
 SENTENCE = "Hello world. This is a test of the frozen application."
+# The steps after the setup, in the order they run: the names `--only` takes.
+STEPS = (
+    "decode", "speech", "tray", "dashboard", "parakeet",
+    "lingua", "sounddevice", "mic_guard", "loopback", "pynput", "overlay", "whisper",
+)  # fmt: skip
+USAGE = (
+    f"usage: NexusVox.exe --selftest <work-dir> [--download] [--only <step>[,<step>...]]\nsteps: {', '.join(STEPS)}\n"
+)
 
 
 def _speak(path: Path) -> None:
@@ -40,6 +53,21 @@ def _speak(path: Path) -> None:
         f"$s.SetOutputToWaveFile('{target}', $f); $s.Speak('{SENTENCE}'); $s.Dispose()"
     )
     subprocess.run(["powershell", "-NoProfile", "-Command", script], check=True, creationflags=0x08000000)
+
+
+def _tone_frames(seconds: int, rate: int = 48_000) -> list:
+    """One frame per second of a 440 Hz tone, s16 mono. PyAV converts them to what each encoder takes."""
+    import av
+    import numpy as np
+
+    tone = (np.sin(2 * np.pi * 440 * np.arange(rate) / rate) * 8000).astype(np.int16).reshape(1, -1)
+    frames = []
+    for second in range(seconds):
+        frame = av.AudioFrame.from_ndarray(tone, format="s16", layout="mono")
+        frame.sample_rate = rate
+        frame.pts = second * rate
+        frames.append(frame)
+    return frames
 
 
 def _fake_pro(folder: Path) -> None:
@@ -66,7 +94,7 @@ def _fake_pro(folder: Path) -> None:
     (info / "entry_points.txt").write_text("[nexusvox.extensions]\nfake_pro = fake_pro:FakePro\n")
 
 
-def run(work: Path, download: bool) -> NoReturn:
+def run(work: Path, download: bool, only: set[str] | None = None) -> NoReturn:
     def crumb(text: str) -> None:
         with open(work / "progress.txt", "a", encoding="utf-8") as handle:
             handle.write(f"{time.strftime('%H:%M:%S')} {text}\n")
@@ -79,7 +107,13 @@ def run(work: Path, download: bool) -> NoReturn:
     work.mkdir(parents=True, exist_ok=True)
     hang_file = open(work / "hang.txt", "w")  # noqa: SIM115 - stays open for the whole run
 
+    # The model steps transcribe the sample the speech step renders, so asking for one brings that step along.
+    if only is not None and only & {"parakeet", "whisper"}:
+        only = only | {"speech"}
+
     def guarded(name: str, func, timeout: float = 120) -> None:
+        if only is not None and name != "setup" and name not in only:
+            return
         crumb(f"step {name}")
         started = time.perf_counter()
         # A step that runs past its budget must leave a trace (a windowed build has no console to Ctrl+C in),
@@ -127,6 +161,43 @@ def run(work: Path, download: bool) -> NoReturn:
         finish(work, checks)
     config, db = state["config"], state["db"]
 
+    def decode() -> None:
+        # The bundled FFmpeg must be the LGPL build (packaging/lgpl_av.py) and still decode every upload format.
+        import av
+        import av._core
+        from lgpl_av import FFMPEG_VERSION, gpl_parts, is_pinned_ffmpeg  # the build's own GPL rules, not a copy
+
+        from nexusvox.transcription.file_transcribe import convert_to_wav
+
+        problems = gpl_parts(av._core.library_meta)
+        record("FFmpeg has no GPL parts", not problems, "; ".join(problems))
+        version = av.ffmpeg_version_info
+        record("FFmpeg is the pinned LGPL build", is_pinned_ffmpeg(version), f"{version} (pinned: {FFMPEG_VERSION})")
+        # suffix -> (container format, encoder); the formats the upload dialog takes, plus m4a (AAC)
+        formats = {
+            ".wav": ("wav", "pcm_s16le"),
+            ".mp3": ("mp3", "libmp3lame"),
+            ".flac": ("flac", "flac"),
+            ".ogg": ("ogg", "libvorbis"),
+            ".m4a": ("ipod", "aac"),
+            ".webm": ("webm", "libopus"),
+        }
+        for suffix, (container_format, codec) in formats.items():
+            path = work / f"tone{suffix}"
+            with av.open(str(path), "w", format=container_format) as container:
+                stream = container.add_stream(codec, rate=48_000)
+                stream.layout = "mono"
+                for frame in _tone_frames(seconds=2):
+                    for packet in stream.encode(frame):
+                        container.mux(packet)
+                for packet in stream.encode(None):
+                    container.mux(packet)
+            with convert_to_wav(path) as chunks:
+                duration_ms = chunks.duration_ms
+            record(f"decodes {suffix}", 1800 <= duration_ms <= 2300, f"{duration_ms} ms")
+
+    guarded("decode", decode)
+
     def speech() -> None:
         _speak(work / "speech.wav")
         record("speech sample rendered", (work / "speech.wav").stat().st_size > 32000)
@@ -150,7 +221,7 @@ def run(work: Path, download: bool) -> NoReturn:
         icon.stop()
         record("tray icon runs", alive)
 
-    guarded("tray icon runs", tray)
+    guarded("tray", tray)
 
     def dashboard() -> None:
         from nexusvox.dashboard import ensure_dashboard_api
@@ -268,8 +339,8 @@ def run(work: Path, download: bool) -> NoReturn:
     for step_name, step in (
         ("lingua", lingua),
         ("sounddevice", portaudio),
-        ("mic guard", wasapi_sessions),
-        ("WASAPI loopback", loopback),
+        ("mic_guard", wasapi_sessions),
+        ("loopback", loopback),
         ("pynput", hook),
     ):
         guarded(step_name, step)
@@ -308,6 +379,12 @@ def run(work: Path, download: bool) -> NoReturn:
 
     guarded("whisper", whisper, timeout=300)
 
+    if only is not None:
+        # A typo or an empty list would otherwise run nothing but the setup and report success.
+        unknown = sorted(only - set(STEPS))
+        detail = f"unknown steps {unknown}; known: {', '.join(STEPS)}" if unknown else ""
+        record("--only names steps", bool(only) and not unknown, detail or ("no step named" if not only else ""))
+
     finish(work, checks)
 
 
@@ -331,6 +408,14 @@ def leave_note(name: str, text: str) -> None:
 def main(argv: list[str]) -> NoReturn:
     position = argv.index("--selftest") + 1
     if position >= len(argv) or argv[position].startswith("--"):
-        leave_note("selftest-usage.txt", "usage: NexusVox.exe --selftest <work-dir> [--download]\n")
+        leave_note("selftest-usage.txt", USAGE)
         sys.exit(2)
-    run(Path(argv[position]), "--download" in argv)
+    only = None
+    if "--only" in argv:
+        steps = argv.index("--only") + 1
+        # `--only` needs its list: a missing one, or a flag in its place, is a usage error, not a step name.
+        if steps >= len(argv) or argv[steps].startswith("--"):
+            leave_note("selftest-usage.txt", USAGE)
+            sys.exit(2)
+        only = {name.strip() for name in argv[steps].split(",")}
+    run(Path(argv[position]), "--download" in argv, only)

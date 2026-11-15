@@ -69,14 +69,32 @@ tag. The tag run creates the draft release. Then, on your PC, from a checkout of
 5. **Install it once.** The shipped installer is the one built on your PC, not the one CI built and tested. Install
    `dist\installer\NexusVox-Setup.exe` over your current copy, start NexusVox, then check the Digital Signatures tab of
    `unins000.exe` in the install folder. If anything differs from CI's tested installer, stop here.
-6. Replace the unsigned installer on the draft (same file name, the website links to it) and publish it:
+6. Replace the unsigned installer on the draft (same file name, the website links to it):
 
    ```powershell
    gh release upload v1.0.0 dist\installer\NexusVox-Setup.exe --clobber
+   ```
+
+7. **Check that the draft holds the FFmpeg source**, then publish. The installer ships an LGPL FFmpeg, and the LGPL asks
+   for its source, so the release workflow attaches it to the draft itself (`packaging/attach_ffmpeg_source.py`, run
+   from the tag: the FFmpeg commit the installer was built from, and the build scripts that name the source of every
+   library linked into it). `gh release upload --clobber` of the installer leaves it alone. Look before you publish:
+
+   ```powershell
+   gh release view v1.0.0 --json assets --jq ".assets[].name"
    gh release edit v1.0.0 --draft=false
    ```
 
-7. Log out of SimplySign Desktop.
+   The list must show `ffmpeg-<version>-source.tar.gz` and `ffmpeg-builds-<release>-scripts.tar.gz` next to
+   `NexusVox-Setup.exe`. If they are missing (the workflow step failed), repair the draft from a checkout of the tag,
+   which the script insists on: `git checkout v1.0.0`, then `python packaging\attach_ffmpeg_source.py v1.0.0` (it also
+   refuses a release without the installer and a published one; `--allow-published` adds the source to a published
+   release). If a run stops with "is not the pinned file", GitHub served other content for the same commit: check that
+   `FFMPEG_COMMIT` is still the `g...` commit in `FFMPEG_VERSION`, pin the new digest in `SOURCE_ARCHIVES` through a
+   pull request and tag after that, because the pins of a tag are the ones the script uses. The installer workflow
+   runs `--dry-run` before it builds, so a pull request that touches the pins finds this early.
+
+8. Log out of SimplySign Desktop.
 
 ### Test the script without the real certificate
 
@@ -94,9 +112,10 @@ vendor that flags it. Do not upload other builds under the same version.
 
 ## If the certificate is not ready: ship unsigned
 
-An unsigned 1.0 is acceptable; a delayed 1.0 for a certificate is not. Skip steps 1 to 6 and publish the draft as CI
-built it (`gh release edit v1.0.0 --draft=false`), and say so in the release notes: *"This installer is not signed yet.
-Windows SmartScreen shows it as from an unknown publisher."* Sign from the next release on.
+An unsigned 1.0 is acceptable; a delayed 1.0 for a certificate is not. Skip steps 1 to 6 and 8, check step 7 (the draft
+carries the FFmpeg source without any local work) and publish the draft as CI built it, and say so in the release
+notes: *"This installer is not signed yet. Windows SmartScreen shows it as from an unknown publisher."* Sign from the
+next release on.
 
 ## What users see: SmartScreen
 

@@ -88,7 +88,19 @@ pinned by SHA-256), and refuses an app that still contains a GPL library. That F
 with `--enable-version3`, without `--enable-gpl`, x264, x265 or any other GPL-only library). Most libraries
 linked into it are permissive or LGPL; libzmq and libsrt are MPL-2.0 (file-level copyleft, met by naming their
 unmodified source), libaom and SVT-AV1 add the AOM patent licence to BSD, and GMP is dual GPL/LGPL and used under
-the LGPL. `THIRD_PARTY_NOTICES.txt` lists each one with its licence, and where the FFmpeg source is. A plain
+the LGPL. `THIRD_PARTY_NOTICES.txt` lists each one with its licence, and where the FFmpeg source is: the archive
+`ffmpeg-<version>-source.tar.gz` attached to each [GitHub release](https://github.com/vzwrt13/NexusVox/releases) that carries the Windows installer
+(upstream FFmpeg at the commit the installer's build was made from; BtbN applies no patches), next to
+`ffmpeg-builds-<release>-scripts.tar.gz`, the build scripts that name the repository and commit of every library
+linked in (`packaging/attach_ffmpeg_source.py`).
+
+**Written offer for the source of the other LGPL libraries.** NightShift AI GmbH will provide, on request, the
+complete corresponding source code of the LGPL libraries linked into the FFmpeg that the Windows installer bundles:
+LAME (libmp3lame), TwoLAME, SoXR, Game Music Emu (libgme), FriBidi, libssh, libbluray, libplacebo, aribb24,
+librsvg, chromaprint, zvbi, OpenAL Soft, and the LGPL libraries the build scripts build into them (for example GMP,
+GNU libiconv, GLib, Cairo and Pango); `THIRD_PARTY_NOTICES.txt` in the installer lists which of them the build
+contains. The offer holds for at least three years from the date of each NexusVox release, at no charge beyond the
+cost of distribution. Write to [info@nightshift-ai.de](mailto:info@nightshift-ai.de) and name the NexusVox version. A plain
 `pip install nexusvox` still gets the PyPI wheel, which is the user's own install and not distributed by NexusVox.
 
 ---

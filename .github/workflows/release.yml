@@ -177,3 +177,11 @@ jobs:
           body: ${{ steps.tag.outputs.body }}
           files: dist/*
           generate_release_notes: true
+
+      # The installer ships an LGPL FFmpeg, so the draft gets that FFmpeg's source before anyone can publish it, on the
+      # signed path and the unsigned one. Run from the checkout of the tag: the pins are the installer's. The script
+      # refuses a checkout that is not the tag, a release without the installer and a published release.
+      - name: Attach the FFmpeg source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 packaging/attach_ffmpeg_source.py "$GITHUB_REF_NAME"

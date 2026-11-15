@@ -179,6 +179,32 @@ def configure_switches(configuration: str) -> tuple[list[str], list[str], list[s
     return libraries, options, unknown
 
 
+# Where a recipient writes to get the source of the LGPL libraries (the address of the README and SECURITY.md).
+SOURCE_OFFER_CONTACT = "info@nightshift-ai.de"
+
+
+def lgpl_libraries(linked: list[str]) -> list[str]:
+    """The libraries of `linked` (configure_switches) that are under the LGPL; the written source offer names them."""
+    return [
+        name
+        for name in linked
+        if "LGPL" in (licence := FFMPEG_LIBRARY_LICENCES.get(name, "")) and "not shipped" not in licence
+    ]
+
+
+def source_offer(linked: list[str]) -> str:
+    """The written offer of the source of the LGPL libraries linked into the FFmpeg DLLs. The source of FFmpeg itself
+    is a release asset (FFMPEG_SOURCE); the other LGPL libraries are covered by this offer."""
+    names = ", ".join(lgpl_libraries(linked)) or "none identified"
+    return (
+        "Written offer: NightShift AI GmbH will provide, on request, the complete corresponding source code of the\n"
+        f"LGPL libraries linked into the FFmpeg DLLs above ({names}, and any other LGPL library the build scripts\n"
+        "build into them, for example GMP, GLib, Cairo and Pango), for at least three years from the date of each\n"
+        f"NexusVox release, at no charge beyond the cost of distribution. Write to {SOURCE_OFFER_CONTACT} and name\n"
+        "the NexusVox version."
+    )
+
+
 def ffmpeg_section(bundle: Path, libraries: dict[str, dict[str, str]] | None = None) -> str:
     """Where the app's FFmpeg comes from, what is linked into it and its licence text, read from the app folder
     itself (the DLLs and PyAV's metadata in it), not from the build environment. `libraries` is what
@@ -212,6 +238,7 @@ def ffmpeg_section(bundle: Path, libraries: dict[str, dict[str, str]] | None = N
     if linked:
         lines.append("\nLibraries linked into these FFmpeg DLLs, each under its own licence:")
         lines += [f"    {name} - {FFMPEG_LIBRARY_LICENCES.get(name, 'see its project')}" for name in linked]
+    lines.append("\n" + source_offer(linked))
     if options:
         lines.append("\nBuild options and system interfaces (not libraries): " + ", ".join(options) + ".")
     if unknown:

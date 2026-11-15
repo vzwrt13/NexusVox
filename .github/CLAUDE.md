@@ -23,7 +23,7 @@
 4. The release workflow lints, runs the full test matrix, builds the wheel and
    sdist, verifies the built wheel with `scripts/packaging_smoke_test.py`, and
    creates a draft GitHub Release with both artifacts and `NexusVox-Setup.exe` attached
-5. Sign the installer locally, replace the asset on the draft and publish it (`docs/SIGNING.md`: SimplySign login, `packaging\sign_release.ps1`, `signtool verify /pa /v`, `gh release upload --clobber`, `gh release edit --draft=false`). If the certificate is not ready, publish the draft unsigned and say so in the release notes
+5. Sign the installer locally, replace the asset on the draft and publish it (`docs/SIGNING.md`: SimplySign login, `packaging\sign_release.ps1`, `signtool verify /pa /v`, `gh release upload --clobber`, then `python packaging\attach_ffmpeg_source.py v<version>` for the FFmpeg source the LGPL asks for, then `gh release edit --draft=false`). If the certificate is not ready, publish the draft unsigned and say so in the release notes
 
 **The tag annotation becomes the release page.** Its first line is the release
 title, the rest is the body, and GitHub's generated list of merged pull requests

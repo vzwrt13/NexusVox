@@ -400,8 +400,8 @@ non-free switch in an FFmpeg DLL's configure line. `third_party_notices.py` read
 version from the app's own DLLs, names the pinned source and the libraries linked in, and refuses an FFmpeg other than
 the pinned build; the frozen self-test (`--only decode`) checks the running FFmpeg the same way and decodes every
 upload format. Costs: the app is about 100 MB bigger (BtbN links many libraries into `avcodec`), and the LGPL source
-pointer depends on BtbN keeping its month-end release (the tarball is to be attached to every release, a follow-up
-ticket). A plain `pip install nexusvox` still gets PyPI's PyAV: that is the user's own install, not distributed by
+pointer depends on BtbN keeping its month-end release (`packaging/attach_ffmpeg_source.py` attaches the FFmpeg
+source archive and BtbN's build scripts to every GitHub release). A plain `pip install nexusvox` still gets PyPI's PyAV: that is the user's own install, not distributed by
 NexusVox.
 
 ## Open questions

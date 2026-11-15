@@ -13,11 +13,12 @@ PyInstaller and checks the finished app with `bundle_gpl_parts()` afterwards; th
 bundled FFmpeg DLLs with `bundle_ffmpeg()`, and the frozen self-test checks the running FFmpeg with `gpl_parts()`.
 This module is the one place that knows what counts as GPL.
 
-Both downloads are pinned by SHA-256. BtbN keeps its month-end builds; a daily build disappears after a few weeks,
-so pin a month-end one. To move to another FFmpeg or PyAV release, change the constants below (FFMPEG_SOURCE too):
-PyAV's FFmpeg major version must match (PyAV 18 is built for FFmpeg 8.1). Building needs the MSVC build tools (the
-GitHub Windows runners have them) and takes about a minute. Downloads and wheels are kept in `build/lgpl-av/`, a
-wheel per FFmpeg build and Python version.
+Both downloads are pinned by SHA-256, and so is the source of that FFmpeg (SOURCE_ARCHIVES), which
+`packaging/attach_ffmpeg_source.py` attaches to every release. BtbN keeps its month-end builds; a daily build
+disappears after a few weeks, so pin a month-end one. To move to another FFmpeg or PyAV release, change the constants
+below (FFMPEG_COMMIT, BTBN_COMMIT and SOURCE_ARCHIVES too): PyAV's FFmpeg major version must match (PyAV 18 is built
+for FFmpeg 8.1). Building needs the MSVC build tools (the GitHub Windows runners have them) and takes about a minute.
+Downloads and wheels are kept in `build/lgpl-av/`, a wheel per FFmpeg build and Python version.
 """
 
 from __future__ import annotations
@@ -47,15 +48,39 @@ AV_SDIST = (
 # FFmpeg's own version string, which every one of its DLLs carries (BtbN appends the build date to it).
 FFMPEG_VERSION = "n8.1.3-27-g8dca1586f4"
 FFMPEG_BUILD = f"ffmpeg-{FFMPEG_VERSION}-win64-lgpl-shared-8.1"
+BTBN_RELEASE = "autobuild-2026-10-31-12-59"
 FFMPEG_ZIP = (
-    f"https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/{FFMPEG_BUILD}.zip",
+    f"https://github.com/BtbN/FFmpeg-Builds/releases/download/{BTBN_RELEASE}/{FFMPEG_BUILD}.zip",
     "5cef7bc48e513f3cee7c881e8b2999d835541edb1846c3e89443a67f8f8556ab",
+)
+# The source that build was made from (BtbN builds upstream FFmpeg's release/8.1 branch without patches of its own;
+# the `g8dca1586f4` of the version is this commit) and the commit of BtbN's build scripts that tagged the release.
+# `packaging/attach_ffmpeg_source.py` puts both archives on every GitHub release (the LGPL asks for the source of
+# what the installer ships). GitHub makes these archives on demand, so pin the SHA-256 of what it serves: when a
+# download no longer matches, check that the commit is still the one in FFMPEG_VERSION, then pin the new digest.
+FFMPEG_COMMIT = "8dca1586f468bfcbb78ae3ed618af1361d9f140a"
+BTBN_COMMIT = "5031c6f1082414e53688d39e521849905071070d"
+# (file name on the release, URL, SHA-256). The names carry the version: a release is meant to hold the source of the
+# FFmpeg its installer ships, and the name tells which one that is.
+SOURCE_ARCHIVES = (
+    (
+        f"ffmpeg-{FFMPEG_VERSION}-source.tar.gz",
+        f"https://github.com/FFmpeg/FFmpeg/archive/{FFMPEG_COMMIT}.tar.gz",
+        "5ce832c43ca0a336c747db9dcd448655c64c25e33cb9868e1cc5b24abb04dbaa",
+    ),
+    (
+        f"ffmpeg-builds-{BTBN_RELEASE}-scripts.tar.gz",
+        f"https://github.com/BtbN/FFmpeg-Builds/archive/{BTBN_COMMIT}.tar.gz",
+        "3d82bbb1dd436116034bb4d945245e5550dff0d89db0094e9af90382527c2c17",
+    ),
 )
 # Where the source of the pinned FFmpeg and of the libraries linked into it can be had (the notices name it).
 FFMPEG_SOURCE = (
-    f"FFmpeg {FFMPEG_VERSION}: https://git.ffmpeg.org/ffmpeg.git (tag n8.1.3, commit 8dca1586f4); "
-    "built by https://github.com/BtbN/FFmpeg-Builds (release autobuild-2026-10-31-12-59, variant win64-lgpl-shared), "
-    "whose scripts.d folder names the source of every library linked in"
+    f"FFmpeg {FFMPEG_VERSION}: the archive {SOURCE_ARCHIVES[0][0]} on every NexusVox release "
+    "(https://github.com/vzwrt13/NexusVox/releases), or upstream at https://git.ffmpeg.org/ffmpeg.git "
+    f"(tag n8.1.3, commit {FFMPEG_COMMIT[:10]}); built by https://github.com/BtbN/FFmpeg-Builds (release "
+    f"{BTBN_RELEASE}, variant win64-lgpl-shared), whose scripts.d folder names the source of every library linked in "
+    f"(the archive {SOURCE_ARCHIVES[1][0]} on the release holds those scripts)"
 )
 # Put into the wheel next to PyAV's own licence, so FFmpeg's LGPL text travels with the DLLs into the app.
 FFMPEG_LICENCE_FILE = "COPYING.FFmpeg-LGPL-3.0.txt"
@@ -201,8 +226,10 @@ def _sha256(path: Path) -> str:
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
-def _download(url: str, sha256: str) -> Path:
-    target = WORK / url.rsplit("/", 1)[1]
+def _download(url: str, sha256: str, name: str | None = None) -> Path:
+    """Download `url` into WORK as `name` (default: the last part of the URL) and check its SHA-256; a file already
+    there with that digest is reused."""
+    target = WORK / (name or url.rsplit("/", 1)[1])
     if target.is_file() and _sha256(target) == sha256:
         return target
     WORK.mkdir(parents=True, exist_ok=True)

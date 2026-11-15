@@ -69,14 +69,28 @@ tag. The tag run creates the draft release. Then, on your PC, from a checkout of
 5. **Install it once.** The shipped installer is the one built on your PC, not the one CI built and tested. Install
    `dist\installer\NexusVox-Setup.exe` over your current copy, start NexusVox, then check the Digital Signatures tab of
    `unins000.exe` in the install folder. If anything differs from CI's tested installer, stop here.
-6. Replace the unsigned installer on the draft (same file name, the website links to it) and publish it:
+6. Replace the unsigned installer on the draft (same file name, the website links to it):
 
    ```powershell
    gh release upload v1.0.0 dist\installer\NexusVox-Setup.exe --clobber
+   ```
+
+7. **Attach the FFmpeg source**, then publish. The installer ships an LGPL FFmpeg, and the LGPL asks for its source, so
+   every release carries it. The script downloads the pinned source archives (FFmpeg at the commit the installer's
+   build was made from, and the build scripts that name the source of every library linked into it), checks their
+   SHA-256 and uploads them to the draft with `gh release upload --clobber`, so running it twice is safe:
+
+   ```powershell
+   python packaging\attach_ffmpeg_source.py v1.0.0
    gh release edit v1.0.0 --draft=false
    ```
 
-7. Log out of SimplySign Desktop.
+   Run it from the checkout of the tag: the pins in `packaging/lgpl_av.py` must be the installer's. `--dry-run`
+   downloads and verifies without uploading. If it stops with "is not the pinned file", GitHub served a different
+   archive for the same commit: check that `FFMPEG_COMMIT` is still the `g...` commit in `FFMPEG_VERSION`, then pin the
+   new digest in `SOURCE_ARCHIVES`.
+
+8. Log out of SimplySign Desktop.
 
 ### Test the script without the real certificate
 
@@ -94,8 +108,8 @@ vendor that flags it. Do not upload other builds under the same version.
 
 ## If the certificate is not ready: ship unsigned
 
-An unsigned 1.0 is acceptable; a delayed 1.0 for a certificate is not. Skip steps 1 to 6 and publish the draft as CI
-built it (`gh release edit v1.0.0 --draft=false`), and say so in the release notes: *"This installer is not signed yet.
+An unsigned 1.0 is acceptable; a delayed 1.0 for a certificate is not. Skip steps 1 to 6 and 8, do step 7 (the FFmpeg
+source is owed for the unsigned installer, too) and publish the draft as CI built it, and say so in the release notes: *"This installer is not signed yet.
 Windows SmartScreen shows it as from an unknown publisher."* Sign from the next release on.
 
 ## What users see: SmartScreen

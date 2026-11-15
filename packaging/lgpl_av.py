@@ -24,6 +24,7 @@ Downloads and wheels are kept in `build/lgpl-av/`, a wheel per FFmpeg build and 
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -34,6 +35,8 @@ import sys
 import tarfile
 import urllib.request
 import zipfile
+import zlib
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -55,32 +58,35 @@ FFMPEG_ZIP = (
 )
 # The source that build was made from (BtbN builds upstream FFmpeg's release/8.1 branch without patches of its own;
 # the `g8dca1586f4` of the version is this commit) and the commit of BtbN's build scripts that tagged the release.
-# `packaging/attach_ffmpeg_source.py` puts both archives on every GitHub release (the LGPL asks for the source of
-# what the installer ships). GitHub makes these archives on demand, so pin the SHA-256 of what it serves: when a
-# download no longer matches, check that the commit is still the one in FFMPEG_VERSION, then pin the new digest.
+# `packaging/attach_ffmpeg_source.py` puts both archives on every GitHub release that carries the installer (the LGPL
+# asks for the source of what it ships). GitHub makes these archives on demand, so the pinned SHA-256 is that of the
+# uncompressed tar (see download_source), which does not change when GitHub changes its compression. If a download
+# still stops matching, installer.yml fails on it (a --dry-run before the build): check that the commit is still
+# the one in FFMPEG_VERSION, pin the new digest on main and, for a release, tag after that.
 FFMPEG_COMMIT = "8dca1586f468bfcbb78ae3ed618af1361d9f140a"
 BTBN_COMMIT = "5031c6f1082414e53688d39e521849905071070d"
-# (file name on the release, URL, SHA-256). The names carry the version: a release is meant to hold the source of the
-# FFmpeg its installer ships, and the name tells which one that is.
+# (file name on the release, URL, SHA-256 of the uncompressed tar). The names carry the version: a release is meant
+# to hold the source of the FFmpeg its installer ships, and the name tells which one that is.
 SOURCE_ARCHIVES = (
     (
         f"ffmpeg-{FFMPEG_VERSION}-source.tar.gz",
         f"https://github.com/FFmpeg/FFmpeg/archive/{FFMPEG_COMMIT}.tar.gz",
-        "5ce832c43ca0a336c747db9dcd448655c64c25e33cb9868e1cc5b24abb04dbaa",
+        "5354fd54ad0319bdb4a6148a016abdda9cb9c94c8af772d9c8459a2e26c70182",
     ),
     (
         f"ffmpeg-builds-{BTBN_RELEASE}-scripts.tar.gz",
         f"https://github.com/BtbN/FFmpeg-Builds/archive/{BTBN_COMMIT}.tar.gz",
-        "3d82bbb1dd436116034bb4d945245e5550dff0d89db0094e9af90382527c2c17",
+        "718f1df3ef5cacf71a5ec733544c1110162379f6eb0e36ab017c0d545618c2b3",
     ),
 )
 # Where the source of the pinned FFmpeg and of the libraries linked into it can be had (the notices name it).
 FFMPEG_SOURCE = (
-    f"FFmpeg {FFMPEG_VERSION}: the archive {SOURCE_ARCHIVES[0][0]} on every NexusVox release "
+    f"FFmpeg {FFMPEG_VERSION}: the archive {SOURCE_ARCHIVES[0][0]} on the NexusVox release that carries this installer "
     "(https://github.com/vzwrt13/NexusVox/releases), or upstream at https://git.ffmpeg.org/ffmpeg.git "
     f"(tag n8.1.3, commit {FFMPEG_COMMIT[:10]}); built by https://github.com/BtbN/FFmpeg-Builds (release "
     f"{BTBN_RELEASE}, variant win64-lgpl-shared), whose scripts.d folder names the source of every library linked in "
-    f"(the archive {SOURCE_ARCHIVES[1][0]} on the release holds those scripts)"
+    f"(the archive {SOURCE_ARCHIVES[1][0]} on the release holds those scripts); the source of the other LGPL "
+    "libraries is covered by the written offer below"
 )
 # Put into the wheel next to PyAV's own licence, so FFmpeg's LGPL text travels with the DLLs into the app.
 FFMPEG_LICENCE_FILE = "COPYING.FFmpeg-LGPL-3.0.txt"
@@ -226,25 +232,53 @@ def _sha256(path: Path) -> str:
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
-def _download(url: str, sha256: str, name: str | None = None) -> Path:
-    """Download `url` into WORK as `name` (default: the last part of the URL) and check its SHA-256; a file already
-    there with that digest is reused."""
+def _tar_sha256(path: Path) -> str:
+    """SHA-256 of a .tar.gz's uncompressed tar stream: the content, whatever compression the server used."""
+    with gzip.open(path, "rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+def _download(url: str, sha256: str, name: str | None = None, digest_of: Callable[[Path], str] = _sha256) -> Path:
+    """Download `url` into WORK as `name` (default: the last part of the URL) and check its digest (`digest_of`, by
+    default the SHA-256 of the file); a file already there with that digest is reused. The file is written under a
+    .part name and renamed once it is verified, so a dropped connection never leaves a file under the real name."""
     target = WORK / (name or url.rsplit("/", 1)[1])
-    if target.is_file() and _sha256(target) == sha256:
+    if target.is_file() and _matches(target, sha256, digest_of):
         return target
     WORK.mkdir(parents=True, exist_ok=True)
+    partial = target.with_name(target.name + ".part")
     print(f"Downloading {url}")
     request = urllib.request.Request(url, headers={"User-Agent": "nexusvox-build"})
     try:
-        with urllib.request.urlopen(request, timeout=300) as response, open(target, "wb") as out:
+        with urllib.request.urlopen(request, timeout=300) as response, open(partial, "wb") as out:
             shutil.copyfileobj(response, out)
+        digest = _safe_digest(partial, digest_of)
     except OSError as error:
+        partial.unlink(missing_ok=True)
         raise LgplBuildError(f"Downloading {url} failed: {error}") from error
-    digest = _sha256(target)
     if digest != sha256:
-        target.unlink()
+        partial.unlink()
         raise LgplBuildError(f"{target.name} is not the pinned file: SHA-256 {digest}, expected {sha256}")
+    partial.replace(target)
     return target
+
+
+def _safe_digest(path: Path, digest_of: Callable[[Path], str]) -> str:
+    """digest_of(path), or "" when the file is not readable as what the digest needs (a truncated or non-gzip file)."""
+    try:
+        return digest_of(path)
+    except (EOFError, zlib.error, gzip.BadGzipFile):
+        return ""
+
+
+def _matches(path: Path, sha256: str, digest_of: Callable[[Path], str]) -> bool:
+    return _safe_digest(path, digest_of) == sha256
+
+
+def download_source(name: str, url: str, sha256: str) -> Path:
+    """Download one of SOURCE_ARCHIVES as `name`. `sha256` is the digest of the uncompressed tar, so a change in how
+    GitHub compresses its archives (it changed once, in 2023) does not stop a release; a change in the files does."""
+    return _download(url, sha256, name, _tar_sha256)
 
 
 def _extract_sdist(sdist: Path, into: Path) -> None:

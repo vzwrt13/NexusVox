@@ -89,7 +89,7 @@ with `--enable-version3`, without `--enable-gpl`, x264, x265 or any other GPL-on
 linked into it are permissive or LGPL; libzmq and libsrt are MPL-2.0 (file-level copyleft, met by naming their
 unmodified source), libaom and SVT-AV1 add the AOM patent licence to BSD, and GMP is dual GPL/LGPL and used under
 the LGPL. `THIRD_PARTY_NOTICES.txt` lists each one with its licence, and where the FFmpeg source is: the archive
-`ffmpeg-<version>-source.tar.gz` attached to every [GitHub release](https://github.com/vzwrt13/NexusVox/releases)
+`ffmpeg-<version>-source.tar.gz` attached to each [GitHub release](https://github.com/vzwrt13/NexusVox/releases) that carries the Windows installer
 (upstream FFmpeg at the commit the installer's build was made from; BtbN applies no patches), next to
 `ffmpeg-builds-<release>-scripts.tar.gz`, the build scripts that name the repository and commit of every library
 linked in (`packaging/attach_ffmpeg_source.py`).

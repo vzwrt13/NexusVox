@@ -43,6 +43,12 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
+      # The LGPL source of the FFmpeg the installer ships goes on the release (release.yml). Download and verify it
+      # here, before the long build, so a source archive GitHub no longer serves as pinned fails every pull request
+      # that touches the pins and the tag run early, not on the day the draft is waiting.
+      - name: Check the pinned FFmpeg source archives
+        run: python packaging/attach_ffmpeg_source.py --dry-run
+
       - name: Install NexusVox
         # A regular install, not editable: the build must contain what a wheel contains. `packaging` is used by
         # the notices script directly, so it is named here instead of relying on another package pulling it in.

@@ -75,20 +75,24 @@ tag. The tag run creates the draft release. Then, on your PC, from a checkout of
    gh release upload v1.0.0 dist\installer\NexusVox-Setup.exe --clobber
    ```
 
-7. **Attach the FFmpeg source**, then publish. The installer ships an LGPL FFmpeg, and the LGPL asks for its source, so
-   every release carries it. The script downloads the pinned source archives (FFmpeg at the commit the installer's
-   build was made from, and the build scripts that name the source of every library linked into it), checks their
-   SHA-256 and uploads them to the draft with `gh release upload --clobber`, so running it twice is safe:
+7. **Check that the draft holds the FFmpeg source**, then publish. The installer ships an LGPL FFmpeg, and the LGPL asks
+   for its source, so the release workflow attaches it to the draft itself (`packaging/attach_ffmpeg_source.py`, run
+   from the tag: the FFmpeg commit the installer was built from, and the build scripts that name the source of every
+   library linked into it). `gh release upload --clobber` of the installer leaves it alone. Look before you publish:
 
    ```powershell
-   python packaging\attach_ffmpeg_source.py v1.0.0
+   gh release view v1.0.0 --json assets --jq ".assets[].name"
    gh release edit v1.0.0 --draft=false
    ```
 
-   Run it from the checkout of the tag: the pins in `packaging/lgpl_av.py` must be the installer's. `--dry-run`
-   downloads and verifies without uploading. If it stops with "is not the pinned file", GitHub served a different
-   archive for the same commit: check that `FFMPEG_COMMIT` is still the `g...` commit in `FFMPEG_VERSION`, then pin the
-   new digest in `SOURCE_ARCHIVES`.
+   The list must show `ffmpeg-<version>-source.tar.gz` and `ffmpeg-builds-<release>-scripts.tar.gz` next to
+   `NexusVox-Setup.exe`. If they are missing (the workflow step failed), repair the draft from a checkout of the tag,
+   which the script insists on: `git checkout v1.0.0`, then `python packaging\attach_ffmpeg_source.py v1.0.0` (it also
+   refuses a release without the installer and a published one; `--allow-published` adds the source to a published
+   release). If a run stops with "is not the pinned file", GitHub served other content for the same commit: check that
+   `FFMPEG_COMMIT` is still the `g...` commit in `FFMPEG_VERSION`, pin the new digest in `SOURCE_ARCHIVES` through a
+   pull request and tag after that, because the pins of a tag are the ones the script uses. The installer workflow
+   runs `--dry-run` before it builds, so a pull request that touches the pins finds this early.
 
 8. Log out of SimplySign Desktop.
 
@@ -108,9 +112,10 @@ vendor that flags it. Do not upload other builds under the same version.
 
 ## If the certificate is not ready: ship unsigned
 
-An unsigned 1.0 is acceptable; a delayed 1.0 for a certificate is not. Skip steps 1 to 6 and 8, do step 7 (the FFmpeg
-source is owed for the unsigned installer, too) and publish the draft as CI built it, and say so in the release notes: *"This installer is not signed yet.
-Windows SmartScreen shows it as from an unknown publisher."* Sign from the next release on.
+An unsigned 1.0 is acceptable; a delayed 1.0 for a certificate is not. Skip steps 1 to 6 and 8, check step 7 (the draft
+carries the FFmpeg source without any local work) and publish the draft as CI built it, and say so in the release
+notes: *"This installer is not signed yet. Windows SmartScreen shows it as from an unknown publisher."* Sign from the
+next release on.
 
 ## What users see: SmartScreen
 

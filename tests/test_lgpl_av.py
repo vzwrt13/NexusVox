@@ -411,3 +411,21 @@ def test_only_takes_the_listed_steps(monkeypatch):
     monkeypatch.setattr(selftest, "run", lambda work, download, only: seen.append((download, only)))
     selftest.main(["NexusVox.exe", "--selftest", "work", "--only", "tray,mic_guard", "--download"])
     assert seen == [(True, {"tray", "mic_guard"})]
+
+
+def test_the_notices_carry_a_written_source_offer_naming_the_lgpl_libraries(tmp_path):
+    section = notices.ffmpeg_section(_pinned_app(tmp_path))
+    offer = section[section.index("Written offer:") :]
+    assert "three years from the date of each" in offer
+    assert "no charge beyond the cost of distribution" in offer
+    assert notices.SOURCE_OFFER_CONTACT in offer
+    assert "libmp3lame" in offer  # LGPL: named
+    assert "libdav1d" not in offer  # BSD: not part of the offer
+
+
+def test_the_offer_in_the_licence_file_names_the_same_contact_as_the_readme():
+    root = PACKAGING.parent
+    licences = (root / "THIRD_PARTY_LICENSES.md").read_text(encoding="utf-8")
+    assert "Written offer" in licences
+    assert notices.SOURCE_OFFER_CONTACT in licences
+    assert notices.SOURCE_OFFER_CONTACT in (root / "README.md").read_text(encoding="utf-8")

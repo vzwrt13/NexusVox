@@ -122,7 +122,7 @@ next release on.
 A valid signature gives the SmartScreen and UAC dialogs a verified publisher name. It does **not** give instant
 SmartScreen reputation: reputation builds with downloads of the same file, so a fresh release can still show the blue
 "Windows protected your PC" dialog, signed or not. The user-facing steps are in the
-[README](../README.md#windows-installer); in short: click **More info**, then **Run anyway**. Never change the file
+[README](../README.md#download); in short: click **More info**, then **Run anyway**. Never change the file
 name (`NexusVox-Setup.exe`, no version) and never publish two different builds under one version: reputation is tracked
 per file, which is why the release stays a draft until the signed installer is on it.
 

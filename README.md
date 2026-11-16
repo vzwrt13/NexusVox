@@ -4,26 +4,69 @@
 
 [![CI](https://github.com/vzwrt13/NexusVox/actions/workflows/ci.yml/badge.svg)](https://github.com/vzwrt13/NexusVox/actions/workflows/ci.yml)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![Platform](https://img.shields.io/badge/platform-Windows%2011-blue.svg)](#platform)
+[![Platform](https://img.shields.io/badge/platform-Windows%2011-blue.svg)](#download)
 
-**Local speech-to-text with push-to-talk and auto-insert.**
+**Your voice stays on your device.**
 
-Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no subscription, no copy-paste.
+NexusVox is a Windows app that turns speech into text on your own PC: hold a hotkey, speak, release, and your words
+appear at the cursor in whatever app you are using. It also records and transcribes meetings. Nothing is sent to a
+cloud service, and there is no subscription. The app is free and source-available under the
+[PolyForm Noncommercial License 1.0.0](#license).
 
-**An NVIDIA GPU is strongly recommended.** A CPU-only path exists and needs no Docker, but it is slow enough that dictation stops feeling immediate — see [Performance](#performance) for measured numbers before you choose it.
+## Download
 
-> **Project status.** NexusVox is actively maintained and developed. The free app is source-available
-> under the PolyForm Noncommercial License 1.0.0. A NexusVox Pro edition with paid add-ons is in development; there is no release date
-> yet. Issues and pull requests are welcome.
+**[Download NexusVox-Setup.exe](https://github.com/vzwrt13/NexusVox/releases/latest/download/NexusVox-Setup.exe)**
+(all releases: [Releases](https://github.com/vzwrt13/NexusVox/releases))
+
+- **Windows 11**, 64-bit. The installer is per-user and needs no administrator rights.
+- **Works on the CPU.** The speech model runs in the app itself, with no Docker and no GPU. It downloads on first use
+  (about 670 MB).
+- **An NVIDIA GPU is optional** and makes dictation much faster; see [Performance](#performance) and
+  [Run from source](#run-from-source) for the GPU setup.
+
+The installer is signed with the NightShift AI GmbH code-signing certificate, but Windows SmartScreen builds trust per
+download, so a new release can still show *"Windows protected your PC"*. Click **More info**, then **Run anyway**. A
+release published before its signature is ready says so in its notes and shows *Unknown publisher*; the same two
+clicks apply. Check a download in the file's Properties, Digital Signatures tab, or with
+`signtool verify /pa /v NexusVox-Setup.exe`. How releases are signed: [docs/SIGNING.md](docs/SIGNING.md).
+
+After the install, the dashboard opens and walks you through the microphone and the hotkey.
+[GettingStarted.md](GettingStarted.md) has the full guide with configuration and troubleshooting.
 
 ![The NexusVox analytics dashboard: a dark interface with tiles for transcription count, average, minimum and maximum words per minute, average duration and minutes saved, above a line chart of transcriptions over time with a date-range filter.](docs/images/dashboard.png)
 
-*Every transcription is stored locally and analysed in the built-in dashboard — words per minute, session length, usage over time.*
+*Every transcription is stored locally and analysed in the built-in dashboard: words per minute, session length, usage over time.*
 
 ---
 
-## Features
+## What it does
+
+**Dictation**
+
+- **Push-to-talk.** Hold `Ctrl+Win`, speak, release. Or press once to start and again to stop. The hotkey is yours to change.
+- **Voice commands.** Say "new line", "new paragraph" or a punctuation mark, in English or German.
+- **Clean-up and rewriting.** Optionally remove fillers and fix punctuation, or select text and say how to rewrite
+  it, with a language model that runs on your PC.
+- **Your words.** A correction dictionary, polish presets and suggestions learned from your edits.
+- **English and German**, detected automatically; other languages with the Whisper model.
+
+**Meetings and files**
+
+- **Meeting recording** without a bot in the call: your microphone and the system audio become one transcript with
+  numbered speakers.
+- **File transcription.** Drop in an audio file and download the text as TXT, SRT or VTT.
+- **History.** Every transcription is stored locally with its audio, to replay, correct and search.
+
+**Private by design.** Audio and text stay on your PC unless you point NexusVox at a server of your own. See
+[SECURITY.md](SECURITY.md) for what the app does on your machine.
+
+Summaries and minutes templates are part of [NexusVox Pro](https://nexusvox.app/pro), which is in development. Everything above is the free app.
+
+---
+
+## Feature reference
+
+The full list, with the settings behind each feature.
 
 - **Push-to-talk** — hold `Ctrl+Win`, speak, release; text is injected at the cursor instantly. Or switch to *Toggle* mode in Settings: press once to start, press again to stop
 - **Your own hotkey** — any modifiers, optionally ending in a key (`Ctrl+Shift+A`, `F9`, ...), set in Settings → Dictation with a *Record* button or in `config.toml`. A bound letter is swallowed while it is held as part of the combo, so it never lands in the app you are dictating into
@@ -49,9 +92,13 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 
 ---
 
-## Requirements
+## Run from source
 
-- **Windows 11** (Win32 SendInput + pynput hooks)
+For developers and for the GPU setup. Most people want the [installer](#download).
+
+### Requirements
+
+- **Windows 11** (Win32 `SendInput` and `WM_PASTE` for text injection, pynput win32 hooks for the hotkey; not portable to macOS or Linux)
 - **Python 3.11+**
 
 **Recommended — NVIDIA GPU** (Parakeet, and a much faster Whisper):
@@ -68,9 +115,7 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 
 **Optional — an extension package:** NexusVox loads installed packages that register under the `nexusvox.extensions` entry-point group and can add a step after a file upload, dashboard tabs and export formats. None ships with NexusVox; [docs/EXTENSIONS.md](docs/EXTENSIONS.md) describes the interface. Without one nothing changes.
 
----
-
-## Quick Start (GPU — recommended)
+### GPU (recommended for speed)
 
 ```bash
 # 1. Start the Parakeet inference server (~2 GB VRAM)
@@ -85,7 +130,7 @@ python -m nexusvox
 
 Parakeet is the default because it is both the fastest and the most accurate model measured (see [Performance](#performance)) and needs only ~2 GB of VRAM. Choose **Whisper Large V3 Turbo** in the dashboard Settings tab for languages Parakeet does not cover (it knows 25 European languages); the server URL follows automatically.
 
-## Quick Start (CPU — fallback)
+### CPU
 
 ```bash
 pip install -e .
@@ -95,16 +140,6 @@ python -m nexusvox
 Without a usable GPU, Parakeet runs in-process on the CPU (ONNX, int8 — no Docker). A config that names a model that no longer exists (Voxtral, Cohere, the smaller Whisper sizes, Distil-Whisper) falls back to Parakeet with one log line. Open the dashboard from the tray icon → Settings → **Models** to pick `whisper-large-v3-turbo` for languages Parakeet does not cover, or set `[inference].model = "whisper-large-v3-turbo"` in `config.toml` before the first run.
 
 Models download on first use (~670 MB for Parakeet on CPU, ~1.6 GB for `whisper-large-v3-turbo`) and cache under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Speaker detection for uploads needs the Parakeet GPU container.
-
-## Windows installer
-
-Each [release](https://github.com/vzwrt13/NexusVox/releases/latest) carries `NexusVox-Setup.exe`, a per-user installer
-(no administrator rights) with the CPU speech path built in. It is signed with the NightShift AI GmbH code-signing
-certificate, but Windows SmartScreen builds trust per download, so a new release can still show *"Windows protected
-your PC"*. Click **More info**, then **Run anyway**. A release published before its signature is ready says so in its
-notes and shows *Unknown publisher*; the same two clicks apply. Check a download in the file's Properties, Digital
-Signatures tab, or with `signtool verify /pa /v NexusVox-Setup.exe`. How releases are signed:
-[docs/SIGNING.md](docs/SIGNING.md).
 
 See [GettingStarted.md](GettingStarted.md) for the full setup guide including configuration, model selection, and troubleshooting.
 
@@ -159,7 +194,6 @@ Reproduce with `python scripts/benchmark.py` — see [docs/BENCHMARK_GUIDE.md](d
 
 Starting NexusVox from the Start menu or a shortcut opens the dashboard; the Windows autostart keeps it in the tray. Otherwise open it from the NexusVox tray icon (left-click) while NexusVox is running. Typing `http://localhost:47392` into the browser does not work: the dashboard only answers the page the tray opens, which carries a one-time key.
 
-
 | Tab | Description |
 |---|---|
 | Analytics | Word count, session stats, usage charts |
@@ -194,12 +228,6 @@ Starting NexusVox from the Start menu or a shortcut opens the dashboard; the Win
 
 ---
 
-## Platform
-
-Windows 11 only. NexusVox uses Win32 APIs (`SendInput`, `WM_PASTE`) for text injection and pynput win32 hooks for the global hotkey listener — these are not portable to macOS or Linux.
-
----
-
 ## Free and Pro (coming soon)
 
 The **core of NexusVox stays free and source-available under the PolyForm Noncommercial License 1.0.0**. That includes dictation, polish, auto cleanup, file upload transcription and speaker detection. Basic export (TXT, SRT, VTT) is free. Nothing listed here is going to become paid.
@@ -214,7 +242,7 @@ Commercial use of the core needs NexusVox Pro or a commercial licence, available
 
 ## Contributing
 
-Bug reports and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, lint and test commands, and branch conventions. Please read the project status above and the notes in CONTRIBUTING.md first.
+Bug reports and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, lint and test commands, and branch conventions. Please read the notes in CONTRIBUTING.md first.
 
 ---
 
@@ -232,3 +260,4 @@ The licence text in [LICENSE](LICENSE) is the only binding wording; this summary
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) covers the bundled Chart.js (MIT), the licenses of the runtime dependencies and the speaker detection model.
 
 Speech recognition models are **not** covered by this license. They are downloaded from Hugging Face at runtime under their own terms — see the [model table](#model-backends) above.
+

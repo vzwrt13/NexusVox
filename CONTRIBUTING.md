@@ -10,7 +10,7 @@ may not be merged. Open an issue first for anything larger than a fix.
 
 ## Before you start
 
-- **Running NexusVox requires Windows 11.** Text injection uses Win32 `SendInput`/`WM_PASTE` and the hotkey listener uses pynput's win32 hooks; neither is portable.
+- **Running NexusVox requires Windows 10 (version 2004 or newer) or Windows 11.** Text injection uses Win32 `SendInput`/`WM_PASTE` and the hotkey listener uses pynput's win32 hooks; neither is portable.
 - **The test suite is not Windows-bound** and runs on Linux too, so you can work on the transcription, dashboard, database, and config layers from any platform — you just can't exercise dictation end to end.
 - For bugs, please include your OS, Python version, the model you selected, and whether you are on the CPU or GPU path.
 

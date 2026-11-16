@@ -18,7 +18,7 @@ cloud service, and there is no subscription. The app is free and source-availabl
 **[Download NexusVox-Setup.exe](https://github.com/vzwrt13/NexusVox/releases/latest/download/NexusVox-Setup.exe)**
 (all releases: [Releases](https://github.com/vzwrt13/NexusVox/releases))
 
-- **Windows 11**, 64-bit. The installer is per-user and needs no administrator rights.
+- **Windows 10 (version 2004 or newer) or Windows 11**, 64-bit. The installer is per-user and needs no administrator rights.
 - **Works on the CPU.** The speech model runs in the app itself, with no Docker and no GPU. It downloads on first use
   (about 670 MB).
 - **An NVIDIA GPU is optional** and makes dictation much faster; see [Performance](#performance) and
@@ -98,7 +98,7 @@ For developers and for the GPU setup. Most people want the [installer](#download
 
 ### Requirements
 
-- **Windows 11** (Win32 `SendInput` and `WM_PASTE` for text injection, pynput win32 hooks for the hotkey; not portable to macOS or Linux)
+- **Windows 10 (version 2004 or newer) or Windows 11** (Win32 `SendInput` and `WM_PASTE` for text injection, pynput win32 hooks for the hotkey; not portable to macOS or Linux)
 - **Python 3.11+**
 
 **Recommended — NVIDIA GPU** (Parakeet, and a much faster Whisper):

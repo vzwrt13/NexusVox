@@ -191,3 +191,8 @@ def test_the_release_signing_script_signs_the_exe_then_the_installer():
     if result.returncode == 77:  # the script's own "signtool.exe (Windows SDK) not installed"
         pytest.skip(result.stdout.strip())
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_installer_accepts_windows_10_2004_and_newer():
+    iss = (PACKAGING / "nexusvox.iss").read_text(encoding="utf-8")
+    assert "MinVersion=10.0.19041" in iss

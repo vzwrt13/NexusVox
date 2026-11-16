@@ -42,7 +42,7 @@ not touched.
 | `--browser PATH` | found automatically | `msedge.exe` or `chrome.exe`; `NEXUSVOX_SCREENSHOT_BROWSER` works too |
 | `--scale N` | `1.5` | device pixel ratio (1280 px wide viewport times N) |
 
-A Chromium browser is the only extra requirement: Microsoft Edge ships with Windows 11, Google Chrome works
+A Chromium browser is the only extra requirement: Microsoft Edge ships with Windows 10 (version 2004 or newer) and Windows 11, Google Chrome works
 as well. No browser-automation package is needed.
 
 ## What it does

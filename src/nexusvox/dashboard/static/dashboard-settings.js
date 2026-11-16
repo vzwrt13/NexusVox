@@ -249,13 +249,15 @@ async function checkForUpdate() {
   updateStatus.hidden = false;
   let reply;
   try {
-    reply = await (await fetch("/api/update-check", { method: "POST" })).json();
+    const r = await fetch("/api/update-check", { method: "POST" });
+    reply = await r.json().catch(() => ({ error: "server", message: "The check failed. Try again later." }));
   } catch (e) {
     reply = { error: "dashboard", message: "The dashboard could not be reached." };
   }
   checkUpdateButton.disabled = false;
   if (reply.ok) {
-    setStatus(updateStatus, reply.newer ? "warn" : "ok", reply.message);
+    // An available update is information, not a caveat: neutral. Green only when the comparison was made.
+    setStatus(updateStatus, reply.latest && !reply.newer ? "ok" : undefined, reply.message);
     if (reply.newer) {
       updateLink.href = reply.url;
       updateLink.hidden = false;

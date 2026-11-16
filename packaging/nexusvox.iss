@@ -40,9 +40,9 @@ SignTool=nexusvox
 SignedUninstaller=yes
 #endif
 PrivilegesRequired=lowest
-; Windows 11, the one supported system (README, pyproject classifiers): refuse earlier ones up front instead of
-; installing an app that cannot start.
-MinVersion=10.0.22000
+; Windows 10 version 2004 (build 19041) or newer, and Windows 11 (README, pyproject classifiers): refuse earlier ones
+; up front instead of installing an app that cannot start.
+MinVersion=10.0.19041
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 LicenseFile=..\LICENSE

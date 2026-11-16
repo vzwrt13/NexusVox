@@ -51,7 +51,7 @@ Hold a hotkey, speak, release — your words appear at the cursor. No cloud, no 
 
 ## Requirements
 
-- **Windows 11** (Win32 SendInput + pynput hooks)
+- **Windows 10 (version 2004 or newer) or Windows 11** (Win32 SendInput + pynput hooks)
 - **Python 3.11+**
 
 **Recommended — NVIDIA GPU** (Parakeet, and a much faster Whisper):
@@ -196,7 +196,7 @@ Starting NexusVox from the Start menu or a shortcut opens the dashboard; the Win
 
 ## Platform
 
-Windows 11 only. NexusVox uses Win32 APIs (`SendInput`, `WM_PASTE`) for text injection and pynput win32 hooks for the global hotkey listener — these are not portable to macOS or Linux.
+Windows only (Windows 10 version 2004 or newer, or Windows 11). NexusVox uses Win32 APIs (`SendInput`, `WM_PASTE`) for text injection and pynput win32 hooks for the global hotkey listener — these are not portable to macOS or Linux.
 
 ---
 

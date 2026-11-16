@@ -385,7 +385,7 @@ deletes it once the new files are in and moves it back if Setup is cancelled or 
 survives and a failed upgrade leaves a working app. Unticking the autostart task on an upgrade removes the Run value. The Run value carries `--autostart` (tray only); the Start menu entry and the optional desktop shortcut start without it and open the dashboard.
 The uninstaller also removes `{app}\extensions` (add-ons run inside the app); the delete-data question covers the
 default folders only, and "delete the models" also removes the Hugging Face xet cache, which the app keeps next to the
-models (`HF_XET_CACHE`). `MinVersion` is Windows 11. CI installs, starts the installed app, tries to install over
+models (`HF_XET_CACHE`). `MinVersion` is Windows 10 version 2004 (build 19041). CI installs, starts the installed app, tries to install over
 it, upgrades, and uninstalls with and without the delete switches.
 
 **GPL libraries in the build: solved by `packaging/lgpl_av.py`.** The PyAV wheel on PyPI carries x264 and x265

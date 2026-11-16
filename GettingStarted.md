@@ -27,7 +27,7 @@ To stay on CPU even if you later add a GPU, open the dashboard from the tray ico
 
 ## Prerequisites
 
-- **Windows 11** (uses Windows-specific keyboard hooks and SendInput API)
+- **Windows 10 (version 2004 or newer) or Windows 11** (uses Windows-specific keyboard hooks and SendInput API)
 - **Python 3.11+**
 
 **CPU path** — no additional requirements.

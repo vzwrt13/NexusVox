@@ -49,6 +49,7 @@ from ..llm import warm_up as llm_warm_up
 from ..system.feedback_form import build_feedback_url
 from ..system.feedback_send import FeedbackError, app_feedback_url, build_report, render_preview, send_report
 from ..system.logsetup import log_dir
+from ..system.update_check import check_for_update, installed_version
 from .api_base import DashboardState, logger
 
 MAX_SERVER_NAME_CHARS = 60
@@ -96,6 +97,7 @@ class SettingsMixin(DashboardState):
             "feedback_modes": list(FEEDBACK_MODES),
             "store_audio": self._config.database.store_audio,
             "log_full_text": self._config.log_full_text,
+            "app_version": installed_version(),
             "setup_done": self._config.setup_done,
             "audio_device": self._config.audio.device,
             "log_dir": str(log_dir()),
@@ -555,6 +557,10 @@ class SettingsMixin(DashboardState):
         if not url:
             raise FeedbackError("disabled", "Sending from the app is not available here. Use the web form.")
         return url, build_report(kind, message, include_log, device=self._config.inference.device)
+
+    def update_check(self) -> dict:
+        """Asks GitHub for the newest release; only the *Check for updates* click calls this."""
+        return check_for_update()
 
     def open_log_folder(self) -> dict:
         """Opens the log folder in Explorer, creating it first when nothing has been logged yet."""

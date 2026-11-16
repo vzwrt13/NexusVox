@@ -236,6 +236,35 @@ async function openLogFolder(errorLine) {
   }
 }
 openLogFolderButton.addEventListener("click", () => openLogFolder(logOpenError));
+
+// ── Version check ───────────────────────────────────────────────────
+// Asks GitHub only when the button is pressed; the server does the request.
+const checkUpdateButton = document.getElementById("check-update");
+const updateStatus = document.getElementById("update-status");
+const updateLink = document.getElementById("update-link");
+async function checkForUpdate() {
+  checkUpdateButton.disabled = true;
+  updateLink.hidden = true;
+  setStatus(updateStatus, undefined, "Checking...");
+  updateStatus.hidden = false;
+  let reply;
+  try {
+    reply = await (await fetch("/api/update-check", { method: "POST" })).json();
+  } catch (e) {
+    reply = { error: "dashboard", message: "The dashboard could not be reached." };
+  }
+  checkUpdateButton.disabled = false;
+  if (reply.ok) {
+    setStatus(updateStatus, reply.newer ? "warn" : "ok", reply.message);
+    if (reply.newer) {
+      updateLink.href = reply.url;
+      updateLink.hidden = false;
+    }
+  } else {
+    setStatus(updateStatus, "down", reply.message || "The check failed.");
+  }
+}
+checkUpdateButton.addEventListener("click", checkForUpdate);
 learnFromEditsToggle.addEventListener("change", async () => {
   await postSetting("/api/settings/learn-from-edits", { enabled: learnFromEditsToggle.checked });
   loadLearnStatus();
@@ -401,6 +430,7 @@ async function loadSettings() {
   storeAudioToggle.checked = s.store_audio;
   logFullTextToggle.checked = s.log_full_text;
   logDirLabel.textContent = s.log_dir;
+  document.getElementById("app-version").textContent = s.app_version;
   feedbackUrl = s.feedback_url || "";
   feedbackTabButton.hidden = !feedbackUrl;
   feedbackPanel.hidden = !feedbackUrl;

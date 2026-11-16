@@ -549,6 +549,16 @@
 
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
+            <h3>Version</h3>
+            <p>You have NexusVox <span id="app-version">-</span>. The check asks GitHub for the newest release when you click, and sends nothing about you or this PC. Nothing is downloaded or installed from here.</p>
+            <p id="update-status" class="settings-hint" role="status" hidden></p>
+            <p class="settings-hint"><a id="update-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Open the release page</a></p>
+          </div>
+          <button type="button" class="btn" id="check-update">Check for updates</button>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
+          <div class="setting-info">
             <h3>Compute Device</h3>
             <p>CPU runs Whisper in-process with no Docker. GPU enables all models via Docker-backed inference servers.</p>
           </div>

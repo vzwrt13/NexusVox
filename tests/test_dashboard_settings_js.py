@@ -114,7 +114,7 @@ def test_tab_switch_and_setup_end_cancel_the_recording():
 
 
 def test_the_toggles_and_home_use_the_shared_helpers():
-    assert _source("dashboard-settings.js").count('method: "POST"') == 1  # the log folder, which needs the status
+    assert _source("dashboard-settings.js").count('method: "POST"') == 2  # log folder, version check
     home = _source("dashboard-home.js")
     assert "openUploadDialog()" in home
     assert "showModal" not in home

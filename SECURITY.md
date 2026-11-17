@@ -68,7 +68,10 @@ operation involves capabilities that look alarming out of context:
   are removed from that log first; audio and transcripts are never sent. Nothing
   is sent until you click, and the tab shows the exact report beforehand. The app
   posts only to `nexusvox.app` (`APP_FEEDBACK_HOSTS` in `system/feedback_send.py`),
-  whatever `[support].feedback_form_url` says.
+  whatever `[support].feedback_form_url` says. The other click-only request is
+  *Check for updates* in Settings > Advanced: one GET to `api.github.com` for the
+  newest release (`system/update_check.py`), with no identifier of you or your PC.
+  Nothing is downloaded or installed from it.
 
 ## Trust boundary
 

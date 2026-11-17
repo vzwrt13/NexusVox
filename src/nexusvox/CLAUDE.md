@@ -10,7 +10,7 @@ Rules and pointers only. How a module works is in `docs/internals/` (table at th
 - `dictation/` - one dictation from hotkey to typed text: `hotkey.py`, `pipeline.py` and its steps (`dictionary.py`, `voice_commands.py`, `cleanup.py`, `translator.py`), `polish.py`, `polish_presets.py`, `injector.py`, `clipboard.py`, `edit_watch.py`, `lang_detect.py`, `assistant.py`, `os_commands.py`, `feedback.py`, `overlay.py`.
 - `meetings/` - `recorder.py`, `session.py`, `live.py`, `transcribe.py`.
 - `storage/` - `db.py`, `models.py`, `vocabulary.py`.
-- `system/` - `paths.py`, `logsetup.py`, `single_instance.py`, `tray.py`, `uia.py`, `window_manager.py`, `keyboard.py`, `com.py`, `docker_ctl.py`, `feedback_form.py`, `feedback_send.py`.
+- `system/` - `paths.py`, `logsetup.py`, `single_instance.py`, `tray.py`, `uia.py`, `window_manager.py`, `keyboard.py`, `com.py`, `docker_ctl.py`, `feedback_form.py`, `feedback_send.py`, `update_check.py`.
 - `transcription/` - `transcriber.py` (base class and factory), `file_transcribe.py`, `diarization.py`, `speaker_fallback.py`, `exports.py`.
 - `transcribers/` (in-process backends), `config_sections/` (config dataclasses), `dashboard/` (Flask, own `CLAUDE.md`).
 

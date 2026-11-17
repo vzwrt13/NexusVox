@@ -258,6 +258,8 @@ The press enter command only fires at the very end of a dictation ("press enter 
 
 Turn on Settings → Vocabulary → Correction Dictionary → Learn From Edits (or `[learn_from_edits].enabled`). After each paste NexusVox reads the text field for 20 seconds (`window_s`); fix a misheard word there and it shows up below the toggle as a suggestion to add or dismiss - nothing enters the dictionary on its own. Password fields and terminals are never read (terminals expose no readable text), and nothing is learned from a dictation that auto cleanup or translation changed. The line under the toggle says how the last paste ended, so you can tell "nothing corrected" from "this app cannot be read". The console log (`[general].log_level`, `INFO` by default) names the reason for every paste that taught nothing: the field could not be read, the edit was too small, there were too many changes, no word was replaced, and whether the watch ended because the time window ran out or the next dictation arrived. If a read fails (a browser rebuilds its address bar, for example) NexusVox fetches the focused field again before it gives up, and the last text it saw is still compared.
 
+To see whether a newer release is out, open Settings → Advanced → *Check for updates*. NexusVox asks GitHub only when you click, sends nothing about you or your PC, and links to the release page; it never downloads or installs anything itself.
+
 ---
 
 ## Troubleshooting

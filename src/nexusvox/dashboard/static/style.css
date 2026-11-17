@@ -112,7 +112,20 @@ header h1 {
   border-top: 1px solid var(--border);
 }
 .tabs-footer .tab[hidden] { display: none; }
-.tabs-footer:not(:has(.tab:not([hidden]))) { display: none; }
+.sidebar-version { padding: 6px 12px 0; font-size: 11px; color: var(--text-dim); }
+.sidebar-version p { margin: 0; }
+.sidebar-version-status { display: block; margin-top: 4px; font-size: 11px; line-height: 1.35; }
+.sidebar-version [hidden] { display: none; }
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent-light);
+  cursor: pointer;
+}
+.link-button:hover:not(:disabled) { text-decoration: underline; }
+.link-button:disabled { opacity: 0.6; cursor: default; }
 
 .tab {
   display: flex;

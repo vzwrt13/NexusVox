@@ -166,6 +166,16 @@ def register(app: Flask, api: DashboardAPI) -> None:
         )
         return jsonify(resp), _feedback_status(resp)
 
+    @app.route("/api/update-check", methods=["POST"])
+    def update_check():
+        resp = api.update_check()
+        return jsonify(resp), (502 if "error" in resp else 200)
+
+    @app.route("/api/update-check/open", methods=["POST"])
+    def open_release_page():
+        resp = api.open_release_page(_json_object().get("url"))
+        return jsonify(resp), (400 if "error" in resp else 200)
+
     @app.route("/api/log-folder/open", methods=["POST"])
     def open_log_folder():
         resp = api.open_log_folder()

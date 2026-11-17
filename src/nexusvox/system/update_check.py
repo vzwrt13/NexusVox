@@ -20,6 +20,17 @@ logger = logging.getLogger(__name__)
 REPO = "vzwrt13/NexusVox"
 LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
+
+
+def is_release_url(url: object) -> bool:
+    """True only for the project's own GitHub releases pages; nothing else may be opened from the dashboard."""
+    if not isinstance(url, str) or any(c.isspace() or ord(c) < 32 for c in url):
+        return False
+    if url == RELEASES_URL:
+        return True
+    return url.startswith(RELEASES_URL) and url[len(RELEASES_URL)] in "/?#" and not url.startswith(RELEASES_URL + "/..")
+
+
 # httpx applies this to each phase (connect, read, ...) and not to the DNS lookup, so `_get` also caps the whole call.
 TIMEOUT_S = 5.0
 DEADLINE_S = 8.0

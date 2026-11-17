@@ -139,3 +139,35 @@ def test_route_reports_offline_as_an_error(monkeypatch, session_factory):
 
 def test_settings_carry_the_installed_version(session_factory):
     assert _client(session_factory).get("/api/settings").get_json()["app_version"] == update_check.installed_version()
+
+
+@pytest.mark.parametrize(
+    ("url", "allowed"),
+    [
+        ("https://github.com/vzwrt13/NexusVox/releases", True),
+        ("https://github.com/vzwrt13/NexusVox/releases/tag/v1.0.0", True),
+        ("https://github.com/vzwrt13/NexusVox/releases?q=1", True),
+        ("https://github.com/vzwrt13/NexusVox/releases-evil", False),
+        ("https://github.com/vzwrt13/NexusVox/releases/../../x", False),
+        ("https://github.com/vzwrt13/NexusVox", False),
+        ("http://github.com/vzwrt13/NexusVox/releases", False),
+        ("https://evil.example/https://github.com/vzwrt13/NexusVox/releases", False),
+        ("https://github.com/vzwrt13/NexusVox/releases\nx", False),
+        ("#", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_only_project_release_urls_are_allowed(url, allowed):
+    assert update_check.is_release_url(url) is allowed
+
+
+def test_open_route_hands_a_release_url_to_the_browser(monkeypatch, session_factory):
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url) or True)
+    client = _client(session_factory)
+    good = "https://github.com/vzwrt13/NexusVox/releases/tag/v9.0.0"
+    assert client.post("/api/update-check/open", json={"url": good}).status_code == 200
+    for bad in ("#", "https://example.org/", None):
+        assert client.post("/api/update-check/open", json={"url": bad}).status_code == 400
+    assert opened == [good]

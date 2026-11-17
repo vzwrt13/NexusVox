@@ -8,6 +8,7 @@ import secrets
 import threading
 import time
 import urllib.parse
+import webbrowser
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
@@ -50,7 +51,7 @@ from ..llm import warm_up as llm_warm_up
 from ..system.feedback_form import build_feedback_url
 from ..system.feedback_send import FeedbackError, app_feedback_url, build_report, render_preview, send_report
 from ..system.logsetup import log_dir
-from ..system.update_check import check_for_update
+from ..system.update_check import check_for_update, is_release_url
 from .api_base import DashboardState, logger
 
 MAX_SERVER_NAME_CHARS = 60
@@ -566,6 +567,17 @@ class SettingsMixin(DashboardState):
         except Exception:  # the page shows a plain line instead of Flask's error page
             logger.exception("Update check failed")
             return {"error": "unreadable", "message": "The check failed. Try again later."}
+
+    def open_release_page(self, url: object) -> dict:
+        """Opens a releases page of this project in the default browser; any other URL is refused."""
+        if not is_release_url(url):
+            return {"error": "That is not a release page of this project."}
+        try:
+            opened = webbrowser.open(url)
+        except Exception as exc:  # the browser launcher can fail in odd ways; the page shows a plain line
+            logger.error("Could not open the release page %s: %s", url, exc)
+            return {"error": "Could not open the browser."}
+        return {"ok": True} if opened else {"error": "Could not open the browser."}
 
     def open_log_folder(self) -> dict:
         """Opens the log folder in Explorer, creating it first when nothing has been logged yet."""

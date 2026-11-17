@@ -258,8 +258,9 @@ async function checkForUpdate() {
   if (reply.ok) {
     // An available update is information, not a caveat: neutral. Green only when the comparison was made.
     setStatus(updateStatus, reply.latest && !reply.newer ? "ok" : undefined, reply.message);
-    if (reply.newer) {
-      updateLink.href = reply.url;
+    // Only an update gets a link; with the newest version there is nothing to go and read.
+    if (reply.newer && reply.url) {
+      updateLink.dataset.url = reply.url;
       updateLink.hidden = false;
     }
   } else {
@@ -267,6 +268,23 @@ async function checkForUpdate() {
   }
 }
 checkUpdateButton.addEventListener("click", checkForUpdate);
+// The default browser opens the page (the server does it); a link inside the dashboard window would load the dashboard.
+updateLink.addEventListener("click", async () => {
+  const url = updateLink.dataset.url;
+  if (!url) return;
+  let reply;
+  try {
+    const r = await fetch("/api/update-check/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    reply = await r.json().catch(() => ({}));
+  } catch (e) {
+    reply = {};
+  }
+  if (!reply.ok) setStatus(updateStatus, "down", reply.error || "Could not open the browser.");
+});
 learnFromEditsToggle.addEventListener("change", async () => {
   await postSetting("/api/settings/learn-from-edits", { enabled: learnFromEditsToggle.checked });
   loadLearnStatus();

@@ -1,7 +1,7 @@
 ; Inno Setup script for the NexusVox per-user installer.
 ;
 ; Build with:  python packaging/build_installer.py   (after `python packaging/build.py`)
-; or directly: ISCC /DAppVersion=0.7.0 /DAppVersionInfo=0.7.0.0 packaging\nexusvox.iss
+; or directly: ISCC /DAppVersion=1.0.0 /DAppVersionInfo=1.0.0.0 packaging\nexusvox.iss
 ; (dist\installer\THIRD_PARTY_NOTICES.txt must exist first; build_installer.py writes it.)
 ;
 ; Per-user, no admin rights: the app goes to %LOCALAPPDATA%\Programs\NexusVox. The file name of the

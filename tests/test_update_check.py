@@ -83,6 +83,26 @@ def test_installed_version_is_the_running_code():
     assert update_check.installed_version() == __version__
 
 
+def test_one_point_zero_against_its_release_tag(monkeypatch):
+    _reply(monkeypatch, body={"tag_name": "v1.0.0"})
+    assert not check_for_update("1.0.0")["newer"]  # equal
+    assert check_for_update("0.7.0")["newer"]  # installed is older
+    _reply(monkeypatch, body={"tag_name": "v0.7.0"})
+    assert not check_for_update("1.0.0")["newer"]  # installed is newer
+    _reply(monkeypatch, body={"tag_name": "v1.0.1"})
+    assert check_for_update("1.0.0")["newer"]
+
+
+def test_package_version_matches_pyproject():
+    import tomllib
+    from pathlib import Path
+
+    from nexusvox import __version__
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    assert tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"] == __version__ == "1.0.0"
+
+
 def test_older_release_is_not_an_update(monkeypatch):
     _reply(monkeypatch, body={"tag_name": "v0.6.0"})
     assert not check_for_update("0.7.0")["newer"]

@@ -129,6 +129,7 @@ def test_quick_paste_tap_still_pastes_when_the_cycle_is_skipped(monkeypatch):
 
 
 def _polish_app(monkeypatch, selection: str, rewritten: str | Exception, windows=(1, 1), presets=()):
+    patch_app(monkeypatch, "reload_unless_loaded", lambda config: False)  # a timeout must not load a real model
     app = NexusVoxApp.__new__(NexusVoxApp)
     app._config = MagicMock(injection_delay_ms=0, llm=LlmConfig())
     app._last_typed = ""

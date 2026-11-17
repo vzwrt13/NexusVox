@@ -432,7 +432,7 @@ async function loadSettings() {
   storeAudioToggle.checked = s.store_audio;
   logFullTextToggle.checked = s.log_full_text;
   logDirLabel.textContent = s.log_dir;
-  document.getElementById("app-version").textContent = s.app_version;
+  document.getElementById("app-version").textContent = "v" + String(s.app_version).replace(/^v/, "");
   feedbackUrl = s.feedback_url || "";
   feedbackTabButton.hidden = !feedbackUrl;
   feedbackPanel.hidden = !feedbackUrl;

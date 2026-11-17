@@ -349,3 +349,10 @@ def test_navigation_stacks_before_the_page_gets_too_narrow():
 def test_search_gap_ignores_hidden_cards():
     rule = re.search(r"#tab-settings\.searching #settings-pages > ([^{]+)\{ margin-top: 12px; \}", CSS)
     assert rule and rule.group(1).strip() == ".settings-card:not(.search-hidden) ~ .settings-card:not(.search-hidden)"
+
+
+def test_version_line_lives_in_the_sidebar_footer_not_in_settings():
+    nav = re.search(r'<nav class="tabs tabs-footer">(.*?)</nav>', HTML, re.S).group(1)
+    for ident in ("app-version", "check-update", "update-status", "update-link"):
+        assert f'id="{ident}"' in nav and f'id="{ident}"' not in _settings_section()
+    assert not re.search(r"tabs-footer:not\(:has", CSS)  # the footer stays visible without the Feedback button

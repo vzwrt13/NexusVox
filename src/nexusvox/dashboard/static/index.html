@@ -26,6 +26,11 @@
     </nav>
     <nav class="tabs tabs-footer">
       <button class="tab" id="feedback-tab-button" data-tab="feedback" hidden>Feedback</button>
+      <div class="sidebar-version">
+        <p class="sidebar-version-line"><span id="app-version">-</span> &middot; <button type="button" class="link-button" id="check-update" title="Asks GitHub for the newest release. Sends nothing about you or this PC; nothing is downloaded.">Check for updates</button></p>
+        <p id="update-status" class="sidebar-version-status" role="status" hidden></p>
+        <a id="update-link" class="sidebar-version-status" href="#" target="_blank" rel="noopener noreferrer" hidden>Open the release page</a>
+      </div>
     </nav>
   </header>
 
@@ -546,16 +551,6 @@
       <div class="settings-card settings-advanced" id="settings-advanced">
         <h4 class="nexus-section-title">Advanced</h4>
         <p class="settings-hint" style="margin-top: 6px;">Rarely needed. The defaults work for most people.</p>
-
-        <div class="setting-row" style="margin-top: 16px;">
-          <div class="setting-info">
-            <h3>Version</h3>
-            <p>You have NexusVox <span id="app-version">-</span>. The check asks GitHub for the newest release when you click, and sends nothing about you or this PC. Nothing is downloaded or installed from here.</p>
-            <p id="update-status" class="settings-hint" role="status" hidden></p>
-            <p class="settings-hint"><a id="update-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Open the release page</a></p>
-          </div>
-          <button type="button" class="btn" id="check-update">Check for updates</button>
-        </div>
 
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">

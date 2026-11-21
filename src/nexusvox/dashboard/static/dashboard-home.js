@@ -43,7 +43,7 @@ function describeHomeStatus(model, device, status) {
   }
   const parts = [lead];
   if (model && model.name) parts.push(model.name);
-  if (device) parts.push(device === "cuda" ? "GPU" : "CPU");
+  if (device) parts.push(device === "gpu" ? "GPU" : "CPU");
   parts.push(model && model.custom ? "uses your own server" : "runs offline");
   return { state, text: parts.join(" · ") };
 }
@@ -68,7 +68,7 @@ async function loadHomeStatus(
     // The model list is the Models page's; at page start it is loaded by the time settingsAlreadyKnown resolves.
     await settingsAlreadyKnown;
     const model = modelSpecs[current.model] || { name: current.model };
-    const { state, text } = describeHomeStatus(model, device.resolved, status);
+    const { state, text } = describeHomeStatus(model, device.active, status);
     setStatus(el, state, text);
     if (status && HOME_BUSY_PHASES.includes(status.status)) {
       homeStatusTimers.set(

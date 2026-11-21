@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
+from nexusvox.config import Config
+from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.storage.vocabulary import DictionaryEntry
 
 
@@ -1583,3 +1586,24 @@ def test_the_start_sweep_deletes_what_a_quit_left_in_the_temp_folder(db, upload_
     DashboardAPI(lambda: None, Config(), db=db).sweep_upload_leftovers()
 
     assert sorted(p.name for p in upload_tmp.iterdir()) == ["nexusvox-meeting-keep", "other.tmp"]
+
+
+@pytest.mark.parametrize(
+    ("transcriber_device", "expected"),
+    [("cpu", "cpu"), ("gpu", "gpu"), ("local", "gpu"), ("remote", None)],
+)
+def test_get_device_reports_the_device_the_transcriber_really_uses(
+    session_factory, monkeypatch, transcriber_device, expected
+):
+    # Auto-detect resolves to cuda on a GPU PC, yet without the container the model runs on the CPU.
+    monkeypatch.setattr("nexusvox.dashboard.api_models.resolve_device", lambda d: "cuda")
+    api = DashboardAPI(session_factory, Config(), get_transcriber=lambda: SimpleNamespace(device=transcriber_device))
+
+    data = api.get_device()
+
+    assert data["resolved"] == "cuda"
+    assert data["active"] == expected
+
+
+def test_get_device_active_is_unknown_without_a_running_app(session_factory):
+    assert DashboardAPI(session_factory, Config()).get_device()["active"] is None

@@ -68,7 +68,7 @@ def run_js(body: str):
 def test_status_names_model_device_and_offline_without_claiming_green():
     got = run_js(
         'const m = { name: "Parakeet", custom: false };'
-        'console.log(JSON.stringify(describeHomeStatus(m, "cuda", { status: "idle" })))'
+        'console.log(JSON.stringify(describeHomeStatus(m, "gpu", { status: "idle" })))'
     )
     # Nothing probes the container or the custom server, so an idle model is shown neutral, never green.
     assert got == {"text": "Speech model · Parakeet · GPU · runs offline"}

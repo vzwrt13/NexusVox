@@ -120,7 +120,20 @@ class ModelsMixin(DashboardState):
             "requested": requested,
             "resolved": resolve_device(requested),
             "cuda_available": cuda_available(),
+            "active": self._active_device(),
         }
+
+    def _active_device(self) -> str | None:
+        """Where the running transcriber really works: "cpu" or "gpu", None when unknown.
+
+        `resolved` is the device the config asks for. Auto-detect on a GPU PC without a running container, or a
+        model with only a CPU path, still runs on the CPU; a custom server's hardware is not ours to name.
+        """
+        transcriber = self._get_transcriber() if self._get_transcriber else None
+        device = getattr(transcriber, "device", None)
+        if device in ("cpu", "gpu"):
+            return device
+        return "gpu" if device == "local" else None  # "local": the model's Docker container on this PC
 
     def set_device(self, requested: str) -> dict:
         if requested not in ("auto", "cuda", "cpu"):

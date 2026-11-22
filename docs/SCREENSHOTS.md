@@ -7,7 +7,7 @@ invented data. One command, no setup beyond the usual `pip install -e ".[dev]"`:
 python scripts/dashboard_screenshots.py
 ```
 
-It writes nine PNGs to `docs/images/`: one per tab, and one per step of the first-run setup:
+It writes fourteen PNGs to `docs/images/`: one per tab, one per step of the first-run setup, and five for the website user guide:
 
 | File | Tab | Image ends |
 |---|---|---|
@@ -17,6 +17,17 @@ It writes nine PNGs to `docs/images/`: one per tab, and one per step of the firs
 | `dashboard-recordings.png` | Recordings | one window (1280 x 860): list and detail pane |
 | `dashboard-settings.png` | Settings | the Dictation page (the page Settings opens on) |
 | `dashboard-setup-welcome.png`, `-microphone.png`, `-hotkey.png`, `-ready.png` | First-run setup | one image per step, ending at the step's card and the *Skip setup* link |
+| `guide-settings-dictation-hotkey.png` | Settings > Dictation | the Hotkey section (the rows after it are hidden) |
+| `guide-settings-vocabulary.png` | Settings > Vocabulary | the whole page |
+| `guide-settings-text-polish.png` | Settings > Text & Polish | the whole page |
+| `guide-recordings-upload.png` | Recordings | one window: the *Upload a file* dialog with its drop area |
+| `guide-recordings-meeting-start.png` | Recordings | one window: the consent card that *Start recording* opens (it is never confirmed, so nothing records) |
+
+The `guide-*` images are copied into the website's user guide. Before any shot the script checks that every click target (`#id`) and settings page slug of `GUIDE_SHOTS` is still in
+`index.html` and stops with a message when not. The Start recording click is also safe by construction: the consent
+hint is pinned on and `start_meeting` is replaced, so no recording can start. The two Recordings ones are photographed with a short script
+that clicks the button once the page has loaded (`GUIDE_SHOTS` in the script); the Settings ones open on their page the
+same way Analytics > Your week does.
 
 The setup is an overlay that opens while `[general].setup_done` is false, so those four are photographed with the
 setup due; the script tells the page which step to show (`SETUP_SCRIPT`), fills the test box on the hotkey step and
@@ -24,13 +35,14 @@ replaces the microphone list and level with demo values (the real audio devices 
 
 The Recordings tab fills one window with its two panes and is photographed at a window's height. The
 script serves its own copy of the page with the elements after the last card to show hidden when a tab
-runs on for a long way (the selectors are in `SHOTS`; Analytics needs none now), photographs it in a tall
+runs on for a long way (the selectors are in `SHOTS` and `GUIDE_SHOTS`; Analytics needs none now), photographs it in a tall
 viewport and cuts the empty strip below the last card, so each image ends at an element and follows the
-dashboard when its layout changes. Settings is photographed on the page it opens on (Dictation); its other pages are
-not displayed, so nothing is hidden there. If a selector stops matching, the image simply gets longer: look at the
+dashboard when its layout changes. The Settings page of `dashboard-settings.png` is Dictation; the `guide-*` shots open Vocabulary and Text & Polish by
+slug and hide the rows after the hotkey row on Dictation (selector in `GUIDE_SHOTS`). If a hide selector stops
+matching, the image simply gets longer: look at the
 result before committing.
 
-The dashboard has a single (dark) theme, so there is one image per tab. The older `dashboard.png`,
+The dashboard has a single (dark) theme, so there is no light/dark pair. The older `dashboard.png`,
 `settings.png`, `dashboard-meetings.png` and `dashboard-upload.png` (from before the Recordings tab) are
 not touched.
 
@@ -53,7 +65,7 @@ as well. No browser-automation package is needed.
    detection), five dictionary entries and three polish presets.
 3. Serves the real dashboard on a free port on 127.0.0.1 and photographs each tab with a headless browser into a
    staging folder.
-4. Copies the four images to `--out` once all of them succeeded (a failed run never leaves a mix of old and
+4. Copies the images to `--out` once all of them succeeded (a failed run never leaves a mix of old and
    new images), then deletes the temporary folder.
 
 ## What it never touches

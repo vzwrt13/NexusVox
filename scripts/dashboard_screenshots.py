@@ -6,7 +6,8 @@ The script starts the real dashboard against a temporary data folder that it fil
 dictations, meetings and uploads, and photographs the Home, Analytics, Recordings and Settings tabs
 (plus the `guide-*` images of the user guide)
 with a headless Chromium browser (Microsoft Edge or Google Chrome, whichever is installed; no extra
-package). The dashboard has one theme, dark, so there is one image per tab.
+package). The dashboard has one theme, dark, so each tab has at least one image
+(Home, Analytics, Recordings and Settings, plus the `guide-*` images).
 
 What stays out of the picture and out of reach:
 
@@ -85,7 +86,7 @@ SETUP_SHOTS = (("welcome", 0), ("microphone", 1), ("hotkey", 2), ("ready", 3))
 # recording button opens; it is not confirmed, so no recording starts) sit on top of the list.
 CLICK_AFTER_LOAD = (
     '<script>window.addEventListener("load", () => '
-    'setTimeout(() => document.querySelector("{selector}").click(), 1500));</script>'
+    "setTimeout(() => document.querySelector({selector}).click(), 1500));</script>"
 )
 GUIDE_SHOTS = (
     (
@@ -415,6 +416,8 @@ def _demo_patches() -> list[mock._patch]:
         # The setup's microphone step: demo names, and a level as if someone were speaking.
         mock.patch("nexusvox.dashboard.api_setup.input_device_names", return_value=devices["inputs"]),
         mock.patch("nexusvox.audio.meter.LevelMeter.read", return_value={"level": 0.62}),
+        # Belt and braces: a click on Start recording must never reach the microphone, whatever the consent setting.
+        mock.patch("nexusvox.dashboard.api.DashboardAPI.start_meeting", side_effect=RuntimeError("demo: no recording")),
     ]
 
 
@@ -462,7 +465,7 @@ def _serve_still(response):
         if _tab_page:
             html = html.replace("</head>", TAB_PAGE_SCRIPT.format(page=_tab_page) + "</head>", 1)
         if _click_selector:
-            html = html.replace("</body>", CLICK_AFTER_LOAD.format(selector=_click_selector) + "</body>", 1)
+            html = html.replace("</body>", CLICK_AFTER_LOAD.format(selector=json.dumps(_click_selector)) + "</body>", 1)
         if _setup_step is not None:
             html = html.replace("</body>", SETUP_SCRIPT.format(step=_setup_step) + "</body>", 1)
         response.set_data(html)
@@ -474,7 +477,19 @@ def _check_page_markers() -> None:
     """Stop before any screenshot when the page no longer has the tag the animation switch hangs on: without it
     two runs would silently stop being identical."""
     index = Path(_PROJECT_ROOT / "src" / "nexusvox" / "dashboard" / "static" / "index.html")
-    if CHART_SCRIPT not in index.read_text(encoding="utf-8"):
+    html = index.read_text(encoding="utf-8")
+    # A guide shot whose click target or settings page is gone would still write an image, of the wrong thing.
+    for tab, filename, _hide, _height, page, click in GUIDE_SHOTS:
+        for selector in filter(None, (click,)):
+            if not selector.startswith("#") or f'id="{selector[1:]}"' not in html:
+                raise SystemExit(
+                    f"{filename}: no element {selector} in index.html: update GUIDE_SHOTS in {Path(__file__).name}."
+                )
+        if tab == "settings" and page and f'data-page="{page}"' not in html:
+            raise SystemExit(
+                f"{filename}: no settings page {page!r} in index.html: update GUIDE_SHOTS in {Path(__file__).name}."
+            )
+    if CHART_SCRIPT not in html:
         raise SystemExit(
             f"index.html no longer contains {CHART_SCRIPT}: update CHART_SCRIPT in {Path(__file__).name} so that "
             "chart animation can still be switched off."
@@ -599,6 +614,7 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
             config.llm.model = "gemma4:e4b"
             config.cleanup.level = "light"
             config.meeting.own_voice_label = OWN_VOICE_LABEL
+            config.meeting.consent_hint = True  # Start recording opens the consent card instead of recording
 
             db = Database(config.database)
             stack.callback(db._engine.dispose)  # the open SQLite file would keep the folder from being deleted

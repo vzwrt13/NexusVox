@@ -33,7 +33,7 @@ clicks apply. Check a download in the file's Properties, Digital Signatures tab,
 After the install, the dashboard opens and walks you through the microphone and the hotkey.
 [GettingStarted.md](GettingStarted.md) has the full guide with configuration and troubleshooting.
 
-![The NexusVox analytics dashboard: a dark interface with tiles for transcription count, average, minimum and maximum words per minute, average duration and minutes saved, above a line chart of transcriptions over time with a date-range filter.](docs/images/dashboard.png)
+![The NexusVox analytics dashboard: a dark interface with tiles for words dictated, dictations, words per minute and time saved, above a bar chart of words per day and a ranking of the apps you dictate into.](docs/images/dashboard-analytics.png)
 
 *Every transcription is stored locally and analysed in the built-in dashboard: words per minute, session length, usage over time.*
 
@@ -202,9 +202,7 @@ Starting NexusVox from the Start menu or a shortcut opens the dashboard; the Win
 | Upload | Transcribe audio files (WAV, MP3, FLAC, OGG, WEBM, up to 2 GB); optional speaker detection with Parakeet; optional text cleanup with the local language model; download as TXT, SRT or VTT (subtitles need Parakeet's word timing) |
 | Review | Flag and replay recordings |
 
-*(Screenshot from before the Settings tab was grouped: the compute device selector now sits on the **Advanced** page, and the language setting was removed.)*
-
-![The NexusVox settings tab: a compute device selector resolved to GPU (CUDA), a transcription model selector set to Parakeet TDT 0.6B, and a model overview listing architecture, parameter count, protocol, runtime, supported languages and VRAM.](docs/images/settings.png)
+![The NexusVox settings tab on the Dictation page: the hotkey with its modifier checkboxes, the hotkey mode, the microphone, the feedback style and the option to mute other apps while recording.](docs/images/dashboard-settings.png)
 
 **Speaker detection (Parakeet on GPU only).** In the Recordings tab, click the upload button, choose a file, switch on *Detect speakers* and click *Transcribe*; the transcript comes back as `Speaker 1: …` paragraphs, one per turn. The Parakeet container runs NVIDIA's [Streaming Sortformer](https://huggingface.co/nvidia/diar_streaming_sortformer_4spk-v2) (`nvidia/diar_streaming_sortformer_4spk-v2`, CC-BY-4.0, ~0.5 GB download, no token) once over the whole file; it is loaded on the first upload that asks for it and only occupies the GPU while it runs, so a dictation made during that run waits a few seconds. It tells **at most 4 speakers** apart — with more, voices get merged. If the container was built before this feature, rebuild it (`docker compose --profile parakeet up --build`).
 

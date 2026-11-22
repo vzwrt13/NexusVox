@@ -7,7 +7,7 @@ invented data. One command, no setup beyond the usual `pip install -e ".[dev]"`:
 python scripts/dashboard_screenshots.py
 ```
 
-It writes nine PNGs to `docs/images/`: one per tab, and one per step of the first-run setup:
+It writes fourteen PNGs to `docs/images/`: one per tab, one per step of the first-run setup, and five for the website user guide:
 
 | File | Tab | Image ends |
 |---|---|---|
@@ -17,6 +17,15 @@ It writes nine PNGs to `docs/images/`: one per tab, and one per step of the firs
 | `dashboard-recordings.png` | Recordings | one window (1280 x 860): list and detail pane |
 | `dashboard-settings.png` | Settings | the Dictation page (the page Settings opens on) |
 | `dashboard-setup-welcome.png`, `-microphone.png`, `-hotkey.png`, `-ready.png` | First-run setup | one image per step, ending at the step's card and the *Skip setup* link |
+| `guide-settings-dictation-hotkey.png` | Settings > Dictation | the Hotkey section (the rows after it are hidden) |
+| `guide-settings-vocabulary.png` | Settings > Vocabulary | the whole page |
+| `guide-settings-text-polish.png` | Settings > Text & Polish | the whole page |
+| `guide-recordings-upload.png` | Recordings | one window: the *Upload a file* dialog with its drop area |
+| `guide-recordings-meeting-start.png` | Recordings | one window: the consent card that *Start recording* opens (it is never confirmed, so nothing records) |
+
+The `guide-*` images are copied into the website's user guide. The two Recordings ones are photographed with a short script
+that clicks the button once the page has loaded (`GUIDE_SHOTS` in the script); the Settings ones open on their page the
+same way Analytics > Your week does.
 
 The setup is an overlay that opens while `[general].setup_done` is false, so those four are photographed with the
 setup due; the script tells the page which step to show (`SETUP_SCRIPT`), fills the test box on the hotkey step and
@@ -53,7 +62,7 @@ as well. No browser-automation package is needed.
    detection), five dictionary entries and three polish presets.
 3. Serves the real dashboard on a free port on 127.0.0.1 and photographs each tab with a headless browser into a
    staging folder.
-4. Copies the four images to `--out` once all of them succeeded (a failed run never leaves a mix of old and
+4. Copies the images to `--out` once all of them succeeded (a failed run never leaves a mix of old and
    new images), then deletes the temporary folder.
 
 ## What it never touches

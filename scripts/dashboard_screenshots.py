@@ -4,6 +4,7 @@
 
 The script starts the real dashboard against a temporary data folder that it fills with invented
 dictations, meetings and uploads, and photographs the Home, Analytics, Recordings and Settings tabs
+(plus the `guide-*` images of the user guide)
 with a headless Chromium browser (Microsoft Edge or Google Chrome, whichever is installed; no extra
 package). The dashboard has one theme, dark, so there is one image per tab.
 
@@ -77,6 +78,29 @@ SHOTS = (
 # The first-run setup, one image per step: (step name, step index). It is an overlay, so each is photographed with
 # the setup due (`setup_done` false) and the page told to show that step.
 SETUP_SHOTS = (("welcome", 0), ("microphone", 1), ("hotkey", 2), ("ready", 3))
+# The images for the website user guide, same shape as SHOTS plus a script that runs in the page once it has
+# loaded (a click that opens the part to show). Each ends at the relevant element: the hotkey row is the first
+# row of the Dictation page, so the rows after it are hidden; the other two settings pages are shown whole. The
+# Recordings shots are a window's height: the upload dialog and the meeting consent card (what the Start
+# recording button opens; it is not confirmed, so no recording starts) sit on top of the list.
+CLICK_AFTER_LOAD = (
+    '<script>window.addEventListener("load", () => '
+    'setTimeout(() => document.querySelector("{selector}").click(), 1500));</script>'
+)
+GUIDE_SHOTS = (
+    (
+        "settings",
+        "guide-settings-dictation-hotkey.png",
+        "#settings-card-dictation .setting-row ~ .setting-row",
+        None,
+        "",
+        None,
+    ),
+    ("settings", "guide-settings-vocabulary.png", None, None, "vocabulary", None),
+    ("settings", "guide-settings-text-polish.png", None, None, "text-polish", None),
+    ("recordings", "guide-recordings-upload.png", None, 860, "", "#upload-open"),
+    ("recordings", "guide-recordings-meeting-start.png", None, 860, "", "#meeting-toggle"),
+)
 CROP_PADDING = 32  # CSS pixels of page background kept below the last card
 
 # ── Demo data ─────────────────────────────────────────────────────────────────────────────────────
@@ -399,6 +423,7 @@ CHART_SCRIPT = '<script src="chart.min.js"></script>'
 STILL_CHARTS = "<script>Chart.defaults.animation = false;</script>"
 _hide_css = ""  # the rule for the tab being photographed; set by `run` before each shot
 _tab_page = ""  # the page of the tab being photographed (Analytics > Your week); set by `run` before each shot
+_click_selector: str | None = None  # the element the page clicks once loaded; set by `run` before each guide shot
 _setup_step: int | None = None  # the setup step the page is told to show; set by `run` before each setup shot
 # Waits for the setup to open (it asks the server), shows the step and, on the hotkey step, a dictated test phrase.
 SETUP_SCRIPT = """<script>
@@ -436,6 +461,8 @@ def _serve_still(response):
         html = html.replace("</head>", STILL_CSS + _hide_css + "</head>", 1)
         if _tab_page:
             html = html.replace("</head>", TAB_PAGE_SCRIPT.format(page=_tab_page) + "</head>", 1)
+        if _click_selector:
+            html = html.replace("</body>", CLICK_AFTER_LOAD.format(selector=_click_selector) + "</body>", 1)
         if _setup_step is not None:
             html = html.replace("</body>", SETUP_SCRIPT.format(step=_setup_step) + "</body>", 1)
         response.set_data(html)
@@ -537,7 +564,7 @@ def _crop_to_content(target: Path, scale: float) -> None:
 
 
 def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
-    global _hide_css, _setup_step, _tab_page
+    global _click_selector, _hide_css, _setup_step, _tab_page
     browser_path = _find_browser(browser)
     _check_page_markers()
     out_dir = out_dir.resolve()  # before the working directory moves
@@ -597,9 +624,10 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
             stack.callback(thread.join, 5)
             stack.callback(server.shutdown)
 
-            for tab, filename, hide, height, page in SHOTS:
+            for tab, filename, hide, height, page, *click in (*((*shot, None) for shot in SHOTS), *GUIDE_SHOTS):
                 _hide_css = _tab_style(hide)
                 _tab_page = page
+                _click_selector = click[0]
                 url = f"http://127.0.0.1:{port}/?launch={guard.new_launch_secret()}&tab={tab}"
                 profile = (
                     data_dir / "browser-profile" / Path(filename).stem
@@ -610,6 +638,7 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
                     _crop_to_content(target, scale)
 
             _tab_page = ""
+            _click_selector = None
             config.setup_done = False  # the setup overlay opens by itself on the dashboard's first page
             _hide_css = ""
             for name, step in SETUP_SHOTS:
@@ -629,7 +658,9 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
             config.setup_done = True
 
         written = []
-        for filename in [s[1] for s in SHOTS] + [f"dashboard-setup-{name}.png" for name, _step in SETUP_SHOTS]:
+        for filename in [s[1] for s in (*SHOTS, *GUIDE_SHOTS)] + [
+            f"dashboard-setup-{name}.png" for name, _step in SETUP_SHOTS
+        ]:
             destination = out_dir / filename
             shutil.copyfile(staging / filename, destination)
             written.append(destination)

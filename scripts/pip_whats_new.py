@@ -2,9 +2,10 @@
 
     python scripts/pip_whats_new.py [--out docs/images/pip-whats-new.png] [--browser PATH] [--scale 2]
 
-One image with the first and the last step of the popup, built by the real `showPipTour` from invented sample entries
-(the shipped data file has none until a release lists some). A throwaway page loads `style.css`, `dashboard-pip.js`,
-`dashboard-pip-texts.js`, `dashboard-pip-greeting.js` and `dashboard-pip-tour.js` from the dashboard's static folder.
+One image with the first and the last step of the popup, built by the real `buildPipTourStep` from invented sample
+entries (the shipped data file has none until a release lists some). A throwaway page loads `style.css`,
+`dashboard-pip.js`, `dashboard-pip-texts.js`, `dashboard-pip-greeting.js` and `dashboard-pip-tour.js` from the
+dashboard's static folder.
 Nothing here touches your config, your database, the browser's saved state or the network, and the browser is
 headless: no window opens. The idle motion and the entrance are switched off, so two runs give the same image.
 """

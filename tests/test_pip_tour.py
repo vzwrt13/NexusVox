@@ -28,7 +28,9 @@ function mountPip(host, options) {
   return host;
 }
 function localIsoDate() { return "2026-11-02"; }
-const document = { createElement: (tag) => ({ tag, children: [], className: "", textContent: "", listeners: {},
+const hiddenTabs = new Set();
+const document = { querySelector: (sel) => ({ hidden: hiddenTabs.has(sel.match(/data-tab="([^"]+)"/)[1]) }),
+  createElement: (tag) => ({ tag, children: [], className: "", textContent: "", listeners: {},
   attrs: {}, setAttribute(k, v) { this.attrs[k] = v; },
   append(...k) { this.children.push(...k); }, addEventListener(t, f) { this.listeners[t] = f; } }) };
 const SAMPLE = {
@@ -83,7 +85,10 @@ def test_every_entry_is_short_english_with_a_real_target_and_never_mentions_a_pa
             assert 0 < len(entry["title"]) <= 40, entry
             assert not re.search(r"\b(pro|premium|upgrade|subscription|licen[cs]e|paid|price)\b", entry["text"], re.I)
             if "target" in entry:
-                assert entry["target"].split("/")[0] in tabs, entry
+                tab, _, page = entry["target"].partition("/")
+                assert tab in tabs, entry
+                if page:
+                    assert tab == "settings" and f'data-page="{page}"' in HTML, entry
 
 
 def test_the_data_and_the_logic_need_no_network():
@@ -129,6 +134,34 @@ def test_a_version_without_entries_shows_nothing_and_is_remembered_quietly():
         "console.log(JSON.stringify([none.steps, none.state, empty.steps, bad.steps, shipped.steps]))"
     )
     assert got == [[], {"version": "1.0.0", "day": ""}, [], [], []]
+
+
+@needs_node
+def test_going_back_to_an_older_version_shows_nothing_and_keeps_the_newest_saved():
+    got = _js(
+        "const entry = [{ title: 'Two', text: 'Second.' }];"
+        "const data = { ...SAMPLE, '1.2.0': entry, '1.10.0': entry };"
+        "const a = pickPipTour('1.2.0', USED, { version: '1.2.0', day: '2026-11-02' }, '2026-11-09', data);"
+        "const back = pickPipTour('1.1.0', USED, a.state, '2026-11-09', data);"
+        "const again = pickPipTour('1.2.0', USED, back.state, '2026-11-10', data);"
+        "const tenth = pickPipTour('1.10.0', USED, { version: '1.9.0', day: '' }, '2026-11-10', data);"
+        "const old = { version: '1.2.0', day: '' };"
+        "const odd = pickPipTour('nightly', USED, old, '2026-11-10', { nightly: entry });"
+        "console.log(JSON.stringify([back.steps, back.state, again.steps, tenth.steps.length, odd.steps.length]))"
+    )
+    assert got == [[], {"version": "1.2.0", "day": "2026-11-02"}, [], 1, 1]
+
+
+@needs_node
+def test_a_version_without_entries_does_not_hide_the_bubble_a_popup_replaced_earlier_today():
+    got = _js(
+        "const host = {};"
+        "showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"  # the popup, today
+        "find(last().bubble, 'pip-bubble-close').listeners.click();"
+        "const hotfix = showPipHome(host, USED, '1.1.1', '2026-11-02', SAMPLE);"
+        "console.log(JSON.stringify([hotfix, read('nexusvox-pip-whats-new')]))"
+    )
+    assert got == ["greeting", {"version": "1.1.1", "day": ""}]
 
 
 @needs_node
@@ -220,6 +253,7 @@ def test_the_popup_replaces_the_daily_bubble_that_day_and_the_bubble_is_not_used
         "const popupMount = last();"
         # untouched below: nothing said, nothing used up
         "const greetingAfterPopup = localStorage.getItem('nexusvox-pip-greeting');"
+        "find(popupMount.bubble, 'pip-bubble-close').listeners.click();"
         "const sameDay = showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
         "const sameDayMount = last();"
         "const nextDay = showPipHome(host, USED, '1.1.0', '2026-11-03', SAMPLE);"
@@ -282,3 +316,65 @@ def test_a_single_step_has_no_counter():
         " find(last().bubble, 'pip-tour-next').textContent]))"
     )
     assert got == ["What's new", "Done"]
+
+
+@needs_node
+def test_opening_home_again_leaves_a_popup_that_is_on_screen_alone():
+    got = _js(
+        "const host = {};"
+        "showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "find(last().bubble, 'pip-tour-next').listeners.click();"
+        "const mounted = mounts.length; const step = find(last().bubble, 'pip-tour-title').textContent;"
+        "const again = showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"  # the Home button, Back, an overlap
+        "const overlap = showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "const untouched = mounts.length - mounted;"
+        "find(last().bubble, 'pip-bubble-close').listeners.click();"
+        "const afterClose = showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "console.log(JSON.stringify([again, overlap, untouched, step, afterClose]))"
+    )
+    # the repeated calls did not remount anything; after the close Pip is quiet for the day
+    assert got == ["tour", "tour", 0, "Own words", "quiet"]
+
+
+@needs_node
+def test_show_me_is_only_offered_for_a_tab_that_is_open_to_the_user():
+    got = _js(
+        "const data = { '1.5.0': [{ title: 'Hidden', text: 'Behind a flag.', target: 'edit' },"
+        " { title: 'Open', text: 'Always there.', target: 'recordings' }] };"
+        "hiddenTabs.add('edit');"
+        "const host = {}; showPipHome(host, USED, '1.5.0', '2026-11-02', data);"
+        "const first = !!find(last().bubble, 'pip-tour-show');"
+        "find(last().bubble, 'pip-tour-next').listeners.click();"
+        "const second = !!find(last().bubble, 'pip-tour-show');"
+        "console.log(JSON.stringify([first, second, pipTargetAvailable('edit'), pipTargetAvailable('settings/x')]))"
+    )
+    assert got == [False, True, False, True]
+
+
+@needs_node
+def test_show_me_on_a_settings_page_shows_that_page_and_a_closed_tab_changes_nothing():
+    got = _js(
+        "const calls = [];"
+        "function goToTab(t) { calls.push(['tab', t]); return true; }"
+        "function showSettingsPageBySlug(s) { calls.push(['page', s]); }"
+        "function defaultSettingsSlug() { return 'dictation'; }"
+        "const a = openPipTarget('settings/vocabulary');"
+        "const b = openPipTarget('settings');"
+        "const c = openPipTarget('recordings');"
+        "hiddenTabs.add('edit');"
+        "const d = openPipTarget('edit');"
+        "console.log(JSON.stringify([a, b, c, d, calls]))"
+    )
+    assert got == [
+        True,
+        True,
+        True,
+        False,
+        [
+            ["tab", "settings/vocabulary"],
+            ["page", "vocabulary"],
+            ["tab", "settings"],
+            ["page", "dictation"],
+            ["tab", "recordings"],
+        ],
+    ]

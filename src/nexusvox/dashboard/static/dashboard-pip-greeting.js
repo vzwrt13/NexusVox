@@ -163,7 +163,8 @@ function buildPipBubble(text, onDismiss, { style = "a", label = "" } = {}) {
 function showPipGreeting(host, facts, day = localIsoDate(new Date())) {
   // Pip stands in Home's bottom-right corner, so his bubble sits on his left.
   const quiet = () => mountPip(host, { pose: "idle", side: "left" });
-  if (!facts) {
+  // While Show Pip is off nothing is drawn, so nothing is said and nothing is used up: the bubble waits for him.
+  if (!facts || !pipEnabled) {
     quiet();
     return null;
   }

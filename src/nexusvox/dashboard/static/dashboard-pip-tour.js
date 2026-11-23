@@ -4,6 +4,8 @@
 // The rules:
 //   - the popup shows on the first Home visit after an update to a version that has entries, once per version: the
 //     version is saved as seen the moment the popup is shown, so closing it at any time (the ×, Done, Show me) ends it;
+//   - only a newer version shows it: going back to an older version (a rollback) shows nothing and keeps the newest
+//     version saved, so neither the old nor the newer popup comes a second time;
 //   - a first installation is not an update: with no saved version and no history (no dictation, meeting or upload yet)
 //     the version is saved silently and nothing is shown;
 //   - that day the popup replaces the daily bubble (dashboard-pip-greeting.js): Pip never talks twice at once. The
@@ -44,6 +46,27 @@ function pipVersionKey(version) {
   return typeof version === "string" ? version.trim().replace(/^v/i, "") : "";
 }
 
+// The numbers of a version ("1.2.0" -> [1, 2, 0]; a suffix like "rc1" is ignored), or null when it has none.
+function pipVersionParts(version) {
+  const parts = pipVersionKey(version)
+    .split(".")
+    .map((part) => parseInt(part, 10));
+  return parts.length && parts.every((n) => Number.isFinite(n)) ? parts : null;
+}
+
+// Is `current` newer than the version saved as seen? Versions that cannot be compared count as newer when they differ.
+function isNewerPipVersion(current, saved) {
+  if (!saved) return true;
+  const a = pipVersionParts(current);
+  const b = pipVersionParts(saved);
+  if (!a || !b) return current !== saved;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const diff = (a[i] || 0) - (b[i] || 0);
+    if (diff) return diff > 0;
+  }
+  return false;
+}
+
 // The usable steps of a version: entries with a title and a text; a target is kept only when it is a string.
 function pipTourSteps(version, data = PIP_WHATS_NEW) {
   const list = data && Object.prototype.hasOwnProperty.call(data, version) ? data[version] : null;
@@ -64,19 +87,22 @@ function pipHasHistory(facts) {
 function pickPipTour(version, facts, savedState, day, data = PIP_WHATS_NEW) {
   const state = savedState && typeof savedState === "object" ? savedState : emptyPipTourState();
   const current = pipVersionKey(version);
-  if (!current || !facts || state.version === current) return { steps: [], state };
+  if (!current || !facts || !isNewerPipVersion(current, state.version)) return { steps: [], state };
   const steps = pipTourSteps(current, data);
   const firstInstall = state.version === "" && !pipHasHistory(facts);
-  if (firstInstall || steps.length === 0) return { steps: [], state: { ...state, version: current } };
+  // No popup for this version: `day` is cleared, so a popup shown earlier today (for the previous version) does not
+  // hide today's bubble now.
+  if (firstInstall || steps.length === 0) return { steps: [], state: { version: current, day: "" } };
   return { steps, state: { version: current, day } };
 }
 
 // ── On the page ──────────────────────────────────────────────────────
 
 // One step as a card for the bubble slot. The × closes the popup; "Show me" (only for a step with a target) opens that
-// page of the dashboard and ends the popup; the main button is "Next", or "Done" on the last step. Built from text
+// page of the dashboard and ends the popup (a target that is not open to this user, such as a tab behind a feature
+// flag that is off, gets no "Show me" at all); the main button is "Next", or "Done" on the last step. Built from text
 // nodes, never from markup.
-function buildPipTourStep(steps, index, { onNext, onClose, onShow }) {
+function buildPipTourStep(steps, index, { onNext, onClose, onShow, canShow = () => true }) {
   const step = steps[index];
   const last = index === steps.length - 1;
   const make = (tag, className, text) => {
@@ -90,7 +116,7 @@ function buildPipTourStep(steps, index, { onNext, onClose, onShow }) {
   const title = make("strong", "pip-tour-title", step.title);
   const text = make("span", "pip-bubble-message", step.text);
   const actions = make("div", "pip-tour-actions");
-  if (step.target) {
+  if (step.target && canShow(step.target)) {
     const show = make("button", "link-btn pip-tour-show", "Show me");
     show.type = "button";
     show.addEventListener("click", () => onShow(step.target));
@@ -114,16 +140,43 @@ function pipQuiet(host) {
   mountPip(host, { pose: "idle", side: "left" });
 }
 
+// Is the dashboard tab of `target` ("recordings", "settings/vocabulary") shown to this user? A tab behind a feature flag
+// that is off, or a Feedback tab that is hidden, is not.
+function pipTargetAvailable(target) {
+  const btn = document.querySelector('.tab[data-tab="' + target.split("/")[0] + '"]');
+  return !!btn && !btn.hidden;
+}
+
+// Opens `target` like a click on that tab does: the tab, its address and, for Settings, the page itself (goToTab only
+// pushes the address; the Settings page is shown by showSettingsPageBySlug). Returns false when the tab is not open.
+function openPipTarget(target) {
+  if (!pipTargetAvailable(target)) return false;
+  const [tab, page] = target.split("/");
+  const opened = goToTab(target);
+  if (opened && tab === "settings") showSettingsPageBySlug(page || defaultSettingsSlug());
+  return opened;
+}
+
+// The host whose popup is on screen now. Opening Home again (the sidebar's Home button on Home, Back, an overlapping
+// load) must not swap a popup that is half read for a quiet Pip: the version is already saved as seen.
+let pipTourHost = null;
+
 // Walks through `steps` in `host`: one mount per step, so the Show Pip setting still hides all of it.
-function showPipTour(host, steps, open = (target) => goToTab(target)) {
+function showPipTour(host, steps, open = openPipTarget, canOpen = pipTargetAvailable) {
+  pipTourHost = host;
+  const end = () => {
+    pipTourHost = null;
+    pipQuiet(host);
+  };
   const draw = (index) => {
     const bubble = buildPipTourStep(steps, index, {
       onNext: () => draw(index + 1),
-      onClose: () => pipQuiet(host),
+      onClose: end,
       onShow: (target) => {
-        pipQuiet(host);
+        end();
         open(target);
       },
+      canShow: canOpen,
     });
     mountPip(host, { pose: "tilt", side: "left", bubble });
   };
@@ -133,12 +186,13 @@ function showPipTour(host, steps, open = (target) => goToTab(target)) {
 // Home's Pip: the what's-new popup on the first visit after an update, else the daily bubble. `version` is the app
 // version ("" when unknown). Returns "tour", "greeting" or "quiet" for what Pip is doing. While Pip is switched off the
 // popup is neither shown nor used up (it comes when he is switched on and Home is opened again).
-function showPipHome(host, facts, version, day = localIsoDate(new Date()), data = PIP_WHATS_NEW, open) {
+function showPipHome(host, facts, version, day = localIsoDate(new Date()), data = PIP_WHATS_NEW, open, canOpen) {
+  if (pipTourHost === host) return "tour"; // the popup is still being read: leave it as it is
   const saved = readPipTourState();
   const { steps, state } = pickPipTour(version, facts, saved, day, data);
   if (steps.length && pipEnabled) {
     writePipTourState(state);
-    showPipTour(host, steps, open);
+    showPipTour(host, steps, open, canOpen);
     return "tour";
   }
   if (steps.length) {

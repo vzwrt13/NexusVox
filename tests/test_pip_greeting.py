@@ -306,6 +306,7 @@ def test_a_day_with_nothing_to_say_saves_nothing():
 PAGE = r"""
 const store = {};
 const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+let pipEnabled = true;
 const mounts = [];
 function mountPip(host, options) {
   mounts.push({ pose: options.pose, side: options.side, bubble: options.bubble || null });
@@ -481,3 +482,17 @@ def test_the_greeting_never_asks_for_texts_and_inserts_text_as_text():
     assert "/api/pip/facts" not in GREETING  # the page's Home fetches the counts; this file only chooses
     for forbidden in ("transcription", "recent", "file-transcriptions", "/api/history"):
         assert forbidden not in GREETING and forbidden not in TEXTS
+
+
+@needs_node
+def test_a_greeting_is_not_used_up_while_show_pip_is_off():
+    got = _js(
+        PAGE + "const host = {};"
+        "pipEnabled = false;"
+        "const off = showPipGreeting(host, FACTS);"
+        "const saved = localStorage.getItem('nexusvox-pip-greeting');"
+        "pipEnabled = true;"
+        "const on = showPipGreeting(host, FACTS);"
+        "console.log(JSON.stringify([off, saved, on && on.id]))"
+    )
+    assert got[0] is None and got[1] is None and got[2]

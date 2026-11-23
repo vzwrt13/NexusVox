@@ -166,6 +166,20 @@ async function loadHomeWeek() {
   }
 }
 
+// ── Pip ──────────────────────────────────────────────────────────────
+// Pip greets with at most one speech bubble a day: dashboard-pip-greeting.js chooses it from counts. Without the
+// counts he sits quietly.
+async function loadHomePip() {
+  const host = document.getElementById("home-pip");
+  let facts = null;
+  try {
+    facts = await fetch("/api/pip/facts").then((r) => (r.ok ? r.json() : null));
+  } catch (err) {
+    console.error("Could not load Pip's numbers:", err);
+  }
+  showPipGreeting(host, facts);
+}
+
 // ── Opening Home ─────────────────────────────────────────────────────
 function openHomeTab() {
   showHomeTip();
@@ -177,6 +191,7 @@ function openHomeTab() {
   loadHomeHotkey(known, atPageStart);
   loadHomeRecent();
   loadHomeWeek();
+  loadHomePip();
 }
 
 // ── Actions ──────────────────────────────────────────────────────────

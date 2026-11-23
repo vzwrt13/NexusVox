@@ -1,0 +1,329 @@
+"""Pip's daily speech bubble on Home: the counts it is made from (the endpoint), the texts file, and the choice
+(one bubble a day, dismissal, the order, the never-used detection), run under Node with stand-ins for the page."""
+
+import json
+import re
+import shutil
+import subprocess
+
+import pytest
+from dashboard_js import STATIC
+
+from nexusvox.config import Config
+from nexusvox.dashboard import _create_app
+from nexusvox.dashboard.analytics import get_pip_facts
+from nexusvox.dashboard.analytics_overview import _TYPING_WPM
+from nexusvox.dashboard.api import DashboardAPI
+from nexusvox.storage.models import COMMAND_APP, DictionaryEntryRow, FileTranscription, Transcription
+
+needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
+
+TEXTS = (STATIC / "dashboard-pip-texts.js").read_text(encoding="utf-8")
+GREETING = (STATIC / "dashboard-pip-greeting.js").read_text(encoding="utf-8")
+HTML = (STATIC / "index.html").read_text(encoding="utf-8")
+
+
+# ── The counts ───────────────────────────────────────────────────────
+
+
+def _add(session_factory, *rows):
+    with session_factory() as session:
+        session.add_all(rows)
+        session.commit()
+
+
+def test_facts_of_an_empty_database_are_all_zero_and_carry_the_typing_speed(session_factory):
+    facts = get_pip_facts(session_factory)
+    assert {k: v for k, v in facts.items() if k != "typing_wpm"} == dict.fromkeys(
+        [
+            "words",
+            "dictations",
+            "meetings",
+            "uploads",
+            "dictionary_entries",
+            "voice_commands",
+            "week_words",
+            "week_dictations",
+            "week_time_saved_minutes",
+        ],
+        0,
+    )
+    assert facts["typing_wpm"] == _TYPING_WPM
+
+
+def test_facts_count_what_exists_and_never_return_what_was_said(session_factory):
+    secret = "my secret dictation sentence"
+    _add(
+        session_factory,
+        Transcription(text=secret, language="en", duration_ms=1000),
+        Transcription(text="two words", language="en", duration_ms=1000),
+        Transcription(text="[command] new paragraph", language="en", duration_ms=0, app=COMMAND_APP),
+        FileTranscription(
+            text="meeting secret", language="en", duration_ms=1, original_filename="a.wav", kind="meeting"
+        ),
+        FileTranscription(text="file secret", language="en", duration_ms=1, original_filename="b.wav", kind="upload"),
+        FileTranscription(text="file secret", language="en", duration_ms=1, original_filename="c.wav", kind="upload"),
+        DictionaryEntryRow(wrong="secret wrong", right="secret right"),
+    )
+    facts = get_pip_facts(session_factory)
+    assert facts["words"] == 6  # the command row is no dictation
+    assert facts["dictations"] == 2
+    assert (facts["meetings"], facts["uploads"], facts["dictionary_entries"]) == (1, 2, 1)
+    assert facts["voice_commands"] == 1
+    assert facts["week_words"] == 6 and facts["week_dictations"] == 2
+    assert all(isinstance(value, int | float) for value in facts.values())
+    assert "secret" not in json.dumps(facts)
+
+
+def test_the_endpoint_serves_the_facts(db, session_factory):
+    _add(session_factory, Transcription(text="one two three", language="en", duration_ms=500))
+    app = _create_app(DashboardAPI(session_factory, Config(), db=db))
+    with app.test_client() as client:
+        got = client.get("/api/pip/facts").get_json()
+    assert got["words"] == 3 and got["dictations"] == 1 and got["typing_wpm"] == _TYPING_WPM
+
+
+# ── The texts ────────────────────────────────────────────────────────
+
+
+def _js(body: str):
+    program = f"{TEXTS}\n{GREETING}\n{body}"
+    out = subprocess.run(["node", "-e", program], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@needs_node
+def test_every_text_is_short_english_counts_only_and_never_mentions_a_paid_plan():
+    lists = _js("console.log(JSON.stringify({ m: PIP_MILESTONES, t: PIP_TIPS, s: PIP_STATS }))")
+    texts = [x["text"] for x in lists["m"] + lists["t"]] + lists["s"]
+    ids = [x["id"] for x in lists["m"] + lists["t"]]
+    assert len(ids) == len(set(ids)), "an id is kept for good and must be unique"
+    for text in texts:
+        sentences = [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s]
+        assert 1 <= len(sentences) <= 2, text
+        assert len(text) <= 170, text
+        assert not re.search(r"\b(pro|premium|upgrade|subscription|licen[cs]e|paid|price)\b", text, re.I), text
+    # A milestone and a tip name a count the endpoint serves.
+    facts = set(
+        re.findall(
+            r'"([a-z_]+)"',
+            (STATIC.parent / "analytics_pip.py").read_text(encoding="utf-8"),
+        )
+    )
+    for item in lists["m"]:
+        assert item["counter"] in facts, item["id"]
+    for item in lists["t"]:
+        assert item["unused"] in facts, item["id"]
+
+
+@needs_node
+def test_the_tips_cover_the_four_free_features():
+    tips = _js("console.log(JSON.stringify(PIP_TIPS.map((t) => t.unused)))")
+    assert sorted(tips) == ["dictionary_entries", "meetings", "uploads", "voice_commands"]
+
+
+# ── The choice ───────────────────────────────────────────────────────
+
+BUSY = (
+    "{ words: 20000, dictations: 300, meetings: 2, uploads: 1, dictionary_entries: 5, voice_commands: 9,"
+    " week_words: 2400, week_time_saved_minutes: 31.4, typing_wpm: 40 }"
+)
+
+
+@needs_node
+def test_a_milestone_comes_first_and_is_said_once():
+    got = _js(
+        f"const facts = {BUSY};"
+        "const a = pickPipGreeting(facts, emptyPipGreetingState(), '2026-11-02');"
+        "const b = pickPipGreeting(facts, a.state, '2026-11-03');"
+        "console.log(JSON.stringify([a.greeting.id, b.greeting.id, b.state.seen]))"
+    )
+    # Several milestones are reached: one a day, in list order, none twice.
+    assert got[0] == "first-dictation" and got[1] == "first-meeting"
+    assert got[2] == ["first-dictation", "first-meeting"]
+
+
+@needs_node
+def test_milestones_use_counts_and_the_10000_words_one_is_there():
+    got = _js(
+        "const ids = []; let state = emptyPipGreetingState();"
+        f"const facts = {BUSY};"
+        "for (let d = 1; d <= 9; d++) { const r = pickPipGreeting(facts, state, '2026-11-0' + d);"
+        " state = r.state; ids.push(r.greeting && r.greeting.id); }"
+        "console.log(JSON.stringify(ids))"
+    )
+    assert got[:6] == ["first-dictation", "first-meeting", "first-file", "words-1000", "dictations-100", "words-10000"]
+    assert got[6] == "stat-week"  # words-50000 is not reached; no tip is due: every feature is used
+
+
+@needs_node
+def test_a_tip_for_a_never_used_feature_comes_when_no_milestone_is_due_and_names_only_unused_features():
+    got = _js(
+        "const none = { words: 0, dictations: 0, meetings: 0, uploads: 0, dictionary_entries: 0, voice_commands: 0 };"
+        "const used = { ...none, voice_commands: 3, dictionary_entries: 2, meetings: 0, uploads: 0 };"
+        "let state = emptyPipGreetingState(); const first = [];"
+        "for (let d = 1; d <= 4; d++) { const r = pickPipGreeting(used, state, '2026-11-0' + d); state = r.state;"
+        " first.push(r.greeting && r.greeting.id); }"
+        "console.log(JSON.stringify(first))"
+    )
+    # Voice commands and own words are used, so only the file and meeting tips remain, each said once; then quiet.
+    assert got == ["tip-file-upload", "tip-meetings", None, None]
+
+
+@needs_node
+def test_the_never_used_detection_follows_each_count():
+    got = _js(
+        "const base = { words: 0, dictations: 0, meetings: 0, uploads: 0, dictionary_entries: 1, voice_commands: 1 };"
+        "const seen = ['first-meeting', 'first-file'];"
+        "const pick = (extra) => { const r = pickPipGreeting({ ...base, ...extra },"
+        " { ...emptyPipGreetingState(), seen }, '2026-11-02'); return r.greeting && r.greeting.id; };"
+        "console.log(JSON.stringify([pick({}), pick({ uploads: 4, meetings: 1 }),"
+        " pick({ dictionary_entries: 0, uploads: 1, meetings: 1 }),"
+        " pick({ voice_commands: 0, uploads: 1, meetings: 1 })]))"
+    )
+    assert got == ["tip-file-upload", None, "tip-own-words", "tip-voice-commands"]
+
+
+@needs_node
+def test_the_statistic_is_the_last_resort_states_its_basis_and_is_skipped_without_a_week():
+    got = _js(
+        "const used = { words: 0, dictations: 0, meetings: 1, uploads: 1, dictionary_entries: 1, voice_commands: 1 };"
+        "const seen = ['first-meeting', 'first-file'];"
+        "const s = (extra) => pickPipGreeting({ ...used, ...extra, typing_wpm: 40 },"
+        " { ...emptyPipGreetingState(), seen }, '2026-11-02').greeting;"
+        "console.log(JSON.stringify([s({ week_words: 1234, week_time_saved_minutes: 25.4 }),"
+        " s({ week_words: 0, week_time_saved_minutes: 0 }), s({ week_words: 5, week_time_saved_minutes: 0.2 }),"
+        " s({ week_words: 5000, week_time_saved_minutes: 95 })]))"
+    )
+    assert got[0]["id"] == "stat-week"
+    assert "1,234" in got[0]["text"] and "25 min" in got[0]["text"] and "40 words a minute" in got[0]["text"]
+    assert got[1] is None and got[2] is None  # no dictation this week, or a saving too small to claim
+    assert "1 h 35 min" in got[3]["text"]
+    assert "typing_wpm" in TEXTS and "_TYPING_WPM" in TEXTS  # the estimate's basis is stated next to the texts
+
+
+@needs_node
+def test_a_stat_is_not_remembered_so_it_can_come_back_next_week_but_a_day_keeps_its_bubble():
+    got = _js(
+        "const used = { words: 0, dictations: 0, meetings: 1, uploads: 1, dictionary_entries: 1, voice_commands: 1,"
+        " week_words: 800, week_time_saved_minutes: 10, typing_wpm: 40 };"
+        "const seen = ['first-meeting', 'first-file'];"
+        "const a = pickPipGreeting(used, { ...emptyPipGreetingState(), seen }, '2026-11-02');"
+        "const b = pickPipGreeting(used, a.state, '2026-11-03');"
+        "const again = pickPipGreeting({ ...used, week_words: 900 }, a.state, '2026-11-02');"
+        "console.log(JSON.stringify([a.greeting.id, b.greeting.id, b.state.seen,"
+        " again.greeting.text === a.greeting.text]))"
+    )
+    assert got == ["stat-week", "stat-week", ["first-meeting", "first-file"], True]
+
+
+@needs_node
+def test_a_day_has_one_bubble_even_when_a_new_milestone_is_reached_later_that_day():
+    got = _js(
+        "const none = { words: 0, dictations: 0, meetings: 1, uploads: 1, dictionary_entries: 1, voice_commands: 1 };"
+        "const a = pickPipGreeting({ ...none, dictations: 1 }, emptyPipGreetingState(), '2026-11-02');"
+        "const b = pickPipGreeting({ ...none, dictations: 1, words: 1000 }, a.state, '2026-11-02');"
+        "const c = pickPipGreeting({ ...none, dictations: 1, words: 1000 }, a.state, '2026-11-03');"
+        "console.log(JSON.stringify([a.greeting.id, b.greeting.id, c.greeting.id]))"
+    )
+    assert got[:2] == ["first-dictation", "first-dictation"] and got[2] in {"first-meeting", "first-file", "words-1000"}
+
+
+@needs_node
+def test_a_day_with_nothing_to_say_saves_nothing():
+    got = _js(
+        "const used = { words: 0, dictations: 0, meetings: 1, uploads: 1, dictionary_entries: 1, voice_commands: 1 };"
+        "const seen = ['first-meeting', 'first-file'];"
+        "const r = pickPipGreeting(used, { ...emptyPipGreetingState(), seen }, '2026-11-02');"
+        "console.log(JSON.stringify([r.greeting, r.state.day, r.state.seen]))"
+    )
+    assert got == [None, "", ["first-meeting", "first-file"]]
+
+
+# ── On the page ──────────────────────────────────────────────────────
+
+PAGE = r"""
+const store = {};
+const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+const mounts = [];
+function mountPip(host, options) { mounts.push({ pose: options.pose, bubble: options.bubble || null }); return host; }
+function localIsoDate() { return "2026-11-02"; }
+const document = { createElement: (tag) => ({ tag, children: [], className: "", textContent: "", listeners: {},
+  append(...k) { this.children.push(...k); }, addEventListener(t, f) { this.listeners[t] = f; } }) };
+const FACTS = { words: 0, dictations: 1, meetings: 1, uploads: 1, dictionary_entries: 1, voice_commands: 1 };
+const last = () => mounts[mounts.length - 1];
+"""
+
+
+@needs_node
+def test_dismissing_keeps_the_bubble_gone_for_the_rest_of_the_day_and_pip_sits_quietly():
+    got = _js(
+        PAGE + "const host = {};"
+        "const shown = showPipGreeting(host, FACTS);"
+        "const withBubble = last();"
+        "withBubble.bubble.children[1].listeners.click();"  # the Got it button
+        "const afterDismiss = last();"
+        "const reopened = showPipGreeting(host, FACTS);"  # the same day, Home opened again
+        "const reopenedMount = last();"
+        "showPipGreeting(host, { ...FACTS, words: 1000 });"  # a new milestone later the same day
+        "const laterMount = last();"
+        "const nextDay = showPipGreeting(host, FACTS, '2026-11-03');"
+        "console.log(JSON.stringify({ shown: shown && shown.id, tilt: withBubble.pose,"
+        " text: withBubble.bubble.children[0].textContent,"
+        " afterDismiss: [afterDismiss.pose, afterDismiss.bubble], reopened, reopenedMount: [reopenedMount.pose,"
+        " reopenedMount.bubble], later: laterMount.bubble, nextDay: nextDay && nextDay.id,"
+        " stored: JSON.parse(store['nexusvox-pip-greeting']).day }))"
+    )
+    assert got["shown"] == "first-dictation" and got["tilt"] == "tilt"
+    assert got["text"].startswith("Your first dictation")
+    assert got["afterDismiss"] == ["idle", None]
+    assert got["reopened"] is None and got["reopenedMount"] == ["idle", None]
+    assert got["later"] is None  # dismissed for the day: not even a newer milestone
+    assert got["nextDay"] == "first-meeting"  # the next day a new bubble, the next one not said before
+    assert got["stored"] == "2026-11-03"  # the last bubble chosen
+
+
+@needs_node
+def test_an_undismissed_bubble_is_still_there_on_the_next_visit_of_the_day():
+    got = _js(
+        PAGE + "const host = {}; showPipGreeting(host, FACTS); const first = last().bubble.children[0].textContent;"
+        "showPipGreeting(host, FACTS);"
+        "console.log(JSON.stringify([first, last().bubble.children[0].textContent, mounts.length]))"
+    )
+    assert got[0] == got[1] and got[2] == 2
+
+
+@needs_node
+def test_without_facts_or_with_damaged_saved_state_pip_sits_quietly_or_starts_fresh():
+    got = _js(
+        PAGE + "const host = {}; const a = showPipGreeting(host, null); const quiet = last();"
+        "store['nexusvox-pip-greeting'] = '{broken'; const b = showPipGreeting(host, FACTS);"
+        "store['nexusvox-pip-greeting'] = '[1,2]'; const c = showPipGreeting(host, FACTS, '2026-11-09');"
+        "console.log(JSON.stringify([a, quiet.bubble, b && b.id, c && c.id]))"
+    )
+    assert got == [None, None, "first-dictation", "first-dictation"]
+
+
+# ── Wiring ───────────────────────────────────────────────────────────
+
+
+def test_home_has_a_pip_host_that_starts_hidden_and_the_scripts_load_before_home():
+    assert re.search(r'<div class="home-pip" id="home-pip" hidden></div>', HTML)
+    order = re.findall(r'<script src="(dashboard-[a-z-]+\.js)"', HTML)
+    assert (
+        order.index("dashboard-pip.js")
+        < order.index("dashboard-pip-texts.js")
+        < order.index("dashboard-pip-greeting.js")
+    )
+    assert order.index("dashboard-pip-greeting.js") < order.index("dashboard-home.js")
+    home = (STATIC / "dashboard-home.js").read_text(encoding="utf-8")
+    assert '"/api/pip/facts"' in home and "showPipGreeting(host, facts)" in home
+    assert re.search(r"function openHomeTab\(\) \{.*loadHomePip\(\);", home, re.S)
+
+
+def test_the_greeting_never_asks_for_texts_and_inserts_text_as_text():
+    assert "innerHTML" not in GREETING
+    assert "/api/pip/facts" not in GREETING  # the page's Home fetches the counts; this file only chooses
+    for forbidden in ("transcription", "recent", "file-transcriptions", "/api/history"):
+        assert forbidden not in GREETING and forbidden not in TEXTS

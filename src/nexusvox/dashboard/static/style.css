@@ -1570,6 +1570,10 @@ canvas { width: 100% !important; max-height: 260px; }
   transform: rotate(45deg);
 }
 
+/* Pip's greeting on Home (dashboard-pip-greeting.js): the dismiss link under the bubble text. */
+.home-pip { margin: 0 0 20px; }
+.pip-bubble-dismiss { display: block; margin-top: 6px; font-size: 12px; }
+
 /* Idle: a slow breathing bob of 2px and a blink every few seconds. Sleeping breathes slower. */
 .pip-idle .pip-art { animation: pip-breathe 4s ease-in-out infinite; }
 .pip-sleeping .pip-art { animation: pip-breathe 6s ease-in-out infinite; }

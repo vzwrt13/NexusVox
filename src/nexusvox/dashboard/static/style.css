@@ -114,6 +114,8 @@ header h1 {
 .tabs-footer .tab[hidden] { display: none; }
 .sidebar-version { padding: 6px 12px 0; font-size: 11px; color: var(--text-dim); }
 .sidebar-version p { margin: 0; }
+.sidebar-help { display: block; padding: 6px 12px 2px; font-size: 12px; color: var(--accent-light); text-decoration: none; }
+.sidebar-help:hover { text-decoration: underline; }
 .sidebar-version-status { display: block; margin-top: 4px; font-size: 11px; line-height: 1.35; }
 .sidebar-version [hidden] { display: none; }
 .link-button {

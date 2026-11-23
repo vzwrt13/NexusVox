@@ -191,23 +191,35 @@ function openPipTarget(target) {
 let pipTourHost = null;
 
 // Walks through `steps` of `version` from entry `start`. `present(bubble)` draws one card (null clears it) and `onEnd`
-// runs when the popup goes away. The state is saved as the cards change: the entry on screen is where a later visit
-// continues, "Done" and the × mark the version as seen, and "Show me" saves the next entry (on the last one it marks
-// the version as seen) before it opens the page.
-function walkPipTour(present, steps, version, start, open, canOpen, onEnd) {
+// runs when the popup goes away. With `persist` the state is saved as the cards change: the entry on screen is where
+// a later visit continues, "Done" and the × mark the version as seen, and "Show me" saves the next entry (on the last
+// one it marks the version as seen) before it opens the page. Without `persist` (the "What's new" link on a version
+// already seen) the saved state is never touched, so leaving a card open can never bring the automatic popup back;
+// the place is kept for this page load only, so the link continues after a "Show me".
+let pipSessionTour = { version: "", step: 0 };
+
+function walkPipTour(present, steps, version, start, open, canOpen, onEnd, persist = true) {
   const save = (update) => writePipTourState(update(readPipTourState()));
+  const goesOn = (index) => {
+    if (persist) save((state) => pipTourAt(state, version, index));
+    else pipSessionTour = { version, step: index };
+  };
+  const over = () => {
+    if (persist) save((state) => pipTourSeen(state, version));
+    else pipSessionTour = { version: "", step: 0 };
+  };
   const draw = (index) => {
-    save((state) => pipTourAt(state, version, index));
+    goesOn(index);
     present(
       buildPipTourStep(steps, index, {
         onNext: () => draw(index + 1),
         onClose: () => {
-          save((state) => pipTourSeen(state, version));
+          over();
           onEnd();
         },
         onShow: (target) => {
-          if (index + 1 < steps.length) save((state) => pipTourAt(state, version, index + 1));
-          else save((state) => pipTourSeen(state, version));
+          if (index + 1 < steps.length) goesOn(index + 1);
+          else over();
           onEnd();
           open(target);
         },
@@ -218,8 +230,33 @@ function walkPipTour(present, steps, version, start, open, canOpen, onEnd) {
   draw(start);
 }
 
-// Walks through `steps` in `host`: one mount per step, so the Show Pip setting still hides all of it.
-function showPipTour(host, steps, open = openPipTarget, canOpen = pipTargetAvailable, version = "", start = 0) {
+// What Home last showed Pip with, so a tour opened from the link can give him back his bubble when it ends.
+let pipHomeContext = null;
+
+// Pip's quiet side of Home: no popup due, so the day's bubble, unless a popup was shown today (it replaced the bubble,
+// which is not used up). Returns "greeting" or "quiet".
+function showPipHomeIdle(host, facts, version, day) {
+  const state = readPipTourState();
+  if (state.day === day && state.version === pipVersionKey(version)) {
+    pipQuiet(host);
+    return "quiet";
+  }
+  return showPipGreeting(host, facts, day) ? "greeting" : "quiet";
+}
+
+// Walks through `steps` in `host`: one mount per step, so the Show Pip setting still hides all of it. `after` runs when
+// the popup ends instead of leaving Pip quiet.
+function showPipTour(
+  host,
+  steps,
+  open = openPipTarget,
+  canOpen = pipTargetAvailable,
+  version = "",
+  start = 0,
+  persist = true,
+  after = null,
+) {
+  closePipPlainTour();
   pipTourHost = host;
   walkPipTour(
     (bubble) => mountPip(host, { pose: "tilt", side: "left", bubble }),
@@ -230,8 +267,10 @@ function showPipTour(host, steps, open = openPipTarget, canOpen = pipTargetAvail
     canOpen,
     () => {
       pipTourHost = null;
-      pipQuiet(host);
+      if (after) after();
+      else pipQuiet(host);
     },
+    persist,
   );
 }
 
@@ -243,31 +282,63 @@ function closePipPlainTour() {
   pipPlainPopup = null;
 }
 
-function showPipPlainTour(steps, open, canOpen, version, start) {
+// The card is a dialog: focus moves into it, Escape is the ×, and when it goes away focus returns to where it came
+// from (the link).
+function showPipPlainTour(steps, open, canOpen, version, start, persist = true) {
   closePipPlainTour();
+  if (pipTourHost) {
+    // Pip was switched off with his popup open: it is gone from the page, so it is not "still being read" either.
+    const host = pipTourHost;
+    pipTourHost = null;
+    pipQuiet(host);
+  }
+  const opener = document.activeElement;
   const box = document.createElement("div");
   box.className = "pip-bubble pip-tour-plain";
   box.setAttribute("role", "dialog");
   box.setAttribute("aria-label", "What's new");
+  const present = (bubble) => {
+    box.replaceChildren(bubble);
+    const next = bubble.querySelector(".pip-tour-next");
+    if (next) next.focus();
+  };
+  box.addEventListener("keydown", (e) => {
+    const close = e.key === "Escape" ? box.querySelector(".pip-bubble-close") : null;
+    if (close) close.click();
+  });
+  const onEnd = () => {
+    if (pipPlainPopup === box) closePipPlainTour();
+    if (opener && opener.isConnected && opener.focus) opener.focus();
+  };
   document.body.append(box);
   pipPlainPopup = box;
-  walkPipTour((bubble) => box.replaceChildren(bubble), steps, version, start, open, canOpen, closePipPlainTour);
+  walkPipTour(present, steps, version, start, open, canOpen, onEnd, persist);
 }
 
-// The "What's new" link in the sidebar: the entries of `version` (the running app's), from the entry an unfinished tour
-// left off at, else from the first. With Show Pip on they are Pip's popup on Home; with him off, a plain card wherever
-// the user is. Returns false when the version has no entries.
+// The "What's new" link in the sidebar: the entries of `version` (the running app's). A version whose popup is still
+// due or half read goes on from its saved entry and saves its progress like the automatic popup; one already seen
+// starts at the first entry (or where a "Show me" left it in this page load) and saves nothing. With Show Pip on the
+// entries are Pip's popup on Home, giving him his bubble back when they end; with him off, a plain card wherever the
+// user is. Returns false when the version has no entries.
 function openPipWhatsNew(version, data = PIP_WHATS_NEW, open = openPipTarget, canOpen = pipTargetAvailable) {
   const current = pipVersionKey(version);
   const steps = pipTourSteps(current, data);
   if (!steps.length) return false;
-  const start = pipResumeStep(readPipTourState(), current, steps.length);
+  const saved = readPipTourState();
+  const persist = saved.pending === current || isNewerPipVersion(current, saved.version);
+  const start = persist
+    ? pipResumeStep(saved, current, steps.length)
+    : pipSessionTour.version === current && pipSessionTour.step < steps.length
+      ? pipSessionTour.step
+      : 0;
   const host = pipEnabled ? document.getElementById("home-pip") : null;
   if (host) {
     goToTab("home");
-    showPipTour(host, steps, open, canOpen, current, start);
+    const ctx = pipHomeContext;
+    const after = ctx ? () => showPipHomeIdle(host, ctx.facts, ctx.version, localIsoDate(new Date())) : null;
+    showPipTour(host, steps, open, canOpen, current, start, persist, after);
   } else {
-    showPipPlainTour(steps, open, canOpen, current, start);
+    showPipPlainTour(steps, open, canOpen, current, start, persist);
   }
   return true;
 }
@@ -284,6 +355,7 @@ function updatePipWhatsNewLink(version, data = PIP_WHATS_NEW) {
 // version ("" when unknown). Returns "tour", "greeting" or "quiet" for what Pip is doing. While Pip is switched off the
 // popup is neither shown nor used up (it comes when he is switched on and Home is opened again).
 function showPipHome(host, facts, version, day = localIsoDate(new Date()), data = PIP_WHATS_NEW, open, canOpen) {
+  pipHomeContext = { facts, version };
   if (pipTourHost === host) return "tour"; // the popup is still being read: leave it as it is
   const saved = readPipTourState();
   const { steps, start, state } = pickPipTour(version, facts, saved, day, data);
@@ -298,9 +370,5 @@ function showPipHome(host, facts, version, day = localIsoDate(new Date()), data 
   }
   if (state !== saved) writePipTourState(state); // a first installation, or a version without entries
   // The popup was shown today: the day's bubble is not told as well, and is not used up either.
-  if (state.day === day && state.version === pipVersionKey(version)) {
-    pipQuiet(host);
-    return "quiet";
-  }
-  return showPipGreeting(host, facts, day) ? "greeting" : "quiet";
+  return showPipHomeIdle(host, facts, version, day);
 }

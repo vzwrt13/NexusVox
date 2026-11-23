@@ -33,10 +33,13 @@ const elements = {};
 const visited = [];
 function goToTab(t) { visited.push(t); return true; }
 const document = { querySelector: (sel) => ({ hidden: hiddenTabs.has(sel.match(/data-tab="([^"]+)"/)[1]) }),
+  activeElement: null, focused: [],
   getElementById: (id) => elements[id] || null,
   body: { children: [], append(...k) { this.children.push(...k); } },
   createElement: (tag) => ({ tag, children: [], className: "", textContent: "", listeners: {}, dataset: {},
-  attrs: {}, setAttribute(k, v) { this.attrs[k] = v; },
+  attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, isConnected: true,
+  focus() { document.focused.push(this); }, click() { this.listeners.click(); },
+  querySelector(sel) { return find(this, sel.slice(1)); },
   append(...k) { this.children.push(...k); }, replaceChildren(...k) { this.children = k; },
   remove() { document.body.children = document.body.children.filter((c) => c !== this); },
   addEventListener(t, f) { this.listeners[t] = f; } }) };
@@ -536,3 +539,100 @@ def test_the_link_with_pip_off_opens_a_plain_popup_without_the_budgie():
     assert got["dialog"] == "dialog" and got["stacked"] == 1 and got["left"] == 0
     assert got["mounted"] == 0 and got["visited"] == []  # no Pip, and the page does not change
     assert got["saved"]["version"] == "1.1.0" and got["saved"]["pending"] == ""
+
+
+# ── Reopening never brings the automatic popup back, never doubles up, keeps focus and the bubble ───
+
+
+@needs_node
+def test_the_link_on_a_version_already_seen_saves_nothing_so_leaving_a_card_open_changes_no_later_visit():
+    got = _js(
+        "const host = {}; elements['home-pip'] = host;"
+        "showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "find(last().bubble, 'pip-bubble-close').listeners.click();"  # seen
+        "const before = store['nexusvox-pip-whats-new'];"
+        "openPipWhatsNew('1.1.0', SAMPLE);"
+        "find(last().bubble, 'pip-tour-next').listeners.click();"
+        "const during = store['nexusvox-pip-whats-new'];"
+        "pipTourHost = null;"  # the window is closed without the x: the page starts afresh
+        "const next = showPipHome(host, USED, '1.1.0', '2026-11-03', SAMPLE);"
+        "console.log(JSON.stringify([before === during, next, last().bubble !== null]))"
+    )
+    assert got[0] is True  # the saved state did not move
+    assert got[1] == "greeting"  # the day's bubble comes as usual, not the tour
+
+
+@needs_node
+def test_the_link_on_a_seen_version_continues_after_show_me_in_this_page_load_without_saving():
+    got = _js(
+        "const host = {}; elements['home-pip'] = host; const open = () => true;"
+        "showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "find(last().bubble, 'pip-bubble-close').listeners.click();"
+        "const before = store['nexusvox-pip-whats-new'];"
+        "openPipWhatsNew('1.1.0', SAMPLE, open);"
+        "find(last().bubble, 'pip-tour-show').listeners.click();"  # Show me on entry 1
+        "openPipWhatsNew('1.1.0', SAMPLE, open);"
+        "const title = find(last().bubble, 'pip-tour-title').textContent;"
+        "console.log(JSON.stringify([title, store['nexusvox-pip-whats-new'] === before]))"
+    )
+    assert got == ["Own words", True]
+
+
+@needs_node
+def test_only_one_tour_is_on_screen_at_a_time():
+    got = _js(
+        "const host = {}; elements['home-pip'] = host; pipEnabled = false;"
+        "openPipWhatsNew('1.1.0', SAMPLE);"  # the plain card, Show Pip off
+        "const plain = document.body.children.length;"
+        "pipEnabled = true;"
+        "openPipWhatsNew('1.1.0', SAMPLE);"  # Pip on: his popup replaces the card
+        "const afterPip = document.body.children.length;"
+        "pipEnabled = false;"
+        "openPipWhatsNew('1.1.0', SAMPLE);"  # off again: the card, and Pip's popup is no longer 'on screen'
+        "const hostFree = pipTourHost === null;"
+        "pipEnabled = true;"
+        "const home = showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "console.log(JSON.stringify([plain, afterPip, hostFree, home, document.body.children.length]))"
+    )
+    assert got == [1, 0, True, "tour", 0]
+
+
+@needs_node
+def test_the_plain_card_takes_focus_closes_on_escape_and_gives_focus_back():
+    got = _js(
+        "pipEnabled = false; const link = document.createElement('button'); document.activeElement = link;"
+        "openPipWhatsNew('1.1.0', SAMPLE);"
+        "const box = document.body.children[0];"
+        "const nextButton = find(box.children[0], 'pip-tour-next');"
+        "const focusedFirst = document.focused[document.focused.length - 1] === nextButton;"
+        "nextButton.listeners.click();"  # a new card replaces the focused button: focus follows
+        "const lastFocus = () => document.focused[document.focused.length - 1];"
+        "const focusedSecond = lastFocus() === find(box.children[0], 'pip-tour-next');"
+        "box.listeners.keydown({ key: 'Enter' }); const stillOpen = document.body.children.length;"
+        "box.listeners.keydown({ key: 'Escape' });"
+        "console.log(JSON.stringify({ focusedFirst, focusedSecond, stillOpen, left: document.body.children.length,"
+        " back: lastFocus() === link, saved: read('nexusvox-pip-whats-new').version }))"
+    )
+    assert got == {
+        "focusedFirst": True,
+        "focusedSecond": True,
+        "stillOpen": 1,
+        "left": 0,
+        "back": True,
+        "saved": "1.1.0",
+    }
+
+
+@needs_node
+def test_a_tour_opened_from_the_link_gives_pip_his_bubble_back_when_it_ends():
+    got = _js(
+        "const host = {}; elements['home-pip'] = host;"
+        "showPipHome(host, USED, '1.0.0', '2026-11-02', SAMPLE);"  # no popup due: the day's bubble
+        "const bubble = last().bubble;"
+        "openPipWhatsNew('1.1.0', SAMPLE);"
+        "const tour = last().bubble !== bubble;"
+        "find(last().bubble, 'pip-bubble-close').listeners.click();"
+        "console.log(JSON.stringify([!!bubble, tour, find(last().bubble || { children: [], className: '' }, 'pip-tour')"
+        " === null, !!last().bubble]))"
+    )
+    assert got == [True, True, True, True]  # a bubble again, and not the tour's card

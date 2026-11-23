@@ -15,16 +15,62 @@ still contains a GPL library. Use a dedicated environment for building.
 from __future__ import annotations
 
 import argparse
+import importlib.machinery
+import importlib.util
 import os
+import re
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 from lgpl_av import GplError, LgplBuildError, bundle_gpl_parts, ensure_lgpl_av
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "packaging" / "nexusvox.spec"
+_VERSION_LINE = re.compile(r'^__version__\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
+
+
+def checkout_version(root: Path = ROOT) -> str:
+    """The version `pyproject.toml` of the checkout declares."""
+    with (root / "pyproject.toml").open("rb") as file:
+        return tomllib.load(file)["project"]["version"]
+
+
+def _package_version(init_file: Path) -> str | None:
+    match = _VERSION_LINE.search(init_file.read_text(encoding="utf-8"))
+    return match.group(1) if match else None
+
+
+def installed_package_init() -> Path | None:
+    """The `nexusvox/__init__.py` the build environment would bundle, without importing it.
+
+    The checkout's own folders are left out of the search: the PyInstaller spec bundles what is installed.
+    """
+    checkout = {ROOT.resolve(), (ROOT / "src").resolve(), Path(__file__).resolve().parent}
+    paths = [p for p in sys.path if p and Path(p).resolve() not in checkout]
+    spec = importlib.machinery.PathFinder.find_spec("nexusvox", paths)
+    return Path(spec.origin) if spec and spec.origin else None
+
+
+def stale_bundle_error(root: Path = ROOT, installed_init: Path | None = None) -> str | None:
+    """One line naming the mismatch when the installed nexusvox is not the checkout's, else None."""
+    expected = checkout_version(root)
+    source_version = _package_version(root / "src" / "nexusvox" / "__init__.py")
+    if source_version != expected:
+        return f"src/nexusvox/__init__.py says {source_version}, pyproject.toml says {expected}: fix the checkout first"
+    if installed_init is None:
+        return (
+            "nexusvox is not installed in this environment: run `python -m pip install --no-deps --force-reinstall .`"
+        )
+    found = _package_version(installed_init)
+    if found != expected:
+        return (
+            f"the installed nexusvox is {found} ({installed_init.parent}), the checkout is {expected}: "
+            "run `python -m pip install --no-deps --force-reinstall .` and build again"
+        )
+    return None
 
 
 def folder_size_mb(folder: Path) -> float:
@@ -47,6 +93,11 @@ def main() -> int:
     ]  # fmt: skip
     if args.clean:
         command.append("--clean")
+
+    problem = stale_bundle_error(ROOT, installed_package_init())
+    if problem:
+        print(f"error: {problem}", file=sys.stderr)
+        return 1
 
     try:
         ensure_lgpl_av()

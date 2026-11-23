@@ -46,7 +46,17 @@ Do the normal release first ([.github/CLAUDE.md](../.github/CLAUDE.md#releasing)
 tag. The tag run creates the draft release. Then, on your PC, from a checkout of the tag:
 
 1. **Log in to SimplySign Desktop** (phone one-time code). The certificate now shows up as a virtual smart card.
-2. `python packaging\check_bootloader.py`, then build the app: `python packaging\build.py --clean`
+2. **Reinstall the checkout into the signing environment**, check the version, then build. A stale install there is
+   what gets bundled, whatever the checkout says:
+
+   ```powershell
+   python -m pip install --no-deps --force-reinstall .
+   python -c "import importlib.metadata as m; print(m.version('nexusvox'))"   # must equal the version in pyproject.toml
+   python packaging\check_bootloader.py
+   python packaging\build.py --clean
+   ```
+
+   `build.py` also stops with one line when the installed nexusvox differs from the checkout.
 3. Run the script:
 
    ```powershell
@@ -72,7 +82,7 @@ tag. The tag run creates the draft release. Then, on your PC, from a checkout of
 6. Replace the unsigned installer on the draft (same file name, the website links to it):
 
    ```powershell
-   gh release upload v1.0.0 dist\installer\NexusVox-Setup.exe --clobber
+   gh release upload <tag> dist\installer\NexusVox-Setup.exe --clobber
    ```
 
 7. **Check that the draft holds the FFmpeg source**, then publish. The installer ships an LGPL FFmpeg, and the LGPL asks
@@ -81,13 +91,13 @@ tag. The tag run creates the draft release. Then, on your PC, from a checkout of
    library linked into it). `gh release upload --clobber` of the installer leaves it alone. Look before you publish:
 
    ```powershell
-   gh release view v1.0.0 --json assets --jq ".assets[].name"
-   gh release edit v1.0.0 --draft=false
+   gh release view <tag> --json assets --jq ".assets[].name"
+   gh release edit <tag> --draft=false
    ```
 
    The list must show `ffmpeg-<version>-source.tar.gz` and `ffmpeg-builds-<release>-scripts.tar.gz` next to
    `NexusVox-Setup.exe`. If they are missing (the workflow step failed), repair the draft from a checkout of the tag,
-   which the script insists on: `git checkout v1.0.0`, then `python packaging\attach_ffmpeg_source.py v1.0.0` (it also
+   which the script insists on: `git checkout <tag>`, then `python packaging\attach_ffmpeg_source.py <tag>` (it also
    refuses a release without the installer and a published one; `--allow-published` adds the source to a published
    release). If a run stops with "is not the pinned file", GitHub served other content for the same commit: check that
    `FFMPEG_COMMIT` is still the `g...` commit in `FFMPEG_VERSION`, pin the new digest in `SOURCE_ARCHIVES` through a

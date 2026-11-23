@@ -13,4 +13,12 @@
 //   - `target` is optional: the dashboard page the "Show me" link opens, a tab name ("recordings") or a tab with its
 //     page ("settings/vocabulary", "analytics/week"). An entry without a target has no "Show me" link.
 //   - pick the features worth a mention, not every change: three or four steps are plenty.
-const PIP_WHATS_NEW = {};
+const PIP_WHATS_NEW = {
+  "1.0.1": [
+    { title: "Model download asks first", text: "The speech model downloads only after you click Download, so nothing big arrives unannounced.", target: "settings/models" },
+    { title: "Easier exports", text: "The Export menu on a recording now lists each format as its own row.", target: "recordings" },
+    { title: "Speakers in meetings", text: "Each speaker in a meeting transcript now has a row of their own.", target: "recordings" },
+    { title: "Help and diagnostics", text: "The Help link opens the online guide. Copy diagnostics under Settings > Privacy gathers what a bug report needs and sends nothing.", target: "settings/privacy" },
+    { title: "Hello from me", text: "I now greet you on Home with a small note now and then. You can turn me off in Settings if you prefer.", target: "home" },
+  ],
+};

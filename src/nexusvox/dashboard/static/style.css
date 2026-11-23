@@ -1550,7 +1550,7 @@ canvas { width: 100% !important; max-height: 260px; }
   align-self: center;
   min-width: 0;
   max-width: min(280px, 100%);
-  padding: 11px 30px 11px 14px;
+  padding: 11px 14px;
   font-size: 13.5px;
   line-height: 1.45;
   text-wrap: pretty;
@@ -1589,6 +1589,8 @@ canvas { width: 100% !important; max-height: 260px; }
   border-right: 1px solid var(--pip-bubble-border);
   border-top-right-radius: 3px;
 }
+/* Room for the × on its right, only when there is one. */
+.pip-bubble:has(.pip-bubble-close) { padding-right: 30px; }
 /* The small × that dismisses the bubble, in its top-right corner. */
 .pip-bubble-close {
   position: absolute;

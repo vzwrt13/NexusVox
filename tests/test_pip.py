@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 from dashboard_js import STATIC
@@ -276,3 +277,74 @@ def test_pip_stands_in_the_bottom_right_corner_of_home_in_the_flow_and_never_ove
     assert re.search(
         r"@media \(max-width: 640px\)\s*\{\s*\.home-pip \.pip-bubble-left\s*\{[^}]*flex-direction: column", CSS
     )
+
+
+# ── Setup and empty states ───────────────────────────────────────────
+
+SETUP_JS = (STATIC / "dashboard-setup.js").read_text(encoding="utf-8")
+RECORDINGS_JS = (STATIC / "dashboard-recordings.js").read_text(encoding="utf-8")
+
+
+def _setup_hosts():
+    return re.findall(r'<div class="setup-pip" data-pip-pose="(\w+)" data-pip-line="([^"]+)" hidden></div>', HTML)
+
+
+def test_every_setup_step_has_a_pip_host_with_one_short_sentence():
+    panels = re.findall(r'<section class="setup-panel".*?</section>', HTML, re.S)
+    assert len(panels) == 4
+    assert all(panel.count('class="setup-pip"') == 1 for panel in panels)
+    hosts = _setup_hosts()
+    assert len(hosts) == 4
+    for pose, line in hosts:
+        assert pose in {"idle", "tilt", "sleeping"}
+        assert len(line) <= 60 and line.count(". ") == 0 and line.endswith((".", "?", "!"))
+        assert "Pro" not in line  # Pip never advertises
+    # The steps themselves are untouched: heading, then Pip, then the step's own content.
+    assert re.search(
+        r'setup-heading" id="setup-h-1" tabindex="-1">Choose your microphone</h3>\s*<div class="setup-pip"', HTML
+    )
+
+
+def test_the_setup_mounts_its_hosts_through_mountpip_as_text_and_they_start_hidden():
+    block = re.search(r'for \(const host of setupEl\.querySelectorAll\("\.setup-pip"\)\) \{(.*?)\n\}', SETUP_JS, re.S)
+    assert block, "the setup no longer mounts its .setup-pip hosts in one loop"
+    assert "mountPip(host" in block.group(1) and "bubble: host.dataset.pipLine" in block.group(1)
+    assert "innerHTML" not in block.group(1)
+    assert not re.search(r"innerHTML\s*=\s*host\.dataset", SETUP_JS)  # the line is never parsed as markup
+    css = (STATIC / "setup.css").read_text(encoding="utf-8")
+    assert re.search(r"\.setup-pip\[hidden\]\s*\{\s*display:\s*none", css)
+
+
+def test_the_empty_list_photo_page_matches_the_markup_the_dashboard_draws():
+    photo = (Path(__file__).resolve().parents[1] / "scripts" / "pip_poses.py").read_text(encoding="utf-8")
+    for needle in ('<li class="empty-state">', 'host.className = "rec-empty-pip"', 'pose: "sleeping", size: 72'):
+        assert needle in RECORDINGS_JS, needle
+        assert needle in photo.replace("{{", "{").replace("}}", "}"), needle
+    assert "unmountPip(host)" in RECORDINGS_JS  # a dropped empty list releases its host
+
+
+def test_the_empty_recordings_list_shows_pip_sleeping_with_one_line_and_keeps_its_text():
+    assert 'recList.innerHTML = `<li class="empty-state">${message}</li>`' in RECORDINGS_JS  # the text as before
+    assert 'mountPip(host, { pose: "sleeping"' in RECORDINGS_JS
+    line = re.search(r'REC_EMPTY_PIP_LINE = "([^"]+)"', RECORDINGS_JS).group(1)
+    assert line.count(". ") == 0 and len(line) <= 90
+    # Pip only appears for an empty library, not for a search without a match.
+    assert "if (!recItems.length) {" in RECORDINGS_JS.split(" mountPip(host")[0].split("recList.innerHTML")[1]
+
+
+@needs_node
+def test_with_show_pip_off_the_setup_and_the_empty_list_hosts_stay_empty_and_hidden():
+    got = run_js(
+        "setShowPip(false);"
+        "const setup = new El('div'); setup.hidden = true;"
+        "mountPip(setup, { pose: 'tilt', size: 72, bubble: 'Say a few words and watch the bar move.' });"
+        "const empty = new El('div');"
+        "mountPip(empty, { pose: 'sleeping', size: 72, bubble: 'Record a meeting or upload an audio file.' });"
+        "const off = [setup, empty].map((h) => [h.hidden, h.children.length]);"
+        "setShowPip(true);"
+        "const on = [setup, empty].map((h) => [h.hidden, h.children.length,"
+        "  all(h).some((e) => e.className === 'pip pip-sleeping')]);"
+        "console.log(JSON.stringify({ off, on }));"
+    )
+    assert got["off"] == [[True, 0], [True, 0]]
+    assert got["on"] == [[False, 1, False], [False, 1, True]]

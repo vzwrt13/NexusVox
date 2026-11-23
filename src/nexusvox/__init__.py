@@ -6,4 +6,4 @@ Source-available under the PolyForm Noncommercial License 1.0.0.
 See the LICENSE file for the full text.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"

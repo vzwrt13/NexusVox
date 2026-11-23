@@ -199,7 +199,18 @@ def to_vtt(transcript: FileTranscript, transform: TextTransform | None = None) -
 def builtin_export_targets(transform: TextTransform | None = None) -> list[ExportTarget]:
     """TXT, SRT and VTT; *transform* (the registry's `display_texts`) changes the texts they write."""
     return [
-        ExportTarget("txt", "TXT", ".txt", "text/plain; charset=utf-8", partial(to_txt, transform=transform)),
-        ExportTarget("srt", "SRT", ".srt", "application/x-subrip; charset=utf-8", partial(to_srt, transform=transform)),
-        ExportTarget("vtt", "VTT", ".vtt", "text/vtt; charset=utf-8", partial(to_vtt, transform=transform)),
+        ExportTarget(
+            "txt", "TXT", ".txt", "text/plain; charset=utf-8", partial(to_txt, transform=transform), group="transcript"
+        ),
+        ExportTarget(
+            "srt",
+            "SRT",
+            ".srt",
+            "application/x-subrip; charset=utf-8",
+            partial(to_srt, transform=transform),
+            group="subtitles",
+        ),
+        ExportTarget(
+            "vtt", "VTT", ".vtt", "text/vtt; charset=utf-8", partial(to_vtt, transform=transform), group="subtitles"
+        ),
     ]

@@ -1580,3 +1580,50 @@ def test_an_upload_deleted_while_its_check_runs_leaves_no_pending_state():
     assert reg._last_pending == {}
     assert reg._checking == {} and reg._forgotten == set()  # nothing is kept for the next upload with this id
     assert reg.unavailable_exports(43) == {"gated-md": {"pending": "Summarising"}}
+
+
+def test_an_export_target_lists_its_row_fields_only_when_it_sets_them():
+    class Grouped(V1Extension):
+        name = "grouped"
+
+        def export_targets(self):
+            def target(id_, **row):
+                return ExportTarget(id_, "Label", ".md", "text/markdown", lambda t: "x", **row)
+
+            return [
+                target("plain"),
+                target("summary", group="summary-a", group_label="Meeting summary", hint="Made today"),
+                target("half", group="speakers"),
+            ]
+
+    reg = ExtensionRegistry()
+    assert reg.add(Grouped)
+    exports = {e["id"]: e for e in reg.describe()["exports"]}
+    assert set(exports["plain"]) == {"id", "label", "extension", "mimetype"}
+    assert exports["summary"]["group"] == "summary-a"
+    assert exports["summary"]["group_label"] == "Meeting summary"
+    assert exports["summary"]["hint"] == "Made today"
+    assert exports["half"]["group"] == "speakers"
+    assert "hint" not in exports["half"]
+
+
+def test_an_export_target_with_a_row_field_that_is_not_a_string_is_dropped():
+    class Odd(V1Extension):
+        name = "odd"
+
+        def export_targets(self):
+            return [ExportTarget("odd-md", "Odd", ".md", "text/markdown", lambda t: "x", group=3)]
+
+    reg = ExtensionRegistry()
+    assert reg.add(Odd)
+    assert reg.export_target("odd-md") is None
+
+
+def test_the_built_in_targets_sit_on_the_transcript_and_subtitle_rows():
+    from nexusvox.transcription.exports import builtin_export_targets
+
+    assert {t.id: t.group for t in builtin_export_targets()} == {
+        "txt": "transcript",
+        "srt": "subtitles",
+        "vtt": "subtitles",
+    }

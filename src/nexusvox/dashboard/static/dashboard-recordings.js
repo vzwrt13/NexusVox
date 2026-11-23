@@ -461,7 +461,7 @@ function fillRecordingHead(detail, item) {
     <div class="rec-head-actions">
       <div class="rec-menu-wrap">
         <button type="button" class="rec-menu-btn" aria-haspopup="true" aria-expanded="false">Export <span aria-hidden="true">▾</span></button>
-        <div class="rec-menu" hidden>${exportMenuHtml(item)}</div>
+        <div class="rec-menu rec-menu-export" hidden>${exportMenuHtml(item)}</div>
       </div>
       <div class="rec-menu-wrap">
         <button type="button" class="rec-menu-btn rec-more-btn" aria-haspopup="true" aria-expanded="false" aria-label="More actions">⋯</button>
@@ -470,8 +470,8 @@ function fillRecordingHead(detail, item) {
     </div>`;
   head.querySelectorAll(".rec-menu-wrap").forEach(bindRecMenu);
   head.querySelector(".rec-rename").addEventListener("click", () => editFileTitle(detail));
-  head.querySelectorAll(".rec-export").forEach((entry) => {
-    entry.addEventListener("click", () => downloadExport(entry.dataset.href, detail._item));
+  head.querySelectorAll(".rec-export").forEach((chip) => {
+    chip.addEventListener("click", () => runExportChip(chip, detail));
   });
   head.querySelectorAll(".upload-action").forEach((button) => {
     button.addEventListener("click", () => runUploadAction(button, detail._item));
@@ -492,16 +492,118 @@ function menuReason(reason) {
   return `<span class="rec-menu-reason">${escapeHtml(state.text)}</span>`;
 }
 
+// ── Export menu: one row per content, its formats as chips ───────────
+// The export targets (the built-in TXT, SRT, VTT and an extension's) are grouped by what they give you. A target
+// whose id is not listed in `exportRowKey` is a row of its own, so an extension's export is never lost. Only what
+// can be exported for this recording is drawn: an entry that cannot run (no summary yet, no word timing) is left
+// out, and the pending or failed state of one still shows under the head (`renderRowStates`).
+const EXPORT_ICONS = {
+  transcript: `<path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/>`,
+  subtitles: `<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M4.5 9.5h3M9 9.5h2.5"/>`,
+  speakers: `<circle cx="5.5" cy="6" r="2"/><circle cx="11" cy="6.5" r="1.6"/><path d="M2 13c.4-2 1.8-3 3.5-3s3.1 1 3.5 3M9 12.5c.3-1.4 1.1-2.2 2-2.2s1.8.8 2.1 2.2"/>`,
+  summary: `<path d="M3 4h10M3 7h10M3 10h6"/>`,
+};
+const EXPORT_ROW_INFO = {
+  transcript: { label: "Transcript", hint: "Text only", icon: "transcript" },
+  subtitles: { label: "Subtitles", hint: "With timestamps", icon: "subtitles" },
+  speakers: { label: "By speaker", hint: "Uses your speaker names", icon: "speakers" },
+};
+const EXPORT_ROW_ORDER = ["transcript", "subtitles", "speakers"];
+const EXPORT_DONE_MS = 1600; // how long a clicked chip shows its mint check
+
+// The row of a target: the `group` its extension declares (`ExportTarget.group`), else, for the entries nexusvox-pro
+// registered before groups existed, the row its id belongs to, else a row of its own.
+function exportRowKey(target) {
+  if (target.group) return target.group;
+  if (target.id === "txt") return "transcript";
+  if (target.id === "srt" || target.id === "vtt") return "subtitles";
+  if (target.id === "pro-transcript" || target.id.startsWith("pro-research-")) return "speakers";
+  return "target:" + target.id;
+}
+
+// "Summary: Meeting summary (Markdown)" becomes "Meeting summary"; any other label loses only a trailing "(...)".
+function exportRowLabel(target) {
+  const label = target.label.replace(/^Summary:\s*/, "").replace(/\s*\([^)]*\)\s*$/, "").trim() || target.label;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+// The file type on the chip: the last part of the suffix (".speakers.docx" is DOCX).
+function exportFormat(target) {
+  const suffix = String(target.extension || "").split(".").pop();
+  return (suffix || target.label).toUpperCase();
+}
+
+// The rows to draw for `item`: `{key, label, hint, icon, chips: [{id, format}]}`, in a fixed order (transcript,
+// subtitles, by speaker), then every other target in the order the server lists them.
+function exportRows(item) {
+  const unavailable = item.exports_unavailable || {};
+  const rows = new Map();
+  for (const target of extensionExports) {
+    if (unavailable[target.id] !== undefined) continue;
+    const key = exportRowKey(target);
+    if (!rows.has(key)) {
+      const known = Object.hasOwn(EXPORT_ROW_INFO, key) ? EXPORT_ROW_INFO[key] : null;
+      const legacySummary = target.id.startsWith("pro-summary-");
+      rows.set(key, {
+        key,
+        label: target.group_label || (known ? known.label : exportRowLabel(target)),
+        hint: target.hint || (known ? known.hint : legacySummary ? "Saved summary" : ""),
+        icon: known ? known.icon : "summary",
+        chips: [],
+      });
+    }
+    rows.get(key).chips.push({ id: target.id, format: exportFormat(target) });
+  }
+  const first = EXPORT_ROW_ORDER.filter((key) => rows.has(key));
+  const others = [...rows.keys()].filter((key) => !EXPORT_ROW_ORDER.includes(key));
+  return [...first, ...others].map((key) => rows.get(key));
+}
+
 function exportMenuHtml(item) {
   if (!extensionExports.length) return `<p class="rec-menu-empty">No export formats are available.</p>`;
-  return extensionExports.map((t) => {
-    const reason = (item.exports_unavailable || {})[t.id];
-    if (reason !== undefined) {
-      return `<button type="button" class="rec-menu-item" disabled>${escapeHtml(t.label)}${menuReason(reason)}</button>`;
-    }
-    const href = `/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}`;
-    return `<button type="button" class="rec-menu-item rec-export" data-href="${escapeHtml(href)}">${escapeHtml(t.label)}</button>`;
+  const rows = exportRows(item).map((row) => {
+    const chips = row.chips.map((chip) => {
+      const href = `/api/file-transcriptions/${item.id}/export/${encodeURIComponent(chip.id)}`;
+      const name = `${row.label} as ${chip.format}`;
+      return `<button type="button" class="rec-chip rec-export" data-href="${escapeHtml(href)}" data-format="${escapeHtml(chip.format)}" aria-label="${escapeHtml(name)}">${escapeHtml(chip.format)}</button>`;
+    }).join("");
+    const hint = row.hint ? `<small>${escapeHtml(row.hint)}</small>` : "";
+    return `<div class="rec-export-row">
+      <span class="rec-export-ico" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">${EXPORT_ICONS[row.icon]}</svg></span>
+      <span class="rec-export-lbl"><b>${escapeHtml(row.label)}</b>${hint}</span>
+      <span class="rec-export-chips">${chips}</span>
+    </div>`;
   }).join("");
+  const summarise = extensionUploadActions.some((a) => a.id === "summarise");
+  const foot = (summarise ? "Other summaries appear here after you create them with Summarise. " : "")
+    + "Files go to your Downloads folder.";
+  return `<div class="rec-export-rows" role="group" aria-label="Export">
+    ${rows || `<p class="rec-menu-empty">Nothing can be exported from this recording yet.</p>`}
+    <p class="rec-export-foot">${escapeHtml(foot)}</p>
+    <p class="rec-export-error" role="alert" hidden></p>
+  </div>`;
+}
+
+// A chip exports at once: a short mint check on success, the message in the menu on failure.
+async function runExportChip(chip, detail) {
+  if (chip.getAttribute("aria-busy") === "true") return;
+  const error = chip.closest(".rec-export-rows").querySelector(".rec-export-error");
+  error.hidden = true;
+  chip.setAttribute("aria-busy", "true");
+  const failure = await downloadExport(chip.dataset.href, detail._item, false);
+  chip.setAttribute("aria-busy", "false");
+  if (failure) {
+    error.textContent = failure;
+    error.hidden = false;
+    return;
+  }
+  const format = chip.dataset.format;
+  chip.classList.add("done");
+  chip.textContent = "✓ " + format;
+  setTimeout(() => {
+    chip.classList.remove("done");
+    chip.textContent = format;
+  }, EXPORT_DONE_MS);
 }
 
 function moreMenuHtml(item) {
@@ -517,6 +619,11 @@ function moreMenuHtml(item) {
     <button type="button" class="rec-menu-item rec-delete-item rec-menu-danger">Delete…</button>`;
 }
 
+// What a menu's arrow keys visit: its entries that can be used, and the format chips of the Export menu.
+function recMenuItems(menu) {
+  return [...menu.querySelectorAll(".rec-menu-item"), ...menu.querySelectorAll(".rec-chip")].filter((el) => !el.disabled);
+}
+
 function bindRecMenu(wrap) {
   const button = wrap.querySelector(".rec-menu-btn");
   const menu = wrap.querySelector(".rec-menu");
@@ -527,7 +634,7 @@ function bindRecMenu(wrap) {
     wrap.classList.add("open");
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
-    const first = menu.querySelector(".rec-menu-item:not([disabled])");
+    const first = recMenuItems(menu)[0];
     if (first) first.focus();
   });
   menu.addEventListener("click", (e) => {
@@ -538,12 +645,16 @@ function bindRecMenu(wrap) {
       closeRecMenu(wrap);
       button.focus();
     }
-    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !menu.hidden) {
-      const items = [...menu.querySelectorAll(".rec-menu-item:not([disabled])")];
+    // Up/Down move through the entries; in the Export menu Left/Right do too, as its chips sit side by side.
+    const forward = e.key === "ArrowDown" || e.key === "ArrowRight";
+    const backward = e.key === "ArrowUp" || e.key === "ArrowLeft";
+    const sideways = e.key === "ArrowLeft" || e.key === "ArrowRight";
+    if ((forward || backward) && !menu.hidden && (!sideways || menu.classList.contains("rec-menu-export"))) {
+      const items = recMenuItems(menu);
       if (!items.length) return;
       e.preventDefault();
       const at = items.indexOf(document.activeElement);
-      items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+      items[(at + (forward ? 1 : items.length - 1)) % items.length].focus();
     }
   });
 }

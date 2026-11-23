@@ -273,6 +273,53 @@ main:has(#tab-recordings.active) { max-width: none; padding-top: 24px; padding-b
 .rec-menu-sep { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
 .rec-menu-empty { padding: 10px 12px; font-size: 13px; color: var(--text-dim); }
 
+/* Export menu: one row per content, the formats as violet chips (mint with a check once clicked). */
+.rec-menu-export { width: 420px; max-width: min(420px, calc(100vw - 32px)); }
+/* On a narrow window the buttons sit at the left, so the menu spans the window instead of hanging off its edge. */
+@media (max-width: 640px) {
+  .rec-menu-export { position: fixed; top: auto; left: 16px; right: 16px; width: auto; max-width: none; }
+}
+.rec-export-rows { display: flex; flex-direction: column; min-width: 0; }
+.rec-export-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px;
+}
+.rec-export-row + .rec-export-row { border-top: 1px solid var(--border); }
+.rec-export-ico {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-glow);
+  color: var(--accent-light);
+}
+.rec-export-ico svg { width: 15px; height: 15px; }
+.rec-export-lbl { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.rec-export-lbl b { font-size: 14px; font-weight: 500; }
+.rec-export-lbl small { font-size: 12px; color: var(--text-dim); }
+.rec-export-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.rec-chip {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid var(--accent-soft);
+  background: var(--accent-glow);
+  color: var(--accent-light);
+  font: 500 12px var(--mono);
+  cursor: pointer;
+}
+.rec-chip:hover { background: var(--accent-fill); border-color: var(--accent); color: var(--text); }
+.rec-chip:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+.rec-chip.done, .rec-chip.done:hover { background: var(--green-fill); border-color: var(--green); color: var(--green); }
+.rec-chip[aria-busy="true"] { cursor: progress; opacity: 0.7; }
+.rec-export-foot { padding: 10px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-dim); }
+.rec-export-error { margin: 0 10px 6px; padding: 8px 10px; border-radius: var(--radius-ctl); font-size: 13px; color: var(--red); background: var(--surface2); }
+.rec-export-error[hidden] { display: none; }
+
 .rec-states:empty, .rec-delete-row[hidden] { display: none; }
 .rec-delete-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .rec-detail .upload-error, .rec-detail .upload-note { margin: 0; }

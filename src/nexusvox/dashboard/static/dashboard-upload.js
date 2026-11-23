@@ -411,15 +411,19 @@ setInterval(() => {
 }, UPLOAD_WATCH_MS);
 
 // An export is fetched, not followed as a link, so a failing one shows its message instead of
-// saving the error reply as a file.
-async function downloadExport(url, item) {
+// saving the error reply as a file. Resolves to the error message, or "" when the file was handed to the browser;
+// `report` false leaves showing the message to the caller (the Export menu shows it inside itself).
+async function downloadExport(url, item, report = true) {
   hideFeedback(item);
+  const fail = (message) => {
+    if (report) showFeedback(item, "error", message);
+    return message;
+  };
   try {
     const res = await fetch(url);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      showFeedback(item, "error", body.error || `Export failed (${res.status})`);
-      return;
+      return fail(body.error || `Export failed (${res.status})`);
     }
     const disposition = res.headers.get("Content-Disposition") || "";
     const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/);
@@ -431,8 +435,9 @@ async function downloadExport(url, item) {
     a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(blobUrl), 10000); // the browser may still be reading it
+    return "";
   } catch (err) {
-    showFeedback(item, "error", `Export failed: ${err.message}`);
+    return fail(`Export failed: ${err.message}`);
   }
 }
 

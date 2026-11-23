@@ -275,9 +275,20 @@ main:has(#tab-recordings.active) { max-width: none; padding-top: 24px; padding-b
 
 /* Export menu: one row per content, the formats as violet chips (mint with a check once clicked). */
 .rec-menu-export { width: 420px; max-width: min(420px, calc(100vw - 32px)); }
-/* On a narrow window the buttons sit at the left, so the menu spans the window instead of hanging off its edge. */
+/* On a narrow window the buttons sit at the left and the pane scrolls under a fixed menu, so the menu becomes a sheet
+   along the bottom edge of the window: all of it on screen, and it scrolls inside itself when it is taller. */
 @media (max-width: 640px) {
-  .rec-menu-export { position: fixed; top: auto; left: 16px; right: 16px; width: auto; max-width: none; }
+  .rec-menu-export {
+    position: fixed;
+    top: auto;
+    bottom: 16px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-width: none;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+  }
 }
 .rec-export-rows { display: flex; flex-direction: column; min-width: 0; }
 .rec-export-row {

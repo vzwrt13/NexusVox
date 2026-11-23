@@ -494,7 +494,7 @@ function menuReason(reason) {
 
 // ── Export menu: one row per content, its formats as chips ───────────
 // The export targets (the built-in TXT, SRT, VTT and an extension's) are grouped by what they give you. A target
-// whose id is not listed in `exportRowKey` is a row of its own, so an extension's export is never lost. Only what
+// without a group (see `exportGroupName`) is a row of its own, so an extension's export is never lost. Only what
 // can be exported for this recording is drawn: an entry that cannot run (no summary yet, no word timing) is left
 // out, and the pending or failed state of one still shows under the head (`renderRowStates`).
 const EXPORT_ICONS = {
@@ -502,6 +502,7 @@ const EXPORT_ICONS = {
   subtitles: `<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M4.5 9.5h3M9 9.5h2.5"/>`,
   speakers: `<circle cx="5.5" cy="6" r="2"/><circle cx="11" cy="6.5" r="1.6"/><path d="M2 13c.4-2 1.8-3 3.5-3s3.1 1 3.5 3M9 12.5c.3-1.4 1.1-2.2 2-2.2s1.8.8 2.1 2.2"/>`,
   summary: `<path d="M3 4h10M3 7h10M3 10h6"/>`,
+  file: `<path d="M8 2.5v7M5 7l3 3 3-3M3 12.5h10"/>`,
 };
 const EXPORT_ROW_INFO = {
   transcript: { label: "Transcript", hint: "Text only", icon: "transcript" },
@@ -511,14 +512,14 @@ const EXPORT_ROW_INFO = {
 const EXPORT_ROW_ORDER = ["transcript", "subtitles", "speakers"];
 const EXPORT_DONE_MS = 1600; // how long a clicked chip shows its mint check
 
-// The row of a target: the `group` its extension declares (`ExportTarget.group`), else, for the entries nexusvox-pro
-// registered before groups existed, the row its id belongs to, else a row of its own.
-function exportRowKey(target) {
+// The group of a target: the `group` its extension declares (`ExportTarget.group`), else, for the entries
+// nexusvox-pro registered before groups existed, the group its id belongs to, else none (a row of its own).
+function exportGroupName(target) {
   if (target.group) return target.group;
   if (target.id === "txt") return "transcript";
   if (target.id === "srt" || target.id === "vtt") return "subtitles";
   if (target.id === "pro-transcript" || target.id.startsWith("pro-research-")) return "speakers";
-  return "target:" + target.id;
+  return "";
 }
 
 // "Summary: Meeting summary (Markdown)" becomes "Meeting summary"; any other label loses only a trailing "(...)".
@@ -527,36 +528,50 @@ function exportRowLabel(target) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-// The file type on the chip: the last part of the suffix (".speakers.docx" is DOCX).
+// The file type on the chip: the last part of the suffix (".speakers.docx" is DOCX), or "TAR.GZ" for ".tar.gz".
 function exportFormat(target) {
-  const suffix = String(target.extension || "").split(".").pop();
+  const extension = String(target.extension || "");
+  const tarball = /\.tar\.[a-z0-9]+$/i.exec(extension);
+  const suffix = tarball ? tarball[0].slice(1) : extension.split(".").pop();
   return (suffix || target.label).toUpperCase();
 }
 
+// What a group's row says: the first title and hint any of its targets declares (so a core row can be retitled by
+// an extension and a row reads the same for every recording), else the core's own for a known group, else the
+// label of its first target. Looked at every target of the group, available for this recording or not.
+function exportRowHead(group) {
+  const known = group.name && Object.hasOwn(EXPORT_ROW_INFO, group.name) ? EXPORT_ROW_INFO[group.name] : null;
+  const declared = (field) => group.targets.map((t) => t[field]).find(Boolean);
+  const legacySummary = group.targets.some((t) => t.id.startsWith("pro-summary-"));
+  const summary = legacySummary || group.name.startsWith("summary");
+  return {
+    label: declared("group_label") || (known ? known.label : exportRowLabel(group.targets[0])),
+    hint: declared("hint") || (known ? known.hint : legacySummary ? "Saved summary" : ""),
+    icon: known ? known.icon : summary ? "summary" : "file",
+  };
+}
+
 // The rows to draw for `item`: `{key, label, hint, icon, chips: [{id, format}]}`, in a fixed order (transcript,
-// subtitles, by speaker), then every other target in the order the server lists them.
+// subtitles, by speaker), then every other group or lone target in the order the server lists them. A row with no
+// export that can run for this recording is left out.
 function exportRows(item) {
   const unavailable = item.exports_unavailable || {};
-  const rows = new Map();
+  const groups = new Map();
   for (const target of extensionExports) {
-    if (unavailable[target.id] !== undefined) continue;
-    const key = exportRowKey(target);
-    if (!rows.has(key)) {
-      const known = Object.hasOwn(EXPORT_ROW_INFO, key) ? EXPORT_ROW_INFO[key] : null;
-      const legacySummary = target.id.startsWith("pro-summary-");
-      rows.set(key, {
-        key,
-        label: target.group_label || (known ? known.label : exportRowLabel(target)),
-        hint: target.hint || (known ? known.hint : legacySummary ? "Saved summary" : ""),
-        icon: known ? known.icon : "summary",
-        chips: [],
-      });
-    }
-    rows.get(key).chips.push({ id: target.id, format: exportFormat(target) });
+    const name = exportGroupName(target);
+    const key = name ? "group:" + name : "target:" + target.id; // a group named "target:x" is not the lone target x
+    if (!groups.has(key)) groups.set(key, { key, name, targets: [] });
+    groups.get(key).targets.push(target);
   }
-  const first = EXPORT_ROW_ORDER.filter((key) => rows.has(key));
-  const others = [...rows.keys()].filter((key) => !EXPORT_ROW_ORDER.includes(key));
-  return [...first, ...others].map((key) => rows.get(key));
+  const rows = [];
+  for (const group of groups.values()) {
+    const chips = group.targets
+      .filter((t) => unavailable[t.id] === undefined)
+      .map((t) => ({ id: t.id, format: exportFormat(t) }));
+    if (chips.length) rows.push({ key: group.key, ...exportRowHead(group), chips, rank: EXPORT_ROW_ORDER.indexOf(group.name) });
+  }
+  const rank = (row) => (row.rank < 0 ? EXPORT_ROW_ORDER.length : row.rank);
+  return rows.sort((a, b) => rank(a) - rank(b)); // stable: the others keep the server's order
 }
 
 function exportMenuHtml(item) {
@@ -593,8 +608,15 @@ async function runExportChip(chip, detail) {
   const failure = await downloadExport(chip.dataset.href, detail._item, false);
   chip.setAttribute("aria-busy", "false");
   if (failure) {
-    error.textContent = failure;
-    error.hidden = false;
+    // A refresh may have redrawn the head (and so the menu), or the menu was closed, while the file was fetched:
+    // the line captured above is then gone or out of sight, and the message goes to the page's own feedback line.
+    const menu = error.closest(".rec-menu");
+    if (error.isConnected && (!menu || !menu.hidden)) {
+      error.textContent = failure;
+      error.hidden = false;
+    } else {
+      showFeedback(detail._item, "error", failure);
+    }
     return;
   }
   const format = chip.dataset.format;
@@ -660,6 +682,8 @@ function bindRecMenu(wrap) {
 }
 
 function closeRecMenu(wrap) {
+  const staleError = wrap.querySelector(".rec-export-error"); // a failure shown by the Export menu is not kept for the next visit
+  if (staleError) staleError.hidden = true;
   wrap.classList.remove("open");
   wrap.querySelector(".rec-menu").hidden = true;
   wrap.querySelector(".rec-menu-btn").setAttribute("aria-expanded", "false");

@@ -100,7 +100,7 @@ def test_package_version_matches_pyproject():
     from nexusvox import __version__
 
     pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    assert tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"] == __version__ == "1.0.0"
+    assert tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"] == __version__ == "1.0.1"
 
 
 def test_older_release_is_not_an_update(monkeypatch):

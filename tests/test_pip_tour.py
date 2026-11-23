@@ -378,3 +378,13 @@ def test_show_me_on_a_settings_page_shows_that_page_and_a_closed_tab_changes_not
             ["tab", "recordings"],
         ],
     ]
+
+
+@needs_node
+def test_the_shipped_entries_show_for_1_0_1_after_an_update_from_1_0_0():
+    got = _js(
+        "const a = pickPipTour('1.0.1', USED, { version: '1.0.0', day: '' }, '2026-11-24');"
+        "const b = pickPipTour('1.0.1', USED, a.state, '2026-11-25');"
+        "console.log(JSON.stringify([a.steps.length > 0, a.state, b.steps]))"
+    )
+    assert got == [True, {"version": "1.0.1", "day": "2026-11-24"}, []]

@@ -31,6 +31,7 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "download_repo": "istupakov/parakeet-tdt-0.6b-v3-onnx",
         "download_probe": "encoder-model.int8.onnx",
         "download_size": "~670 MB",
+        "download_bytes": 670_000_000,  # what the progress bar counts to
     },
     "whisper-large-v3-turbo": {
         "hf_name": "deepdml/faster-whisper-large-v3-turbo-ct2",
@@ -48,6 +49,7 @@ MODEL_REGISTRY: dict[str, dict[str, object]] = {
         "inprocess_supported": True,
         "download_probe": "model.bin",
         "download_size": "~1.6 GB",
+        "download_bytes": 1_620_000_000,
     },
     "custom-server": {
         # Not a model but a slot: any server the user runs, at [inference.custom].url,

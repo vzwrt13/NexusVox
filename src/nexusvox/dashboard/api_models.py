@@ -14,6 +14,7 @@ from ..config import (
     save_config,
 )
 from ..system.paths import models_dir
+from ..transcription import model_download
 from ..transcription.diarization import speaker_detection_models
 from .api_base import DashboardState, logger
 
@@ -105,6 +106,75 @@ class ModelsMixin(DashboardState):
             self._config.inference.server_url = str(default_url)
         save_config(self._config)
         return {"ok": True, "model": model_id}
+
+    # ---- Download of the speech model ---------------------------------------
+
+    def _local_model(self) -> str | None:
+        """The model this PC loads in-process and may have to download: the running engine's, or the config's."""
+        transcriber = self._get_transcriber() if self._get_transcriber else None
+        if transcriber is not None:
+            return transcriber.local_model
+        inference = self._config.inference
+        info = MODEL_REGISTRY.get(inference.model, {})
+        needs_docker = model_needs_docker(inference.model, resolve_device(inference.device))
+        return None if info.get("custom") or needs_docker else inference.model
+
+    def get_model_download(self) -> dict:
+        """What the setup's model step and Settings > Models show before anything is downloaded.
+
+        `hardware` is "gpu" (an NVIDIA GPU) or "cpu". `runs` is "local" (in this process), "docker" (the model's
+        container) or "custom" (the user's server); `backup` is set for engine "auto" on a GPU, whose CPU copy
+        transcribes while the container is down. `state` is "none" (nothing to download here), "missing", "downloading"
+        (with `progress` in percent, None when unknown), "ready" or "error" (with `error`, and `offline` when there was
+        no connection).
+        """
+        inference = self._config.inference
+        model_id = inference.model
+        info = MODEL_REGISTRY.get(model_id, {})
+        resolved = resolve_device(inference.device)
+        local = self._local_model()
+        backup = bool(local) and model_needs_docker(model_id, resolved)
+        if info.get("custom"):
+            runs = "custom"
+        else:
+            runs = "local" if local and not backup else "docker"
+        result: dict = {
+            "hardware": "gpu" if cuda_available() else "cpu",
+            "model": model_id,
+            "name": str(info.get("display_name", model_id)),
+            "size": str(info.get("download_size", "")),
+            "runs": runs,
+            "backup": backup,
+            "state": "none",
+            "progress": None,
+            "error": None,
+            "offline": False,
+        }
+        if not local:
+            return result
+        job = model_download.job(local)
+        if job["state"] == "downloading":
+            result.update(state="downloading", progress=model_download.progress(local))
+        elif job["state"] == "ready" or model_download.is_downloaded(local) is not False:
+            result["state"] = "ready"
+            if job["state"] == "ready":
+                self._download_cache.pop(local, None)  # the Settings list marks it downloaded at once
+        elif job["state"] == "error":
+            result.update(state="error", error=job["error"], offline=job["offline"])
+        else:
+            result["state"] = "missing"
+        return result
+
+    def start_model_download(self) -> dict:
+        """The user's click on Download (or Retry): the one way a speech model gets downloaded."""
+        transcriber = self._get_transcriber() if self._get_transcriber else None
+        local = transcriber.local_model if transcriber is not None else None
+        if not local:
+            return {**self.get_model_download(), "refused": "This model has nothing to download on this PC"}
+        if self.get_model_download()["state"] in ("ready", "downloading"):
+            return self.get_model_download()
+        model_download.start(local, transcriber.download_model)
+        return self.get_model_download()
 
     def get_model_status(self) -> dict:
         status = self._get_switch_status() if self._get_switch_status else {"status": "idle"}

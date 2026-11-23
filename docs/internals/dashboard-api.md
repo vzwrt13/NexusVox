@@ -28,7 +28,9 @@ A route reads its JSON body through `_json_object` in `routes_base.py`: valid JS
 | GET | `/api/models` | List available models (filtered: GPU-only hidden on CPU systems) |
 | GET | `/api/models/current` | Active model, `diarization_fallback` (true for a model without the flag: an upload with speakers runs on Parakeet), `diarization` (whether it can detect speakers in uploads: the model has it and the running transcriber supports it, so false for Parakeet in-process on CPU), `diarization_models` (display names of the models that can) and `diarization_hint` ("Speaker detection needs the GPU container" when only the CPU engine is the reason, else empty; the upload toggle shows it) |
 | POST | `/api/models/switch` | Switch model |
-| GET | `/api/models/status` | Switch progress (polled every 2s); `downloading` / `loading` / `error` while an in-process model loads or failed to load, once no switch is in flight |
+| GET | `/api/models/status` | Switch progress (polled every 2s); `downloading` / `loading` / `error` while an in-process model loads or failed to load, and `missing` while it is not downloaded and waits for the user's click, once no switch is in flight |
+| GET | `/api/models/download` | The speech model's download box (first-run setup, Settings > Models): `{hardware: gpu/cpu, model, name, size, runs: local/docker/custom, backup, state: none/missing/downloading/ready/error, progress, error, offline}`; `backup` is engine "auto" on a GPU, whose CPU copy serves while the container is down |
+| POST | `/api/models/download` | The user's click on *Download* or *Retry*: allows the download of the running engine's in-process model and starts it in a thread (`transcription/model_download.py`); returns the state. 400 with `refused` when the model has nothing to download on this PC |
 | GET | `/api/device` | Current device: requested, resolved, cuda_available, active (`cpu`/`gpu` the running transcriber really uses, null for a custom server) |
 | POST | `/api/device` | Set requested device (`auto`/`cuda`/`cpu`) — requires app restart |
 | GET | `/api/voice-commands` | Voice commands config + all symbol info |

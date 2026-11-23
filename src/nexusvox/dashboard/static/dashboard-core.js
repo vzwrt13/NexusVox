@@ -388,6 +388,8 @@ function openExtensionPanel(id) {
 
 // Resolves when the page is settled: only a recording has to be looked up first.
 function restoreTabFromHash() {
+  // "#models": the app's way to Settings > Models (a launch link carries no "/"), used by a press without the model.
+  if (window.location.hash === "#models") replaceHash("#settings/models");
   const hash = window.location.hash;
   const [name, page] = hash.replace(/^#/, "").split("/"); // "#settings/models": tab and page
   // No hash, or one for a tab that is off, opens Home.

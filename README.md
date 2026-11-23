@@ -19,8 +19,8 @@ cloud service, and there is no subscription. The app is free and source-availabl
 (all releases: [Releases](https://github.com/vzwrt13/NexusVox/releases))
 
 - **Windows 10 (version 2004 or newer) or Windows 11**, 64-bit. The installer is per-user and needs no administrator rights.
-- **Works on the CPU.** The speech model runs in the app itself, with no Docker and no GPU. It downloads on first use
-  (about 670 MB).
+- **Works on the CPU.** The speech model runs in the app itself, with no Docker and no GPU. The first-run setup shows
+  the model and its size (about 670 MB) and downloads it when you click *Download*; nothing is downloaded before that.
 - **An NVIDIA GPU is optional** and makes dictation much faster; see [Performance](#performance) and
   [Run from source](#run-from-source) for the GPU setup.
 
@@ -139,7 +139,7 @@ python -m nexusvox
 
 Without a usable GPU, Parakeet runs in-process on the CPU (ONNX, int8 — no Docker). A config that names a model that no longer exists (Voxtral, Cohere, the smaller Whisper sizes, Distil-Whisper) falls back to Parakeet with one log line. Open the dashboard from the tray icon → Settings → **Models** to pick `whisper-large-v3-turbo` for languages Parakeet does not cover, or set `[inference].model = "whisper-large-v3-turbo"` in `config.toml` before the first run.
 
-Models download on first use (~670 MB for Parakeet on CPU, ~1.6 GB for `whisper-large-v3-turbo`) and cache under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Speaker detection for uploads needs the Parakeet GPU container.
+An in-process model is downloaded only when you click *Download* in the first-run setup or under Settings → **Models** (~670 MB for Parakeet on CPU, ~1.6 GB for `whisper-large-v3-turbo`); it caches under `%USERPROFILE%\.cache\huggingface`, and the box shows the progress, a *Retry* after a failure and a note when the PC is offline. Until then a hotkey press plays the error sound and opens the dashboard where the button is. Speaker detection for uploads needs the Parakeet GPU container.
 
 See [GettingStarted.md](GettingStarted.md) for the full setup guide including configuration, model selection, and troubleshooting.
 

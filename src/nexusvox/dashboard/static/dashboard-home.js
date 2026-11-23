@@ -26,8 +26,8 @@ function nextHomeTip() {
 // ── Status line ──────────────────────────────────────────────────────
 // What the dashboard knows: the model, the device and whether anything leaves this computer (only a custom
 // server can be somewhere else). Green is not claimed: nothing here probes the Docker container or the custom
-// server, so a model that is not switching is shown plainly. Yellow while the model downloads or loads, red when
-// that failed.
+// server, so a model that is not switching is shown plainly. Yellow while the model downloads or loads, and while it
+// waits for the user to download it ("missing"); red when loading failed.
 const HOME_BUSY_PHASES = ["stopping", "starting", "waiting", "downloading", "loading"];
 
 function describeHomeStatus(model, device, status) {
@@ -40,6 +40,9 @@ function describeHomeStatus(model, device, status) {
   } else if (HOME_BUSY_PHASES.includes(phase)) {
     state = "warn";
     lead = "Loading the speech model";
+  } else if (phase === "missing") {
+    state = "warn";
+    lead = "Speech model not downloaded yet: download it under Settings > Models";
   }
   const parts = [lead];
   if (model && model.name) parts.push(model.name);

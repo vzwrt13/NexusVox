@@ -32,6 +32,15 @@ def register(app: Flask, api: DashboardAPI) -> None:
     def model_status():
         return jsonify(api.get_model_status())
 
+    @app.route("/api/models/download")
+    def model_download_state():
+        return jsonify(api.get_model_download())
+
+    @app.route("/api/models/download", methods=["POST"])
+    def model_download_start():
+        result = api.start_model_download()
+        return jsonify(result), (400 if "refused" in result else 200)
+
     # ---- Device endpoints --------------------------------------------------
 
     @app.route("/api/device")

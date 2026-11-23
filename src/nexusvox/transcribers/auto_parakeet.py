@@ -27,6 +27,7 @@ from typing import BinaryIO
 from urllib.parse import urlsplit, urlunsplit
 
 from ..config import MODEL_REGISTRY, InferenceConfig
+from ..transcription.model_download import ModelNotDownloaded
 from ..transcription.transcriber import (
     BaseTranscriber,
     OpenAIHttpTranscriber,
@@ -171,6 +172,8 @@ class AutoParakeetTranscriber(BaseTranscriber):
         self._pcm = bytearray()
         self.model = self._gpu.model
         self.device = self._gpu.device
+        # The CPU side loads Parakeet in this process: its download waits for the user, like the CPU engine's.
+        self.local_model = config.model
 
     # ---- Engine choice ------------------------------------------------------
 
@@ -269,6 +272,8 @@ class AutoParakeetTranscriber(BaseTranscriber):
                 loader = LocalParakeetTranscriber(self._config, retry_failed_load=False)
                 asyncio.run(loader.connect())  # begins the model load in its own thread and returns
                 asyncio.run(loader.disconnect())
+            except ModelNotDownloaded:
+                logger.info("The CPU Parakeet model is not downloaded; it is not preloaded until the user downloads it")
             except Exception:
                 logger.warning("Preloading the CPU Parakeet model failed", exc_info=True)
 
@@ -352,6 +357,10 @@ class AutoParakeetTranscriber(BaseTranscriber):
 
     def load_status(self) -> dict[str, str | None] | None:
         return self._cpu.load_status() if self._engine == CPU and self._cpu is not None else None
+
+    def download_model(self) -> None:
+        """The CPU copy: what takes run on while the Docker server is down."""
+        self._cpu_transcriber().download_model()
 
     # ---- Cycle --------------------------------------------------------------
 

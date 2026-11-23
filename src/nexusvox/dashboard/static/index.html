@@ -383,6 +383,7 @@
           <span class="model-status-spinner"></span>
           <span id="model-status-text"></span>
         </div>
+        <div class="model-download" id="model-download"></div>
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
             <h3 id="llm-model-title">Language model (LLM)</h3>
@@ -1236,15 +1237,16 @@
       <ol class="setup-steps" id="setup-steps" aria-label="Setup steps">
         <li data-step="0">Welcome</li>
         <li data-step="1">Microphone</li>
-        <li data-step="2">Hotkey</li>
-        <li data-step="3">Ready</li>
+        <li data-step="2">Speech model</li>
+        <li data-step="3">Hotkey</li>
+        <li data-step="4">Ready</li>
       </ol>
 
       <section class="setup-panel" data-step="0" aria-labelledby="setup-h-0">
         <h3 class="setup-heading" id="setup-h-0" tabindex="-1">Welcome to NexusVox</h3>
         <div class="setup-pip" data-pip-pose="idle" data-pip-line="Hi, I am Pip, and this will only take a minute." hidden></div>
         <p class="setup-lead">Hold a key, speak, let go: your words are typed into whatever app you are in. The speech is recognised on this computer.</p>
-        <p class="setup-text">Setting up takes about a minute: pick your microphone, check your hotkey and say hello.</p>
+        <p class="setup-text">Setting up takes about a minute: pick your microphone, get the speech model, check your hotkey and say hello.</p>
         <div class="setup-actions">
           <button type="button" class="btn btn-primary" data-setup-next>Get started</button>
         </div>
@@ -1269,7 +1271,19 @@
       </section>
 
       <section class="setup-panel" data-step="2" aria-labelledby="setup-h-2" hidden>
-        <h3 class="setup-heading" id="setup-h-2" tabindex="-1">Your hotkey</h3>
+        <h3 class="setup-heading" id="setup-h-2" tabindex="-1">Your speech model</h3>
+        <div class="setup-pip" data-pip-pose="tilt" data-pip-line="I need the speech model before I can listen." hidden></div>
+        <p class="setup-text">NexusVox recognises your speech on this computer with a speech model. This is what it found on your PC and what the model needs.</p>
+        <div class="model-download" id="setup-model-download"></div>
+        <p class="setup-text">You can continue while it downloads, or download it later under Settings &gt; Models.</p>
+        <div class="setup-actions">
+          <button type="button" class="btn btn-ghost" data-setup-back>Back</button>
+          <button type="button" class="btn btn-primary" data-setup-next>Continue</button>
+        </div>
+      </section>
+
+      <section class="setup-panel" data-step="3" aria-labelledby="setup-h-3" hidden>
+        <h3 class="setup-heading" id="setup-h-3" tabindex="-1">Your hotkey</h3>
         <div class="setup-pip" data-pip-pose="idle" data-pip-line="Pick a key you can reach without looking." hidden></div>
         <div class="setup-hotkey">
           <span class="keycaps" id="setup-hotkey-keycaps" aria-label="Your dictation hotkey"></span>
@@ -1309,8 +1323,8 @@
         </div>
       </section>
 
-      <section class="setup-panel" data-step="3" aria-labelledby="setup-h-3" hidden>
-        <h3 class="setup-heading" id="setup-h-3" tabindex="-1">You are ready</h3>
+      <section class="setup-panel" data-step="4" aria-labelledby="setup-h-4" hidden>
+        <h3 class="setup-heading" id="setup-h-4" tabindex="-1">You are ready</h3>
         <div class="setup-pip" data-pip-pose="idle" data-pip-line="You are set, so go ahead and speak." hidden></div>
         <dl class="setup-summary">
           <dt>Microphone</dt><dd id="setup-sum-mic"></dd>

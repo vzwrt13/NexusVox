@@ -17,7 +17,9 @@ public thumbprint and passes nothing secret on a command line.
 - SimplySign Desktop installed and set up with your Certum account.
 - The Windows SDK signing tools (`signtool.exe`, found automatically under `Windows Kits\10\bin\*\x64`; or set `SIGNTOOL`).
 - [Inno Setup](https://jrsoftware.org/isinfo.php) 6, the version in `INNO_SETUP_VERSION` of `.github/workflows/installer.yml`.
-- Visual Studio C++ build tools, and a Python environment with NexusVox installed **as a regular package**
+- Visual Studio C++ build tools, and a Python environment, created with the Python version the installer workflow
+  builds with (`python-version` in `.github/workflows/installer.yml`; `build.py` stops when the running Python's
+  major.minor differs, so the shipped build matches the installer CI tested), with NexusVox installed **as a regular package**
   (`pip install .`, not editable) and PyInstaller with a bootloader built from source, as in CI:
 
   ```powershell
@@ -46,7 +48,22 @@ Do the normal release first ([.github/CLAUDE.md](../.github/CLAUDE.md#releasing)
 tag. The tag run creates the draft release. Then, on your PC, from a checkout of the tag:
 
 1. **Log in to SimplySign Desktop** (phone one-time code). The certificate now shows up as a virtual smart card.
-2. `python packaging\check_bootloader.py`, then build the app: `python packaging\build.py --clean`
+2. **Reinstall the checkout into the signing environment**, check it, then build. A stale install there is what gets
+   bundled, whatever the checkout says. The first command brings the dependencies up to the pins of this tag, the
+   second replaces nexusvox itself even when the version number did not change:
+
+   ```powershell
+   python -m pip install .
+   python -m pip install --no-deps --force-reinstall .
+   python packaging\build.py --check
+   python packaging\check_bootloader.py
+   python packaging\build.py --clean
+   ```
+
+   `build.py --check` runs the checks `build.py` makes before every build and stops with one line when the running
+   Python differs from the one `installer.yml` builds with, or the installed nexusvox (the `__version__` of the copy
+   Python finds first) differs from the checkout. If it cannot read the Python version from the workflow, set
+   `NEXUSVOX_CI_PYTHON` to it (for example `3.12`).
 3. Run the script:
 
    ```powershell
@@ -72,7 +89,7 @@ tag. The tag run creates the draft release. Then, on your PC, from a checkout of
 6. Replace the unsigned installer on the draft (same file name, the website links to it):
 
    ```powershell
-   gh release upload v1.0.0 dist\installer\NexusVox-Setup.exe --clobber
+   gh release upload <tag> dist\installer\NexusVox-Setup.exe --clobber
    ```
 
 7. **Check that the draft holds the FFmpeg source**, then publish. The installer ships an LGPL FFmpeg, and the LGPL asks
@@ -81,13 +98,13 @@ tag. The tag run creates the draft release. Then, on your PC, from a checkout of
    library linked into it). `gh release upload --clobber` of the installer leaves it alone. Look before you publish:
 
    ```powershell
-   gh release view v1.0.0 --json assets --jq ".assets[].name"
-   gh release edit v1.0.0 --draft=false
+   gh release view <tag> --json assets --jq ".assets[].name"
+   gh release edit <tag> --draft=false
    ```
 
    The list must show `ffmpeg-<version>-source.tar.gz` and `ffmpeg-builds-<release>-scripts.tar.gz` next to
    `NexusVox-Setup.exe`. If they are missing (the workflow step failed), repair the draft from a checkout of the tag,
-   which the script insists on: `git checkout v1.0.0`, then `python packaging\attach_ffmpeg_source.py v1.0.0` (it also
+   which the script insists on: `git checkout <tag>`, then `python packaging\attach_ffmpeg_source.py <tag>` (it also
    refuses a release without the installer and a published one; `--allow-published` adds the source to a published
    release). If a run stops with "is not the pinned file", GitHub served other content for the same commit: check that
    `FFMPEG_COMMIT` is still the `g...` commit in `FFMPEG_VERSION`, pin the new digest in `SOURCE_ARCHIVES` through a

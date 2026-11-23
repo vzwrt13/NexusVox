@@ -40,6 +40,8 @@
   --red: #ff6b6b;
   --yellow: #ffd43b;
   --orange: #ffa94d;
+  --pip-mint-dark: #00a881;
+  --pip-ink: #14122b;
   --radius: 18px;
   --radius-sm: 12px;
   --radius-ctl: 10px;
@@ -1521,3 +1523,61 @@ canvas { width: 100% !important; max-height: 260px; }
 .week-day-name { font-size: 11px; color: var(--text-faint); }
 .week-learned { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .week-learned-more { color: var(--text-dim); list-style: none; margin-left: -18px; }
+
+/* ── Pip, the mascot (dashboard-pip.js) ──────────────────────────── */
+.pip { --pip-size: 80px; display: flex; align-items: flex-end; gap: 12px; max-width: 100%; }
+.pip-figure { flex: none; width: var(--pip-size); height: var(--pip-size); }
+.pip-art { display: block; width: 100%; height: 100%; overflow: visible; }
+.pip-body { fill: var(--green); }
+.pip-wing { fill: var(--pip-mint-dark); }
+.pip-face { fill: var(--text); }
+.pip-ink { fill: var(--pip-ink); }
+.pip-beak, .pip-cheek { fill: var(--accent); }
+.pip-cere { fill: var(--accent-light); }
+.pip-mark, .pip-foot, .pip-zzz, .pip-lid { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.pip-mark { stroke: var(--accent); stroke-width: 7; }
+.pip-foot { stroke: var(--accent-light); stroke-width: 6; }
+.pip-lid { stroke: var(--pip-ink); stroke-width: 5.5; }
+.pip-zzz { stroke: var(--accent-light); stroke-width: 6; }
+.pip-zzz-small { stroke-width: 5; opacity: 0.7; }
+
+/* The bubble slot: what it says is up to the caller. A small tail on its left edge points left at Pip. */
+.pip-bubble {
+  position: relative;
+  order: 2;
+  align-self: center;
+  min-width: 0;
+  max-width: 320px;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--surface3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.pip-bubble::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  background: var(--surface3);
+  border-left: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  transform: rotate(45deg);
+}
+
+/* Idle: a slow breathing bob of 2px and a blink every few seconds. Sleeping breathes slower. */
+.pip-idle .pip-art { animation: pip-breathe 4s ease-in-out infinite; }
+.pip-sleeping .pip-art { animation: pip-breathe 6s ease-in-out infinite; }
+.pip-idle .pip-eyes-closed { opacity: 0; animation: pip-blink 5s steps(1, end) infinite; }
+.pip-idle .pip-eyes-open { animation: pip-blink-open 5s steps(1, end) infinite; }
+@keyframes pip-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(2px); } }
+@keyframes pip-blink { 0%, 94%, 100% { opacity: 0; } 95%, 98% { opacity: 1; } }
+@keyframes pip-blink-open { 0%, 94%, 100% { opacity: 1; } 95%, 98% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .pip-art, .pip-eyes-open, .pip-eyes-closed { animation: none !important; }
+}

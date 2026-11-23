@@ -578,6 +578,17 @@
           </label>
         </div>
 
+        <div class="setting-row" style="margin-top: 8px;">
+          <div class="setting-info">
+            <h3>Show Pip</h3>
+            <p>Pip is the small budgie that keeps you company in the dashboard. Off hides him and his speech bubbles everywhere.</p>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="show-pip-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
         <div class="settings-sub" data-feature="os_commands" hidden>
           <div class="setting-row">
             <div class="setting-info">
@@ -1315,6 +1326,7 @@
   <!-- Fixed order: every script shares one global scope and runs its top-level code as it loads, so a file may
        only use what an earlier file defines at that moment. Init stays last: it makes the tabs live. -->
   <script src="dashboard-core.js"></script>
+  <script src="dashboard-pip.js"></script>
   <script src="dashboard-settings.js"></script>
   <script src="dashboard-feedback.js"></script>
   <script src="dashboard-settings-models.js"></script>

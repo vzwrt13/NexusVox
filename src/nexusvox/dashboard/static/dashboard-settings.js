@@ -6,6 +6,7 @@ const hotkeyModeSelect = document.getElementById("hotkey-mode-select");
 const micGuardToggle = document.getElementById("mic-guard-toggle");
 const storeAudioToggle = document.getElementById("store-audio-toggle");
 const logFullTextToggle = document.getElementById("log-full-text-toggle");
+const showPipToggle = document.getElementById("show-pip-toggle");
 const openLogFolderButton = document.getElementById("open-log-folder");
 const logOpenError = document.getElementById("log-open-error");
 const logDirLabel = document.getElementById("log-dir");
@@ -225,6 +226,18 @@ async function loadTranslatorStatus() {
 micGuardToggle.addEventListener("change", () => postSetting("/api/settings/mic-guard", { enabled: micGuardToggle.checked }));
 storeAudioToggle.addEventListener("change", () => postSetting("/api/settings/store-audio", { enabled: storeAudioToggle.checked }));
 logFullTextToggle.addEventListener("change", () => postSetting("/api/settings/log-full-text", { enabled: logFullTextToggle.checked }));
+showPipToggle.addEventListener("change", async () => {
+  const on = showPipToggle.checked;
+  setShowPip(on);
+  try {
+    const r = await postSetting("/api/settings/show-pip", { enabled: on });
+    if (!r.ok) throw new Error("not saved");
+  } catch (err) {
+    console.error("Could not save the Show Pip setting:", err);
+    showPipToggle.checked = !on;
+    setShowPip(!on);
+  }
+});
 async function openLogFolder(errorLine) {
   errorLine.hidden = true;
   try {
@@ -449,6 +462,8 @@ async function loadSettings() {
   micGuardToggle.checked = s.mic_guard_enabled;
   storeAudioToggle.checked = s.store_audio;
   logFullTextToggle.checked = s.log_full_text;
+  showPipToggle.checked = s.show_pip;
+  setShowPip(s.show_pip);
   logDirLabel.textContent = s.log_dir;
   document.getElementById("app-version").textContent = "v" + String(s.app_version).replace(/^v/, "");
   feedbackUrl = s.feedback_url || "";

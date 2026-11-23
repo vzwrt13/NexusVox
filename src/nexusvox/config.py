@@ -294,6 +294,8 @@ class Config:
     log_level: str = "INFO"
     # Dictated text goes into the log file in full; off shortens it there (the console always shows it).
     log_full_text: bool = False
+    # Pip, the dashboard's mascot. Off: no Pip and no speech bubbles anywhere in the dashboard.
+    show_pip: bool = True
     # False only in the config a fresh install creates from the template: the dashboard then opens the first-run
     # setup. A config without the key (every existing install) counts as set up.
     setup_done: bool = True
@@ -557,6 +559,7 @@ def load_config(path: Path | None = None) -> Config:
         injection_delay_ms=_whole(general, "injection_delay_ms", "general", 500),
         log_level=_log_level(general.get("log_level", "INFO")),
         log_full_text=_strict_flag(general, "log_full_text", "general"),
+        show_pip=_strict_flag(general, "show_pip", "general", True, invalid=True),
         setup_done=_strict_flag(general, "setup_done", "general", True, invalid=True),
         hotkey=HotkeyConfig(
             modifiers=hotkey_modifiers,
@@ -856,6 +859,7 @@ def save_config(config: Config, path: Path | None = None) -> None:
                 ("injection_delay_ms", config.injection_delay_ms),
                 ("log_level", config.log_level),
                 ("log_full_text", config.log_full_text),
+                ("show_pip", config.show_pip),
                 ("setup_done", config.setup_done),
             ),
             *_section(

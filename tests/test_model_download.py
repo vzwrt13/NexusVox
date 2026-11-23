@@ -308,11 +308,12 @@ def test_the_status_says_the_model_waits_for_its_download(ask_before_download, m
 
 
 def _press_app(monkeypatch, *, setup_done: bool):
+    app_cls = _app_cls()  # skips first: the app's parts need the Windows runtime
     from app_parts import patch_app
 
     patch_app(monkeypatch, "running_dashboard_api", lambda: None)
     patch_app(monkeypatch, "_play", lambda beep: None)
-    app = _app_cls().__new__(_app_cls())
+    app = app_cls.__new__(app_cls)
     app._transcriber = MagicMock(connect=AsyncMock(side_effect=ModelNotDownloaded(PARAKEET)), disconnect=AsyncMock())
     app._hotkey = MagicMock(command=False, mark=None, active=False, mode="hold")
     app._record_start_event = asyncio.Event()

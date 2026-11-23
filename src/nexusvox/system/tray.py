@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import functools
+import logging
 import threading
 import webbrowser
 from collections.abc import Callable
@@ -13,6 +14,8 @@ import pystray
 from PIL import Image
 
 from nexusvox.system.links import GUIDE_URL
+
+logger = logging.getLogger(__name__)
 
 # The tray drawings of the NexusVox logo kit (pixel-fitted for 16 to 48 px). ``tray-N`` is transparent and meant for a
 # dark taskbar; ``tile-N`` sits on the dark #0d0d10 tile and stays readable on a light taskbar.
@@ -119,7 +122,12 @@ class SystemTray:
         return pystray.Menu(*items)
 
     def _handle_open_help(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
-        webbrowser.open(GUIDE_URL)
+        try:
+            opened = webbrowser.open(GUIDE_URL)
+        except webbrowser.Error:
+            opened = False
+        if not opened:
+            logger.warning("Could not open the online guide in a browser")
 
     def _handle_open_dashboard(self, icon: pystray.Icon, item: pystray.MenuItem) -> None:
         if self._on_open_dashboard is not None:

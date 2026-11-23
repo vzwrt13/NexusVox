@@ -19,6 +19,7 @@ from werkzeug.serving import ThreadedWSGIServer
 from ..config import Config
 from ..extensions import load_extensions
 from ..storage.db import Database
+from ..system.links import GUIDE_URL
 from ..system.single_instance import show_message
 from ..transcription.file_transcribe import MAX_UPLOAD_BYTES, MAX_UPLOAD_LABEL
 from . import (
@@ -120,7 +121,11 @@ def _create_app(api: DashboardAPI, port: int = _PORT) -> Flask:
 
     @app.route("/")
     def index():
-        return app.send_static_file("index.html")
+        # The one placeholder in the page: the guide link takes its URL from ``system.links``, so it is set once.
+        html = (_STATIC_DIR / "index.html").read_text(encoding="utf-8").replace("{{GUIDE_URL}}", GUIDE_URL)
+        response = app.response_class(html, mimetype="text/html")
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
     # Features that are not part of v1: their routes below are only registered when the flag is on, and the page
     # asks which ones to show. Read once at start, so a change needs a restart.

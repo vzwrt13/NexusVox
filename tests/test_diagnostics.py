@@ -100,3 +100,32 @@ def test_the_endpoint_returns_the_text(db, session_factory, quiet_probes):
         resp = client.get("/api/diagnostics")
     assert resp.status_code == 200
     assert "NexusVox diagnostics" in resp.get_json()["text"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "gone"),
+    [
+        ("https://bob:p@ss@example.com/v1", "ss@"),
+        ("https://api.example/translate?api_key=XYZ&x=1", "XYZ"),
+        ("https://u:sk-abc@host/v1", "sk-abc"),
+    ],
+)
+def test_redact_text_removes_url_credentials_and_secret_query_values(raw, gone):
+    out = diagnostics.redact_text(raw)
+    assert gone not in out
+    assert "example.com" in out or "host" in out or "api.example" in out
+
+
+def test_a_credentialed_url_in_the_log_is_redacted(quiet_probes, file_log):
+    logging.getLogger("nexusvox.test").warning("Warm-up at %s failed", "https://user:sk-abc@host/v1?token=TOK")
+    text = diagnostics.build_diagnostics(Config())
+    assert "sk-abc" not in text
+    assert "TOK" not in text
+
+
+def test_config_hides_database_paths_and_prints_lists_and_empty_tables_readably(quiet_probes):
+    config = Config()
+    config.database.path = "D:/Clients/AcmeCorp/nexusvox.db"
+    text = diagnostics.build_diagnostics(config)
+    assert "AcmeCorp" not in text
+    assert "{'" not in text  # no Python repr

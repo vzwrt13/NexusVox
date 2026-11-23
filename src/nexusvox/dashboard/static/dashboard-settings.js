@@ -252,18 +252,30 @@ openLogFolderButton.addEventListener("click", () => openLogFolder(logOpenError))
 
 // Copy diagnostics: the server builds the text (secrets and dictated text removed); it only goes to the clipboard.
 const copyDiagnosticsButton = document.getElementById("copy-diagnostics");
+const copyDiagnosticsLabel = copyDiagnosticsButton.textContent;
+let copyDiagnosticsTimer = null;
+async function fetchDiagnostics() {
+  const r = await fetch("/api/diagnostics");
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.error || "The diagnostics could not be collected.");
+  return body.text;
+}
 async function copyDiagnostics(errorLine) {
   errorLine.hidden = true;
-  const label = copyDiagnosticsButton.textContent;
   try {
-    const r = await fetch("/api/diagnostics");
-    const body = await r.json();
-    if (!r.ok) throw new Error(body.error || "The diagnostics could not be collected.");
-    await navigator.clipboard.writeText(body.text);
+    const pending = fetchDiagnostics();
+    if (window.ClipboardItem && navigator.clipboard.write) {
+      // The write starts now, inside the click, so a slow server cannot outlast the browser's user activation.
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": pending.then((t) => new Blob([t], { type: "text/plain" })) })]);
+    } else {
+      await navigator.clipboard.writeText(await pending);
+    }
     copyDiagnosticsButton.textContent = "Copied";
-    setTimeout(() => { copyDiagnosticsButton.textContent = label; }, 2000);
+    clearTimeout(copyDiagnosticsTimer);
+    copyDiagnosticsTimer = setTimeout(() => { copyDiagnosticsButton.textContent = copyDiagnosticsLabel; }, 2000);
   } catch (e) {
-    errorLine.textContent = e.message || "The diagnostics could not be copied.";
+    const known = e instanceof Error && !(e instanceof DOMException);
+    errorLine.textContent = known ? e.message : "The browser did not allow copying. Click the button again.";
     errorLine.hidden = false;
   }
 }

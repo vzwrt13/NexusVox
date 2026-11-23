@@ -51,3 +51,22 @@ def test_checkout_that_disagrees_with_itself_is_reported(tmp_path):
 
 def test_real_checkout_versions_agree():
     assert build.checkout_version() == build._package_version(build.ROOT / "src" / "nexusvox" / "__init__.py")
+
+
+def test_python_mismatch_names_both_versions():
+    message = build.python_mismatch_error("3.12", (3, 11))
+    assert "3.11" in message and "3.12" in message and "\n" not in message
+
+
+def test_python_match_passes():
+    assert build.python_mismatch_error("3.12", (3, 12)) is None
+
+
+def test_ci_python_version_is_read_from_the_workflow(tmp_path):
+    workflow = tmp_path / "w.yml"
+    workflow.write_text('steps:\n  - uses: actions/setup-python@v7\n    with:\n      python-version: "3.12"\n')
+    assert build.ci_python_version(workflow) == "3.12"
+
+
+def test_real_installer_workflow_pins_a_python():
+    assert build.ci_python_version().count(".") == 1

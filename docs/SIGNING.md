@@ -17,7 +17,9 @@ public thumbprint and passes nothing secret on a command line.
 - SimplySign Desktop installed and set up with your Certum account.
 - The Windows SDK signing tools (`signtool.exe`, found automatically under `Windows Kits\10\bin\*\x64`; or set `SIGNTOOL`).
 - [Inno Setup](https://jrsoftware.org/isinfo.php) 6, the version in `INNO_SETUP_VERSION` of `.github/workflows/installer.yml`.
-- Visual Studio C++ build tools, and a Python environment with NexusVox installed **as a regular package**
+- Visual Studio C++ build tools, and a Python environment, created with the Python version the installer workflow
+  builds with (`python-version` in `.github/workflows/installer.yml`; `build.py` stops when the running Python's
+  major.minor differs, so the shipped build matches the installer CI tested), with NexusVox installed **as a regular package**
   (`pip install .`, not editable) and PyInstaller with a bootloader built from source, as in CI:
 
   ```powershell

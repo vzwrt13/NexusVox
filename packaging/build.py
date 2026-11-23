@@ -32,6 +32,30 @@ SPEC = ROOT / "packaging" / "nexusvox.spec"
 _VERSION_LINE = re.compile(r'^__version__\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
 
 
+INSTALLER_WORKFLOW = ROOT / ".github" / "workflows" / "installer.yml"
+_PYTHON_PIN = re.compile(r"""python-version:\s*["']?(\d+\.\d+)""")
+
+
+def ci_python_version(workflow: Path = INSTALLER_WORKFLOW) -> str:
+    """The major.minor Python the installer workflow builds the app with (its first setup-python pin)."""
+    match = _PYTHON_PIN.search(workflow.read_text(encoding="utf-8"))
+    if not match:
+        raise ValueError(f"no python-version found in {workflow}")
+    return match.group(1)
+
+
+def python_mismatch_error(expected: str, running: tuple[int, int] | None = None) -> str | None:
+    """One line when the running Python is not the one CI builds the installer with, else None."""
+    running = running or (sys.version_info.major, sys.version_info.minor)
+    found = f"{running[0]}.{running[1]}"
+    if found == expected:
+        return None
+    return (
+        f"this is Python {found}, but the installer workflow builds with Python {expected} "
+        f"(.github/workflows/installer.yml): create the signing venv with Python {expected}"
+    )
+
+
 def checkout_version(root: Path = ROOT) -> str:
     """The version `pyproject.toml` of the checkout declares."""
     with (root / "pyproject.toml").open("rb") as file:
@@ -94,7 +118,10 @@ def main() -> int:
     if args.clean:
         command.append("--clean")
 
-    problem = stale_bundle_error(ROOT, installed_package_init())
+    try:
+        problem = python_mismatch_error(ci_python_version()) or stale_bundle_error(ROOT, installed_package_init())
+    except (OSError, ValueError) as error:
+        problem = f"cannot read the CI Python version: {error}"
     if problem:
         print(f"error: {problem}", file=sys.stderr)
         return 1

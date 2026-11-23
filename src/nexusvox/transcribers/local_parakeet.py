@@ -23,7 +23,6 @@ import numpy as np
 from ..config import MODEL_REGISTRY, InferenceConfig, model_download_state
 from ..system.logsetup import Text
 from ..transcription import model_download
-from ..transcription.model_download import ModelNotDownloaded
 from ..transcription.transcriber import SPEAKERS_NEED_GPU, BaseTranscriber, TranscriptionResult, Word
 
 logger = logging.getLogger(__name__)
@@ -249,11 +248,6 @@ class LocalParakeetTranscriber(BaseTranscriber):
         return downloaded is not False  # cannot tell: report "loading" rather than a download that may not happen
 
     @classmethod
-    def _may_load(cls) -> bool:
-        """Whether a load is allowed: the model is on disk, or the user has started its download."""
-        return model_download.is_allowed(MODEL_ID) or cls._is_downloaded()
-
-    @classmethod
     def _get_model(cls, onnx_model: str, quantization: str):
         """Load or reuse the cached onnx-asr model; downloads it first once the user has started the download.
 
@@ -263,10 +257,8 @@ class LocalParakeetTranscriber(BaseTranscriber):
         with cls._cache_lock:
             if key in cls._model_cache:
                 return cls._model_cache[key]
-            downloaded = cls._is_downloaded()
-            if not downloaded and not model_download.is_allowed(MODEL_ID):
-                raise ModelNotDownloaded(MODEL_ID)
-            cls._set_status("loading" if downloaded else "downloading")
+            model_download.require(MODEL_ID)  # not on disk (or a broken download) and not started by the user
+            cls._set_status("loading" if cls._is_downloaded() else "downloading")
             try:
                 import onnx_asr
 
@@ -327,8 +319,8 @@ class LocalParakeetTranscriber(BaseTranscriber):
 
     async def connect(self) -> None:
         # A hotkey press without the model fails here, before anything is recorded, and the app says where to get it.
-        if (self._onnx_model, self._quantization) not in self._model_cache and not self._may_load():
-            raise ModelNotDownloaded(MODEL_ID)
+        if (self._onnx_model, self._quantization) not in self._model_cache:
+            model_download.require(MODEL_ID)
         self._audio_buffer = bytearray()
         self._connected = True
         # Trigger a background load so the first recording doesn't pay the full download and

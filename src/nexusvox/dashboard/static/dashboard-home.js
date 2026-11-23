@@ -29,6 +29,8 @@ function nextHomeTip() {
 // server, so a model that is not switching is shown plainly. Yellow while the model downloads or loads, and while it
 // waits for the user to download it ("missing"); red when loading failed.
 const HOME_BUSY_PHASES = ["stopping", "starting", "waiting", "downloading", "loading"];
+// Asked again too while the model waits for its download: it may be started from the setup or Settings meanwhile.
+const HOME_REPOLL_PHASES = [...HOME_BUSY_PHASES, "missing"];
 
 function describeHomeStatus(model, device, status) {
   const phase = (status && status.status) || "idle";
@@ -73,7 +75,7 @@ async function loadHomeStatus(
     const model = modelSpecs[current.model] || { name: current.model };
     const { state, text } = describeHomeStatus(model, device.active, status);
     setStatus(el, state, text);
-    if (status && HOME_BUSY_PHASES.includes(status.status)) {
+    if (status && HOME_REPOLL_PHASES.includes(status.status)) {
       homeStatusTimers.set(
         el,
         setTimeout(() => {

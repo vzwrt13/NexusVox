@@ -155,12 +155,13 @@ class ModelsMixin(DashboardState):
         job = model_download.job(local)
         if job["state"] == "downloading":
             result.update(state="downloading", progress=model_download.progress(local))
+        elif job["state"] == "error":
+            # Before the probe: a download that broke off may have left the probe file, but not the rest.
+            result.update(state="error", error=job["error"], offline=job["offline"])
         elif job["state"] == "ready" or model_download.is_downloaded(local) is not False:
             result["state"] = "ready"
             if job["state"] == "ready":
                 self._download_cache.pop(local, None)  # the Settings list marks it downloaded at once
-        elif job["state"] == "error":
-            result.update(state="error", error=job["error"], offline=job["offline"])
         else:
             result["state"] = "missing"
         return result

@@ -166,7 +166,7 @@ def test_progress_counts_the_bytes_in_the_cache(monkeypatch, tmp_path):
     blobs = tmp_path / "models--istupakov--parakeet-tdt-0.6b-v3-onnx" / "blobs"
     blobs.mkdir(parents=True)
     (blobs / "a.incomplete").write_bytes(b"\0" * 1000)
-    monkeypatch.setattr(md, "_hub_cache", lambda: tmp_path)
+    monkeypatch.setattr(md, "hf_hub_cache", lambda: tmp_path)
     monkeypatch.setitem(md.MODEL_REGISTRY[PARAKEET], "download_bytes", 4000)
 
     assert md.downloaded_bytes(PARAKEET) == 1000
@@ -553,3 +553,52 @@ def test_home_says_the_model_waits_for_its_download():
 def test_readme_no_longer_promises_a_download_on_first_use():
     readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
     assert "It downloads on first use" not in readme
+
+
+# ── Review follow-ups ───────────────────────────────────────────────────────────────────────────
+
+
+def test_a_download_that_broke_off_after_the_probe_file_is_still_missing(
+    db, session_factory, ask_before_download, monkeypatch, patch_api
+):
+    md = ask_before_download
+    patch_api("cuda_available", lambda: False)
+    _on_disk(monkeypatch, md, True)  # the encoder (the probe) arrived, the rest did not
+    onnx = _OnnxAsr()
+    monkeypatch.setitem(__import__("sys").modules, "onnx_asr", onnx)
+    md.start(PARAKEET, lambda: (_ for _ in ()).throw(ConnectionError("dropped")))
+    _wait_for(md, PARAKEET)
+
+    got = _api(db, session_factory, _Engine(), model=PARAKEET, device="cpu").get_model_download()
+    assert (got["state"], got["error"]) == ("error", OFFLINE_MESSAGE)  # Retry, not a green "on this PC"
+    assert md.missing(PARAKEET)
+    with pytest.raises(ModelNotDownloaded):
+        asyncio.run(_parakeet().connect())  # a press does not fetch the rest unasked
+    with pytest.raises(ModelNotDownloaded):
+        LocalParakeetTranscriber._get_model("nemo-parakeet-tdt-0.6b-v3", "int8")
+    assert onnx.loads == []
+
+
+def test_the_hub_cache_is_decided_in_paths(monkeypatch, tmp_path):
+    from nexusvox.system import paths
+
+    monkeypatch.setattr(paths, "models_dir", lambda: tmp_path / "models")
+    assert paths.hf_hub_cache() == tmp_path / "models"  # the installed app: its models folder
+    monkeypatch.setattr(paths, "models_dir", lambda: None)
+    hub = pytest.importorskip("huggingface_hub.constants")
+    assert paths.hf_hub_cache() == Path(hub.HF_HUB_CACHE)  # from source: huggingface_hub's own folder
+    source = (Path(__file__).resolve().parents[1] / "src/nexusvox/transcription/model_download.py").read_text("utf-8")
+    assert "HF_HUB_CACHE" not in source and "HF_HOME" not in source
+
+
+def test_the_box_runs_one_poll_chain_and_keeps_polling_through_a_failed_poll():
+    body = MODELS_JS[MODELS_JS.index("async function refresh()") : MODELS_JS.index('button.addEventListener("click"')]
+    assert "const mine = ++run;" in body
+    assert body.count("if (mine !== run) return;") == 2  # after the await, on success and on failure
+    assert 'if (lastState === "downloading")' in body and "timer = setTimeout(refresh" in body
+
+
+def test_home_asks_again_while_the_model_waits_for_its_download():
+    home = (STATIC / "dashboard-home.js").read_text(encoding="utf-8")
+    assert 'const HOME_REPOLL_PHASES = [...HOME_BUSY_PHASES, "missing"];' in home
+    assert "HOME_REPOLL_PHASES.includes(status.status)" in home

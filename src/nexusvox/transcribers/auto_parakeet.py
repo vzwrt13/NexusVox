@@ -27,6 +27,7 @@ from typing import BinaryIO
 from urllib.parse import urlsplit, urlunsplit
 
 from ..config import MODEL_REGISTRY, InferenceConfig
+from ..transcription import model_download
 from ..transcription.model_download import ModelNotDownloaded
 from ..transcription.transcriber import (
     BaseTranscriber,
@@ -172,7 +173,8 @@ class AutoParakeetTranscriber(BaseTranscriber):
         self._pcm = bytearray()
         self.model = self._gpu.model
         self.device = self._gpu.device
-        # The CPU side loads Parakeet in this process: its download waits for the user, like the CPU engine's.
+        # The CPU side loads Parakeet in this process: its download waits for the user, like the CPU engine's. Until
+        # it is on disk the CPU engine is out (`_usable`) and this engine is the plain server client it wraps.
         self.local_model = config.model
 
     # ---- Engine choice ------------------------------------------------------
@@ -188,8 +190,22 @@ class AutoParakeetTranscriber(BaseTranscriber):
         Before the first probe it follows the shared state: the GPU only for a server that has been warmed up.
         """
         if self._probed_at is None:
-            return GPU if _is_warm(self._health_url) else CPU
-        return self._engine
+            return self._usable(GPU if _is_warm(self._health_url) else CPU)
+        return self._usable(self._engine)
+
+    def _cpu_missing(self) -> bool:
+        """Whether the CPU copy is not downloaded (and not being downloaded): the CPU engine cannot serve then."""
+        return model_download.missing(self.local_model)
+
+    def _usable(self, engine: str) -> str:
+        """`engine`, or the GPU when it is the CPU and its copy is missing: a Docker user who never downloaded the
+        backup keeps dictating to the server (a cold one answers slowly, a down one fails like a plain client),
+        and is never asked for a download they do not need."""
+        return GPU if engine == CPU and self._cpu_missing() else engine
+
+    def model_missing(self) -> bool:
+        """Never: the CPU copy is an optional backup here, the Docker server does the work."""
+        return False
 
     @property
     def _warming(self) -> bool:
@@ -305,8 +321,9 @@ class AutoParakeetTranscriber(BaseTranscriber):
         if self._probed_at is None or (not self._monitor_started and self._stale()):
             reachable = await asyncio.get_running_loop().run_in_executor(None, probe_server, self._health_url)
             self._apply(reachable)
-        self.model = self._gpu.model if self._engine == GPU else self._cpu_transcriber().model
-        self.device = self._gpu.device if self._engine == GPU else CPU  # the server's: local or remote
+        engine = self._usable(self._engine)
+        self.model = self._gpu.model if engine == GPU else self._cpu_transcriber().model
+        self.device = self._gpu.device if engine == GPU else CPU  # the server's: local or remote
 
     async def wait_until_warm(self, timeout: float = _WARM_UP_TIMEOUT_S) -> None:
         """For a job that needs speaker detection: let a reachable but cold server finish warming, then take the GPU.
@@ -376,7 +393,7 @@ class AutoParakeetTranscriber(BaseTranscriber):
             threading.Thread(
                 target=lambda: self._apply(probe_server(self._health_url)), name="auto-engine-probe", daemon=True
             ).start()
-        self._cycle = self._engine
+        self._cycle = self._usable(self._engine)
         self._pcm = bytearray()
         self.model = self._gpu.model if self._cycle == GPU else self._cpu_transcriber().model
         self.device = self._gpu.device if self._cycle == GPU else CPU
@@ -391,20 +408,35 @@ class AutoParakeetTranscriber(BaseTranscriber):
         if self._cycle != GPU:
             return await self._cpu_transcriber().finish(timeout=timeout)
         pcm = bytes(self._pcm)
+        failure: Exception | None = None
+        result = TranscriptionResult()
         try:
             result = await self._gpu.finish(timeout=timeout)
             if result.done:
                 return result
             # The client swallows a timeout and returns nothing: a hung server counts as unreachable.
             logger.warning("Parakeet server returned no result; replaying the take on the CPU")
-        except Exception:
+        except Exception as exc:
+            failure = exc
             logger.warning("Parakeet server failed; replaying the take on the CPU", exc_info=True)
         self._apply(False, outage=False)
-        self.device = CPU  # the take is stored with the engine that produced its text
-        cpu = self._cpu_transcriber()
-        await cpu.connect()
-        await cpu.send_audio_chunk(pcm)
-        return await cpu.finish(timeout=timeout)
+        try:
+            if self._cpu_missing():
+                raise ModelNotDownloaded(str(self.local_model))
+            self.device = CPU  # the take is stored with the engine that produced its text
+            cpu = self._cpu_transcriber()
+            await cpu.connect()
+            await cpu.send_audio_chunk(pcm)
+            return await cpu.finish(timeout=timeout)
+        except ModelNotDownloaded:
+            # No CPU copy to replay on: the take fails as it would with a plain server client, with the server's
+            # error. No download hint: the copy is an optional backup (Settings > Models offers it).
+            logger.warning(
+                "No CPU copy of Parakeet to replay the take on; it can be downloaded under Settings > Models"
+            )
+            if failure is not None:
+                raise failure from None
+            return result
 
     async def disconnect(self) -> None:
         self._pcm = bytearray()

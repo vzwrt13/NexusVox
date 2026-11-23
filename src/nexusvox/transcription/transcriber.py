@@ -203,6 +203,12 @@ class BaseTranscriber(ABC):
         """Download (if needed) and load the `local_model`; blocking. Only after the user started the download."""
         raise NotImplementedError(f"{type(self).__name__} has no model to download")
 
+    def model_missing(self) -> bool:
+        """True when this engine cannot transcribe until the user downloads its `local_model`."""
+        from . import model_download  # lazily: it imports the config and the paths, this module is imported early
+
+        return model_download.missing(self.local_model)
+
     async def diarize(self, wav: bytes | BinaryIO, timeout: float) -> list[SpeakerTurn]:
         """Speaker turns for a whole WAV file (bytes or a file object); only engines with `supports_diarization`."""
         raise NotImplementedError(f"{type(self).__name__} cannot detect speakers")

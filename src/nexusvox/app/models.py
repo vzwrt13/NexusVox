@@ -62,7 +62,7 @@ class ModelSwitching:
             if local and not self._transcriber.needs_docker:
                 if model_download.job(local)["state"] == "downloading":
                     return {"status": "downloading", "error": None}
-                if model_download.missing(local):
+                if self._transcriber.model_missing() is True:  # never for engine "auto": its CPU copy is optional
                     return {"status": "missing", "error": None}
         status = {"status": self._switch_status, "error": self._switch_error}
         if self._switch_note and self._switch_status == "ready":

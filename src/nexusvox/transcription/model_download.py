@@ -17,10 +17,9 @@ import os
 import socket
 import threading
 from collections.abc import Callable
-from pathlib import Path
 
 from ..config import MODEL_REGISTRY, model_download_state
-from ..system.paths import models_dir
+from ..system.paths import hf_hub_cache, models_dir
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +74,21 @@ def is_downloaded(model_id: str) -> bool | None:
     return model_download_state(model_id, models_dir())["downloaded"]  # type: ignore[return-value]
 
 
+def failed(model_id: str) -> bool:
+    """Whether the last download of `model_id` in this session failed."""
+    with _lock:
+        return (_jobs.get(model_id) or {}).get("state") == "error"
+
+
 def missing(model_id: str | None) -> bool:
-    """True when the copy of `model_id` is known to be missing and the user has not started its download."""
+    """True when the copy of `model_id` is known to be missing and the user has not started its download.
+
+    After a failed download the copy counts as missing even when its probe file is there: the probe may have
+    finished before the connection dropped, and a load would then fetch the rest without asking.
+    """
     if not model_id or is_allowed(model_id):
         return False
-    return is_downloaded(model_id) is False
+    return failed(model_id) or is_downloaded(model_id) is False
 
 
 def require(model_id: str | None) -> None:
@@ -145,25 +154,13 @@ def is_offline(exc: BaseException) -> bool:
     return False
 
 
-def _hub_cache() -> Path:
-    """The Hugging Face hub cache the engines download into (the models folder when frozen)."""
-    folder = models_dir()
-    if folder is not None:
-        return folder
-    env = os.environ.get("HF_HUB_CACHE")
-    if env:
-        return Path(env)
-    home = os.environ.get("HF_HOME")
-    return Path(home) / "hub" if home else Path.home() / ".cache" / "huggingface" / "hub"
-
-
 def downloaded_bytes(model_id: str) -> int:
     """How many bytes of the model's repository are in the cache so far, partial files included."""
     info = MODEL_REGISTRY.get(model_id, {})
     repo = info.get("download_repo") or info.get("hf_name")
     if not repo:
         return 0
-    blobs = _hub_cache() / ("models--" + str(repo).replace("/", "--")) / "blobs"
+    blobs = hf_hub_cache() / ("models--" + str(repo).replace("/", "--")) / "blobs"
     total = 0
     try:
         for entry in os.scandir(blobs):

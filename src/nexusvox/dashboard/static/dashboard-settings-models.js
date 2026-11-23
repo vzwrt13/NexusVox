@@ -818,6 +818,7 @@ llmPullCancel.addEventListener("click", () => fetch("/api/settings/llm-pull", { 
 // the same box (GET / POST /api/models/download): the hardware found, where the model runs, its size, and the
 // download's progress. A failed download offers Retry and says when the PC seems to be offline.
 const MODEL_DOWNLOAD_POLL_MS = 1000;
+const MODEL_DOWNLOAD_RETRY_MAX_MS = 10000; // a failed poll during a download is retried, slower each time up to this
 const MODEL_HARDWARE_NAMES = { gpu: "NVIDIA GPU", cpu: "CPU only (no NVIDIA GPU found)" };
 
 function describeModelRuntime(d) {
@@ -868,6 +869,8 @@ function mountModelDownload(host, onChange = () => {}) {
   host.hidden = true; // until the first answer
   let timer = null;
   let lastState = null;
+  let run = 0; // bumped by every refresh: only the newest one schedules the next poll, so no two chains run
+  let failures = 0; // polls in a row that could not reach the app
 
   function render(d) {
     host.hidden = false;
@@ -892,14 +895,24 @@ function mountModelDownload(host, onChange = () => {}) {
   }
 
   async function refresh() {
+    const mine = ++run;
     clearTimeout(timer);
     let d;
     try {
       d = await fetch("/api/models/download").then((r) => r.json());
     } catch (err) {
+      if (mine !== run) return;
       showFailure("The dashboard could not reach the app.");
+      // The download goes on in the app: keep asking, so the bar resumes and the box still turns ready.
+      if (lastState === "downloading") {
+        failures++;
+        timer = setTimeout(refresh, Math.min(MODEL_DOWNLOAD_POLL_MS * 2 ** failures, MODEL_DOWNLOAD_RETRY_MAX_MS));
+      }
       return;
     }
+    if (mine !== run) return; // a newer refresh started meanwhile and schedules the polls
+    failures = 0;
+    clearTimeout(timer);
     render(d);
     if (d.state === "downloading") timer = setTimeout(refresh, MODEL_DOWNLOAD_POLL_MS);
     const changed = lastState !== null && lastState !== d.state;

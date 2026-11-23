@@ -466,9 +466,12 @@ def test_latency_ends_when_the_text_is_in_not_after_the_clipboard_restore(monkey
 
     # inject_text reports when the text was in place; anything after it (the clipboard
     # restore) is not latency. A time far in the future shows the reported one is used.
+    # The cycle starts its clock a moment before inject_text runs, and the Windows monotonic clock
+    # ticks in ~15 ms steps, so the exact 60 s is not guaranteed: allow a whole second of slack
+    # (a latency measured without the reported time would be milliseconds, nowhere near it).
     app, _ = _dictation_app(monkeypatch, lambda text, delay, enter: time.monotonic() + 60)
     _run_cycle(app)
-    assert app._db.save_transcription.call_args.kwargs["latency_ms"] >= 60_000
+    assert app._db.save_transcription.call_args.kwargs["latency_ms"] >= 59_000
 
 
 def test_polish_lets_an_extension_handle_the_spoken_command(monkeypatch):

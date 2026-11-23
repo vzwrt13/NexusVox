@@ -440,12 +440,47 @@ button.rec-time:hover { color: var(--accent-light); text-decoration: underline; 
 .rec-text mark { background: var(--accent-soft); color: var(--text); border-radius: 3px; }
 
 /* ── Speakers and the Pro note ────────────────────────────────────── */
-.rec-speaker-list { list-style: none; display: flex; flex-direction: column; gap: 14px; max-width: 560px; }
-.rec-speaker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: baseline; }
-.rec-speaker .rec-who { font-size: 15px; }
-.rec-speaker-meta { font-size: 13px; color: var(--text-dim); }
-.rec-speaker-bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--surface3); overflow: hidden; }
-.rec-speaker-fill { display: block; height: 100%; border-radius: 3px; }
+.rec-speaker-list { list-style: none; display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
+.rec-speaker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 11px;
+  background: var(--surface2);
+  border: 1px solid transparent;
+}
+.rec-speaker:hover, .rec-speaker:focus-within { border-color: var(--border); }
+.rec-avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  /* Dark text on the speaker colour, as in the design reference */
+  color: var(--surface);
+}
+.rec-speaker-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.rec-speaker-name { font-size: 15px; font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+.rec-speaker-bar { display: block; height: 6px; border-radius: 999px; background: var(--surface3); overflow: hidden; }
+.rec-speaker-fill { display: block; height: 100%; border-radius: 999px; }
+.rec-speaker-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.rec-stat { white-space: nowrap; }
+.rec-stat b { color: var(--text); font-weight: 500; }
+/* Where an extension puts a row's menu; nothing shows until it does */
+.rec-speaker-actions { flex: none; display: flex; align-items: center; gap: 4px; }
+.rec-speaker-actions:empty { display: none; }
 .rec-fill-0 { background: var(--accent-light); }
 .rec-fill-1 { background: var(--green); }
 .rec-fill-2 { background: var(--orange); }

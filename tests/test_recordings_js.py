@@ -34,7 +34,6 @@ let extensionExports = [{ id: "txt", label: "Text" }];
 let extensionUploadActions = [];
 const runningUploadActions = new Set();
 const extensionPanels = {};
-const formatClock = (s) => Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
 const setStatus = () => {};
 for (const f of ["openExtensionPanel", "loadPendingMeetings", "openMeetingRecording", "refreshDiarizeToggle",
   "resumeUploadJob", "activateTab", "downloadExport", "runUploadAction"]) globalThis[f] = () => {};
@@ -89,7 +88,10 @@ def run_recordings(body: str, prelude: str = ""):
         "function parseServerTime",
         "function formatDuration",
     )
-    parts = [prelude, FAKE_DOM, RECORDINGS_STUBS, pending, core, recordings, f"const ROWS = {json.dumps(ROWS)};", body]
+    meetings = (STATIC / "dashboard-meetings.js").read_text(encoding="utf-8")
+    clock = _section(meetings, "function formatClock", "function showMeetingStatus")  # the real clock format
+    rows = f"const ROWS = {json.dumps(ROWS)};"
+    parts = [prelude, FAKE_DOM, RECORDINGS_STUBS, pending, core, clock, recordings, rows, body]
     script = "\n".join(parts)
     out = _node(script)
     assert out.returncode == 0, out.stderr
@@ -975,3 +977,218 @@ def test_a_group_named_like_a_lone_target_does_not_join_it_and_unknown_rows_get_
         out(exportRows({ id: 7 }).map((r) => [r.label, r.icon, r.chips.map((c) => c.id)]));"""
     )
     assert result == [["Foo", "file", ["foo"]], ["Bar", "file", ["bar"]], ["Sum", "summary", ["sum"]]]
+
+
+# -- the Speakers panel ------------------------------------------------------------------------------
+
+TIMED_LINES = r"""
+const timedLines = [
+  { who: "Speaker 1", colour: 0, text: "a", start: 0, end: 30 },
+  { who: "Maria", colour: 1, text: "b", start: 30, end: 40 },
+  { who: "Speaker 1", colour: 0, text: "c", start: 40, end: 70 },
+  { who: "Speaker 3", colour: 2, text: "d", start: 70, end: 100 },
+];
+function showSpeakers(lines) {
+  const d = makeDetail(ROWS[0]);
+  d._lines = lines;
+  recChosenTab = "speakers";
+  renderRecordingTabs(d, ROWS[0]);
+  return d;
+}
+const rowParts = (li) => ({
+  speaker: li.dataset.speaker,
+  avatar: li.querySelector(".rec-avatar").textContent,
+  name: li.querySelector(".rec-speaker-name").textContent,
+  bar: li.querySelector(".rec-speaker-fill") ? li.querySelector(".rec-speaker-fill").style.width : null,
+  stats: li.querySelectorAll(".rec-stat").map((x) => x.textContent),
+});
+"""
+
+
+def test_each_speaker_gets_one_row_with_avatar_share_time_and_turns():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers(timedLines);
+        out([d.querySelectorAll(".rec-speaker").map(rowParts), d.querySelectorAll(".rec-speaker-list").length]);"""
+    )
+    rows, lists = result
+    assert lists == 1
+    assert rows == [
+        {"speaker": "Speaker 1", "avatar": "1", "name": "Speaker 1", "bar": "60%", "stats": ["60% · 01:00", "2 turns"]},
+        {"speaker": "Maria", "avatar": "M", "name": "Maria", "bar": "10%", "stats": ["10% · 00:10", "1 turn"]},
+        {"speaker": "Speaker 3", "avatar": "3", "name": "Speaker 3", "bar": "30%", "stats": ["30% · 00:30", "1 turn"]},
+    ]
+
+
+def test_without_word_timing_a_row_shows_turns_only_and_no_bar():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers(transcriptLines(ROWS[0].text, [], "meeting"));
+        out(d.querySelectorAll(".rec-speaker").map(rowParts));"""
+    )
+    assert result == [
+        {"speaker": "Speaker 1", "avatar": "1", "name": "Speaker 1", "bar": None, "stats": ["1 turn"]},
+        {"speaker": "Speaker 2", "avatar": "2", "name": "Speaker 2", "bar": None, "stats": ["1 turn"]},
+    ]
+
+
+def test_a_name_is_shown_as_text_and_its_initial_is_a_letter():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers([{ who: "<b>élan</b>", colour: 3, text: "x", start: null, end: null }]);
+        const li = d.querySelector(".rec-speaker");
+        out([rowParts(li), li.querySelector(".rec-speaker-name").children.length,
+          li.querySelector(".rec-avatar").classList.contains("rec-fill-3")]);"""
+    )
+    parts, children, filled = result
+    assert parts["name"] == "<b>élan</b>"
+    assert parts["avatar"] == "<"  # first character, never markup that was parsed
+    assert children == 0
+    assert filled is True
+
+
+def test_no_speaker_lines_show_the_empty_note_and_no_list():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers([]);
+        const note = d.querySelector(".rec-speakers").innerHTML.includes("Detect speakers");
+        out([d.querySelectorAll(".rec-speaker").length, note]);"""
+    )
+    assert result == [0, True]
+
+
+def test_rows_offer_a_name_and_an_empty_actions_slot_for_extensions():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers(timedLines);
+        const li = d.querySelector(".rec-speaker");
+        const actions = li.querySelector('[data-slot="actions"]');
+        out([li.querySelector('[data-slot="name"]').textContent, actions.children.length, actions.textContent,
+          li.dataset.colour]);"""
+    )
+    assert result == ["Speaker 1", 0, "", "0"]
+
+
+def test_a_speaker_rows_hook_gets_every_row_in_the_page_and_a_failing_one_is_skipped():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const calls = [];
+        const d = showSpeakers(timedLines);
+        const hook = ({ recording, rows }) => {
+          const figures = rows.map((r) => [r.speaker, r.turns, r.seconds, r.share]);
+          calls.push([recording.id, figures, rows[0].row.isConnected]);
+          for (const r of rows) {
+            const b = document.createElement("button");
+            b.textContent = "...";
+            r.actions.append(b);
+          }
+        };
+        const added = addSpeakerRowsHook("pro", hook);  // the open Speakers panel is drawn again at once
+        console.error = () => {};
+        const bad = addSpeakerRowsHook("bad", () => { throw new Error("boom"); });
+        const invalid = [addSpeakerRowsHook("Bad Id", hook), addSpeakerRowsHook("x", null)];
+        renderRecordingTabs(d, ROWS[0]);
+        out([added, bad, invalid, calls.length, calls[0], d.querySelectorAll(".rec-speaker-actions button").length,
+          d.querySelectorAll(".rec-speaker").length]);"""
+    )
+    added, bad, invalid, count, first, buttons, rows = result
+    assert (added, bad, invalid) == (True, True, [False, False])
+    assert count == 3  # on registering, on the failing hook registering, then the explicit draw
+    expected = [["Speaker 1", 2, 60, 60], ["Maria", 1, 10, 10], ["Speaker 3", 1, 30, 30]]
+    assert first == [7, expected, True]  # the rows are in the page when the hook runs
+    assert (buttons, rows) == (3, 3)  # the panel was rebuilt each time, so the buttons are not stacked up
+
+
+def test_registering_an_id_again_replaces_its_hook_and_unregistering_removes_it():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers(timedLines);
+        const mark = (text) => ({ rows }) => { for (const r of rows) r.actions.append(text); };
+        addSpeakerRowsHook("pro", mark("a"));
+        addSpeakerRowsHook("pro", mark("b"));  // a script that ran twice
+        const texts = () => d.querySelectorAll(".rec-speaker-actions").map((x) => x.textContent);
+        const twice = texts();
+        const removed = [removeSpeakerRowsHook("pro"), removeSpeakerRowsHook("pro")];
+        out([twice, removed, texts(), speakerRowHooks.length]);"""
+    )
+    assert result == [["b", "b", "b"], [True, False], ["", "", ""], 0]
+
+
+def test_the_panel_is_not_rebuilt_while_a_row_is_in_use_and_catches_up_afterwards():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers(timedLines);
+        const field = document.createElement("input");
+        d.querySelector(".rec-speaker-actions").append(field);
+        field.focus();
+        const list = d.querySelector(".rec-speaker-list");
+        renderRecordingTabs(d, ROWS[0]);  // e.g. the turns finished loading
+        const kept = d.querySelector(".rec-speaker-list") === list
+          && d.querySelector(".rec-speaker-actions input") === field;
+        const stale = d._speakersStale;
+        document.body.focus();  // the focus leaves the list
+        list.dispatch("focusout", { relatedTarget: null });
+        setTimeout(() => {
+          out([kept, stale, d.querySelector(".rec-speaker-list") !== list, d._speakersStale]);
+        }, 20);"""
+    )
+    assert result == [True, True, True, False]
+
+
+def test_a_row_an_extension_marked_busy_is_kept_until_it_is_released():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """let release;
+        addSpeakerRowsHook("pro", ({ setBusy }) => { release = setBusy; });
+        const d = showSpeakers(timedLines);
+        release(true);
+        const list = d.querySelector(".rec-speaker-list");
+        renderRecordingTabs(d, ROWS[0]);
+        renderRecordingTabs(d, ROWS[0]);
+        const held = d.querySelector(".rec-speaker-list") === list;
+        release(false);
+        setTimeout(() => out([held, d.querySelector(".rec-speaker-list") !== list]), 20);"""
+    )
+    assert result == [True, True]
+
+
+def test_switching_tabs_is_never_held_back_by_a_row_in_use():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers(timedLines);
+        d.querySelector(".rec-speaker-list").dataset.busy = "1";
+        chooseRecordingTab("transcript");
+        out([chosen(d), d.querySelectorAll(".rec-speaker-list").length]);"""
+    )
+    assert result == ["transcript", 0]
+
+
+def test_shares_always_add_up_to_100():
+    result = run_recordings(
+        """const lines = (secs) => secs.map((s, i) => ({ who: "S" + i, colour: i, text: "", start: 0, end: s }));
+        const shares = (secs) => speakerStats(lines(secs)).map((s) => s.share);
+        out([shares([10, 10, 10]), shares([1, 1, 1, 997]), shares([60, 10, 30]), shares([0, 0]), shares([5, 0])]);"""
+    )
+    thirds, tiny, plain, none, lone = result
+    assert thirds == [34, 33, 33]
+    assert tiny == [0, 0, 0, 100]
+    assert plain == [60, 10, 30]
+    assert none == [None, None]  # no timed talk at all: no shares
+    assert lone == [100, 0]
+    assert sum(thirds) == sum(tiny) == 100
+
+
+def test_the_extension_object_exposes_the_speaker_rows_hook():
+    core = (STATIC / "dashboard-core.js").read_text(encoding="utf-8")
+    assert "registerSpeakerRows(id, fn) {\n    return addSpeakerRowsHook(id, fn);" in core
+    assert "unregisterSpeakerRows(id) {\n    return removeSpeakerRowsHook(id);" in core

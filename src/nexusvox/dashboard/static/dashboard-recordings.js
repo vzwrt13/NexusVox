@@ -837,6 +837,11 @@ function renderRecordingTabs(detail, item) {
   if (again) again.focus();
 
   const tab = tabs.find((t) => t.id === active);
+  if (active === "speakers" && !tab.ext && speakersInUse(detail)) {
+    detail._speakersStale = true; // redrawn when the user is done with the row
+    return;
+  }
+  detail._speakersStale = false;
   const panel = document.createElement("div");
   panel.className = "rec-panel";
   panel.id = "rec-panel";
@@ -849,6 +854,7 @@ function renderRecordingTabs(detail, item) {
   else panel.append(transcriptPanel(detail, item));
   detail.querySelector(".rec-panels").replaceChildren(panel);
   if (active === "transcript") applyTranscriptMark(detail);
+  if (active === "speakers") runSpeakerRowHooks(panel.querySelector(".rec-speakers"));
 }
 
 function chooseRecordingTab(id) {
@@ -989,7 +995,7 @@ function applyTranscriptMark(detail) {
 //       span.rec-speaker-bar > span.rec-speaker-fill
 //       span.rec-speaker-stats        share · talk time, turns
 //     span.rec-speaker-actions[data-slot="actions"]   empty, hidden until something is put in it
-const speakerRowHooks = [];
+const speakerRowHooks = []; // [{id, fn}] of NexusVoxExt.registerSpeakerRows
 
 // The speakers of a recording in order of first appearance, with turns, talk time (seconds) and share (percent of
 // the timed talk time; null when no turn has a time).
@@ -1004,7 +1010,14 @@ function speakerStats(lines) {
   }
   const all = [...speakers.values()];
   const total = all.reduce((sum, s) => sum + s.seconds, 0);
-  if (total) for (const s of all) s.share = Math.round((s.seconds / total) * 100);
+  if (total) {
+    // Largest remainder: whole percents that always add up to 100 (rounding each one alone gives 99 or 101).
+    const exact = all.map((s) => (s.seconds / total) * 100);
+    all.forEach((s, i) => (s.share = Math.floor(exact[i])));
+    const left = 100 - all.reduce((sum, s) => sum + s.share, 0);
+    const order = all.map((_, i) => i).sort((a, b) => (exact[b] % 1) - (exact[a] % 1) || a - b);
+    for (const i of order.slice(0, left)) all[i].share += 1;
+  }
   return all;
 }
 
@@ -1053,6 +1066,8 @@ function speakerRow(s) {
   return row;
 }
 
+// Builds the panel; the extension hooks run once it is in the page (runSpeakerRowHooks), so a hook can focus a
+// field, measure a row or look elements up.
 function speakersPanel(detail, item) {
   const wrap = document.createElement("div");
   wrap.className = "rec-speakers";
@@ -1066,7 +1081,39 @@ function speakersPanel(detail, item) {
   list.className = "rec-speaker-list";
   const rows = speakers.map((s) => ({ ...s, speaker: s.who, row: speakerRow(s) }));
   list.append(...rows.map((r) => r.row));
+  // A redraw that was held back while a row was in use goes through when the focus leaves the list.
+  list.addEventListener("focusout", (e) => {
+    if (e.relatedTarget && list.contains(e.relatedTarget)) return;
+    setTimeout(() => redrawSpeakersIfIdle(detail), 0);
+  });
   wrap.append(list);
+  wrap._speakerRows = rows;
+  wrap._item = item;
+  return wrap;
+}
+
+// A row is in use while the focus is inside the list (a rename field, a menu button) or an extension has said so
+// with setBusy(true). The panel is then not rebuilt: the user would lose the text they are typing.
+function speakersInUse(detail) {
+  const list = detail.querySelector(".rec-panels .rec-speaker-list");
+  return Boolean(list && (list.dataset.busy === "1" || list.contains(document.activeElement)));
+}
+
+function redrawSpeakersIfIdle(detail) {
+  if (!detail._speakersStale || detail !== currentDetail() || speakersInUse(detail)) return;
+  if (recChosenTab === "speakers") renderRecordingTabs(detail, detail._item);
+}
+
+function runSpeakerRowHooks(wrap) {
+  const rows = wrap._speakerRows;
+  if (!rows) return;
+  const list = wrap.querySelector(".rec-speaker-list");
+  const detail = currentDetail();
+  const setBusy = (on) => {
+    if (on) list.dataset.busy = "1";
+    else delete list.dataset.busy;
+    if (!on && detail) setTimeout(() => redrawSpeakersIfIdle(detail), 0);
+  };
   for (const hook of speakerRowHooks) {
     try {
       const named = rows.map((r) => ({
@@ -1074,21 +1121,38 @@ function speakersPanel(detail, item) {
         name: r.row.querySelector('[data-slot="name"]'),
         actions: r.row.querySelector('[data-slot="actions"]'),
       }));
-      hook({ recording: item, list, rows: named });
+      hook.fn({ recording: wrap._item, list, rows: named, setBusy });
     } catch (err) {
-      console.error("Speaker rows hook failed:", err);
+      console.error("Speaker rows hook failed:", hook.id, err);
     }
   }
-  return wrap;
 }
 
-// NexusVoxExt.registerSpeakerRows(fn): fn({recording, list, rows}) runs each time a Speakers panel is drawn.
-function addSpeakerRowsHook(fn) {
-  if (typeof fn !== "function" || speakerRowHooks.includes(fn)) return false;
-  speakerRowHooks.push(fn);
+// NexusVoxExt.registerSpeakerRows(id, fn): fn({recording, list, rows, setBusy}) runs each time a Speakers panel is
+// drawn. An id registered again replaces its function, so a script that runs twice adds its controls once.
+function addSpeakerRowsHook(id, fn) {
+  if (typeof id !== "string" || !/^[a-z0-9_-]+$/.test(id) || typeof fn !== "function") {
+    console.error("Speaker rows hook not registered (invalid id or no function):", id);
+    return false;
+  }
+  const known = speakerRowHooks.find((h) => h.id === id);
+  if (known) known.fn = fn;
+  else speakerRowHooks.push({ id, fn });
+  redrawSpeakersTab();
+  return true;
+}
+
+function removeSpeakerRowsHook(id) {
+  const at = speakerRowHooks.findIndex((h) => h.id === id);
+  if (at < 0) return false;
+  speakerRowHooks.splice(at, 1);
+  redrawSpeakersTab();
+  return true;
+}
+
+function redrawSpeakersTab() {
   const detail = currentDetail();
   if (detail && recChosenTab === "speakers") renderRecordingTabs(detail, detail._item);
-  return true;
 }
 
 // ── Extension tabs ───────────────────────────────────────────────────

@@ -117,14 +117,15 @@ def download_installer(
             for _ in range(MAX_REDIRECTS + 1):
                 with client.stream("GET", url) as response:
                     if response.is_redirect:
-                        target = urllib.parse.urljoin(url, response.headers.get("location", ""))
-                        if not is_allowed_hop(target):
-                            logger.warning("Update download redirected to a refused address: %s", target)
+                        location = urllib.parse.urljoin(url, response.headers.get("location", ""))
+                        if not is_allowed_hop(location):
+                            host = urllib.parse.urlsplit(location).hostname
+                            logger.warning("Update download redirected to a refused host: %s", host)
                             raise UpdateError(
                                 "refused",
                                 "The download was sent to a server that is not GitHub's. Nothing was installed.",
                             )
-                        url = target
+                        url = location
                         continue
                     if response.status_code != 200:
                         logger.info("Update download refused: HTTP %d", response.status_code)

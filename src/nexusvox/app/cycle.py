@@ -30,7 +30,11 @@ MIN_TOGGLE_TAKE_S = 0.3
 # Hold mode: the start chime and the overlay appear this long after the key press, so a longer shortcut that
 # begins with the chord (Ctrl+Win+Alt+letter) discards the recording while it is still silent. Audio is captured
 # from the first moment; only the cue waits.
-START_CUE_DELAY_S = 0.15
+START_CUE_DELAY_S = 0.25
+# The wait is counted from the key press, but never shorter than this after the microphone opened. A slow
+# connection to the server used up the whole delay before the recording started, so the cue fired at once and
+# the arrow of Ctrl+Win+Arrow (a virtual-desktop switch) arrived after the chime had already played.
+START_CUE_MIN_WAIT_S = 0.12
 # A key press older than this before the recording started is not the start of this take.
 MAX_TAKE_LEAD_S = 10.0
 
@@ -224,8 +228,9 @@ class TranscriptionCycle:
                 # wait a moment, so a longer shortcut that starts with the chord (Ctrl+Win+Alt+letter,
                 # Ctrl+Win+Arrow) is discarded before anything shows. Counted from the key press, so the
                 # connection and the microphone opening already used up part of the wait. (The mic guard
-                # mutes at the press and is released again by the discard.)
-                wait_s = max(0.0, START_CUE_DELAY_S - (time.monotonic() - self._press_time))
+                # mutes at the press and is released again by the discard.) The wait never drops below
+                # START_CUE_MIN_WAIT_S, even when the connection already used up the delay.
+                wait_s = max(START_CUE_MIN_WAIT_S, START_CUE_DELAY_S - (time.monotonic() - self._press_time))
                 cue_timer = loop.call_later(wait_s, show_start_cue)
             if not remote:
                 # From the key press if the connection took a while, so the first words are inside the range.

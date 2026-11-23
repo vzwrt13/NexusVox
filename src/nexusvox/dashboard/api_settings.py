@@ -48,6 +48,7 @@ from ..llm import model_status as llm_model_status
 from ..llm import start_ollama as llm_start_ollama
 from ..llm import unload as llm_unload
 from ..llm import warm_up as llm_warm_up
+from ..system.diagnostics import build_diagnostics
 from ..system.feedback_form import build_feedback_url
 from ..system.feedback_send import FeedbackError, app_feedback_url, build_report, render_preview, send_report
 from ..system.logsetup import log_dir
@@ -604,6 +605,15 @@ class SettingsMixin(DashboardState):
             logger.error("Could not open the log folder %s: %s", folder, exc)
             return {"error": f"Could not open {folder}: {exc}"}
         return {"ok": True, "path": str(folder)}
+
+    def diagnostics(self) -> dict:
+        """The text of *Copy diagnostics*; the page copies it, nothing leaves the PC."""
+        try:
+            text = build_diagnostics(self._config, model_status=self.get_model_status(), device=self.get_device())
+        except Exception:  # the page shows a plain line instead of Flask's error page
+            logger.exception("Could not build the diagnostics")
+            return {"error": "The diagnostics could not be collected."}
+        return {"text": text}
 
     def set_store_audio(self, enabled: bool) -> dict:
         """Checked by the app on every recording, so this is live."""

@@ -397,6 +397,7 @@ body::before {
 .feedback-field .flagged-textarea { margin-bottom: 0; font-weight: 400; }
 .feedback-check { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
 .feedback-check input { accent-color: var(--accent); margin-top: 3px; flex-shrink: 0; }
+.log-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .feedback-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
 .link-btn { background: none; border: none; padding: 0; color: var(--accent-light); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
 .feedback-preview {

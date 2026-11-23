@@ -186,6 +186,11 @@ def register(app: Flask, api: DashboardAPI) -> None:
         resp = api.open_log_folder()
         return jsonify(resp), (500 if "error" in resp else 200)
 
+    @app.route("/api/diagnostics")
+    def diagnostics():
+        resp = api.diagnostics()
+        return jsonify(resp), (500 if "error" in resp else 200)
+
     @app.route("/api/settings/store-audio", methods=["POST"])
     def set_store_audio():
         data = _json_object()

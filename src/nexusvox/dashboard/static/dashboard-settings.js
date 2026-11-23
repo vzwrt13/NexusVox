@@ -312,6 +312,8 @@ async function checkForUpdate() {
   }
 }
 checkUpdateButton.addEventListener("click", checkForUpdate);
+// Pip's what's-new entries of this version, again (dashboard-pip-tour.js).
+document.getElementById("whats-new-link").addEventListener("click", (e) => openPipWhatsNew(e.currentTarget.dataset.version));
 // The default browser opens the page (the server does it); a link inside the dashboard window would load the dashboard.
 updateLink.addEventListener("click", async () => {
   const url = updateLink.dataset.url;
@@ -497,6 +499,7 @@ async function loadSettings() {
   setShowPip(s.show_pip);
   logDirLabel.textContent = s.log_dir;
   document.getElementById("app-version").textContent = "v" + String(s.app_version).replace(/^v/, "");
+  updatePipWhatsNewLink(String(s.app_version));
   feedbackUrl = s.feedback_url || "";
   feedbackTabButton.hidden = !feedbackUrl;
   feedbackPanel.hidden = !feedbackUrl;

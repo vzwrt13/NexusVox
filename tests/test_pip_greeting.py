@@ -307,9 +307,14 @@ PAGE = r"""
 const store = {};
 const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
 const mounts = [];
-function mountPip(host, options) { mounts.push({ pose: options.pose, bubble: options.bubble || null }); return host; }
+function mountPip(host, options) {
+  mounts.push({ pose: options.pose, side: options.side, bubble: options.bubble || null });
+  return host;
+}
 function localIsoDate() { return "2026-11-02"; }
-const document = { createElement: (tag) => ({ tag, children: [], className: "", textContent: "", listeners: {},
+const document = { createElement: (tag) => ({ tag, children: [], className: "", textContent: "",
+  listeners: {}, attrs: {},
+  setAttribute(k, v) { this.attrs[k] = v; },
   append(...k) { this.children.push(...k); }, addEventListener(t, f) { this.listeners[t] = f; } }) };
 const FACTS = { words: 0, dictations: 1, meetings: 1, uploads: 1, dictionary_entries: 1, formatting_commands: 1 };
 const last = () => mounts[mounts.length - 1];
@@ -322,7 +327,7 @@ def test_dismissing_keeps_the_bubble_gone_for_the_rest_of_the_day_and_pip_sits_q
         PAGE + "const host = {};"
         "const shown = showPipGreeting(host, FACTS);"
         "const withBubble = last();"
-        "withBubble.bubble.children[1].listeners.click();"  # the Got it button
+        "withBubble.bubble.children[1].listeners.click();"  # the × button
         "const afterDismiss = last();"
         "const reopened = showPipGreeting(host, FACTS);"  # the same day, Home opened again
         "const reopenedMount = last();"
@@ -345,7 +350,19 @@ def test_dismissing_keeps_the_bubble_gone_for_the_rest_of_the_day_and_pip_sits_q
 
 
 @needs_node
-def test_got_it_in_a_stale_window_does_not_overwrite_a_newer_state():
+def test_the_bubble_has_a_labelled_x_button_and_pip_stands_in_the_right_corner():
+    got = _js(
+        PAGE + "const host = {}; showPipGreeting(host, FACTS); const m = last(); const close = m.bubble.children[1];"
+        "console.log(JSON.stringify([m.side, close.className, close.textContent, close.attrs, close.type]))"
+    )
+    assert got[0] == "left"  # Pip is bottom right, so his bubble is on his left
+    assert got[1] == "pip-bubble-close" and got[2] == "×"
+    assert got[3] == {"aria-label": "Dismiss"} and got[4] == "button"
+    assert "Got it" not in GREETING
+
+
+@needs_node
+def test_dismiss_in_a_stale_window_does_not_overwrite_a_newer_state():
     got = _js(
         PAGE + "const host = {}; showPipGreeting(host, FACTS, '2026-11-02');"
         "const dismiss = last().bubble.children[1].listeners.click;"
@@ -357,7 +374,7 @@ def test_got_it_in_a_stale_window_does_not_overwrite_a_newer_state():
     )
     newer, after, bubble = got
     assert newer["day"] == "2026-11-03" and newer["seen"] == ["first-dictation", "first-meeting"]
-    assert after == newer  # the old window's Got it did not write its own, older state
+    assert after == newer  # the old window's × did not write its own, older state
     assert bubble is None  # but it still hides its own bubble
 
 

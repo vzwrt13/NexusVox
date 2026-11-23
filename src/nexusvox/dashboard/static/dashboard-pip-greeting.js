@@ -118,17 +118,20 @@ function dismissPipGreeting(state) {
 
 // ── On the page ──────────────────────────────────────────────────────
 
-// The bubble: its text and a small "Got it" button that dismisses it. Built from text nodes, never from markup.
+// The bubble: its text and a small "×" that dismisses it (a button with an accessible name, in the card's corner).
+// Built from text nodes, never from markup.
 function buildPipBubble(text, onDismiss) {
   const wrap = document.createElement("div");
   const message = document.createElement("span");
   message.textContent = text;
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "link-btn pip-bubble-dismiss";
-  button.textContent = "Got it";
-  button.addEventListener("click", onDismiss);
-  wrap.append(message, button);
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "pip-bubble-close";
+  close.textContent = "×";
+  close.setAttribute("aria-label", "Dismiss");
+  close.title = "Dismiss";
+  close.addEventListener("click", onDismiss);
+  wrap.append(message, close);
   return wrap;
 }
 
@@ -136,7 +139,8 @@ function buildPipBubble(text, onDismiss) {
 // dismissed. `facts` is null when they could not be read: Pip then sits quietly. Goes through mountPip, so the
 // Show Pip setting still hides him and the bubble. Returns the greeting that is shown, or null.
 function showPipGreeting(host, facts, day = localIsoDate(new Date())) {
-  const quiet = () => mountPip(host, { pose: "idle" });
+  // Pip stands in Home's bottom-right corner, so his bubble sits on his left.
+  const quiet = () => mountPip(host, { pose: "idle", side: "left" });
   if (!facts) {
     quiet();
     return null;
@@ -158,6 +162,6 @@ function showPipGreeting(host, facts, day = localIsoDate(new Date())) {
     if (current.day === state.day && current.id === state.id) writePipGreetingState(dismissPipGreeting(current));
     quiet();
   };
-  mountPip(host, { pose: "tilt", bubble: buildPipBubble(greeting.text, dismiss) });
+  mountPip(host, { pose: "tilt", side: "left", bubble: buildPipBubble(greeting.text, dismiss) });
   return greeting;
 }

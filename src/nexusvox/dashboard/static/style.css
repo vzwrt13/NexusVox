@@ -42,6 +42,7 @@
   --orange: #ffa94d;
   --pip-mint-dark: #00a881;
   --pip-ink: #14122b;
+  --pip-bubble-border: #2a2a33;
   --radius: 18px;
   --radius-sm: 12px;
   --radius-ctl: 10px;
@@ -1541,20 +1542,25 @@ canvas { width: 100% !important; max-height: 260px; }
 .pip-zzz { stroke: var(--accent-light); stroke-width: 6; }
 .pip-zzz-small { stroke-width: 5; opacity: 0.7; }
 
-/* The bubble slot: what it says is up to the caller. A small tail on its left edge points left at Pip. */
+/* The bubble slot: what it says is up to the caller. A quiet card with a soft tail pointing at Pip: on its left edge
+   when the bubble sits right of him (the default), on its right edge when it sits left of him (`side: "left"`). */
 .pip-bubble {
   position: relative;
   order: 2;
   align-self: center;
   min-width: 0;
-  max-width: 320px;
-  padding: 10px 14px;
-  font-size: 13px;
+  max-width: min(280px, 100%);
+  padding: 11px 30px 11px 14px;
+  font-size: 13.5px;
   line-height: 1.45;
+  text-wrap: pretty;
   color: var(--text);
   background: var(--surface3);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--pip-bubble-border);
   border-radius: var(--radius-sm);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  transform-origin: left bottom;
+  animation: pip-bubble-in 0.28s ease-out both;
 }
 .pip-bubble::before {
   content: "";
@@ -1565,14 +1571,64 @@ canvas { width: 100% !important; max-height: 260px; }
   height: 10px;
   margin-top: -5px;
   background: var(--surface3);
-  border-left: 1px solid var(--border-strong);
-  border-bottom: 1px solid var(--border-strong);
+  border-left: 1px solid var(--pip-bubble-border);
+  border-bottom: 1px solid var(--pip-bubble-border);
+  border-bottom-left-radius: 3px;
   transform: rotate(45deg);
 }
+.pip-bubble-left { justify-content: flex-end; }
+.pip-bubble-left .pip-figure { order: 2; }
+.pip-bubble-left .pip-bubble { order: 0; transform-origin: right bottom; }
+.pip-bubble-left .pip-bubble::before {
+  left: auto;
+  right: -6px;
+  border-left: none;
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-top: 1px solid var(--pip-bubble-border);
+  border-right: 1px solid var(--pip-bubble-border);
+  border-top-right-radius: 3px;
+}
+/* The small × that dismisses the bubble, in its top-right corner. */
+.pip-bubble-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.pip-bubble-close:hover, .pip-bubble-close:focus-visible { color: var(--text); background: var(--surface2); }
+@keyframes pip-bubble-in { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
 
-/* Pip's greeting on Home (dashboard-pip-greeting.js): the dismiss link under the bubble text. */
-.home-pip { margin: 0 0 20px; }
-.pip-bubble-dismiss { display: block; margin-top: 6px; font-size: 12px; }
+/* Pip on Home (dashboard-pip-greeting.js): the bottom-right corner of the content, in the flow under the last row, so
+   he never covers a card or a button. Home is a column at least as tall as the window, and the host's auto top margin
+   pushes it to the bottom; on a taller page it just follows the content. Narrow windows stack the bubble above him. */
+#tab-home.active { display: flex; flex-direction: column; min-height: calc(100vh - 80px); }
+.home-pip { align-self: flex-end; max-width: 100%; margin-top: auto; padding-top: 20px; }
+@media (max-width: 800px) { #tab-home.active { min-height: 0; } }
+@media (max-width: 640px) {
+  .home-pip .pip-bubble-left { flex-direction: column; align-items: flex-end; gap: 12px; }
+  .home-pip .pip-bubble-left .pip-bubble { align-self: flex-end; }
+  .home-pip .pip-bubble-left .pip-bubble::before {
+    top: auto;
+    bottom: -6px;
+    right: 35px;
+    margin-top: 0;
+    border-top: none;
+    border-right: 1px solid var(--pip-bubble-border);
+    border-bottom: 1px solid var(--pip-bubble-border);
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 3px;
+  }
+}
 
 /* Idle: a slow breathing bob of 2px and a blink every few seconds. Sleeping breathes slower. */
 .pip-idle .pip-art { animation: pip-breathe 4s ease-in-out infinite; }
@@ -1583,5 +1639,5 @@ canvas { width: 100% !important; max-height: 260px; }
 @keyframes pip-blink { 0%, 94%, 100% { opacity: 0; } 95%, 98% { opacity: 1; } }
 @keyframes pip-blink-open { 0%, 94%, 100% { opacity: 1; } 95%, 98% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .pip-art, .pip-eyes-open, .pip-eyes-closed { animation: none !important; }
+  .pip-art, .pip-eyes-open, .pip-eyes-closed, .pip-bubble { animation: none !important; }
 }

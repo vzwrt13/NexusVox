@@ -67,10 +67,11 @@ VIEWPORT_WIDTH = 1280
 # Settings is shot on the page it opens on (Dictation), the one `.active` card; the other pages are not displayed,
 # so nothing needs hiding. Analytics is shot twice, on the Overview it opens on and on Your week (the tab hash
 # cannot carry a page, so the script switches the served copy of the page to it). The Recordings tab fills the
-# window with its two panes, so it is photographed at a window's height.
+# window with its two panes, so it is photographed at a window's height; so is Home, where Pip stands in the
+# bottom-right corner of the window.
 VIEWPORT_HEIGHT = 4000
 SHOTS = (
-    ("home", "dashboard-home.png", None, None, ""),  # the page the dashboard opens on
+    ("home", "dashboard-home.png", None, 860, ""),  # the page the dashboard opens on: one window, Pip bottom right
     ("analytics", "dashboard-analytics.png", None, None, ""),  # the Overview
     ("analytics", "dashboard-analytics-week.png", None, None, "week"),
     ("recordings", "dashboard-recordings.png", None, 860, ""),

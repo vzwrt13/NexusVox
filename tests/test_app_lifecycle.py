@@ -922,18 +922,26 @@ def test_the_note_survives_a_first_download_but_not_a_later_refusal(monkeypatch)
 # -- Unreachable server ------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("where", ["connect", "finish"])
-def test_an_unreachable_server_logs_one_warning_and_no_traceback(monkeypatch, caplog, where):
+def _implicit_connect_failure() -> RuntimeError:
+    """A backend that wraps the refusal without `from`: only `__context__` links them."""
+    try:
+        try:
+            raise ConnectionRefusedError("refused")
+        except OSError:
+            raise RuntimeError("connect failed")  # noqa: B904
+    except RuntimeError as exc:
+        return exc
+
+
+def _run_failing_cycle(monkeypatch, caplog, *, where, failure, server_url="ws://127.0.0.1:1"):
     app = _take_app(monkeypatch, stop_info=(None, False, 101.0))
-    app._config.inference.server_url = "ws://127.0.0.1:1"
     app._offline_stop = AsyncMock()
     app._drop_stale_stop = AsyncMock(return_value=100.0)
-    app._transcriber._server_url = "ws://127.0.0.1:1"
-    failure = ConnectionRefusedError("refused")
-    if where == "connect":
-        app._transcriber.connect = AsyncMock(side_effect=failure)
+    if server_url:
+        app._transcriber._server_url = server_url
     else:
-        app._transcriber.finish = AsyncMock(side_effect=failure)
+        del app._transcriber._server_url  # an in-process model has no server
+    setattr(app._transcriber, where, AsyncMock(side_effect=failure))
 
     async def scenario():
         app._record_stop_event = asyncio.Event()
@@ -942,7 +950,28 @@ def test_an_unreachable_server_logs_one_warning_and_no_traceback(monkeypatch, ca
 
     with caplog.at_level(logging.DEBUG):
         asyncio.run(scenario())
-    above_debug = [r for r in caplog.records if r.levelno >= logging.WARNING]
-    assert [r.getMessage() for r in above_debug] == ["Transcription server not reachable at ws://127.0.0.1:1"]
-    assert not [r for r in above_debug if r.exc_info]
+    return [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@pytest.mark.parametrize("where", ["connect", "finish"])
+@pytest.mark.parametrize("failure", [ConnectionRefusedError("refused"), _implicit_connect_failure()])
+def test_an_unreachable_server_logs_one_warning_and_no_traceback(monkeypatch, caplog, where, failure):
+    records = _run_failing_cycle(monkeypatch, caplog, where=where, failure=failure)
+    assert len(records) == 1 and not records[0].exc_info
+    assert records[0].getMessage().startswith("Transcription server not reachable at ws://127.0.0.1:1")
     assert [r for r in caplog.records if r.levelno == logging.DEBUG and r.exc_info]  # the traceback stays at debug
+
+
+@pytest.mark.parametrize(
+    ("where", "failure", "server_url"),
+    [
+        ("finish", TimeoutError("read timed out"), "http://127.0.0.1:1"),  # up, but slow
+        ("finish", PermissionError("locked"), "ws://127.0.0.1:1"),
+        ("connect", FileNotFoundError("model.onnx"), None),  # an in-process model: no server to blame
+        ("connect", ConnectionRefusedError("refused"), None),
+    ],
+)
+def test_other_failures_keep_their_traceback(monkeypatch, caplog, where, failure, server_url):
+    records = _run_failing_cycle(monkeypatch, caplog, where=where, failure=failure, server_url=server_url)
+    assert len(records) == 1 and records[0].exc_info
+    assert "not reachable" not in records[0].getMessage()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import socket
 import time
 
 from ..audio.capture import AudioCapture
@@ -34,14 +35,20 @@ START_CUE_DELAY_S = 0.15
 MAX_TAKE_LEAD_S = 10.0
 
 
-def _is_unreachable(exc: BaseException | None) -> bool:
-    """Whether *exc* (or its cause) says the server could not be reached: refused, timed out or no route."""
+def _is_unreachable(exc: BaseException | None, *, connecting: bool = False) -> bool:
+    """Whether *exc* (or what it wraps) says the server could not be reached: refused, no route, no DNS answer.
+
+    A connect timeout counts too (`connecting`, for `connect()`): a read timeout means the server is up and busy.
+    """
     import httpx  # lazy, like the HTTP transcriber
 
-    while exc is not None:
-        if isinstance(exc, OSError | TimeoutError | httpx.ConnectError | httpx.TimeoutException):
+    unreachable = (ConnectionError, socket.gaierror, httpx.ConnectError, httpx.ConnectTimeout)
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, unreachable) or (connecting and isinstance(exc, TimeoutError)):
             return True
-        exc = exc.__cause__
+        exc = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
     return False
 
 
@@ -101,16 +108,21 @@ class TranscriptionCycle:
         logger.warning("A model switch is in progress, no dictation until it is done")
         await self._offline_stop(await self._drop_stale_stop(self._press_time))
 
-    def _log_server_failure(self, exc: BaseException, transcriber: object, message: str) -> None:
-        """Log *message* with the traceback, or one warning line when the server is just not reachable."""
-        if not _is_unreachable(exc):
-            logger.error(message, exc_info=exc)
-            return
+    def _log_server_failure(
+        self, exc: Exception, transcriber: object, message: str, *, connecting: bool = False
+    ) -> bool:
+        """Log a failed `transcriber` call: one warning when its server is not reachable, else the traceback.
+
+        Only a server-backed transcriber (one with a `_server_url`) can be unreachable; an in-process model has
+        no server. Returns whether the one-line warning was used.
+        """
         url = getattr(transcriber, "_server_url", None)
-        if not isinstance(url, str):
-            url = self._config.inference.server_url
-        logger.warning("Transcription server not reachable at %s", url)
+        if not isinstance(url, str) or not _is_unreachable(exc, connecting=connecting):
+            logger.error(message, exc_info=exc)
+            return False
+        logger.warning("Transcription server not reachable at %s (%s: %s); %s", url, type(exc).__name__, exc, message)
         logger.debug("%s", message, exc_info=exc)
+        return True
 
     async def _transcription_cycle(self, remote: bool = False) -> None:
         """Run one full transcription cycle: connect, record, transcribe, inject.
@@ -119,6 +131,7 @@ class TranscriptionCycle:
         never a command recording and leaves the hotkey state alone.
         """
         recording_stopped = False
+        reported: BaseException | None = None  # a failure of the transcriber that is already logged
         pressed_at = self._press_time  # `_press_time` moves on with the next press, while this take still runs
         loop = asyncio.get_running_loop()
         # `_transcriber_lock` (held by the caller) keeps a model switch from replacing it during the take.
@@ -165,7 +178,7 @@ class TranscriptionCycle:
             except Exception as exc:
                 if remote:
                     raise
-                self._log_server_failure(exc, transcriber, "Could not reach the transcription server")
+                self._log_server_failure(exc, transcriber, "Could not reach the transcription server", connecting=True)
                 await hang_up()
                 await self._offline_stop(await self._drop_stale_stop(pressed_at))
                 return
@@ -299,6 +312,8 @@ class TranscriptionCycle:
                 result = await transcriber.finish()
             except Exception as exc:
                 if remote or mark != POLISH or stop_at is None or stop_at - pressed_at >= QUICK_TAP_S:
+                    self._log_server_failure(exc, transcriber, "Transcription cycle failed")
+                    reported = exc
                     raise
                 # A polish tap needs no transcript (HTTP backends only fail here, not in connect()).
                 self._log_server_failure(
@@ -428,7 +443,8 @@ class TranscriptionCycle:
             await loop.run_in_executor(None, self._store_audio, audio_buffer, record.id)
 
         except Exception as exc:
-            self._log_server_failure(exc, transcriber, "Transcription cycle failed")
+            if exc is not reported:
+                logger.error("Transcription cycle failed", exc_info=exc)
             await self._abort_recording(audio, stream_task, recording_stopped)
             self._tray.set_active(False)
             if not remote:

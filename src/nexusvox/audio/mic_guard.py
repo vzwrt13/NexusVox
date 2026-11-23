@@ -30,6 +30,7 @@ import atexit
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from collections import Counter
@@ -46,7 +47,7 @@ logger = logging.getLogger("nexusvox.mic_guard")
 
 def _log_enumeration_failure(outcome: str) -> None:
     """One warning line for a failed session enumeration (no microphone); call it in an `except`."""
-    logger.warning("Mic guard: enumerating capture sessions failed, %s", outcome)
+    logger.warning("Mic guard: enumerating capture sessions failed, %s (%r)", outcome, sys.exc_info()[1])
     logger.debug("Mic guard: enumeration failure", exc_info=True)
 
 

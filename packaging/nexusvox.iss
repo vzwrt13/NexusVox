@@ -59,7 +59,8 @@ WizardStyle=modern
 ; A running NexusVox (usually in the tray) holds its files open and cannot be closed from outside: it has no window
 ; to send WM_CLOSE to. It owns this mutex (system/single_instance.py), so Setup and the uninstaller both stop and ask the
 ; user to quit it from the tray first. A silent install or uninstall fails instead of replacing files under a running
-; app.
+; app. The in-app *Install update* (system/update_install.py) runs this installer with /SILENT /SP- /NORESTART only
+; after NexusVox has ended, and starts it again afterwards (skipifsilent keeps the [Run] entry from doing it twice).
 AppMutex=Local\NexusVox-single-instance
 CloseApplications=no
 RestartApplications=no
@@ -217,6 +218,10 @@ begin
         'You can delete the folders by hand:' + #13#10#13#10 + ExpandConstant('{userappdata}\NexusVox') + #13#10 +
         LocalRoot, mbInformation, MB_OK);
   end;
+
+  { An installer the app downloaded for *Install update* and could not delete (system/update_install.py): not the
+    user's data, so it goes without a question. }
+  RemoveFolder(LocalRoot + '\updates');
 
   { Removes the folder only when nothing is left in it. }
   RemoveDir(LocalRoot);

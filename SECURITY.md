@@ -68,10 +68,15 @@ operation involves capabilities that look alarming out of context:
   are removed from that log first; audio and transcripts are never sent. Nothing
   is sent until you click, and the tab shows the exact report beforehand. The app
   posts only to `nexusvox.app` (`APP_FEEDBACK_HOSTS` in `system/feedback_send.py`),
-  whatever `[support].feedback_form_url` says. The other click-only request is
-  *Check for updates* in Settings > Advanced: one GET to `api.github.com` for the
-  newest release (`system/update_check.py`), with no identifier of you or your PC.
-  Nothing is downloaded or installed from it.
+  whatever `[support].feedback_form_url` says. The other click-only requests are
+  *Check for updates* in the dashboard's sidebar: one GET to `api.github.com` for
+  the newest release (`system/update_check.py`), with no identifier of you or your
+  PC; and, only after a second click on *Install update*, the download of that
+  release's `NexusVox-Setup.exe` (`system/update_install.py`). The download is
+  accepted only from this repository's release on `github.com` and GitHub's
+  release-asset hosts, must match the size and SHA-256 GitHub announced, and is run
+  only when Windows confirms a valid, timestamped Authenticode signature by
+  NightShift AI GmbH; anything else is deleted unrun.
 
 ## Trust boundary
 

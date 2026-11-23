@@ -6,6 +6,7 @@ app) there is no meaningful working directory, so everything lives in fixed per-
 - config: ``%APPDATA%\NexusVox``
 - database and audio: the data folder, ``%LOCALAPPDATA%\NexusVox\data``
 - speech models: ``%LOCALAPPDATA%\NexusVox\models`` (and ``...\models-xet``, the Hugging Face chunk cache)
+- a downloaded update installer, until it runs: ``%LOCALAPPDATA%\NexusVox\updates``
 
 The models folder is defined only here; a later setting that lets the user pick another folder
 changes ``models_dir`` and nothing else.
@@ -49,6 +50,11 @@ def _local_dir() -> Path:
 def data_dir() -> Path:
     r"""The folder holding the database and audio: ``%LOCALAPPDATA%\NexusVox\data`` when frozen, else the cwd."""
     return _local_dir() / "data" if is_frozen() else Path.cwd()
+
+
+def updates_dir() -> Path:
+    r"""Where *Install update* keeps the downloaded installer until it runs: ``%LOCALAPPDATA%\NexusVox\updates``."""
+    return _local_dir() / "updates"
 
 
 def models_dir() -> Path | None:

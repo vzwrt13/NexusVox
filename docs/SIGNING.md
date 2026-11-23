@@ -127,6 +127,24 @@ antivirus vendors and cannot be undone. When the maintainer agrees, put the repo
 that flag the file into the release notes (`release-notes/v<version>.md`), and report a false positive to the
 vendor that flags it. Do not upload other builds under the same version.
 
+## What the app checks before it installs an update
+
+*Install update* in the dashboard (`src/nexusvox/system/update_install.py`) downloads `NexusVox-Setup.exe` from the
+release and runs it only when Windows (`WinVerifyTrust`, through `system/authenticode.py`) confirms the signature is
+valid and trusted, carries a timestamp, and the signing certificate's common name or organisation is exactly
+`NightShift AI GmbH` (`SIGNER`). Anything else deletes the file unrun. So:
+
+- An unsigned release (next section) cannot be installed from inside the app; users of the previous version get a
+  red line and fall back to *Open the release page*.
+- A new certificate under another name needs `SIGNER` changed in a release **before** the first one signed with it,
+  or the in-app update of every older version refuses it.
+- Keep the timestamp (`-TimestampUrl`): a release signed without one is refused.
+- Revocation is checked for the whole chain except the root. A revoked certificate always refuses. When the CRL and
+  OCSP servers cannot be reached (a network that blocks them), the check is repeated without revocation and the
+  install goes ahead; the log says so (`revocation not checked`).
+- The installer must stay per-user (`PrivilegesRequired=lowest`) and accept `/SILENT /SP- /NORESTART`, which is how the
+  app runs it once it has quit.
+
 ## If the certificate is not ready: ship unsigned
 
 An unsigned 1.0 is acceptable; a delayed 1.0 for a certificate is not. Skip steps 1 to 6 and 8, check step 7 (the draft

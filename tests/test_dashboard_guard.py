@@ -331,7 +331,7 @@ def _switch_app(loop):
 
     app = types.SimpleNamespace(_loop=loop, status={"status": "idle"}, ended=[])
     app.get_switch_status = lambda: app.status
-    app.get_learn_status = app.on_feedback_mode = app._transcriber = None
+    app.get_learn_status = app.on_feedback_mode = app._transcriber = app._on_quit = None
     app._end_switch = lambda status, error=None: app.ended.append((status, error))
     return app
 

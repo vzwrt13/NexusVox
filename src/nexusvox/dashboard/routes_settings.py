@@ -176,6 +176,19 @@ def register(app: Flask, api: DashboardAPI) -> None:
         resp = api.update_check()
         return jsonify(resp), (502 if "error" in resp else 200)
 
+    @app.route("/api/update/install", methods=["POST"])
+    def install_update():
+        resp = api.install_update()
+        return jsonify(resp), (409 if "error" in resp else 200)
+
+    @app.route("/api/update/cancel", methods=["POST"])
+    def cancel_update():
+        return jsonify(api.cancel_update())
+
+    @app.route("/api/update/status")
+    def update_status():
+        return jsonify(api.update_status())
+
     @app.route("/api/update-check/open", methods=["POST"])
     def open_release_page():
         resp = api.open_release_page(_json_object().get("url"))

@@ -38,6 +38,10 @@ def register(app: Flask, api: DashboardAPI) -> None:
     def week():
         return jsonify(api.get_week(request.args.get("week") or None))
 
+    @app.route("/api/pip/facts")
+    def pip_facts():
+        return jsonify(api.get_pip_facts())
+
     @app.route("/api/language-distribution")
     def language_distribution():
         start, end = _date_args()

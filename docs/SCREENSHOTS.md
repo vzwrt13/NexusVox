@@ -7,11 +7,12 @@ invented data. One command, no setup beyond the usual `pip install -e ".[dev]"`:
 python scripts/dashboard_screenshots.py
 ```
 
-It writes fourteen PNGs to `docs/images/`: one per tab, one per step of the first-run setup, and five for the website user guide:
+It writes fifteen PNGs to `docs/images/`: one per tab, one per step of the first-run setup, and five for the website user guide:
 
 | File | Tab | Image ends |
 |---|---|---|
-| `dashboard-home.png` | Home | the whole page (the page the dashboard opens on) |
+| `dashboard-home.png` | Home | one window (1280 x 860): the page the dashboard opens on, with Pip and a milestone bubble (style C, with its label line) in the bottom-right corner |
+| `dashboard-home-tip.png` | Home | the same window with every milestone already said (the page is told so before it runs), so Pip says a tip: bubble style A |
 | `dashboard-analytics.png` | Analytics | the Overview (the view the tab opens on) |
 | `dashboard-analytics-week.png` | Analytics | the Your week view |
 | `dashboard-recordings.png` | Recordings | one window (1280 x 860): list and detail pane |
@@ -34,6 +35,8 @@ setup due; the script tells the page which step to show (`SETUP_SCRIPT`), fills 
 replaces the microphone list and level with demo values (the real audio devices are never probed).
 
 `scripts/pip_poses.py` is a separate, smaller script for Pip, the dashboard mascot: `python scripts/pip_poses.py` writes `docs/images/pip-poses.png`, one headless photograph of the real `dashboard-pip.js` and `style.css` with Pip in each pose (idle, blink, head tilt, sleeping) and once with a speech bubble, and `docs/images/pip-empty-recordings.png`, the empty Recordings list with Pip sleeping. It builds a throwaway page in a temporary folder with invented sample text, opens no window, reads no config or database and switches the idle motion off so two runs match. It reuses the browser lookup and launch of `dashboard_screenshots.py`.
+
+`scripts/pip_greetings.py` does the same for Pip's daily speech bubble on Home: `python scripts/pip_greetings.py` writes two images: `docs/images/pip-greetings.png`, one headless photograph of the three kinds of bubble (a milestone, a tip about a feature never used, a usage statistic), each chosen by the real `pickPipGreeting` from invented counts, and `docs/images/pip-bubble-variants.png`, three looks of the bubble side by side (A and C ship, B is an alternative drawn only in the throwaway page). It opens no window and reads no config, database or saved browser state.
 
 The Recordings tab fills one window with its two panes and is photographed at a window's height. The
 script serves its own copy of the page with the elements after the last card to show hidden when a tab

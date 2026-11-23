@@ -11,7 +11,7 @@ Rules and pointers only. How the server, the tabs and the endpoints work is in `
 
 ## Module Layout
 
-- `analytics.py` is the one import path of the query functions in `analytics_*.py` (`overview`, `usage`, `accuracy`, `review`, `common`). A new public query goes into its topic module and is re-exported; `tests/test_analytics_exports.py` pins the names.
+- `analytics.py` is the one import path of the query functions in `analytics_*.py` (`overview`, `usage`, `accuracy`, `week`, `pip`, `review`, `common`). A new public query goes into its topic module and is re-exported; `tests/test_analytics_exports.py` pins the names.
 - `api.py` joins the topic mixins `api_*.py` on `DashboardAPI`; `api_base.py` holds `DashboardState`, which declares what a mixin takes from another. Declare new cross-mixin use there: `tests/test_dashboard_api_contract.py` fails otherwise.
 - `routes_*.py` match the mixins. Each has `register(app, api)` and is listed in `_ROUTE_MODULES`; `__init__.py` keeps `_create_app`, `/`, `/api/features` and the server code, because tests patch `_make_server`, `_PORT` and `show_message` there.
 - Patch a name in the module that uses it. Names several modules import have a copy in each: use the `no_config_save` fixture for `save_config` and `patch_api(name, value)` for `cuda_available` and `convert_to_wav`.

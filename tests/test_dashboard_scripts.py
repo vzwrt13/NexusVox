@@ -14,6 +14,8 @@ from nexusvox.dashboard.scripts import page_scripts
 ORDER = [
     "dashboard-core.js",
     "dashboard-pip.js",
+    "dashboard-pip-texts.js",
+    "dashboard-pip-greeting.js",
     "dashboard-settings.js",
     "dashboard-feedback.js",
     "dashboard-settings-models.js",

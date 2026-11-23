@@ -56,6 +56,9 @@ class AnalyticsMixin(DashboardState):
     def get_week(self, week: str | None = None) -> dict:
         return analytics.get_week(self._sf, week)
 
+    def get_pip_facts(self) -> dict:
+        return analytics.get_pip_facts(self._sf)
+
     def get_accuracy(self, period: str = "day", start: str | None = None, end: str | None = None) -> dict:
         return {
             **analytics.get_accuracy_over_time(self._sf, period, start=start, end=end),

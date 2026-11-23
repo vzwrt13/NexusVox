@@ -229,9 +229,54 @@ def test_idle_motion_is_a_two_pixel_bob_and_a_blink_that_stop_for_reduced_motion
     for selector in (".pip-art", ".pip-eyes-open", ".pip-eyes-closed"):
         assert selector in media.group(1), selector
     assert "animation: none" in media.group(1)
-    # Only idle and sleeping move; the still poses carry no animation.
+    # Only idle and sleeping move; the still poses carry no animation. The bubble fades in once, and that stops too.
     animated = re.findall(r"^\.(pip-[a-z]+) [^{]*\{[^}]*animation:", CSS, re.M)
-    assert set(animated) <= {"pip-idle", "pip-sleeping"}
+    assert set(animated) <= {"pip-idle", "pip-sleeping", "pip-bubble"}
+    assert ".pip-bubble" in media.group(1)
+
+
+@needs_node
+def test_the_bubble_sits_on_the_side_asked_for_and_defaults_to_the_right():
+    got = run_js(
+        "const right = createPip({ bubble: 'x' }); const left = createPip({ bubble: 'x', side: 'left' });"
+        "const odd = createPip({ bubble: 'x', side: 'up' });"
+        "console.log(JSON.stringify([right.className, left.className, odd.className]));"
+    )
+    assert got == ["pip pip-idle", "pip pip-idle pip-bubble-left", "pip pip-idle"]
+
+
+def _rule(selector: str) -> str:
+    match = re.search(rf"^{re.escape(selector)} \{{(.*?)\}}", CSS, re.M | re.S)
+    assert match, f"no rule for {selector}"
+    return match.group(1)
+
+
+def test_the_bubble_is_a_quiet_card_with_a_soft_tail_and_one_gentle_entrance():
+    assert re.search(r":root\s*\{[^}]*--pip-bubble-border:\s*#2a2a33", CSS)
+    assert re.search(r":root\s*\{[^}]*--surface3:\s*#1c1c22", CSS)
+    card = _rule(".pip-bubble")
+    assert "background: var(--surface3)" in card and "var(--pip-bubble-border)" in card
+    assert "border-radius: var(--radius-sm)" in card  # 12px
+    assert "max-width: min(280px, 100%)" in card and "font-size: 13.5px" in card and "color: var(--text)" in card
+    assert "box-shadow" in card and "animation: pip-bubble-in" in card
+    assert re.search(r"@keyframes pip-bubble-in\s*\{[^}]*opacity: 0[^}]*scale\(0\.94\)", CSS)
+    assert ".pip-bubble::before" in CSS and ".pip-bubble-left .pip-bubble::before" in CSS  # a tail on either side
+    assert ".pip-bubble-close" in CSS and ".pip-bubble-eyebrow" in CSS  # the × and the label line of style c
+
+
+def test_pip_stands_in_the_bottom_right_corner_of_home_in_the_flow_and_never_over_a_card():
+    host = _rule(".home-pip")
+    assert "align-self: flex-end" in host and "margin-top: auto" in host
+    assert "position" not in host  # in the flow: it cannot cover a card, a button or the sidebar
+    assert re.search(
+        r"#tab-home\.active\s*\{[^}]*display: flex[^}]*flex-direction: column[^}]*min-height: calc\(100vh", CSS
+    )
+    home = HTML[HTML.index('<section id="tab-home"') : HTML.index('<section id="tab-settings"')]
+    assert home.rindex('id="home-pip"') > home.rindex('id="home-tip-next"')  # the last thing on Home
+    # Narrow windows stack the bubble above him instead of beside him, so nothing overlaps or runs off.
+    assert re.search(
+        r"@media \(max-width: 640px\)\s*\{\s*\.home-pip \.pip-bubble-left\s*\{[^}]*flex-direction: column", CSS
+    )
 
 
 # ── Setup and empty states ───────────────────────────────────────────

@@ -18,6 +18,7 @@ from .analytics_overview import (  # noqa: F401
     get_transcription_speed,
     get_upload_overview,
 )
+from .analytics_pip import get_pip_facts  # noqa: F401
 from .analytics_review import get_flagged_transcriptions, get_unreviewed_transcriptions  # noqa: F401
 from .analytics_usage import (  # noqa: F401
     APP_NAMES,

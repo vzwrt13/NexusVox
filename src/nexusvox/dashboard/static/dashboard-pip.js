@@ -4,7 +4,9 @@
 // mounts him, and a tab never mounts him by hand-writing markup: it goes through mountPip, so the "Show Pip" setting
 // (Settings > Dictation) hides every Pip and every bubble in one place.
 //
-//   mountPip(host, { pose: "idle", size: 80, bubble: "text or a Node" })
+//   mountPip(host, { pose: "idle", size: 80, bubble: "text or a Node", side: "right" })
+//
+// `side` is the side of Pip the bubble sits on ("right" by default; "left" for a Pip in a right-hand corner).
 //
 // Colours come from the tokens in style.css (--pip-*, --green, --accent, --accent-light, --text); the motion (a slow
 // breathing bob, a blink every few seconds) is CSS and stops under prefers-reduced-motion.
@@ -96,7 +98,7 @@ function createPip(options = {}) {
   const pose = PIP_POSES.includes(options.pose) ? options.pose : "idle";
   const size = pipClampSize(options.size);
   const root = document.createElement("div");
-  root.className = "pip pip-" + pose;
+  root.className = "pip pip-" + pose + (options.side === "left" ? " pip-bubble-left" : "");
   root.style.setProperty("--pip-size", size + "px");
   const figure = document.createElement("div");
   figure.className = "pip-figure";

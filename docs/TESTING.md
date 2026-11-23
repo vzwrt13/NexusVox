@@ -82,6 +82,7 @@ tests/
 ├── test_analytics_exports.py      # Every name dashboard.analytics has to keep exporting
 ├── test_analytics_js.py           # The Analytics views: markup, address, week and date helpers (Node)
 ├── test_analytics_week.py         # The weekly report and the words-per-day series
+├── test_pip_greeting.py           # Pip's daily bubble on Home: the counts, the texts, the choice (Node)
 ├── test_dashboard_api.py          # Flask API endpoint integration tests
 ├── test_dashboard_routes.py       # Every routes_*.py module is registered
 ├── test_transcriber.py            # Transcriber ABC, factory, and implementations
@@ -121,6 +122,7 @@ tests/
 | `test_analytics.py` | `dashboard/analytics_*.py` | Overview stats, word counting, time grouping, heatmap shape, date filtering |
 | `test_analytics_exports.py` | `dashboard/analytics.py` | The names `nexusvox.dashboard.analytics` must keep exporting |
 | `test_analytics_week.py` | `dashboard/analytics_week.py`, `analytics_usage.get_words_per_day` | Week boundaries (Monday to Sunday), words per day, meetings, new dictionary entries, the headline, the endpoints |
+| `test_pip_greeting.py` | `dashboard/analytics_pip.py`, `static/dashboard-pip-texts.js`, `static/dashboard-pip-greeting.js` | The counts behind Pip's bubble (counts only, formatting-command detection, cached totals), the texts rules, the order milestone / tip / statistic, once a day, dismissal, the catch-up for an existing history, never-used detection |
 | `test_analytics_js.py` | `static/dashboard-analytics.js` | The three Analytics views in the markup, the view in the address, week and date helpers |
 | `test_dashboard_routes.py` | `dashboard/__init__.py`, `dashboard/routes_*.py` | Every topic module's routes reach the app |
 | `test_dashboard_api.py` | `dashboard/routes_*.py` | All `/api/*` HTTP endpoints return correct status codes and JSON shape |

@@ -1541,7 +1541,7 @@ canvas { width: 100% !important; max-height: 260px; }
 .pip-zzz { stroke: var(--accent-light); stroke-width: 6; }
 .pip-zzz-small { stroke-width: 5; opacity: 0.7; }
 
-/* The bubble slot: what it says is up to the caller. A small tail points down at Pip. */
+/* The bubble slot: what it says is up to the caller. A small tail on its left edge points left at Pip. */
 .pip-bubble {
   position: relative;
   order: 2;

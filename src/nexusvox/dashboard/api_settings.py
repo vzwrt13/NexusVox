@@ -528,8 +528,13 @@ class SettingsMixin(DashboardState):
 
     def set_show_pip(self, enabled: bool) -> dict:
         """The dashboard reads it on page load and on every change, so this is live."""
+        previous = self._config.show_pip
         self._config.show_pip = enabled
-        save_config(self._config)
+        try:
+            save_config(self._config)
+        except Exception:
+            self._config.show_pip = previous  # the page rolls its switch back, so the running config must agree
+            raise
         return self.get_settings()
 
     def preview_feedback(self, kind: object, message: object, include_log: bool) -> dict:

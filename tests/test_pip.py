@@ -56,6 +56,19 @@ def test_dashboard_switches_pip_and_saves_it(db, session_factory, no_config_save
         assert config.show_pip is True
 
 
+def test_a_failed_save_leaves_the_running_setting_as_it_was(db, session_factory, monkeypatch):
+    config = Config()
+    api = DashboardAPI(session_factory, config, db=db)
+
+    def refuse(_config):
+        raise OSError("config.toml is read-only")
+
+    monkeypatch.setattr("nexusvox.dashboard.api_settings.save_config", refuse)
+    with pytest.raises(OSError):
+        api.set_show_pip(False)
+    assert config.show_pip is True  # the page puts its switch back, so a reload must agree
+
+
 @pytest.mark.parametrize("body", [{}, {"enabled": "false"}, {"enabled": 0}])
 def test_show_pip_needs_a_real_boolean(db, session_factory, no_config_save, body):
     config = Config()
@@ -67,6 +80,8 @@ def test_show_pip_needs_a_real_boolean(db, session_factory, no_config_save, body
 
 def test_settings_has_a_show_pip_switch_with_one_short_sentence_of_help():
     assert 'id="show-pip-toggle"' in HTML
+    advanced = re.search(r'id="settings-advanced">(.*?)\n      </div>\n', HTML, re.S).group(1)
+    assert 'id="show-pip-toggle"' in advanced  # a dashboard look option, not a dictation one
     row = re.search(r"<h3>Show Pip</h3>\s*<p>(.*?)</p>", HTML, re.S)
     assert row, "the Show Pip row is missing"
     assert row.group(1).count(". ") <= 1  # at most two short sentences, no paragraph
@@ -163,12 +178,27 @@ def test_nothing_renders_while_pip_is_off_and_it_comes_back_when_switched_on():
 
 
 @needs_node
-def test_a_host_that_left_the_page_is_forgotten():
+def test_a_host_built_off_the_page_is_still_hidden_when_pip_is_switched_off():
     got = run_js(
-        "const host = new El('div'); mountPip(host); host.isConnected = false; setShowPip(false);"
-        "console.log(JSON.stringify([pipMounts.size, host.children.length]));"
+        "const host = new El('div'); host.isConnected = false;"  # a card built before it is inserted
+        "setShowPip(true); mountPip(host, { bubble: 'Hi' }); setShowPip(true);"
+        "host.isConnected = true;"
+        "const shown = [host.hidden, host.children.length];"
+        "setShowPip(false);"
+        "const off = [host.hidden, host.children.length];"
+        "console.log(JSON.stringify({ shown, off, hosts: livePipHosts().length }));"
     )
-    assert got == [0, 1]  # not redrawn, and no longer tracked
+    assert got == {"shown": [False, 1], "off": [True, 0], "hosts": 1}
+
+
+@needs_node
+def test_an_unmounted_host_is_left_alone_by_later_changes():
+    got = run_js(
+        "const host = new El('div'); mountPip(host, { bubble: 'Hi' }); unmountPip(host);"
+        "setShowPip(false); setShowPip(true);"
+        "console.log(JSON.stringify([host.children.length, host.hidden, livePipHosts().length]));"
+    )
+    assert got == [0, False, 0]
 
 
 @needs_node

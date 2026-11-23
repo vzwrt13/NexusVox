@@ -18,8 +18,21 @@ const PIP_DEFAULT_SIZE = 80;
 // known he is shown, which is the default; a page that loads with him off hides him as soon as the setting arrives.
 let pipEnabled = true;
 
-// Every host a Pip is mounted in, with how it was mounted, so a change of the setting redraws them all.
-const pipMounts = new Map();
+// Every host a Pip is mounted in, so a change of the setting redraws them all. A host may be built off the page and
+// inserted later, so it is tracked whether or not it is connected; the references are weak, so a host that is
+// dropped without unmountPip does not stay alive here (it is pruned the next time the list is walked).
+const pipHosts = new Set();
+const pipOptions = new WeakMap();
+
+function livePipHosts() {
+  const hosts = [];
+  for (const ref of pipHosts) {
+    const host = ref.deref();
+    if (host && pipOptions.has(host)) hosts.push(host);
+    else pipHosts.delete(ref);
+  }
+  return hosts;
+}
 
 // The drawing is the budgie of the promo mascot (viewBox 256, face centre y = 122). `tilt` turns the head and opens
 // the eyes wider, as when listening. Nothing here comes from the user, so it is safe as markup.
@@ -109,21 +122,20 @@ function drawPipMount(host, options) {
 // Puts Pip into `host` (replacing what is there). While Pip is off the host stays empty and hidden, and turning him
 // on later fills it. Mounting the same host again redraws it with the new options. Returns the host.
 function mountPip(host, options = {}) {
-  pipMounts.set(host, options);
+  if (!pipOptions.has(host)) pipHosts.add(new WeakRef(host));
+  pipOptions.set(host, options);
   drawPipMount(host, options);
   return host;
 }
 
 function unmountPip(host) {
-  pipMounts.delete(host);
+  pipOptions.delete(host);
   host.replaceChildren();
+  livePipHosts();
 }
 
 // The Show Pip setting. Redraws every mounted Pip, so switching him off removes the figures and the bubbles now.
 function setShowPip(on) {
   pipEnabled = on !== false;
-  for (const [host, options] of pipMounts) {
-    if (!host.isConnected) pipMounts.delete(host);
-    else drawPipMount(host, options);
-  }
+  for (const host of livePipHosts()) drawPipMount(host, pipOptions.get(host));
 }

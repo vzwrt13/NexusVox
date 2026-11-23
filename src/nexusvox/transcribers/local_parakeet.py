@@ -2,7 +2,8 @@
 
 The CPU counterpart of the Docker NeMo container: same model, no GPU and no Docker. Loads the
 model once and caches it at the class level. The int8 ONNX build (~670 MB) is downloaded from
-Hugging Face on first use; `load_status` reports that to the dashboard.
+Hugging Face once the user has started the download in the dashboard (`model_download`); until then a
+load raises `ModelNotDownloaded`. `load_status` reports the download and the load to the dashboard.
 
 One model call handles roughly 20 s of audio well, so longer audio (long dictations, file uploads) is
 cut at speech pauses into segments of at most `MAX_DIRECT_S` (`split_at_pauses`) and each segment goes
@@ -21,10 +22,13 @@ import numpy as np
 
 from ..config import MODEL_REGISTRY, InferenceConfig, model_download_state
 from ..system.logsetup import Text
+from ..transcription import model_download
 from ..transcription.transcriber import SPEAKERS_NEED_GPU, BaseTranscriber, TranscriptionResult, Word
 
 logger = logging.getLogger(__name__)
 
+# The registry entry of this engine: its download is what the user is asked about.
+MODEL_ID = "parakeet-tdt-0.6b"
 SAMPLE_RATE = 16_000
 # Audio up to this long goes to the model in one call; longer audio is cut at pauses into segments
 # that never exceed the same length.
@@ -214,6 +218,7 @@ class LocalParakeetTranscriber(BaseTranscriber):
         self._audio_buffer = bytearray()
         self._connected = False
         self.model = str(registry["hf_name"])
+        self.local_model = MODEL_ID
         # A new transcriber (start, model switch) gets a fresh try after an earlier failed load. A background
         # preloader (`retry_failed_load=False`) does not: it is built on every flip to the CPU, and a failed
         # download would be retried each time instead of once per press.
@@ -239,16 +244,20 @@ class LocalParakeetTranscriber(BaseTranscriber):
     @staticmethod
     def _is_downloaded() -> bool:
         # The registry names the repo and the file that proves the download (the same check the dashboard uses).
-        downloaded = model_download_state("parakeet-tdt-0.6b")["downloaded"]
+        downloaded = model_download_state(MODEL_ID)["downloaded"]
         return downloaded is not False  # cannot tell: report "loading" rather than a download that may not happen
 
     @classmethod
     def _get_model(cls, onnx_model: str, quantization: str):
-        """Load or reuse the cached onnx-asr model; downloads it first on first use."""
+        """Load or reuse the cached onnx-asr model; downloads it first once the user has started the download.
+
+        A model that is not on disk and whose download the user has not started raises `ModelNotDownloaded`.
+        """
         key = (onnx_model, quantization)
         with cls._cache_lock:
             if key in cls._model_cache:
                 return cls._model_cache[key]
+            model_download.require(MODEL_ID)  # not on disk (or a broken download) and not started by the user
             cls._set_status("loading" if cls._is_downloaded() else "downloading")
             try:
                 import onnx_asr
@@ -305,7 +314,13 @@ class LocalParakeetTranscriber(BaseTranscriber):
         result = model.with_timestamps().recognize(chunk, sample_rate=SAMPLE_RATE)
         return result.text.strip(), words_from_tokens(result.tokens or [], result.timestamps or [], offset_s)
 
+    def download_model(self) -> None:
+        self._get_model(self._onnx_model, self._quantization)
+
     async def connect(self) -> None:
+        # A hotkey press without the model fails here, before anything is recorded, and the app says where to get it.
+        if (self._onnx_model, self._quantization) not in self._model_cache:
+            model_download.require(MODEL_ID)
         self._audio_buffer = bytearray()
         self._connected = True
         # Trigger a background load so the first recording doesn't pay the full download and

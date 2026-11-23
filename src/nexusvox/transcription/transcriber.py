@@ -167,6 +167,9 @@ class BaseTranscriber(ABC):
     supports_diarization: bool = False
     # For an engine whose model can detect speakers elsewhere (the Docker build) but not here: why not.
     no_diarization_reason: str = ""
+    # The registry id of the model this engine loads in this process, and so may have to download first (the CPU
+    # engines, and the CPU side of engine "auto"); None for a client of a server.
+    local_model: str | None = None
 
     async def prepare(self) -> None:  # noqa: B027
         """Settle which engine the next cycle uses, so the flags above describe it. Most engines have one."""
@@ -195,6 +198,16 @@ class BaseTranscriber(ABC):
     def load_status(self) -> dict[str, str | None] | None:
         """Model download/load progress (`state`, `error`) for engines that load a model in-process, else None."""
         return None
+
+    def download_model(self) -> None:
+        """Download (if needed) and load the `local_model`; blocking. Only after the user started the download."""
+        raise NotImplementedError(f"{type(self).__name__} has no model to download")
+
+    def model_missing(self) -> bool:
+        """True when this engine cannot transcribe until the user downloads its `local_model`."""
+        from . import model_download  # lazily: it imports the config and the paths, this module is imported early
+
+        return model_download.missing(self.local_model)
 
     async def diarize(self, wav: bytes | BinaryIO, timeout: float) -> list[SpeakerTurn]:
         """Speaker turns for a whole WAV file (bytes or a file object); only engines with `supports_diarization`."""

@@ -291,10 +291,10 @@ def _setup_hosts():
 
 def test_every_setup_step_has_a_pip_host_with_one_short_sentence():
     panels = re.findall(r'<section class="setup-panel".*?</section>', HTML, re.S)
-    assert len(panels) == 4
+    assert len(panels) == 5
     assert all(panel.count('class="setup-pip"') == 1 for panel in panels)
     hosts = _setup_hosts()
-    assert len(hosts) == 4
+    assert len(hosts) == 5
     for pose, line in hosts:
         assert pose in {"idle", "tilt", "sleeping"}
         assert len(line) <= 60 and line.count(". ") == 0 and line.endswith((".", "?", "!"))

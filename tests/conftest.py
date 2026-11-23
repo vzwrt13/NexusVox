@@ -14,6 +14,7 @@ from nexusvox.dashboard import _PORT, _create_app
 from nexusvox.dashboard.api import DashboardAPI
 from nexusvox.dashboard.guard import COOKIE_NAME
 from nexusvox.storage.db import Database
+from nexusvox.transcription.model_download import is_allowed as _real_is_allowed
 
 
 @pytest.fixture(autouse=True)
@@ -61,6 +62,28 @@ def _fresh_cuda_probe(monkeypatch):
     import nexusvox.config
 
     monkeypatch.setattr(nexusvox.config, "_cuda_probed", False)
+
+
+@pytest.fixture(autouse=True)
+def _speech_models_count_as_allowed(monkeypatch):
+    """The in-process engines refuse a model that is not downloaded until the user starts its download; the test
+    home has no Hugging Face cache, so every model would be missing. Tests of that consent use `ask_before_download`.
+    No test downloads anything either way: the engines' model loaders are replaced."""
+    from nexusvox.transcription import model_download
+
+    model_download._reset()
+    monkeypatch.setattr(model_download, "is_allowed", lambda model_id: True)
+    yield
+    model_download._reset()
+
+
+@pytest.fixture
+def ask_before_download(monkeypatch):
+    """The real consent: a model that is not on disk may be downloaded only after `model_download.start`."""
+    from nexusvox.transcription import model_download
+
+    monkeypatch.setattr(model_download, "is_allowed", _real_is_allowed)
+    return model_download
 
 
 @pytest.fixture(autouse=True)

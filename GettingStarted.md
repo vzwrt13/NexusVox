@@ -19,7 +19,7 @@ pip install -e .
 python -m nexusvox
 ```
 
-That runs the model in-process — Parakeet (ONNX, int8) by default, Whisper if you pick it. The model downloads from HuggingFace on first use (~670 MB for Parakeet, ~1.6 GB for `whisper-large-v3-turbo`) and caches under `%USERPROFILE%\.cache\huggingface`; the dashboard's Settings tab shows the download while it runs. Parakeet on CPU has no speaker detection for uploads — that needs the GPU container.
+That runs the model in-process — Parakeet (ONNX, int8) by default, Whisper if you pick it. The model downloads from HuggingFace when you click *Download* in the first-run setup or under Settings → Models (~670 MB for Parakeet, ~1.6 GB for `whisper-large-v3-turbo`), never before, and caches under `%USERPROFILE%\.cache\huggingface`; the box shows the progress, and *Retry* after a failure. Parakeet on CPU has no speaker detection for uploads — that needs the GPU container.
 
 To stay on CPU even if you later add a GPU, open the dashboard from the tray icon → Settings → **Advanced** → **Compute Device** → set to `CPU`.
 
@@ -270,7 +270,8 @@ NexusVox writes its log to `%LOCALAPPDATA%\NexusVox\logs` (one file per day, the
 |---|---|
 | `Connection refused` on start | Make sure the Docker container is running and healthy. Check `docker compose logs`. |
 | No audio captured | Verify your default microphone is set correctly in Windows Sound settings. |
-| Model download fails | No model needs a token, so a failure is usually network or disk space. |
+| Model download fails | No model needs a token, so a failure is usually network or disk space. The download box says when Hugging Face cannot be reached; click *Retry* once the PC is online. |
+| Hotkey only plays the error sound | The speech model is not downloaded yet: click *Download* in Settings → Models (the dashboard opens there by itself). |
 | Text not appearing at cursor | Some applications block simulated Ctrl+V. Try a standard text editor first. |
 | `Audio conversion failed` on upload | The file is damaged or is not audio. NexusVox decodes uploads itself (no extra program needed): try another copy or convert the file to WAV. |
 | Starting NexusVox again while it runs | The second start opens the running instance's dashboard and exits; there is only ever one tray icon and one hotkey hook. |

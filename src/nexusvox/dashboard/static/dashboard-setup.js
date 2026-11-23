@@ -1,4 +1,4 @@
-/* NexusVox Dashboard — First-run setup: Welcome, Microphone, Hotkey, Ready. A full-page overlay over the dashboard. */
+/* NexusVox Dashboard — First-run setup: Welcome, Microphone, Speech model, Hotkey, Ready. A full-page overlay. */
 
 // It opens by itself while [general].setup_done is false (a config created from the template on a fresh install) and
 // from Settings > "Run the first-run setup again" (the `nexusvox:rerun-setup` event). "Skip setup" and finishing both
@@ -20,6 +20,9 @@ const setupTestStatus = document.getElementById("setup-test-status");
 const setupModelStatus = document.getElementById("setup-model-status");
 
 const SETUP_LAST_STEP = setupPanels.length - 1;
+const SETUP_STEP_MIC = 1;
+const SETUP_STEP_MODEL = 2;
+const SETUP_STEP_HOTKEY = 3;
 const SETUP_METER_INTERVAL_MS = 120;
 // A bar that stays this still for this long gets a hint: the microphone may be muted or the wrong one.
 const SETUP_QUIET_LEVEL = 0.05;
@@ -37,6 +40,9 @@ let setupMeterTimer = null;
 let setupMeterRun = 0; // changes on every start and stop, so a reply from an earlier run is dropped
 let setupQuietSince = 0;
 let setupSettings = null; // the settings as the setup last saw them
+// The speech model step: the hardware found, the model and its size, and the Download button. Nothing is downloaded
+// before that click; the box is the one Settings > Models shows (dashboard-settings-models.js).
+const setupModelDownload = mountModelDownload(document.getElementById("setup-model-download"));
 
 function setupIsOpen() {
   return !setupEl.hidden;
@@ -169,7 +175,7 @@ setupTest.addEventListener("input", () => {
 });
 
 function loadSetupModelStatus() {
-  loadHomeStatus(settingsReady.catch(() => {}), setupModelStatus, () => setupIsOpen() && setupStep === 2);
+  loadHomeStatus(settingsReady.catch(() => {}), setupModelStatus, () => setupIsOpen() && setupStep === SETUP_STEP_HOTKEY);
 }
 
 // ── Ready ────────────────────────────────────────────────────────────
@@ -195,9 +201,10 @@ function showSetupStep(n) {
     if (i === setupStep) item.setAttribute("aria-current", "step");
     else item.removeAttribute("aria-current");
   });
-  if (setupStep === 1) startSetupMeter();
+  if (setupStep === SETUP_STEP_MIC) startSetupMeter();
   else stopSetupMeter();
-  if (setupStep === 2) {
+  if (setupStep === SETUP_STEP_MODEL) setupModelDownload.refresh();
+  if (setupStep === SETUP_STEP_HOTKEY) {
     loadSetupSettings();
     loadSetupModelStatus();
   }

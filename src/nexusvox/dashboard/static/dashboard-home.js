@@ -26,9 +26,11 @@ function nextHomeTip() {
 // ── Status line ──────────────────────────────────────────────────────
 // What the dashboard knows: the model, the device and whether anything leaves this computer (only a custom
 // server can be somewhere else). Green is not claimed: nothing here probes the Docker container or the custom
-// server, so a model that is not switching is shown plainly. Yellow while the model downloads or loads, red when
-// that failed.
+// server, so a model that is not switching is shown plainly. Yellow while the model downloads or loads, and while it
+// waits for the user to download it ("missing"); red when loading failed.
 const HOME_BUSY_PHASES = ["stopping", "starting", "waiting", "downloading", "loading"];
+// Asked again too while the model waits for its download: it may be started from the setup or Settings meanwhile.
+const HOME_REPOLL_PHASES = [...HOME_BUSY_PHASES, "missing"];
 
 function describeHomeStatus(model, device, status) {
   const phase = (status && status.status) || "idle";
@@ -40,6 +42,9 @@ function describeHomeStatus(model, device, status) {
   } else if (HOME_BUSY_PHASES.includes(phase)) {
     state = "warn";
     lead = "Loading the speech model";
+  } else if (phase === "missing") {
+    state = "warn";
+    lead = "Speech model not downloaded yet: download it under Settings > Models";
   }
   const parts = [lead];
   if (model && model.name) parts.push(model.name);
@@ -70,7 +75,7 @@ async function loadHomeStatus(
     const model = modelSpecs[current.model] || { name: current.model };
     const { state, text } = describeHomeStatus(model, device.active, status);
     setStatus(el, state, text);
-    if (status && HOME_BUSY_PHASES.includes(status.status)) {
+    if (status && HOME_REPOLL_PHASES.includes(status.status)) {
       homeStatusTimers.set(
         el,
         setTimeout(() => {

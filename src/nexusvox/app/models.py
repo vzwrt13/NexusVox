@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import replace
 
 from ..config import DEFAULT_MODEL, MODEL_REGISTRY, InferenceConfig, model_needs_docker, save_config
 from ..system import docker_ctl
 from ..system.paths import DOCKER_UNAVAILABLE_MSG, is_frozen
+from ..transcription import model_download
+from ..transcription.model_download import ModelNotDownloaded
 from ..transcription.transcriber import create_transcriber
 from .common import logger
+
+# A press without the speech model opens the dashboard at most this often; the error cue sounds every time.
+MODEL_HINT_INTERVAL_S = 60.0
 
 
 def apply_startup_fallback(inference: InferenceConfig, device: str) -> None:
@@ -40,7 +46,8 @@ class ModelSwitching:
 
         Once no switch is in flight (idle, or just ready), an in-process model that is still downloading
         or loading reports that (`downloading` / `loading`), and one that failed to load reports `error`
-        with the reason, so the first start of CPU Parakeet neither looks done nor hung.
+        with the reason, so the first start of CPU Parakeet neither looks done nor hung. One that is not
+        downloaded and waits for the user to start the download reports `missing`.
         """
         if self._switch_status in ("idle", "ready"):
             load = self._transcriber.load_status()
@@ -51,6 +58,12 @@ class ModelSwitching:
                 return status
             if load and load["state"] == "error":
                 return {"status": "error", "error": load["error"]}
+            local = getattr(self._transcriber, "local_model", None)
+            if local and not self._transcriber.needs_docker:
+                if model_download.job(local)["state"] == "downloading":
+                    return {"status": "downloading", "error": None}
+                if self._transcriber.model_missing() is True:  # never for engine "auto": its CPU copy is optional
+                    return {"status": "missing", "error": None}
         status = {"status": self._switch_status, "error": self._switch_error}
         if self._switch_note and self._switch_status == "ready":
             status["note"] = self._switch_note
@@ -218,10 +231,29 @@ class ModelSwitching:
         return self._is_inprocess() or self._transcriber.warms_up_at_start
 
     async def _preload_transcriber(self) -> None:
-        """Warm up an in-process transcriber so the first hotkey press is snappy."""
+        """Warm up an in-process transcriber so the first hotkey press is snappy.
+
+        A model that is not downloaded is left alone: nothing is downloaded until the user starts it in the dashboard.
+        """
         try:
-            logger.info("Preloading in-process transcriber model (first run may download)")
+            logger.info("Preloading in-process transcriber model")
             await self._transcriber.warm_up()
             logger.info("Preload complete")
+        except ModelNotDownloaded:
+            logger.info("The speech model is not downloaded yet; it waits for the user to download it in the dashboard")
         except Exception:
             logger.exception("Preloading transcriber failed")
+
+    def _hint_model_download(self) -> None:
+        """A press without the speech model: say where to get it, instead of downloading it unasked.
+
+        The error cue is the caller's. The dashboard opens where the Download button is (the first-run setup while it
+        is not done, else Settings > Models), at most once a minute, so repeated presses do not pile up windows.
+        """
+        logger.warning("No dictation: %s", model_download.MISSING_MESSAGE)
+        now = time.monotonic()
+        if self._model_hint_at is not None and now - self._model_hint_at < MODEL_HINT_INTERVAL_S:
+            return
+        self._model_hint_at = now
+        tab = "models" if self._config.setup_done else ""  # the page shows Settings > Models; the setup opens itself
+        self._loop.run_in_executor(None, self._open_dashboard_logged, tab)

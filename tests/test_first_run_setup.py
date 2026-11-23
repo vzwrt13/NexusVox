@@ -293,10 +293,10 @@ def test_the_level_and_stop_routes_use_the_meter(flask_client, monkeypatch):
 # ── The page ─────────────────────────────────────────────────────────
 
 
-def test_the_setup_has_four_steps_in_this_order_and_a_skip_on_every_one():
+def test_the_setup_has_five_steps_in_this_order_and_a_skip_on_every_one():
     steps = re.findall(r'<li data-step="(\d)">([^<]+)</li>', HTML)
-    assert steps == [("0", "Welcome"), ("1", "Microphone"), ("2", "Hotkey"), ("3", "Ready")]
-    assert len(re.findall(r'class="setup-panel" data-step="\d"', HTML)) == 4
+    assert steps == [("0", "Welcome"), ("1", "Microphone"), ("2", "Speech model"), ("3", "Hotkey"), ("4", "Ready")]
+    assert len(re.findall(r'class="setup-panel" data-step="\d"', HTML)) == 5
     # One skip link below the panels, not inside one: it stays on screen on every step.
     assert HTML.index('id="setup-skip"') > HTML.rindex('class="setup-panel"')
 
@@ -306,8 +306,16 @@ def test_the_microphone_step_has_the_device_choice_and_a_live_meter():
     assert 'id="setup-mic-select"' in step and 'role="meter"' in step and 'id="setup-meter-bar"' in step
 
 
-def test_the_hotkey_step_offers_the_choices_and_the_hello_world_test():
+def test_the_speech_model_step_holds_the_download_box_and_comes_before_the_hotkey_test():
     step = HTML[HTML.index('data-step="2" aria-labelledby') : HTML.index('data-step="3" aria-labelledby')]
+    assert "Your speech model" in step and 'id="setup-model-download"' in step
+    # The box is built by the shared code of Settings > Models; the step only refreshes it when shown.
+    assert 'mountModelDownload(document.getElementById("setup-model-download"))' in SETUP_JS
+    assert "if (setupStep === SETUP_STEP_MODEL) setupModelDownload.refresh();" in SETUP_JS
+
+
+def test_the_hotkey_step_offers_the_choices_and_the_hello_world_test():
+    step = HTML[HTML.index('data-step="3" aria-labelledby') : HTML.index('data-step="4" aria-labelledby')]
     assert "Use other keys" in step
     assert re.findall(r'name="setup-mode" value="(\w+)"', step) == ["hold", "toggle"]
     assert set(re.findall(r'name="setup-feedback" value="(\w+)"', step)) == {"visual", "sound", "both"}
@@ -566,13 +574,13 @@ def test_a_failed_dashboard_open_on_first_start_is_logged(monkeypatch, caplog):
 
     app = NexusVoxApp.__new__(NexusVoxApp)
 
-    def broken() -> None:
+    def broken(tab: str = "") -> None:
         raise OSError("port taken")
 
     app._open_dashboard = broken
     with caplog.at_level("ERROR"):
         app._open_dashboard_logged()
-    assert "could not be opened for the first-run setup" in caplog.text
+    assert "The dashboard could not be opened" in caplog.text
 
 
 def test_the_hotkey_recorder_ignores_a_second_click_while_it_listens():

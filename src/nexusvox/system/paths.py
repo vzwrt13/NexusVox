@@ -56,6 +56,19 @@ def models_dir() -> Path | None:
     return _local_dir() / "models" if is_frozen() else None
 
 
+def hf_hub_cache() -> Path:
+    """The Hugging Face hub cache the speech models are downloaded into: the models folder when frozen, from source
+    the folder huggingface_hub itself uses (it reads ``HF_HUB_CACHE``, ``HF_HOME`` and their older names)."""
+    folder = models_dir()
+    if folder is not None:
+        return folder
+    try:
+        from huggingface_hub import constants
+    except Exception:  # not installed (the core without the model libraries): its default folder
+        return Path.home() / ".cache" / "huggingface" / "hub"
+    return Path(constants.HF_HUB_CACHE)
+
+
 def xet_cache_dir() -> Path | None:
     """The Hugging Face xet chunk cache when frozen. It holds model data too, so it lives next to the models folder
     and the uninstaller deletes both with "delete the models"; by default it would sit in the user profile."""

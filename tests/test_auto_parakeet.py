@@ -544,3 +544,58 @@ async def test_a_restarted_engine_warms_the_server_again(server):
     await fresh.warm_up()
     assert server["posted"] == 1
     assert fresh.engine == GPU
+
+
+# ---- No CPU copy downloaded: the engine is the plain server client ------------------------------
+
+
+@pytest.fixture
+def no_cpu_copy(ask_before_download, monkeypatch):
+    """The CPU copy of Parakeet was never downloaded (the user runs on Docker)."""
+    monkeypatch.setattr(ask_before_download, "model_download_state", lambda *a, **k: {"downloaded": False})
+    return ask_before_download
+
+
+async def test_a_cold_server_still_takes_the_dictation_without_a_cpu_copy(server, no_cpu_copy):
+    gate = threading.Event()
+    server["hold"] = gate
+    transcriber, cpu = make(warm=False)
+    await transcriber.prepare()  # reachable but cold: the CPU would take it, but there is none
+    assert transcriber.engine == GPU
+    await transcriber.connect()  # no ModelNotDownloaded: a Docker user is never asked for the backup
+    gate.set()
+    await transcriber.send_audio_chunk(b"\x00\x01" * 160)
+    assert (await transcriber.finish()).text == "from gpu"
+    assert cpu.connects == 0
+    assert transcriber.model_missing() is False  # the dashboard reports no "missing" either
+    join_warm_up(transcriber)
+
+
+async def test_a_failed_gpu_take_without_a_cpu_copy_fails_like_a_server_client(server, no_cpu_copy, caplog):
+    transcriber, cpu = make()
+    await transcriber.connect()
+    await transcriber.send_audio_chunk(b"\x00\x01" * 160)
+    server["up"] = False
+    with caplog.at_level(logging.WARNING), pytest.raises(RuntimeError, match="connection refused"):
+        await transcriber.finish()
+    assert cpu.connects == 0
+    assert "No CPU copy of Parakeet to replay the take on" in caplog.text
+
+
+async def test_a_hung_server_without_a_cpu_copy_returns_nothing_and_asks_for_nothing(server, no_cpu_copy):
+    server["hang"] = True
+    transcriber, cpu = make()
+    await transcriber.connect()
+    await transcriber.send_audio_chunk(b"\x00\x01" * 160)
+    result = await transcriber.finish()
+    assert result.done is False and result.text == ""
+    assert cpu.connects == 0
+
+
+async def test_once_the_cpu_copy_is_downloaded_the_outage_goes_to_the_cpu_again(server, no_cpu_copy):
+    no_cpu_copy.start("parakeet-tdt-0.6b", lambda: None)  # the user's click
+    transcriber, cpu = make()
+    await transcriber.connect()
+    await transcriber.send_audio_chunk(b"\x00\x01" * 160)
+    server["up"] = False
+    assert (await transcriber.finish()).text == "from cpu"

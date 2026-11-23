@@ -1,9 +1,10 @@
 """In-process faster-whisper transcriber for CPU (and optional GPU) mode.
 
 Loads the model once and caches it at the class level — switching away from
-Whisper and back reuses the already-loaded instance. Model downloads happen on first use via faster-whisper's
+Whisper and back reuses the already-loaded instance. The model is downloaded through faster-whisper's
 HuggingFace Hub integration (~/.cache/huggingface on Linux/macOS,
-%USERPROFILE%\\.cache\\huggingface on Windows).
+%USERPROFILE%\\.cache\\huggingface on Windows), but only once the user has started the download in the
+dashboard (`model_download`); until then `connect` raises `ModelNotDownloaded`.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import threading
 from ..config import MODEL_REGISTRY, InferenceConfig
 from ..system.logsetup import Text
 from ..system.paths import models_dir
+from ..transcription import model_download
 from ..transcription.transcriber import BaseTranscriber, TranscriptionResult, pcm16_to_wav_bytes
 
 logger = logging.getLogger(__name__)
@@ -51,6 +53,7 @@ class LocalWhisperTranscriber(BaseTranscriber):
         self._sample_rate = 16_000
         self._connected = False
         self.model = self._hf_name
+        self.local_model = config.model
 
     @classmethod
     def _get_model(cls, hf_name: str, device: str, compute_type: str):
@@ -75,14 +78,25 @@ class LocalWhisperTranscriber(BaseTranscriber):
                 logger.info("faster-whisper model ready")
             return cls._model_cache[key]
 
+    def _key(self) -> tuple[str, str, str]:
+        return (self._hf_name, self._device, self._compute_type)
+
+    def _require_model(self) -> None:
+        """Refuse to download a model that is not on disk and whose download the user has not started."""
+        if self._key() not in self._model_cache:
+            model_download.require(self.local_model)
+
+    def download_model(self) -> None:
+        self._get_model(*self._key())
+
     async def connect(self) -> None:
+        self._require_model()
         self._audio_buffer = bytearray()
         self._connected = True
         # Trigger a background load so the first recording doesn't pay the
         # full model-load latency inside finish().
         loop = asyncio.get_event_loop()
-        key = (self._hf_name, self._device, self._compute_type)
-        if key not in self._model_cache:
+        if self._key() not in self._model_cache:
             loop.run_in_executor(None, self._get_model, self._hf_name, self._device, self._compute_type)
 
     async def send_audio_chunk(self, pcm16_bytes: bytes) -> None:

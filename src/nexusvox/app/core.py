@@ -154,6 +154,7 @@ class NexusVoxApp(
         self._switch_error: str | None = None
         self._switch_reset: asyncio.Future | None = None  # puts the status back to idle 5 s after a switch ended
         self._switch_note: str | None = None  # one short sentence about a finished switch, e.g. the CPU fallback
+        self._model_hint_at: float | None = None  # when a press without the speech model last opened the dashboard
         # Held by a dictation cycle for its take and by a model switch from start to end: the two never overlap.
         # Neither waits for it: a switch is refused during a take, and a press during a switch records nothing.
         self._transcriber_lock = asyncio.Lock()
@@ -170,17 +171,17 @@ class NexusVoxApp(
         task.add_done_callback(self._tasks.discard)
         return task
 
-    def _open_dashboard(self) -> None:
-        """Open the dashboard window."""
-        open_dashboard(self._db, self._config, app=self)
+    def _open_dashboard(self, tab: str = "") -> None:
+        """Open the dashboard window, on `tab` when given."""
+        open_dashboard(self._db, self._config, app=self, tab=tab)
 
-    def _open_dashboard_logged(self) -> None:
+    def _open_dashboard_logged(self, tab: str = "") -> None:
         """`_open_dashboard` for a thread nobody waits for: a failure (the port is taken, no browser) is logged,
         not left on a future that is never read."""
         try:
-            self._open_dashboard()
+            self._open_dashboard(tab)
         except Exception:
-            logger.exception("The dashboard could not be opened for the first-run setup")
+            logger.exception("The dashboard could not be opened")
 
     def open_dashboard_from_second_start(self) -> None:
         """A second start of NexusVox rang the doorbell: show the dashboard of this instance."""
@@ -258,7 +259,8 @@ class NexusVoxApp(
                 llm_warm_up(model)
 
         # For in-process transcribers (Whisper on CPU), eagerly load the model
-        # so the first hotkey press doesn't pay the full load + download latency.
+        # so the first hotkey press doesn't pay the full load latency. A model that is not downloaded yet is
+        # skipped: it is downloaded only when the user starts that in the dashboard.
         # A custom server is remote and has nothing to preload.
         # Engine "auto" on a GPU machine warms up the Docker server (or the CPU model while it is down).
         if self._warms_up():

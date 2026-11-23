@@ -21,6 +21,7 @@ from ..dictation.overlay import CONFIRMED, ERROR, PROCESSING, RECORDING
 from ..dictation.pipeline import process_text
 from ..extensions import HOOK_TIMEOUT_S
 from ..system.logsetup import Text
+from ..transcription.model_download import ModelNotDownloaded
 from .common import QUICK_TAP_S, logger
 from .feedback import _play
 from .records import _Recording
@@ -179,6 +180,14 @@ class TranscriptionCycle:
             connected = True  # a failed connect is disconnected too
             try:
                 await transcriber.connect()
+            except ModelNotDownloaded:
+                if remote:
+                    raise
+                # Nothing is downloaded unasked: the press gets the error cue and the way to the Download button.
+                self._hint_model_download()
+                await hang_up()
+                await self._offline_stop(await self._drop_stale_stop(pressed_at))
+                return
             except Exception as exc:
                 if remote:
                     raise

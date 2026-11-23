@@ -813,8 +813,138 @@ llmModelSelect.addEventListener("change", async () => {
 llmPullSelected.addEventListener("click", () => startLlmPull(llmSavedModel, Number(llmPullSelected.dataset.sizeGb) || null));
 llmPullCancel.addEventListener("click", () => fetch("/api/settings/llm-pull", { method: "DELETE" }));
 
+// ── Speech model download ───────────────────────────────────────────
+// Nothing is downloaded until the user clicks Download. The first-run setup's model step and Settings > Models show
+// the same box (GET / POST /api/models/download): the hardware found, where the model runs, its size, and the
+// download's progress. A failed download offers Retry and says when the PC seems to be offline.
+const MODEL_DOWNLOAD_POLL_MS = 1000;
+const MODEL_DOWNLOAD_RETRY_MAX_MS = 10000; // a failed poll during a download is retried, slower each time up to this
+const MODEL_HARDWARE_NAMES = { gpu: "NVIDIA GPU", cpu: "CPU only (no NVIDIA GPU found)" };
+
+function describeModelRuntime(d) {
+  if (d.runs === "custom") return "Your own server recognises the speech, so there is nothing to download here.";
+  if (d.runs === "docker" && !d.backup) {
+    return `${d.name} runs in its Docker container on the GPU, which fetches the model itself. Nothing to download here.`;
+  }
+  if (d.backup) {
+    return `${d.name} runs in its Docker container on the GPU. While the container is not running, NexusVox ` +
+      `transcribes on the processor with a copy of the model on this PC: a one-time download of ${d.size} from Hugging Face.`;
+  }
+  return `${d.name} runs on this PC's processor. It needs a one-time download of ${d.size} from Hugging Face. ` +
+    "Nothing is downloaded until you click Download.";
+}
+
+function describeModelDownload(d) {
+  if (d.state === "missing") {
+    return { state: "warn", text: d.backup
+      ? "○ Not downloaded yet. Until it is, dictation needs the Docker container."
+      : "○ Not downloaded yet. Dictation works once it is downloaded." };
+  }
+  if (d.state === "downloading") {
+    const pct = d.progress === null || d.progress === undefined ? "" : ` ${d.progress}%`;
+    return { state: "", text: `Downloading ${d.name}...${pct}` };
+  }
+  if (d.state === "ready") return { state: "ok", text: `● ${d.name} is on this PC.` };
+  if (d.state === "error") return { state: "down", text: "✕ " + (d.error || "The download failed.") };
+  return null; // "none": nothing to download here
+}
+
+// Builds the box inside `host`; `onChange(d)` runs when the state changes (for example once the download is done).
+function mountModelDownload(host, onChange = () => {}) {
+  const add = (tag, className) => {
+    const el = document.createElement(tag);
+    el.className = className;
+    host.append(el);
+    return el;
+  };
+  const hardware = add("p", "settings-hint model-download-hardware");
+  const runtime = add("p", "settings-hint model-download-text");
+  const status = add("p", "status-line");
+  status.setAttribute("role", "status");
+  const bar = add("progress", "model-download-progress");
+  bar.max = 100;
+  bar.setAttribute("aria-label", "Download progress");
+  const button = add("button", "btn btn-primary btn-sm model-download-button");
+  button.type = "button";
+  host.hidden = true; // until the first answer
+  let timer = null;
+  let lastState = null;
+  let run = 0; // bumped by every refresh: only the newest one schedules the next poll, so no two chains run
+  let failures = 0; // polls in a row that could not reach the app
+
+  function render(d) {
+    host.hidden = false;
+    hardware.textContent = "Hardware found: " + (MODEL_HARDWARE_NAMES[d.hardware] || d.hardware);
+    runtime.textContent = describeModelRuntime(d);
+    const line = describeModelDownload(d);
+    status.hidden = !line;
+    if (line) setStatus(status, line.state, line.text);
+    bar.hidden = d.state !== "downloading";
+    if (d.progress === null || d.progress === undefined) bar.removeAttribute("value"); // an indeterminate bar
+    else bar.value = d.progress;
+    button.hidden = d.state !== "missing" && d.state !== "error";
+    button.disabled = false;
+    button.textContent = d.state === "error" ? "Retry" : `Download${d.size ? ` (${d.size})` : ""}`;
+  }
+
+  function showFailure(text) {
+    host.hidden = false;
+    status.hidden = false;
+    setStatus(status, "down", "✕ " + text);
+    button.disabled = false;
+  }
+
+  async function refresh() {
+    const mine = ++run;
+    clearTimeout(timer);
+    let d;
+    try {
+      d = await fetch("/api/models/download").then((r) => r.json());
+    } catch (err) {
+      if (mine !== run) return;
+      showFailure("The dashboard could not reach the app.");
+      // The download goes on in the app: keep asking, so the bar resumes and the box still turns ready.
+      if (lastState === "downloading") {
+        failures++;
+        timer = setTimeout(refresh, Math.min(MODEL_DOWNLOAD_POLL_MS * 2 ** failures, MODEL_DOWNLOAD_RETRY_MAX_MS));
+      }
+      return;
+    }
+    if (mine !== run) return; // a newer refresh started meanwhile and schedules the polls
+    failures = 0;
+    clearTimeout(timer);
+    render(d);
+    if (d.state === "downloading") timer = setTimeout(refresh, MODEL_DOWNLOAD_POLL_MS);
+    const changed = lastState !== null && lastState !== d.state;
+    lastState = d.state;
+    if (changed) onChange(d);
+  }
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const d = await postSetting("/api/models/download", {}).then((r) => r.json());
+      if (d.refused) {
+        render(d);
+        showFailure(d.refused);
+        return;
+      }
+    } catch (err) {
+      showFailure("The dashboard could not reach the app.");
+      return;
+    }
+    refresh();
+  });
+
+  return { refresh };
+}
+
 // ── Model Switcher ──────────────────────────────────────────────────
 const modelSelect = document.getElementById("model-select");
+// Settings > Models: a finished download redraws the list, so the model's "downloaded" mark follows.
+const settingsModelDownload = mountModelDownload(document.getElementById("model-download"), (d) => {
+  if (d.state === "ready") loadModelSwitcher();
+});
 
 // " ✓ downloaded" or " · not downloaded (~670 MB)" for a model with a copy on this PC; nothing for the
 // custom server, or when the cache could not be read.
@@ -835,6 +965,7 @@ async function loadModelSwitcher() {
   ).join("");
   modelSelect.dataset.prev = current.model; // what a refused or failed switch goes back to
   renderModelOverview(current.model);
+  settingsModelDownload.refresh();
   // An in-process model (Parakeet on CPU) may still be downloading or loading from the start.
   const status = await fetch("/api/models/status").then((r) => r.json()).catch(() => null);
   if (status && (status.status === "downloading" || status.status === "loading")) {
@@ -925,7 +1056,7 @@ const STATUS_MESSAGES = {
   stopping: "Disconnecting current model...",
   starting: "Starting new container...",
   waiting: "Waiting for model to load...",
-  downloading: "Downloading the model, first use only (about 670 MB)...",
+  downloading: "Downloading the model...",
   loading: "Loading the model...",
   ready: "Model ready!",
   error: "Switch failed.",
@@ -953,12 +1084,13 @@ function pollModelStatus(prevModel) {
         modelSelect.disabled = false;
         showModelStatus("Error: " + (data.error || "Unknown"));
         hideModelStatusLater(5000);
-      } else if (data.status === "idle") {
-        // Switch already completed or was no-op
+      } else if (data.status === "idle" || data.status === "missing") {
+        // Switch already completed or was no-op; "missing": the new model waits for its Download button
         clearInterval(interval);
         modelSelect.dataset.prev = modelSelect.value;
         modelSelect.disabled = false;
         hideModelStatus();
+        settingsModelDownload.refresh();
       }
     } catch {
       // Network error during poll, keep trying

@@ -534,10 +534,13 @@
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
             <h3>Log File</h3>
-            <p>NexusVox also writes its log to <code id="log-dir">%LOCALAPPDATA%\NexusVox\logs</code> (one file per day, the last 7 days are kept). Send the file when you report a problem. Dictated text is shortened there to its first 20 characters and its length.</p>
+            <p>NexusVox also writes its log to <code id="log-dir">%LOCALAPPDATA%\NexusVox\logs</code> (one file per day, the last 7 days are kept). Send the file when you report a problem, or use Copy diagnostics: it copies app and PC facts, the settings without secrets and the last 200 log lines to the clipboard, and sends nothing. Dictated text is shortened there to its first 20 characters and its length.</p>
             <p id="log-open-error" class="settings-hint" hidden></p>
           </div>
-          <button type="button" class="btn btn-ghost" id="open-log-folder">Open log folder</button>
+          <div class="log-actions">
+            <button type="button" class="btn btn-ghost" id="open-log-folder">Open log folder</button>
+            <button type="button" class="btn btn-ghost" id="copy-diagnostics">Copy diagnostics</button>
+          </div>
         </div>
 
         <div class="setting-row" style="margin-top: 16px;">

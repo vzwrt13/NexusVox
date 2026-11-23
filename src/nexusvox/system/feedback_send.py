@@ -110,8 +110,8 @@ def _drop_cut_fence(text: str) -> str:
 _cache: tuple[tuple, str] | None = None
 
 
-def report_log(directory: Path | None = None) -> str:
-    """The last `LOG_LINES` lines (at most `LOG_MAX_CHARS` characters) of today's log, dictated text removed.
+def report_log(directory: Path | None = None, lines: int = LOG_LINES) -> str:
+    """The last `lines` (default `LOG_LINES`) lines, at most `LOG_MAX_CHARS` characters, of today's log, text removed.
 
     Everything from the file's first start mark on was written by a version that fences dictated text, restarts
     included, so a report after a restart still holds the session that went wrong. Lines before that mark may
@@ -121,7 +121,7 @@ def report_log(directory: Path | None = None) -> str:
     path = (directory or log_dir()) / LOG_FILE_NAME
     try:
         info = path.stat()
-        key = (str(path), info.st_size, info.st_mtime_ns)
+        key = (str(path), info.st_size, info.st_mtime_ns, lines)
         if _cache and _cache[0] == key:
             return _cache[1]
         with path.open("rb") as handle:
@@ -136,10 +136,10 @@ def report_log(directory: Path | None = None) -> str:
         return ""
     if offset:
         text = _drop_cut_fence(text)
-    lines = strip_dictated_text(text).splitlines()[-LOG_LINES:]
-    while len(lines) > 1 and sum(len(line) + 1 for line in lines) > LOG_MAX_CHARS:
-        lines.pop(0)
-    log = "\n".join(lines)[-LOG_MAX_CHARS:]
+    kept = strip_dictated_text(text).splitlines()[-lines:]
+    while len(kept) > 1 and sum(len(line) + 1 for line in kept) > LOG_MAX_CHARS:
+        kept.pop(0)
+    log = "\n".join(kept)[-LOG_MAX_CHARS:]
     _cache = (key, log)
     return log
 

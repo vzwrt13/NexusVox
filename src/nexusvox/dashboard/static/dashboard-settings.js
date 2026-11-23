@@ -250,6 +250,25 @@ async function openLogFolder(errorLine) {
 }
 openLogFolderButton.addEventListener("click", () => openLogFolder(logOpenError));
 
+// Copy diagnostics: the server builds the text (secrets and dictated text removed); it only goes to the clipboard.
+const copyDiagnosticsButton = document.getElementById("copy-diagnostics");
+async function copyDiagnostics(errorLine) {
+  errorLine.hidden = true;
+  const label = copyDiagnosticsButton.textContent;
+  try {
+    const r = await fetch("/api/diagnostics");
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error || "The diagnostics could not be collected.");
+    await navigator.clipboard.writeText(body.text);
+    copyDiagnosticsButton.textContent = "Copied";
+    setTimeout(() => { copyDiagnosticsButton.textContent = label; }, 2000);
+  } catch (e) {
+    errorLine.textContent = e.message || "The diagnostics could not be copied.";
+    errorLine.hidden = false;
+  }
+}
+copyDiagnosticsButton.addEventListener("click", () => copyDiagnostics(logOpenError));
+
 // ── Version check ───────────────────────────────────────────────────
 // Asks GitHub only when the button is pressed; the server does the request.
 const checkUpdateButton = document.getElementById("check-update");

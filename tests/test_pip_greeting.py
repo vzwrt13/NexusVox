@@ -472,8 +472,8 @@ def test_home_has_a_pip_host_that_starts_hidden_and_the_scripts_load_before_home
     )
     assert order.index("dashboard-pip-greeting.js") < order.index("dashboard-home.js")
     home = (STATIC / "dashboard-home.js").read_text(encoding="utf-8")
-    assert '"/api/pip/facts"' in home and "showPipGreeting(host, facts)" in home
-    assert re.search(r"function openHomeTab\(\) \{.*loadHomePip\(\);", home, re.S)
+    assert '"/api/pip/facts"' in home and "showPipHome(host, facts," in home
+    assert re.search(r"function openHomeTab\(\) \{.*loadHomePip\(known\);", home, re.S)
 
 
 def test_the_greeting_never_asks_for_texts_and_inserts_text_as_text():

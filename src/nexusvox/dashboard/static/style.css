@@ -1620,6 +1620,23 @@ canvas { width: 100% !important; max-height: 260px; }
 .pip-bubble-close:hover, .pip-bubble-close:focus-visible { color: var(--text); background: var(--surface2); }
 @keyframes pip-bubble-in { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: scale(1); } }
 
+/* The what's-new popup (dashboard-pip-tour.js): the same card with a title, the text and a row of actions. */
+.pip-tour-title { display: block; margin-bottom: 2px; font-size: 14px; font-weight: 600; color: var(--text); }
+.pip-tour-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; margin-top: 10px; }
+.pip-tour-show { margin-right: auto; }
+.pip-tour-next {
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.pip-tour-next:hover { background: var(--accent-light); border-color: var(--accent-light); color: var(--bg); }
+.pip-tour-next:focus-visible, .pip-tour-show:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+
 /* Pip on Home (dashboard-pip-greeting.js): the bottom-right corner of the content, in the flow under the last row, so
    he never covers a card or a button. Home is a column at least as tall as the window, and the host's auto top margin
    pushes it to the bottom; on a taller page it just follows the content. Narrow windows stack the bubble above him. */

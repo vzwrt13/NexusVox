@@ -159,5 +159,4 @@ def build_diagnostics(config: Config, *, model_status: dict | None = None, devic
         f"Log (last {DIAGNOSTICS_LOG_LINES} lines, dictated text removed):",
         report_log(lines=DIAGNOSTICS_LOG_LINES) or "(no log)",
     ]
-    return redact_text(strip_dictated_text("
-".join(lines)))
+    return redact_text(strip_dictated_text("\n".join(lines)))

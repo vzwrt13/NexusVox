@@ -29,10 +29,20 @@ function mountPip(host, options) {
 }
 function localIsoDate() { return "2026-11-02"; }
 const hiddenTabs = new Set();
+const elements = {};
+const visited = [];
+function goToTab(t) { visited.push(t); return true; }
 const document = { querySelector: (sel) => ({ hidden: hiddenTabs.has(sel.match(/data-tab="([^"]+)"/)[1]) }),
-  createElement: (tag) => ({ tag, children: [], className: "", textContent: "", listeners: {},
-  attrs: {}, setAttribute(k, v) { this.attrs[k] = v; },
-  append(...k) { this.children.push(...k); }, addEventListener(t, f) { this.listeners[t] = f; } }) };
+  activeElement: null, focused: [],
+  getElementById: (id) => elements[id] || null,
+  body: { children: [], append(...k) { this.children.push(...k); } },
+  createElement: (tag) => ({ tag, children: [], className: "", textContent: "", listeners: {}, dataset: {},
+  attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, isConnected: true,
+  focus() { document.focused.push(this); }, click() { this.listeners.click(); },
+  querySelector(sel) { return find(this, sel.slice(1)); },
+  append(...k) { this.children.push(...k); }, replaceChildren(...k) { this.children = k; },
+  remove() { document.body.children = document.body.children.filter((c) => c !== this); },
+  addEventListener(t, f) { this.listeners[t] = f; } }) };
 const SAMPLE = {
   "1.1.0": [
     { title: "Spoken formatting", text: "Say \"new paragraph\" while you dictate.", target: "settings" },
@@ -52,7 +62,7 @@ const read = (k) => JSON.parse(store[k]);
 
 def _js(body: str):
     program = f"{TEXTS}\n{GREETING}\n{PAGE}\n{DATA}\n{TOUR}\n{body}"
-    out = subprocess.run(["node", "-e", program], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    out = subprocess.run(["node", "-"], input=program, capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
 
@@ -103,12 +113,14 @@ def test_the_data_and_the_logic_need_no_network():
 def test_the_popup_shows_once_per_version_and_never_again_for_it():
     got = _js(
         "const a = pickPipTour('1.1.0', USED, emptyPipTourState(), '2026-11-02', SAMPLE);"
-        "const b = pickPipTour('1.1.0', USED, a.state, '2026-11-03', SAMPLE);"
-        "const c = pickPipTour('v1.1.0', USED, a.state, '2026-11-03', SAMPLE);"
+        "const closed = pipTourSeen(a.state, '1.1.0');"
+        "const b = pickPipTour('1.1.0', USED, closed, '2026-11-03', SAMPLE);"
+        "const c = pickPipTour('v1.1.0', USED, closed, '2026-11-03', SAMPLE);"
         "console.log(JSON.stringify({ a: a.steps.map((s) => s.title), state: a.state, b: b.steps, c: c.steps }))"
     )
     assert got["a"] == ["Spoken formatting", "Own words", "Meetings"]
-    assert got["state"] == {"version": "1.1.0", "day": "2026-11-02"}
+    # shown, not yet seen: the version counts as seen only when the popup is closed
+    assert got["state"] == {"version": "", "day": "2026-11-02", "pending": "1.1.0", "step": 0}
     assert got["b"] == [] and got["c"] == []
 
 
@@ -117,10 +129,10 @@ def test_a_later_version_with_entries_shows_again():
     got = _js(
         "const data = { ...SAMPLE, '1.3.0': [{ title: 'New', text: 'Something new.' }] };"
         "const a = pickPipTour('1.1.0', USED, emptyPipTourState(), '2026-11-02', data);"
-        "const b = pickPipTour('1.3.0', USED, a.state, '2026-12-01', data);"
+        "const b = pickPipTour('1.3.0', USED, pipTourSeen(a.state, '1.1.0'), '2026-12-01', data);"
         "console.log(JSON.stringify([b.steps.map((s) => s.title), b.state]))"
     )
-    assert got == [["New"], {"version": "1.3.0", "day": "2026-12-01"}]
+    assert got == [["New"], {"version": "1.1.0", "day": "2026-12-01", "pending": "1.3.0", "step": 0}]
 
 
 @needs_node
@@ -133,7 +145,7 @@ def test_a_version_without_entries_shows_nothing_and_is_remembered_quietly():
         "const shipped = pickPipTour('1.0.0', USED, emptyPipTourState(), '2026-11-02');"
         "console.log(JSON.stringify([none.steps, none.state, empty.steps, bad.steps, shipped.steps]))"
     )
-    assert got == [[], {"version": "1.0.0", "day": ""}, [], [], []]
+    assert got == [[], {"version": "1.0.0", "day": "", "pending": "", "step": 0}, [], [], []]
 
 
 @needs_node
@@ -141,15 +153,16 @@ def test_going_back_to_an_older_version_shows_nothing_and_keeps_the_newest_saved
     got = _js(
         "const entry = [{ title: 'Two', text: 'Second.' }];"
         "const data = { ...SAMPLE, '1.2.0': entry, '1.10.0': entry };"
-        "const a = pickPipTour('1.2.0', USED, { version: '1.2.0', day: '2026-11-02' }, '2026-11-09', data);"
+        "const seen = { version: '1.2.0', day: '2026-11-02', pending: '', step: 0 };"
+        "const a = pickPipTour('1.2.0', USED, seen, '2026-11-09', data);"
         "const back = pickPipTour('1.1.0', USED, a.state, '2026-11-09', data);"
         "const again = pickPipTour('1.2.0', USED, back.state, '2026-11-10', data);"
         "const tenth = pickPipTour('1.10.0', USED, { version: '1.9.0', day: '' }, '2026-11-10', data);"
-        "const old = { version: '1.2.0', day: '' };"
+        "const old = { version: '1.2.0', day: '', pending: '', step: 0 };"
         "const odd = pickPipTour('nightly', USED, old, '2026-11-10', { nightly: entry });"
         "console.log(JSON.stringify([back.steps, back.state, again.steps, tenth.steps.length, odd.steps.length]))"
     )
-    assert got == [[], {"version": "1.2.0", "day": "2026-11-02"}, [], 1, 1]
+    assert got == [[], {"version": "1.2.0", "day": "2026-11-02", "pending": "", "step": 0}, [], 1, 1]
 
 
 @needs_node
@@ -161,7 +174,7 @@ def test_a_version_without_entries_does_not_hide_the_bubble_a_popup_replaced_ear
         "const hotfix = showPipHome(host, USED, '1.1.1', '2026-11-02', SAMPLE);"
         "console.log(JSON.stringify([hotfix, read('nexusvox-pip-whats-new')]))"
     )
-    assert got == ["greeting", {"version": "1.1.1", "day": ""}]
+    assert got == ["greeting", {"version": "1.1.1", "day": "", "pending": "", "step": 0}]
 
 
 @needs_node
@@ -172,7 +185,7 @@ def test_a_first_installation_is_not_an_update_but_an_existing_history_is():
         "const updated = pickPipTour('1.1.0', { ...NEW_USER, uploads: 1 }, emptyPipTourState(), '2026-11-02', SAMPLE);"
         "console.log(JSON.stringify([fresh.steps, fresh.state, freshLater.steps, updated.steps.length]))"
     )
-    assert got == [[], {"version": "1.1.0", "day": ""}, [], 3]
+    assert got == [[], {"version": "1.1.0", "day": "", "pending": "", "step": 0}, [], 3]
 
 
 @needs_node
@@ -217,7 +230,7 @@ def test_the_steps_walk_with_next_and_done_and_closing_ends_the_popup_for_good()
     assert got["labelLast"] == "Done"
     assert got["afterDone"] == ["idle", None]
     assert got["again"] == "quiet"  # the same day, Home opened again: no popup and no bubble
-    assert got["saved"] == {"version": "1.1.0", "day": "2026-11-02"}
+    assert got["saved"] == {"version": "1.1.0", "day": "2026-11-02", "pending": "", "step": 0}
 
 
 @needs_node
@@ -235,14 +248,66 @@ def test_the_x_closes_at_any_time_and_has_an_accessible_name():
 
 
 @needs_node
-def test_show_me_opens_the_target_and_ends_the_popup():
+def test_show_me_opens_the_target_and_puts_the_popup_away_without_using_it_up():
     got = _js(
         "const opened = []; const host = {};"
         "showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE, (t) => opened.push(t));"
         "find(last().bubble, 'pip-tour-show').listeners.click();"
-        "console.log(JSON.stringify([opened, last().bubble]))"
+        "console.log(JSON.stringify([opened, last().bubble, read('nexusvox-pip-whats-new')]))"
     )
-    assert got == [["settings"], None]
+    # the popup is gone, the version is not seen yet and the tour continues with the second entry
+    assert got == [["settings"], None, {"version": "", "day": "2026-11-02", "pending": "1.1.0", "step": 1}]
+
+
+@needs_node
+def test_after_show_me_the_next_home_visit_continues_with_the_next_entry_until_done():
+    got = _js(
+        "const host = {}; const titles = []; const open = () => true;"
+        "const title = () => find(last().bubble, 'pip-tour-title').textContent;"
+        "showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE, open);"
+        "find(last().bubble, 'pip-tour-show').listeners.click();"  # Show me on entry 1
+        "const quiet = last().bubble;"
+        "const again = showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE, open);"  # back on Home, same day
+        "titles.push(title(), find(last().bubble, 'pip-bubble-eyebrow').textContent);"
+        "find(last().bubble, 'pip-tour-next').listeners.click();"  # entry 2 has no target: Next
+        "titles.push(title());"
+        "find(last().bubble, 'pip-tour-show').listeners.click();"  # Show me on the last entry
+        "const lastSaved = read('nexusvox-pip-whats-new');"
+        "const after = showPipHome(host, USED, '1.1.0', '2026-11-03', SAMPLE, open);"
+        "console.log(JSON.stringify({ quiet, again, titles, lastSaved, after }))"
+    )
+    assert got["quiet"] is None and got["again"] == "tour"
+    assert got["titles"] == ["Own words", "What's new · 2 of 3", "Meetings"]
+    # Show me on the last entry ends the tour: the version is seen and nothing comes back
+    assert got["lastSaved"] == {"version": "1.1.0", "day": "2026-11-02", "pending": "", "step": 0}
+    assert got["after"] != "tour"
+
+
+@needs_node
+def test_a_reload_in_the_middle_of_the_tour_continues_where_it_stopped():
+    got = _js(
+        "const host = {};"
+        "showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "find(last().bubble, 'pip-tour-next').listeners.click();"
+        "const mid = read('nexusvox-pip-whats-new');"
+        "pipTourHost = null;"  # a reload: the page starts afresh, the saved state stays
+        "showPipHome(host, USED, '1.1.0', '2026-11-03', SAMPLE);"
+        "console.log(JSON.stringify([mid, find(last().bubble, 'pip-tour-title').textContent]))"
+    )
+    assert got == [{"version": "", "day": "2026-11-02", "pending": "1.1.0", "step": 1}, "Own words"]
+
+
+@needs_node
+def test_a_tour_left_in_the_middle_starts_afresh_for_a_newer_version_and_clamps_a_stale_step():
+    got = _js(
+        "const data = { ...SAMPLE, '1.3.0': [{ title: 'New', text: 'Something new.' }] };"
+        "const stale = { version: '', day: '', pending: '1.1.0', step: 7 };"
+        "const a = pickPipTour('1.1.0', USED, stale, '2026-11-02', data);"
+        "const other = { version: '', day: '', pending: '1.1.0', step: 2 };"
+        "const b = pickPipTour('1.3.0', USED, other, '2026-11-02', data);"
+        "console.log(JSON.stringify([a.start, b.start, b.state.pending]))"
+    )
+    assert got == [0, 0, "1.3.0"]
 
 
 @needs_node
@@ -304,7 +369,7 @@ def test_an_unreadable_saved_state_is_treated_as_empty():
         "store['nexusvox-pip-whats-new'] = JSON.stringify({ version: 5, day: null });"
         "console.log(JSON.stringify([a, readPipTourState()]))"
     )
-    assert got == [{"version": "", "day": ""}] * 2
+    assert got == [{"version": "", "day": "", "pending": "", "step": 0}] * 2
 
 
 @needs_node
@@ -383,8 +448,191 @@ def test_show_me_on_a_settings_page_shows_that_page_and_a_closed_tab_changes_not
 @needs_node
 def test_the_shipped_entries_show_for_1_0_1_after_an_update_from_1_0_0():
     got = _js(
-        "const a = pickPipTour('1.0.1', USED, { version: '1.0.0', day: '' }, '2026-11-24');"
-        "const b = pickPipTour('1.0.1', USED, a.state, '2026-11-25');"
+        "const a = pickPipTour('1.0.1', USED, { version: '1.0.0', day: '', pending: '', step: 0 }, '2026-11-24');"
+        "const b = pickPipTour('1.0.1', USED, pipTourSeen(a.state, '1.0.1'), '2026-11-25');"
         "console.log(JSON.stringify([a.steps.length > 0, a.state, b.steps]))"
     )
-    assert got == [True, {"version": "1.0.1", "day": "2026-11-24"}, []]
+    assert got == [True, {"version": "1.0.0", "day": "2026-11-24", "pending": "1.0.1", "step": 0}, []]
+
+
+# ── The "What's new" link ────────────────────────────────────────────
+
+
+def test_the_sidebar_has_a_hidden_whats_new_button_next_to_the_version_line():
+    nav = re.search(r'<nav class="tabs tabs-footer">(.*?)</nav>', HTML, re.S).group(1)
+    link = re.search(r'<[^>]*id="whats-new-link"[^>]*>', nav).group(0)
+    assert link.startswith("<button") and " hidden" in link and "href" not in link
+    assert nav.index('id="app-version"') < nav.index('id="whats-new-link"')
+
+
+@needs_node
+def test_the_link_is_shown_only_for_a_version_with_entries():
+    got = _js(
+        "const link = document.createElement('button'); link.hidden = true; elements['whats-new-link'] = link;"
+        "updatePipWhatsNewLink('1.1.0', SAMPLE); const withEntries = link.hidden;"
+        "updatePipWhatsNewLink('v1.2.0', SAMPLE); const empty = link.hidden;"
+        "updatePipWhatsNewLink('9.9.9', SAMPLE); const unknown = link.hidden;"
+        "updatePipWhatsNewLink('v1.1.0', SAMPLE);"
+        "console.log(JSON.stringify([withEntries, empty, unknown, link.dataset.version]))"
+    )
+    assert got == [False, True, True, "1.1.0"]
+
+
+@needs_node
+def test_the_link_reopens_the_entries_on_home_even_after_the_version_is_seen():
+    got = _js(
+        "const host = {}; elements['home-pip'] = host;"
+        "showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "find(last().bubble, 'pip-bubble-close').listeners.click();"  # seen
+        "const seen = read('nexusvox-pip-whats-new').version;"
+        "const none = showPipHome(host, USED, '1.1.0', '2026-11-03', SAMPLE);"
+        "const opened = openPipWhatsNew('1.1.0', SAMPLE);"
+        "const eyebrow = find(last().bubble, 'pip-bubble-eyebrow').textContent;"
+        "const title = find(last().bubble, 'pip-tour-title').textContent;"
+        "const leftAlone = showPipHome(host, USED, '1.1.0', '2026-11-03', SAMPLE);"  # the Home visit the link starts
+        "find(last().bubble, 'pip-tour-next').listeners.click();"
+        "find(last().bubble, 'pip-tour-next').listeners.click();"
+        "find(last().bubble, 'pip-tour-next').listeners.click();"  # Done
+        "console.log(JSON.stringify({ seen, none, opened, eyebrow, title, leftAlone, visited, end: last().bubble,"
+        " saved: read('nexusvox-pip-whats-new'), unknown: openPipWhatsNew('9.9.9', SAMPLE) }))"
+    )
+    assert got["seen"] == "1.1.0" and got["none"] != "tour"
+    assert got["opened"] is True and got["visited"] == ["home"]
+    assert got["eyebrow"] == "What's new · 1 of 3" and got["title"] == "Spoken formatting"
+    assert got["leftAlone"] == "tour"
+    assert got["end"] is None
+    assert got["saved"] == {"version": "1.1.0", "day": "2026-11-02", "pending": "", "step": 0}
+    assert got["unknown"] is False
+
+
+@needs_node
+def test_the_link_after_show_me_continues_with_the_next_entry():
+    got = _js(
+        "const host = {}; elements['home-pip'] = host; const open = () => true;"
+        "openPipWhatsNew('1.1.0', SAMPLE, open);"
+        "find(last().bubble, 'pip-tour-show').listeners.click();"  # Show me on entry 1
+        "openPipWhatsNew('1.1.0', SAMPLE, open);"
+        "console.log(JSON.stringify(find(last().bubble, 'pip-tour-title').textContent))"
+    )
+    assert got == "Own words"
+
+
+@needs_node
+def test_the_link_with_pip_off_opens_a_plain_popup_without_the_budgie():
+    got = _js(
+        "pipEnabled = false; const open = () => true;"
+        "const before = mounts.length;"
+        "const opened = openPipWhatsNew('1.1.0', SAMPLE, open);"
+        "const box = document.body.children[0];"
+        "const title = () => find(box.children[0], 'pip-tour-title').textContent;"
+        "const first = title(); const dialog = box.attrs.role;"
+        "find(box.children[0], 'pip-tour-next').listeners.click();"
+        "const second = title();"
+        "openPipWhatsNew('1.1.0', SAMPLE, open);"  # asking again swaps the card, never stacks a second one
+        "const stacked = document.body.children.length;"
+        "const x = find(document.body.children[0].children[0], 'pip-bubble-close');"
+        "x.listeners.click();"
+        "console.log(JSON.stringify({ opened, first, second, dialog, stacked, left: document.body.children.length,"
+        " mounted: mounts.length - before, visited, saved: read('nexusvox-pip-whats-new') }))"
+    )
+    assert got["opened"] is True and got["first"] == "Spoken formatting" and got["second"] == "Own words"
+    assert got["dialog"] == "dialog" and got["stacked"] == 1 and got["left"] == 0
+    assert got["mounted"] == 0 and got["visited"] == []  # no Pip, and the page does not change
+    assert got["saved"]["version"] == "1.1.0" and got["saved"]["pending"] == ""
+
+
+# ── Reopening never brings the automatic popup back, never doubles up, keeps focus and the bubble ───
+
+
+@needs_node
+def test_the_link_on_a_version_already_seen_saves_nothing_so_leaving_a_card_open_changes_no_later_visit():
+    got = _js(
+        "const host = {}; elements['home-pip'] = host;"
+        "showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "find(last().bubble, 'pip-bubble-close').listeners.click();"  # seen
+        "const before = store['nexusvox-pip-whats-new'];"
+        "openPipWhatsNew('1.1.0', SAMPLE);"
+        "find(last().bubble, 'pip-tour-next').listeners.click();"
+        "const during = store['nexusvox-pip-whats-new'];"
+        "pipTourHost = null;"  # the window is closed without the x: the page starts afresh
+        "const next = showPipHome(host, USED, '1.1.0', '2026-11-03', SAMPLE);"
+        "console.log(JSON.stringify([before === during, next, last().bubble !== null]))"
+    )
+    assert got[0] is True  # the saved state did not move
+    assert got[1] == "greeting"  # the day's bubble comes as usual, not the tour
+
+
+@needs_node
+def test_the_link_on_a_seen_version_continues_after_show_me_in_this_page_load_without_saving():
+    got = _js(
+        "const host = {}; elements['home-pip'] = host; const open = () => true;"
+        "showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "find(last().bubble, 'pip-bubble-close').listeners.click();"
+        "const before = store['nexusvox-pip-whats-new'];"
+        "openPipWhatsNew('1.1.0', SAMPLE, open);"
+        "find(last().bubble, 'pip-tour-show').listeners.click();"  # Show me on entry 1
+        "openPipWhatsNew('1.1.0', SAMPLE, open);"
+        "const title = find(last().bubble, 'pip-tour-title').textContent;"
+        "console.log(JSON.stringify([title, store['nexusvox-pip-whats-new'] === before]))"
+    )
+    assert got == ["Own words", True]
+
+
+@needs_node
+def test_only_one_tour_is_on_screen_at_a_time():
+    got = _js(
+        "const host = {}; elements['home-pip'] = host; pipEnabled = false;"
+        "openPipWhatsNew('1.1.0', SAMPLE);"  # the plain card, Show Pip off
+        "const plain = document.body.children.length;"
+        "pipEnabled = true;"
+        "openPipWhatsNew('1.1.0', SAMPLE);"  # Pip on: his popup replaces the card
+        "const afterPip = document.body.children.length;"
+        "pipEnabled = false;"
+        "openPipWhatsNew('1.1.0', SAMPLE);"  # off again: the card, and Pip's popup is no longer 'on screen'
+        "const hostFree = pipTourHost === null;"
+        "pipEnabled = true;"
+        "const home = showPipHome(host, USED, '1.1.0', '2026-11-02', SAMPLE);"
+        "console.log(JSON.stringify([plain, afterPip, hostFree, home, document.body.children.length]))"
+    )
+    assert got == [1, 0, True, "tour", 0]
+
+
+@needs_node
+def test_the_plain_card_takes_focus_closes_on_escape_and_gives_focus_back():
+    got = _js(
+        "pipEnabled = false; const link = document.createElement('button'); document.activeElement = link;"
+        "openPipWhatsNew('1.1.0', SAMPLE);"
+        "const box = document.body.children[0];"
+        "const nextButton = find(box.children[0], 'pip-tour-next');"
+        "const focusedFirst = document.focused[document.focused.length - 1] === nextButton;"
+        "nextButton.listeners.click();"  # a new card replaces the focused button: focus follows
+        "const lastFocus = () => document.focused[document.focused.length - 1];"
+        "const focusedSecond = lastFocus() === find(box.children[0], 'pip-tour-next');"
+        "box.listeners.keydown({ key: 'Enter' }); const stillOpen = document.body.children.length;"
+        "box.listeners.keydown({ key: 'Escape' });"
+        "console.log(JSON.stringify({ focusedFirst, focusedSecond, stillOpen, left: document.body.children.length,"
+        " back: lastFocus() === link, saved: read('nexusvox-pip-whats-new').version }))"
+    )
+    assert got == {
+        "focusedFirst": True,
+        "focusedSecond": True,
+        "stillOpen": 1,
+        "left": 0,
+        "back": True,
+        "saved": "1.1.0",
+    }
+
+
+@needs_node
+def test_a_tour_opened_from_the_link_gives_pip_his_bubble_back_when_it_ends():
+    got = _js(
+        "const host = {}; elements['home-pip'] = host;"
+        "showPipHome(host, USED, '1.0.0', '2026-11-02', SAMPLE);"  # no popup due: the day's bubble
+        "const bubble = last().bubble;"
+        "openPipWhatsNew('1.1.0', SAMPLE);"
+        "const tour = last().bubble !== bubble;"
+        "find(last().bubble, 'pip-bubble-close').listeners.click();"
+        "console.log(JSON.stringify([!!bubble, tour, find(last().bubble || { children: [], className: '' }, 'pip-tour')"
+        " === null, !!last().bubble]))"
+    )
+    assert got == [True, True, True, True]  # a bubble again, and not the tour's card

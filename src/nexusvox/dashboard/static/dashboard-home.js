@@ -172,9 +172,11 @@ async function loadHomeWeek() {
 }
 
 // ── Pip ──────────────────────────────────────────────────────────────
-// Pip greets with at most one speech bubble a day: dashboard-pip-greeting.js chooses it from counts. Without the
-// counts he sits quietly.
-async function loadHomePip() {
+// Pip has one thing to say per visit: the what's-new popup on the first visit after an update to a version with
+// entries (dashboard-pip-tour.js), else the daily bubble (dashboard-pip-greeting.js). Both come from counts and the
+// app version. Without the counts he sits quietly. `settingsKnown` resolves when the page start's settings (and so the
+// Show Pip setting and the app version) are loaded.
+async function loadHomePip(settingsKnown = Promise.resolve()) {
   const host = document.getElementById("home-pip");
   let facts = null;
   try {
@@ -182,7 +184,8 @@ async function loadHomePip() {
   } catch (err) {
     console.error("Could not load Pip's numbers:", err);
   }
-  showPipGreeting(host, facts);
+  await settingsKnown;
+  showPipHome(host, facts, lastSettings ? String(lastSettings.app_version || "") : "");
 }
 
 // ── Opening Home ─────────────────────────────────────────────────────
@@ -196,7 +199,7 @@ function openHomeTab() {
   loadHomeHotkey(known, atPageStart);
   loadHomeRecent();
   loadHomeWeek();
-  loadHomePip();
+  loadHomePip(known);
 }
 
 // ── Actions ──────────────────────────────────────────────────────────

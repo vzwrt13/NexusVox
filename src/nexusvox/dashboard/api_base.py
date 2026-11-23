@@ -54,6 +54,10 @@ class DashboardState:
     # The report the Feedback tab last previewed: (token, (kind, message, include_log), url, report).
     _feedback_preview: tuple[str, tuple, str, dict[str, str]] | None = None
 
+    # Defined by `ModelsMixin`.
+    get_model_status: Callable[[], dict]
+    get_device: Callable[[], dict]
+
     # Defined by `FilesMixin`.
     _store_file_transcription: Callable[..., dict]
     _transcribe_wav_chunks: Callable[..., Any]

@@ -38,6 +38,8 @@ replaces the microphone list and level with demo values (the real audio devices 
 
 `scripts/pip_greetings.py` does the same for Pip's daily speech bubble on Home: `python scripts/pip_greetings.py` writes two images: `docs/images/pip-greetings.png`, one headless photograph of the three kinds of bubble (a milestone, a tip about a feature never used, a usage statistic), each chosen by the real `pickPipGreeting` from invented counts, and `docs/images/pip-bubble-variants.png`, three looks of the bubble side by side (A and C ship, B is an alternative drawn only in the throwaway page). It opens no window and reads no config, database or saved browser state.
 
+`scripts/pip_whats_new.py` does the same for Pip's what's-new popup: `python scripts/pip_whats_new.py` writes `docs/images/pip-whats-new.png`, one headless photograph of the first and the last step, built by the real `buildPipTourStep` from invented sample entries (the shipped data file has none until a release lists some). It opens no window and reads no config, database or saved browser state.
+
 The Recordings tab fills one window with its two panes and is photographed at a window's height. The
 script serves its own copy of the page with the elements after the last card to show hidden when a tab
 runs on for a long way (the selectors are in `SHOTS` and `GUIDE_SHOTS`; Analytics needs none now), photographs it in a tall

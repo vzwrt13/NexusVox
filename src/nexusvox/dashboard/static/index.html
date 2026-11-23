@@ -91,7 +91,7 @@
       <p class="home-tip"><span class="home-tip-label">Tip</span> <span id="home-tip-text"></span>
         <button type="button" class="link-btn" id="home-tip-next">Next tip</button></p>
 
-      <!-- Pip, bottom right of Home; his daily bubble comes from dashboard-pip-greeting.js -->
+      <!-- Pip, bottom right of Home; his daily bubble comes from dashboard-pip-greeting.js, the what's-new popup after an update from dashboard-pip-tour.js -->
       <div class="home-pip" id="home-pip" hidden></div>
     </section>
 
@@ -535,10 +535,13 @@
         <div class="setting-row" style="margin-top: 16px;">
           <div class="setting-info">
             <h3>Log File</h3>
-            <p>NexusVox also writes its log to <code id="log-dir">%LOCALAPPDATA%\NexusVox\logs</code> (one file per day, the last 7 days are kept). Send the file when you report a problem. Dictated text is shortened there to its first 20 characters and its length.</p>
+            <p>NexusVox also writes its log to <code id="log-dir">%LOCALAPPDATA%\NexusVox\logs</code> (one file per day, the last 7 days are kept). Dictated text is shortened there to its first 20 characters and its length. Send the file when you report a problem, or use Copy diagnostics: it copies app and PC facts, the settings without secrets and the last 200 log lines to the clipboard, and sends nothing.</p>
             <p id="log-open-error" class="settings-hint" hidden></p>
           </div>
-          <button type="button" class="btn btn-ghost" id="open-log-folder">Open log folder</button>
+          <div class="log-actions">
+            <button type="button" class="btn btn-ghost" id="open-log-folder">Open log folder</button>
+            <button type="button" class="btn btn-ghost" id="copy-diagnostics">Copy diagnostics</button>
+          </div>
         </div>
 
         <div class="setting-row" style="margin-top: 16px;">
@@ -1350,6 +1353,8 @@
   <script src="dashboard-pip.js"></script>
   <script src="dashboard-pip-texts.js"></script>
   <script src="dashboard-pip-greeting.js"></script>
+  <script src="dashboard-pip-whats-new.js"></script>
+  <script src="dashboard-pip-tour.js"></script>
   <script src="dashboard-settings.js"></script>
   <script src="dashboard-feedback.js"></script>
   <script src="dashboard-settings-models.js"></script>

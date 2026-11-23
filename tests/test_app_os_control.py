@@ -811,7 +811,27 @@ def test_hold_start_cue_is_silent_when_the_recording_is_discarded_at_once(monkey
 
 def test_hold_start_cue_comes_after_the_delay(monkeypatch):
     patch_app(monkeypatch, "START_CUE_DELAY_S", 0.02)
+    patch_app(monkeypatch, "START_CUE_MIN_WAIT_S", 0.02)
     app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.2)
+    _run_cycle(app)
+    assert [state for state, _ in cues].count("recording") == 1
+
+
+@pytest.mark.parametrize("mode", ["hold", "toggle"])
+def test_arrow_joining_the_chord_after_a_slow_connect_stays_silent(monkeypatch, mode):
+    """Ctrl+Win+Arrow: the connection already used up the delay counted from the key press, yet the cue still
+    waits, so an arrow that lands shortly after the recording started discards it before any chime."""
+    app, cues = _cue_app(monkeypatch, cancelled=True, hold_s=0.05, mode=mode)
+    app._press_time = time.monotonic() - 1.0
+    _run_cycle(app)
+    assert [state for state, _ in cues if state == "recording"] == []
+    assert all(call.args != (True,) for call in app._tray.set_active.call_args_list)
+
+
+@pytest.mark.parametrize("mode", ["hold", "toggle"])
+def test_a_clean_hotkey_press_still_gets_its_start_cue_after_a_slow_connect(monkeypatch, mode):
+    app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.5, mode=mode)
+    app._press_time = time.monotonic() - 1.0
     _run_cycle(app)
     assert [state for state, _ in cues].count("recording") == 1
 
@@ -841,6 +861,7 @@ def test_toggle_start_cue_is_silent_when_the_recording_is_discarded_at_once(monk
 
 def test_toggle_start_cue_comes_after_the_delay(monkeypatch):
     patch_app(monkeypatch, "START_CUE_DELAY_S", 0.02)
+    patch_app(monkeypatch, "START_CUE_MIN_WAIT_S", 0.02)
     app, cues = _cue_app(monkeypatch, cancelled=False, hold_s=0.2, mode="toggle")
     _run_cycle(app)
     assert [state for state, _ in cues].count("recording") == 1

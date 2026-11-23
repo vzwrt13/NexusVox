@@ -107,23 +107,23 @@ def _drop_cut_fence(text: str) -> str:
     return text
 
 
-_cache: tuple[tuple, str] | None = None
+_cache: dict[int, tuple[tuple, str]] = {}  # by line count: the Feedback tab and Copy diagnostics differ
 
 
-def report_log(directory: Path | None = None) -> str:
-    """The last `LOG_LINES` lines (at most `LOG_MAX_CHARS` characters) of today's log, dictated text removed.
+def report_log(directory: Path | None = None, lines: int = LOG_LINES) -> str:
+    """The last `lines` (default `LOG_LINES`) lines, at most `LOG_MAX_CHARS` characters, of today's log, text removed.
 
     Everything from the file's first start mark on was written by a version that fences dictated text, restarts
     included, so a report after a restart still holds the session that went wrong. Lines before that mark may
     not be fenced and are never sent. "" when there is no log or no such mark. The result is kept until the file
     changes, so a preview that refreshes while the user types does not read the log again."""
-    global _cache
     path = (directory or log_dir()) / LOG_FILE_NAME
     try:
         info = path.stat()
-        key = (str(path), info.st_size, info.st_mtime_ns)
-        if _cache and _cache[0] == key:
-            return _cache[1]
+        key = (str(path), info.st_size, info.st_mtime_ns, lines)
+        cached = _cache.get(lines)
+        if cached and cached[0] == key:
+            return cached[1]
         with path.open("rb") as handle:
             size = handle.seek(0, 2)
             offset = max(0, size - _READ_LIMIT)
@@ -136,11 +136,11 @@ def report_log(directory: Path | None = None) -> str:
         return ""
     if offset:
         text = _drop_cut_fence(text)
-    lines = strip_dictated_text(text).splitlines()[-LOG_LINES:]
-    while len(lines) > 1 and sum(len(line) + 1 for line in lines) > LOG_MAX_CHARS:
-        lines.pop(0)
-    log = "\n".join(lines)[-LOG_MAX_CHARS:]
-    _cache = (key, log)
+    kept = strip_dictated_text(text).splitlines()[-lines:]
+    while len(kept) > 1 and sum(len(line) + 1 for line in kept) > LOG_MAX_CHARS:
+        kept.pop(0)
+    log = "\n".join(kept)[-LOG_MAX_CHARS:]
+    _cache[lines] = (key, log)
     return log
 
 

@@ -1188,6 +1188,7 @@ def test_a_config_that_is_no_known_text_is_moved_aside(tmp_path):
 
 _SWITCHES = [
     ("general", "log_full_text", lambda c: c.log_full_text, False),
+    ("general", "show_pip", lambda c: c.show_pip, True),
     ("general", "setup_done", lambda c: c.setup_done, True),
     ("database", "store_audio", lambda c: c.database.store_audio, False),
     ("meeting", "store_audio", lambda c: c.meeting.store_audio, False),

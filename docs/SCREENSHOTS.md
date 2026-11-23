@@ -33,6 +33,8 @@ The setup is an overlay that opens while `[general].setup_done` is false, so tho
 setup due; the script tells the page which step to show (`SETUP_SCRIPT`), fills the test box on the hotkey step and
 replaces the microphone list and level with demo values (the real audio devices are never probed).
 
+`scripts/pip_poses.py` is a separate, smaller script for Pip, the dashboard mascot: `python scripts/pip_poses.py` writes `docs/images/pip-poses.png`, one headless photograph of the real `dashboard-pip.js` and `style.css` with Pip in each pose (idle, blink, head tilt, sleeping) and once with a speech bubble. It builds a throwaway page in a temporary folder with invented sample text, opens no window, reads no config or database and switches the idle motion off so two runs match. It reuses the browser lookup and launch of `dashboard_screenshots.py`.
+
 The Recordings tab fills one window with its two panes and is photographed at a window's height. The
 script serves its own copy of the page with the elements after the last card to show hidden when a tab
 runs on for a long way (the selectors are in `SHOTS` and `GUIDE_SHOTS`; Analytics needs none now), photographs it in a tall

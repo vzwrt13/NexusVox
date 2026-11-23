@@ -10,6 +10,9 @@ log_level = "INFO"
 # Dictated text appears there shortened (first 20 characters and the length). true logs it in full,
 # for debugging; the log may then contain what you said. The console always shows full text.
 log_full_text = false
+# Show Pip, the small budgie mascot, and his speech bubbles in the dashboard. false hides him everywhere.
+# Also switchable in the dashboard Settings tab (Dictation).
+show_pip = true
 # true once the first-run setup (Welcome, Microphone, Hotkey, Ready) has been finished or skipped. This template is
 # the only place it is false: a fresh install shows the setup in the dashboard once, a config without this key
 # (an existing install) never does. Settings > "Run the first-run setup again" opens it again.

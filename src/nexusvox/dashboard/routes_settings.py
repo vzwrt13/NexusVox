@@ -152,6 +152,11 @@ def register(app: Flask, api: DashboardAPI) -> None:
         data = _json_object()
         return jsonify(api.set_log_full_text(_switch(data, None)))
 
+    @app.route("/api/settings/show-pip", methods=["POST"])
+    def set_show_pip():
+        data = _json_object()
+        return jsonify(api.set_show_pip(_switch(data, None)))
+
     @app.route("/api/feedback/preview", methods=["POST"])
     def preview_feedback():
         data = _json_object()

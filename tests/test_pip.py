@@ -231,3 +231,65 @@ def test_idle_motion_is_a_two_pixel_bob_and_a_blink_that_stop_for_reduced_motion
     # Only idle and sleeping move; the still poses carry no animation.
     animated = re.findall(r"^\.(pip-[a-z]+) [^{]*\{[^}]*animation:", CSS, re.M)
     assert set(animated) <= {"pip-idle", "pip-sleeping"}
+
+
+# ── Setup and empty states ───────────────────────────────────────────
+
+SETUP_JS = (STATIC / "dashboard-setup.js").read_text(encoding="utf-8")
+RECORDINGS_JS = (STATIC / "dashboard-recordings.js").read_text(encoding="utf-8")
+
+
+def _setup_hosts():
+    return re.findall(r'<div class="setup-pip" data-pip-pose="(\w+)" data-pip-line="([^"]+)" hidden></div>', HTML)
+
+
+def test_every_setup_step_has_a_pip_host_with_one_short_sentence():
+    panels = re.findall(r'<section class="setup-panel".*?</section>', HTML, re.S)
+    assert len(panels) == 4
+    assert all(panel.count('class="setup-pip"') == 1 for panel in panels)
+    hosts = _setup_hosts()
+    assert len(hosts) == 4
+    for pose, line in hosts:
+        assert pose in {"idle", "tilt", "sleeping"}
+        assert len(line) <= 60 and line.count(". ") == 0 and line.endswith((".", "?", "!"))
+        assert "Pro" not in line  # Pip never advertises
+    # The steps themselves are untouched: heading, then Pip, then the step's own content.
+    assert re.search(
+        r'setup-heading" id="setup-h-1" tabindex="-1">Choose your microphone</h3>\s*<div class="setup-pip"', HTML
+    )
+
+
+def test_the_setup_mounts_its_hosts_through_mountpip_and_they_start_hidden():
+    assert "mountPip(host" in SETUP_JS and "data-pip-line" not in SETUP_JS.split("mountPip(host")[0].split("\n")[-1]
+    assert "host.dataset.pipLine" in SETUP_JS
+    assert "innerHTML" not in SETUP_JS.split("mountPip(host")[1].split("}")[0]  # text only, never markup
+    assert re.search(
+        r"\.setup-pip\[hidden\]\s*\{\s*display:\s*none", (STATIC / "setup.css").read_text(encoding="utf-8")
+    )
+
+
+def test_the_empty_recordings_list_shows_pip_sleeping_with_one_line_and_keeps_its_text():
+    assert 'recList.innerHTML = `<li class="empty-state">${message}</li>`' in RECORDINGS_JS  # the text as before
+    assert 'mountPip(host, { pose: "sleeping"' in RECORDINGS_JS
+    line = re.search(r'REC_EMPTY_PIP_LINE = "([^"]+)"', RECORDINGS_JS).group(1)
+    assert line.count(". ") == 0 and len(line) <= 90
+    # Pip only appears for an empty library, not for a search without a match.
+    assert "if (!recItems.length) {" in RECORDINGS_JS.split("mountPip(host")[0].split("recList.innerHTML")[1]
+
+
+@needs_node
+def test_with_show_pip_off_the_setup_and_the_empty_list_hosts_stay_empty_and_hidden():
+    got = run_js(
+        "setShowPip(false);"
+        "const setup = new El('div'); setup.hidden = true;"
+        "mountPip(setup, { pose: 'tilt', size: 72, bubble: 'Say a few words and watch the bar move.' });"
+        "const empty = new El('div');"
+        "mountPip(empty, { pose: 'sleeping', size: 72, bubble: 'Record a meeting or upload an audio file.' });"
+        "const off = [setup, empty].map((h) => [h.hidden, h.children.length]);"
+        "setShowPip(true);"
+        "const on = [setup, empty].map((h) => [h.hidden, h.children.length,"
+        "  all(h).some((e) => e.className === 'pip pip-sleeping')]);"
+        "console.log(JSON.stringify({ off, on }));"
+    )
+    assert got["off"] == [[True, 0], [True, 0]]
+    assert got["on"] == [[False, 1, False], [False, 1, True]]

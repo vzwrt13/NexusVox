@@ -269,6 +269,9 @@ function shownRecordings() {
   return recItems.filter((item) => matchesRecordingSearch(item, query));
 }
 
+// What Pip says over an empty list; it is only a hint, so it names no recording content.
+const REC_EMPTY_PIP_LINE = "Record a meeting or upload an audio file from Home, and it shows up here.";
+
 function recordingRowHtml(item) {
   return `<button type="button" class="rec-row" data-id="${item.id}" data-kind="${item.kind === "meeting" ? "meeting" : "upload"}">
       <span class="rec-row-icon" aria-hidden="true"></span>
@@ -288,9 +291,19 @@ function renderRecordingList() {
   const focusedId = active && recList.contains(active) && active.dataset ? active.dataset.id : undefined;
   const message = !recItems.length ? "No recordings yet." : !shown.length ? "Nothing matches your search." : "";
   if (message) {
+    // The list redraws on every poll; an empty list that is already drawn stays, so Pip's breathing is not restarted.
+    if (recList.dataset.empty === message) return;
+    recList.dataset.empty = message;
     recList.innerHTML = `<li class="empty-state">${message}</li>`;
+    if (!recItems.length) {
+      const host = document.createElement("div");
+      host.className = "rec-empty-pip";
+      recList.firstElementChild.append(host);
+      mountPip(host, { pose: "sleeping", size: 72, bubble: REC_EMPTY_PIP_LINE });
+    }
     return;
   }
+  delete recList.dataset.empty;
   const existing = new Map([...recList.children].filter((li) => li.dataset.id).map((li) => [li.dataset.id, li]));
   const rows = shown.map((item) => {
     const id = String(item.id);

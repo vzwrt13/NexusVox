@@ -26,6 +26,12 @@ const SETUP_QUIET_LEVEL = 0.05;
 const SETUP_QUIET_HINT_MS = 6000;
 const SETUP_FEEDBACK_NAMES = { visual: "Visual", sound: "Audio", both: "Visual and audio" };
 
+// Pip sits beside each step with one short sentence (data-pip-line on the host). The hosts stay empty and hidden while
+// Show Pip is off, so the setup then looks as it did before he came.
+for (const host of setupEl.querySelectorAll(".setup-pip")) {
+  mountPip(host, { pose: host.dataset.pipPose, size: 72, bubble: host.dataset.pipLine });
+}
+
 let setupStep = 0;
 let setupMeterTimer = null;
 let setupMeterRun = 0; // changes on every start and stop, so a reply from an earlier run is dropped

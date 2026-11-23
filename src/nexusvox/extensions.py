@@ -158,6 +158,14 @@ class ExportTarget:
     # "<upload action id>"}` (the reason plus a Retry button that runs that action). Called while the Upload list
     # is built, so keep it cheap.
     available: Callable[[int], bool | str | dict | None] | None = None
+    # Optional, where the Export menu puts the entry: one row per `group`, the entries of a group as format chips on
+    # that row (the chip shows `extension`'s last part in capitals, e.g. `.speakers.docx` is DOCX). `"transcript"`,
+    # `"subtitles"` and `"speakers"` are the rows the core knows (label, hint and icon come with them); any other
+    # string opens a row of its own, titled `group_label` (else the target's `label`) with the one-line `hint`
+    # under it. Without a group the entry gets a row of its own. Additive: older dashboards ignore all three.
+    group: str = ""
+    group_label: str = ""
+    hint: str = ""
 
 
 @dataclass(frozen=True)
@@ -363,7 +371,17 @@ def _problem_with_target(target: ExportTarget) -> str:
         return "export is not callable"
     if target.available is not None and not callable(target.available):
         return "available is not callable"
+    for name in ("group", "group_label", "hint"):
+        if not isinstance(getattr(target, name), str):
+            return f"{name} is not a string"
     return ""
+
+
+def _describe_export(target: ExportTarget) -> dict:
+    """An export target as the dashboard lists it; the row fields only when the extension set them."""
+    described = {"id": target.id, "label": target.label, "extension": target.extension, "mimetype": target.mimetype}
+    described.update({k: v for k in ("group", "group_label", "hint") if (v := getattr(target, k))})
+    return described
 
 
 def _availability_state(answer: dict) -> str | dict:
@@ -973,10 +991,7 @@ class ExtensionRegistry:
             "api_version": API_VERSION,
             "extensions": [{"name": e.name, "version": e.version} for e in self.extensions],
             "panels": [_describe_panel(p) for p in self._panels.values()],
-            "exports": [
-                {"id": t.id, "label": t.label, "extension": t.extension, "mimetype": t.mimetype}
-                for t in self._targets.values()
-            ],
+            "exports": [_describe_export(t) for t in self._targets.values()],
             "upload_actions": [
                 {"id": a.id, "label": a.label, "endpoint": a.endpoint, "panel": a.panel} for a in self._actions.values()
             ],

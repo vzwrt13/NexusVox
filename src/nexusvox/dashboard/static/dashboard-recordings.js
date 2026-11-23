@@ -269,6 +269,15 @@ function shownRecordings() {
   return recItems.filter((item) => matchesRecordingSearch(item, query));
 }
 
+// What Pip says over an empty list; it is only a hint, so it names no recording content.
+const REC_EMPTY_PIP_LINE = "Start a recording or upload a file above, and it shows up here.";
+
+// A Pip host that is thrown away with the empty list is released first, so Show Pip does not keep redrawing it.
+function dropEmptyPip() {
+  const host = recList.querySelector(".rec-empty-pip");
+  if (host) unmountPip(host);
+}
+
 function recordingRowHtml(item) {
   return `<button type="button" class="rec-row" data-id="${item.id}" data-kind="${item.kind === "meeting" ? "meeting" : "upload"}">
       <span class="rec-row-icon" aria-hidden="true"></span>
@@ -288,9 +297,21 @@ function renderRecordingList() {
   const focusedId = active && recList.contains(active) && active.dataset ? active.dataset.id : undefined;
   const message = !recItems.length ? "No recordings yet." : !shown.length ? "Nothing matches your search." : "";
   if (message) {
+    // The list redraws on every poll; an empty list that is already drawn stays, so Pip's breathing is not restarted.
+    if (recList.dataset.empty === message) return;
+    recList.dataset.empty = message;
+    dropEmptyPip();
     recList.innerHTML = `<li class="empty-state">${message}</li>`;
+    if (!recItems.length) {
+      const host = document.createElement("div");
+      host.className = "rec-empty-pip";
+      recList.firstElementChild.append(host);
+      mountPip(host, { pose: "sleeping", size: 72, bubble: REC_EMPTY_PIP_LINE });
+    }
     return;
   }
+  if (recList.dataset.empty) dropEmptyPip();
+  delete recList.dataset.empty;
   const existing = new Map([...recList.children].filter((li) => li.dataset.id).map((li) => [li.dataset.id, li]));
   const rows = shown.map((item) => {
     const id = String(item.id);
@@ -461,7 +482,7 @@ function fillRecordingHead(detail, item) {
     <div class="rec-head-actions">
       <div class="rec-menu-wrap">
         <button type="button" class="rec-menu-btn" aria-haspopup="true" aria-expanded="false">Export <span aria-hidden="true">▾</span></button>
-        <div class="rec-menu" hidden>${exportMenuHtml(item)}</div>
+        <div class="rec-menu rec-menu-export" hidden>${exportMenuHtml(item)}</div>
       </div>
       <div class="rec-menu-wrap">
         <button type="button" class="rec-menu-btn rec-more-btn" aria-haspopup="true" aria-expanded="false" aria-label="More actions">⋯</button>
@@ -470,8 +491,8 @@ function fillRecordingHead(detail, item) {
     </div>`;
   head.querySelectorAll(".rec-menu-wrap").forEach(bindRecMenu);
   head.querySelector(".rec-rename").addEventListener("click", () => editFileTitle(detail));
-  head.querySelectorAll(".rec-export").forEach((entry) => {
-    entry.addEventListener("click", () => downloadExport(entry.dataset.href, detail._item));
+  head.querySelectorAll(".rec-export").forEach((chip) => {
+    chip.addEventListener("click", () => runExportChip(chip, detail));
   });
   head.querySelectorAll(".upload-action").forEach((button) => {
     button.addEventListener("click", () => runUploadAction(button, detail._item));
@@ -492,16 +513,140 @@ function menuReason(reason) {
   return `<span class="rec-menu-reason">${escapeHtml(state.text)}</span>`;
 }
 
+// ── Export menu: one row per content, its formats as chips ───────────
+// The export targets (the built-in TXT, SRT, VTT and an extension's) are grouped by what they give you. A target
+// without a group (see `exportGroupName`) is a row of its own, so an extension's export is never lost. Only what
+// can be exported for this recording is drawn: an entry that cannot run (no summary yet, no word timing) is left
+// out, and the pending or failed state of one still shows under the head (`renderRowStates`).
+const EXPORT_ICONS = {
+  transcript: `<path d="M4 2.5h5.5L12 5v8.5H4z"/><path d="M6 8h4M6 10.5h4"/>`,
+  subtitles: `<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M4.5 9.5h3M9 9.5h2.5"/>`,
+  speakers: `<circle cx="5.5" cy="6" r="2"/><circle cx="11" cy="6.5" r="1.6"/><path d="M2 13c.4-2 1.8-3 3.5-3s3.1 1 3.5 3M9 12.5c.3-1.4 1.1-2.2 2-2.2s1.8.8 2.1 2.2"/>`,
+  summary: `<path d="M3 4h10M3 7h10M3 10h6"/>`,
+  file: `<path d="M8 2.5v7M5 7l3 3 3-3M3 12.5h10"/>`,
+};
+const EXPORT_ROW_INFO = {
+  transcript: { label: "Transcript", hint: "Text only", icon: "transcript" },
+  subtitles: { label: "Subtitles", hint: "With timestamps", icon: "subtitles" },
+  speakers: { label: "By speaker", hint: "Uses your speaker names", icon: "speakers" },
+};
+const EXPORT_ROW_ORDER = ["transcript", "subtitles", "speakers"];
+const EXPORT_DONE_MS = 1600; // how long a clicked chip shows its mint check
+
+// The group of a target: the `group` its extension declares (`ExportTarget.group`), else, for the entries
+// nexusvox-pro registered before groups existed, the group its id belongs to, else none (a row of its own).
+function exportGroupName(target) {
+  if (target.group) return target.group;
+  if (target.id === "txt") return "transcript";
+  if (target.id === "srt" || target.id === "vtt") return "subtitles";
+  if (target.id === "pro-transcript" || target.id.startsWith("pro-research-")) return "speakers";
+  return "";
+}
+
+// "Summary: Meeting summary (Markdown)" becomes "Meeting summary"; any other label loses only a trailing "(...)".
+function exportRowLabel(target) {
+  const label = target.label.replace(/^Summary:\s*/, "").replace(/\s*\([^)]*\)\s*$/, "").trim() || target.label;
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+// The file type on the chip: the last part of the suffix (".speakers.docx" is DOCX), or "TAR.GZ" for ".tar.gz".
+function exportFormat(target) {
+  const extension = String(target.extension || "");
+  const tarball = /\.tar\.[a-z0-9]+$/i.exec(extension);
+  const suffix = tarball ? tarball[0].slice(1) : extension.split(".").pop();
+  return (suffix || target.label).toUpperCase();
+}
+
+// What a group's row says: the first title and hint any of its targets declares (so a core row can be retitled by
+// an extension and a row reads the same for every recording), else the core's own for a known group, else the
+// label of its first target. Looked at every target of the group, available for this recording or not.
+function exportRowHead(group) {
+  const known = group.name && Object.hasOwn(EXPORT_ROW_INFO, group.name) ? EXPORT_ROW_INFO[group.name] : null;
+  const declared = (field) => group.targets.map((t) => t[field]).find(Boolean);
+  const legacySummary = group.targets.some((t) => t.id.startsWith("pro-summary-"));
+  const summary = legacySummary || group.name.startsWith("summary");
+  return {
+    label: declared("group_label") || (known ? known.label : exportRowLabel(group.targets[0])),
+    hint: declared("hint") || (known ? known.hint : legacySummary ? "Saved summary" : ""),
+    icon: known ? known.icon : summary ? "summary" : "file",
+  };
+}
+
+// The rows to draw for `item`: `{key, label, hint, icon, chips: [{id, format}]}`, in a fixed order (transcript,
+// subtitles, by speaker), then every other group or lone target in the order the server lists them. A row with no
+// export that can run for this recording is left out.
+function exportRows(item) {
+  const unavailable = item.exports_unavailable || {};
+  const groups = new Map();
+  for (const target of extensionExports) {
+    const name = exportGroupName(target);
+    const key = name ? "group:" + name : "target:" + target.id; // a group named "target:x" is not the lone target x
+    if (!groups.has(key)) groups.set(key, { key, name, targets: [] });
+    groups.get(key).targets.push(target);
+  }
+  const rows = [];
+  for (const group of groups.values()) {
+    const chips = group.targets
+      .filter((t) => unavailable[t.id] === undefined)
+      .map((t) => ({ id: t.id, format: exportFormat(t) }));
+    if (chips.length) rows.push({ key: group.key, ...exportRowHead(group), chips, rank: EXPORT_ROW_ORDER.indexOf(group.name) });
+  }
+  const rank = (row) => (row.rank < 0 ? EXPORT_ROW_ORDER.length : row.rank);
+  return rows.sort((a, b) => rank(a) - rank(b)); // stable: the others keep the server's order
+}
+
 function exportMenuHtml(item) {
   if (!extensionExports.length) return `<p class="rec-menu-empty">No export formats are available.</p>`;
-  return extensionExports.map((t) => {
-    const reason = (item.exports_unavailable || {})[t.id];
-    if (reason !== undefined) {
-      return `<button type="button" class="rec-menu-item" disabled>${escapeHtml(t.label)}${menuReason(reason)}</button>`;
-    }
-    const href = `/api/file-transcriptions/${item.id}/export/${encodeURIComponent(t.id)}`;
-    return `<button type="button" class="rec-menu-item rec-export" data-href="${escapeHtml(href)}">${escapeHtml(t.label)}</button>`;
+  const rows = exportRows(item).map((row) => {
+    const chips = row.chips.map((chip) => {
+      const href = `/api/file-transcriptions/${item.id}/export/${encodeURIComponent(chip.id)}`;
+      const name = `${row.label} as ${chip.format}`;
+      return `<button type="button" class="rec-chip rec-export" data-href="${escapeHtml(href)}" data-format="${escapeHtml(chip.format)}" aria-label="${escapeHtml(name)}">${escapeHtml(chip.format)}</button>`;
+    }).join("");
+    const hint = row.hint ? `<small>${escapeHtml(row.hint)}</small>` : "";
+    return `<div class="rec-export-row">
+      <span class="rec-export-ico" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">${EXPORT_ICONS[row.icon]}</svg></span>
+      <span class="rec-export-lbl"><b>${escapeHtml(row.label)}</b>${hint}</span>
+      <span class="rec-export-chips">${chips}</span>
+    </div>`;
   }).join("");
+  const summarise = extensionUploadActions.some((a) => a.id === "summarise");
+  const foot = (summarise ? "Other summaries appear here after you create them with Summarise. " : "")
+    + "Files go to your Downloads folder.";
+  return `<div class="rec-export-rows" role="group" aria-label="Export">
+    ${rows || `<p class="rec-menu-empty">Nothing can be exported from this recording yet.</p>`}
+    <p class="rec-export-foot">${escapeHtml(foot)}</p>
+    <p class="rec-export-error" role="alert" hidden></p>
+  </div>`;
+}
+
+// A chip exports at once: a short mint check on success, the message in the menu on failure.
+async function runExportChip(chip, detail) {
+  if (chip.getAttribute("aria-busy") === "true") return;
+  const error = chip.closest(".rec-export-rows").querySelector(".rec-export-error");
+  error.hidden = true;
+  chip.setAttribute("aria-busy", "true");
+  const failure = await downloadExport(chip.dataset.href, detail._item, false);
+  chip.setAttribute("aria-busy", "false");
+  if (failure) {
+    // A refresh may have redrawn the head (and so the menu), or the menu was closed, while the file was fetched:
+    // the line captured above is then gone or out of sight, and the message goes to the page's own feedback line.
+    const menu = error.closest(".rec-menu");
+    if (error.isConnected && (!menu || !menu.hidden)) {
+      error.textContent = failure;
+      error.hidden = false;
+    } else {
+      showFeedback(detail._item, "error", failure);
+    }
+    return;
+  }
+  const format = chip.dataset.format;
+  chip.classList.add("done");
+  chip.textContent = "✓ " + format;
+  setTimeout(() => {
+    chip.classList.remove("done");
+    chip.textContent = format;
+  }, EXPORT_DONE_MS);
 }
 
 function moreMenuHtml(item) {
@@ -517,6 +662,11 @@ function moreMenuHtml(item) {
     <button type="button" class="rec-menu-item rec-delete-item rec-menu-danger">Delete…</button>`;
 }
 
+// What a menu's arrow keys visit: its entries that can be used, and the format chips of the Export menu.
+function recMenuItems(menu) {
+  return [...menu.querySelectorAll(".rec-menu-item"), ...menu.querySelectorAll(".rec-chip")].filter((el) => !el.disabled);
+}
+
 function bindRecMenu(wrap) {
   const button = wrap.querySelector(".rec-menu-btn");
   const menu = wrap.querySelector(".rec-menu");
@@ -527,7 +677,7 @@ function bindRecMenu(wrap) {
     wrap.classList.add("open");
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
-    const first = menu.querySelector(".rec-menu-item:not([disabled])");
+    const first = recMenuItems(menu)[0];
     if (first) first.focus();
   });
   menu.addEventListener("click", (e) => {
@@ -538,17 +688,23 @@ function bindRecMenu(wrap) {
       closeRecMenu(wrap);
       button.focus();
     }
-    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !menu.hidden) {
-      const items = [...menu.querySelectorAll(".rec-menu-item:not([disabled])")];
+    // Up/Down move through the entries; in the Export menu Left/Right do too, as its chips sit side by side.
+    const forward = e.key === "ArrowDown" || e.key === "ArrowRight";
+    const backward = e.key === "ArrowUp" || e.key === "ArrowLeft";
+    const sideways = e.key === "ArrowLeft" || e.key === "ArrowRight";
+    if ((forward || backward) && !menu.hidden && (!sideways || menu.classList.contains("rec-menu-export"))) {
+      const items = recMenuItems(menu);
       if (!items.length) return;
       e.preventDefault();
       const at = items.indexOf(document.activeElement);
-      items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+      items[(at + (forward ? 1 : items.length - 1)) % items.length].focus();
     }
   });
 }
 
 function closeRecMenu(wrap) {
+  const staleError = wrap.querySelector(".rec-export-error"); // a failure shown by the Export menu is not kept for the next visit
+  if (staleError) staleError.hidden = true;
   wrap.classList.remove("open");
   wrap.querySelector(".rec-menu").hidden = true;
   wrap.querySelector(".rec-menu-btn").setAttribute("aria-expanded", "false");

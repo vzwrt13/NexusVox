@@ -185,6 +185,9 @@ main:has(#tab-recordings.active) { max-width: none; padding-top: 24px; padding-b
 /* ── List rows ────────────────────────────────────────────────────── */
 .rec-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .rec-list .empty-state { padding: 24px 8px; font-size: 14px; }
+.rec-empty-pip { margin-top: 16px; }
+.rec-empty-pip[hidden] { display: none; }
+.rec-empty-pip .pip { justify-content: center; text-align: left; }
 .rec-row {
   width: 100%;
   display: flex;
@@ -272,6 +275,64 @@ main:has(#tab-recordings.active) { max-width: none; padding-top: 24px; padding-b
 .rec-menu-danger { color: var(--red); }
 .rec-menu-sep { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
 .rec-menu-empty { padding: 10px 12px; font-size: 13px; color: var(--text-dim); }
+
+/* Export menu: one row per content, the formats as violet chips (mint with a check once clicked). */
+.rec-menu-export { width: 420px; max-width: min(420px, calc(100vw - 32px)); }
+/* On a narrow window the buttons sit at the left and the pane scrolls under a fixed menu, so the menu becomes a sheet
+   along the bottom edge of the window: all of it on screen, and it scrolls inside itself when it is taller. */
+@media (max-width: 640px) {
+  .rec-menu-export {
+    position: fixed;
+    top: auto;
+    bottom: 16px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-width: none;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+  }
+}
+.rec-export-rows { display: flex; flex-direction: column; min-width: 0; }
+.rec-export-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px;
+}
+.rec-export-row + .rec-export-row { border-top: 1px solid var(--border); }
+.rec-export-ico {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-glow);
+  color: var(--accent-light);
+}
+.rec-export-ico svg { width: 15px; height: 15px; }
+.rec-export-lbl { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.rec-export-lbl b { font-size: 14px; font-weight: 500; }
+.rec-export-lbl small { font-size: 12px; color: var(--text-dim); }
+.rec-export-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.rec-chip {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid var(--accent-soft);
+  background: var(--accent-glow);
+  color: var(--accent-light);
+  font: 500 12px var(--mono);
+  cursor: pointer;
+}
+.rec-chip:hover { background: var(--accent-fill); border-color: var(--accent); color: var(--text); }
+.rec-chip:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+.rec-chip.done, .rec-chip.done:hover { background: var(--green-fill); border-color: var(--green); color: var(--green); }
+.rec-chip[aria-busy="true"] { cursor: progress; opacity: 0.7; }
+.rec-export-foot { padding: 10px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-dim); }
+.rec-export-error { margin: 0 10px 6px; padding: 8px 10px; border-radius: var(--radius-ctl); font-size: 13px; color: var(--red); background: var(--surface2); }
+.rec-export-error[hidden] { display: none; }
 
 .rec-states:empty, .rec-delete-row[hidden] { display: none; }
 .rec-delete-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

@@ -155,8 +155,48 @@ def export_targets(self) -> list[ExportTarget]:
 
 NexusVox itself ships the targets `txt`, `srt` and `vtt`; they are registered first, so an extension cannot reuse those ids. Each target adds an entry to the *Export* menu of every recording in the Recordings tab. `export(transcript)` receives a
 `FileTranscript` and returns `bytes` or `str`; the file is named after the uploaded file plus `extension`.
-`id` follows the same rules as a panel id; `extension` must be a file name suffix such as `.docx` or `.tar.gz` (no slash, no spaces) and `mimetype` a media type, or the target is dropped. The entry downloads through the page, so a failing export shows its message next to the recording instead of saving an error file. A failing export answers with a 500 and its message; nothing else
+`id` follows the same rules as a panel id; `extension` must be a file name suffix such as `.docx` or `.tar.gz` (no slash, no spaces) and `mimetype` a media type, or the target is dropped. The entry downloads through the page, so a failing export shows its message inside the open Export menu (`.rec-export-error`; on the page's own error line if the menu was closed or redrawn meanwhile) instead of saving an error file. A failing export answers with a 500 and its message; nothing else
 is affected. The link points at `GET /api/file-transcriptions/<id>/export/<target id>`.
+
+### Where an entry sits in the Export menu
+
+The *Export* menu has one row per content, with its formats as chips (the chip shows the last part of `extension`
+in capitals: `.speakers.docx` is DOCX; `.tar.gz` is TAR.GZ). `ExportTarget` takes three optional strings to place an entry; they are
+additive (the API version stays 1, an older dashboard ignores them):
+
+| Field | Meaning |
+|---|---|
+| `group` | The row. `"transcript"` (the built-in TXT), `"subtitles"` (SRT, VTT) and `"speakers"` ("By speaker", hint "Uses your speaker names") are the rows the core knows, in that order; put an entry there and it becomes one more chip on that row. Any other string opens a row of its own, after the known ones, in the order the targets are registered; its icon is the summary icon when the string starts with `summary`, else a plain download icon. No `group`: a row of its own for that one entry (a group named like a lone entry's id never joins it) |
+| `group_label` | The row's title. The first non-empty `group_label` of any target in the group counts (so an extension can retitle a core row such as `"transcript"`, and the title is the same for every recording, whichever entries can run), else the core's title for a known row, else the `label` of the group's first target without a leading `Summary:` and a trailing `(...)` |
+| `hint` | The one line under the title; the first non-empty `hint` in the group counts, else the core's line for a known row, else none |
+
+```python
+ExportTarget(
+    "my-summary-md",
+    "Meeting summary (Markdown)",
+    ".md",
+    "text/markdown",
+    self._md,
+    group="summary-meeting",
+    group_label="Meeting summary",
+    hint="Made today, 17:04",
+)
+ExportTarget(
+    "my-summary-docx",
+    "Meeting summary (Word)",
+    ".docx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    self._docx,
+    group="summary-meeting",
+)  # a second chip on the same row
+```
+
+Only what can be exported for the recording is listed: an entry whose `available` check answers anything but
+`True`/`None` is left out of the menu (no greyed-out line); a `{"pending"}` or `{"error"}` state still shows under
+the recording's title. Every row of an entry that does not exist yet therefore simply does not appear.
+
+The `hint` is a fixed string per target, not a per-recording one. Entries registered before these fields existed keep
+working: `pro-transcript` and `pro-research-*` are read as the "By speaker" row, `pro-summary-*` as one row per id.
 
 ## Listing what is loaded
 
@@ -171,8 +211,8 @@ and hook are simply ignored or rejected, so guard with the `nexusvox` version if
 ### Marking an export unavailable
 
 `ExportTarget` takes an optional `available(transcription_id) -> bool | str | None`. `True` or `None` offers
-the entry as usual; `False` (or any other falsy answer such as `0`) shows it greyed out and not clickable, with
-"Not available" under it; a string does the same and is the text shown under it (e.g. `"No summary yet"`). The answers come with the upload list (`exports_unavailable`, a
+the entry as usual; `False` (or any other falsy answer such as `0`) or a string (e.g. `"No summary yet"`) leaves it out of the *Export* menu
+(an upload action stays in the More menu, greyed out and not clickable, with "Not available" or the string under it). The answers come with the upload list (`exports_unavailable`, a
 `{target id: reason}` object per upload in `GET /api/file-transcriptions`), not one request per link, so keep
 the check cheap: it runs once per listed upload (up to 50) for each target that has one. A check that raises leaves the link on, so the export itself reports the problem.
 
@@ -227,7 +267,7 @@ Besides the answers above, `available` may return a small dict. It works the sam
 
 | Answer | Shown on the row |
 |---|---|
-| `{"pending": "<label>"}` | The label with a spinner; the export or button stays greyed out. While any row is pending, the dashboard re-fetches the Recordings list every few seconds and stops when none is, so a finished export becomes active without a page reload |
+| `{"pending": "<label>"}` | The label with a spinner under the recording's title; the export stays out of the menu and the button greyed out. While any row is pending, the dashboard re-fetches the Recordings list every few seconds and stops when none is, so a finished export becomes active without a page reload |
 | `{"error": "<reason>", "retry": "<action id>"}` | The reason in red and a Retry button that runs the named `UploadAction`. `retry` must be an action your own extension registered; any other id is dropped with a log warning and only the reason is shown. Retry is also hidden while that action is itself greyed out for the row, and disabled while it runs |
 
 ```python

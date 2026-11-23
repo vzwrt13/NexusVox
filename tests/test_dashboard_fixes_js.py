@@ -371,3 +371,33 @@ def test_the_export_blob_url_is_revoked_after_a_delay():
         + "(async () => { await downloadExport('/x', {}); out([events, pending.length, pending[0][1] >= 1000]); })();"
     )
     assert run(script) == [["clicked"], 1, True]
+
+
+def test_a_failed_export_resolves_to_its_message_and_reports_it_only_when_asked():
+    source = _source("dashboard-upload.js")
+    script = (
+        OUT
+        + """
+    const shown = []; const hideFeedback = () => {};
+    const showFeedback = (item, kind, text) => shown.push([kind, text]);
+    const URL = { createObjectURL: () => "blob:x", revokeObjectURL: () => {} };
+    const document = { createElement: () => ({ click: () => {} }) };
+    let reply = { ok: false, status: 500, json: async () => ({ error: "No word timestamps" }) };
+    const fetch = async () => { if (reply instanceof Error) throw reply; return reply; };
+    """
+        + _fn(source, "downloadExport", True)
+        + """(async () => {
+      const results = [await downloadExport("/x", {}), await downloadExport("/x", {}, false)];
+      reply = { ok: false, status: 502, json: async () => { throw new Error("not json"); } };
+      results.push(await downloadExport("/x", {}, false));
+      reply = new Error("offline");
+      results.push(await downloadExport("/x", {}, false));
+      reply = { ok: true, headers: { get: () => "" }, blob: async () => ({}) };
+      results.push(await downloadExport("/x", {}, false));
+      out([results, shown]);
+    })();"""
+    )
+    assert run(script) == [
+        ["No word timestamps", "No word timestamps", "Export failed (502)", "Export failed: offline", ""],
+        [["error", "No word timestamps"]],
+    ]

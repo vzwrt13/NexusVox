@@ -115,8 +115,6 @@ header h1 {
 .sidebar-version { padding: 6px 12px 0; font-size: 11px; color: var(--text-dim); }
 .sidebar-version p { margin: 0; }
 .tabs-footer a.tab { text-decoration: none; box-sizing: border-box; }
-/* Help opens the online guide in the browser, not a tab: a small arrow says so */
-.tab-help::after { content: "97"; margin-left: auto; font-size: 13px; color: var(--text-dim); }
 .sidebar-version-status { display: block; margin-top: 4px; font-size: 11px; line-height: 1.35; }
 .sidebar-version [hidden] { display: none; }
 .link-button {

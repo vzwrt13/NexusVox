@@ -185,6 +185,9 @@ main:has(#tab-recordings.active) { max-width: none; padding-top: 24px; padding-b
 /* ── List rows ────────────────────────────────────────────────────── */
 .rec-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .rec-list .empty-state { padding: 24px 8px; font-size: 14px; }
+.rec-empty-pip { margin-top: 16px; }
+.rec-empty-pip[hidden] { display: none; }
+.rec-empty-pip .pip { justify-content: center; text-align: left; }
 .rec-row {
   width: 100%;
   display: flex;

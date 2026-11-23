@@ -54,6 +54,7 @@
 .setup-panel[hidden] { display: none; }
 .setup-heading { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
 .setup-heading:focus { outline: none; }
+.setup-pip[hidden] { display: none; }
 .setup-lead { margin: 0; font-size: 16px; line-height: 1.5; }
 .setup-text { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-dim); }
 .setup-panel .status-line { margin-top: 0; font-size: 13px; }

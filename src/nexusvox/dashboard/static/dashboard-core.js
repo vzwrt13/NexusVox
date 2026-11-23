@@ -272,6 +272,11 @@ window.NexusVoxExt = {
   registerRecordingTab(id, tab) {
     return addRecordingTab(id, tab);
   },
+  // Calls fn({recording, list, rows}) whenever the Speakers panel is drawn, so an extension can add to each speaker's
+  // row (an inline rename, a menu); `rows` hold {speaker, colour, turns, seconds, share, row, name, actions}.
+  registerSpeakerRows(fn) {
+    return addSpeakerRowsHook(fn);
+  },
   // Draws an extension tab again for one recording (or for all), e.g. once a summary has been generated.
   refreshRecordingTab(id, recordingId) {
     refreshRecordingTabContent(id, recordingId);

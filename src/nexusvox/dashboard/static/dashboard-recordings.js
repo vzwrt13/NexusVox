@@ -980,33 +980,115 @@ function applyTranscriptMark(detail) {
 }
 
 // ── Speakers ─────────────────────────────────────────────────────────
-function speakersPanel(detail, item) {
-  const wrap = document.createElement("div");
-  wrap.className = "rec-speakers";
-  const lines = (detail._lines || []).filter((l) => l.who);
-  if (!lines.length) {
-    wrap.innerHTML = `<p class="empty-state">No speakers in this transcript. Turn on <strong>Detect speakers</strong> in the
-      upload dialog to label who said what; meetings are always split by speaker.</p>`;
-    return wrap;
-  }
+// One row per speaker: avatar, name, a share-of-talk-time bar and one line of numbers. Extensions (NexusVox Pro adds
+// rename and merge) reach a row through NexusVoxExt.registerSpeakerRows (docs/EXTENSIONS.md); the markup they rely on:
+//   li.rec-speaker[data-speaker][data-colour]
+//     span.rec-avatar                 the coloured disc (the number of "Speaker 2", else the first letter)
+//     div.rec-speaker-main
+//       span.rec-speaker-name[data-slot="name"]   the name; an extension may replace its content
+//       span.rec-speaker-bar > span.rec-speaker-fill
+//       span.rec-speaker-stats        share · talk time, turns
+//     span.rec-speaker-actions[data-slot="actions"]   empty, hidden until something is put in it
+const speakerRowHooks = [];
+
+// The speakers of a recording in order of first appearance, with turns, talk time (seconds) and share (percent of
+// the timed talk time; null when no turn has a time).
+function speakerStats(lines) {
   const speakers = new Map();
   for (const line of lines) {
-    const s = speakers.get(line.who) || { who: line.who, colour: line.colour, turns: 0, seconds: 0 };
+    if (!line.who) continue;
+    const s = speakers.get(line.who) || { who: line.who, colour: line.colour, turns: 0, seconds: 0, share: null };
     s.turns += 1;
     if (line.start !== null && line.end !== null) s.seconds += Math.max(0, line.end - line.start);
     speakers.set(line.who, s);
   }
-  const total = [...speakers.values()].reduce((sum, s) => sum + s.seconds, 0);
-  wrap.innerHTML = `<ul class="rec-speaker-list">${[...speakers.values()].map((s) => {
-    const share = total ? Math.round((s.seconds / total) * 100) : null;
-    const talk = total ? `${formatRecordingLength(s.seconds * 1000)} · ${share}%` : "";
-    return `<li class="rec-speaker">
-      <span class="rec-who rec-who-${s.colour}">${escapeHtml(s.who)}</span>
-      <span class="rec-speaker-meta">${s.turns} ${s.turns === 1 ? "turn" : "turns"}${talk ? " · " + talk : ""}</span>
-      ${share === null ? "" : `<span class="rec-speaker-bar" aria-hidden="true"><span class="rec-speaker-fill rec-fill-${s.colour}" style="width: ${share}%"></span></span>`}
-    </li>`;
-  }).join("")}</ul>`;
+  const all = [...speakers.values()];
+  const total = all.reduce((sum, s) => sum + s.seconds, 0);
+  if (total) for (const s of all) s.share = Math.round((s.seconds / total) * 100);
+  return all;
+}
+
+// "Speaker 2" shows as 2, any other name as its first letter.
+function speakerInitial(who) {
+  const numbered = /^Speaker (\d+)$/.exec(who);
+  return numbered ? numbered[1] : (Array.from(who.trim())[0] || "?").toUpperCase();
+}
+
+function speakerRow(s) {
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const stat = (value, label) => {
+    const part = el("span", "rec-stat");
+    part.append(el("b", "", value), el("span", "rec-stat-label", label));
+    return part;
+  };
+  const row = el("li", "rec-speaker");
+  row.dataset.speaker = s.who;
+  row.dataset.colour = String(s.colour);
+  const avatar = el("span", `rec-avatar rec-fill-${s.colour}`, speakerInitial(s.who));
+  avatar.setAttribute("aria-hidden", "true");
+  const main = el("div", "rec-speaker-main");
+  const name = el("span", `rec-speaker-name rec-who-${s.colour}`, s.who);
+  name.dataset.slot = "name";
+  main.append(name);
+  if (s.share !== null) {
+    const bar = el("span", "rec-speaker-bar");
+    bar.setAttribute("aria-hidden", "true");
+    const fill = el("span", `rec-speaker-fill rec-fill-${s.colour}`);
+    fill.style.width = s.share + "%";
+    bar.append(fill);
+    main.append(bar);
+  }
+  const stats = el("span", "rec-speaker-stats");
+  if (s.share !== null) stats.append(stat(s.share + "%", " · " + formatClock(Math.round(s.seconds))));
+  stats.append(stat(String(s.turns), s.turns === 1 ? " turn" : " turns"));
+  main.append(stats);
+  const actions = el("span", "rec-speaker-actions");
+  actions.dataset.slot = "actions";
+  row.append(avatar, main, actions);
+  return row;
+}
+
+function speakersPanel(detail, item) {
+  const wrap = document.createElement("div");
+  wrap.className = "rec-speakers";
+  const speakers = speakerStats(detail._lines || []);
+  if (!speakers.length) {
+    wrap.innerHTML = `<p class="empty-state">No speakers in this transcript. Turn on <strong>Detect speakers</strong> in the
+      upload dialog to label who said what; meetings are always split by speaker.</p>`;
+    return wrap;
+  }
+  const list = document.createElement("ul");
+  list.className = "rec-speaker-list";
+  const rows = speakers.map((s) => ({ ...s, speaker: s.who, row: speakerRow(s) }));
+  list.append(...rows.map((r) => r.row));
+  wrap.append(list);
+  for (const hook of speakerRowHooks) {
+    try {
+      const named = rows.map((r) => ({
+        ...r,
+        name: r.row.querySelector('[data-slot="name"]'),
+        actions: r.row.querySelector('[data-slot="actions"]'),
+      }));
+      hook({ recording: item, list, rows: named });
+    } catch (err) {
+      console.error("Speaker rows hook failed:", err);
+    }
+  }
   return wrap;
+}
+
+// NexusVoxExt.registerSpeakerRows(fn): fn({recording, list, rows}) runs each time a Speakers panel is drawn.
+function addSpeakerRowsHook(fn) {
+  if (typeof fn !== "function" || speakerRowHooks.includes(fn)) return false;
+  speakerRowHooks.push(fn);
+  const detail = currentDetail();
+  if (detail && recChosenTab === "speakers") renderRecordingTabs(detail, detail._item);
+  return true;
 }
 
 // ── Extension tabs ───────────────────────────────────────────────────

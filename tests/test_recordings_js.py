@@ -634,3 +634,132 @@ def test_without_storage_the_handle_still_works():
         out([widthSet(), storedRecListWidth()]);"""
     )
     assert result == ["500px", None]
+
+
+# -- the Speakers panel ------------------------------------------------------------------------------
+
+TIMED_LINES = r"""
+const timedLines = [
+  { who: "Speaker 1", colour: 0, text: "a", start: 0, end: 30 },
+  { who: "Maria", colour: 1, text: "b", start: 30, end: 40 },
+  { who: "Speaker 1", colour: 0, text: "c", start: 40, end: 70 },
+  { who: "Speaker 3", colour: 2, text: "d", start: 70, end: 100 },
+];
+function showSpeakers(lines) {
+  const d = makeDetail(ROWS[0]);
+  d._lines = lines;
+  recChosenTab = "speakers";
+  renderRecordingTabs(d, ROWS[0]);
+  return d;
+}
+const rowParts = (li) => ({
+  speaker: li.dataset.speaker,
+  avatar: li.querySelector(".rec-avatar").textContent,
+  name: li.querySelector(".rec-speaker-name").textContent,
+  bar: li.querySelector(".rec-speaker-fill") ? li.querySelector(".rec-speaker-fill").style.width : null,
+  stats: li.querySelectorAll(".rec-stat").map((x) => x.textContent),
+});
+"""
+
+
+def test_each_speaker_gets_one_row_with_avatar_share_time_and_turns():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers(timedLines);
+        out([d.querySelectorAll(".rec-speaker").map(rowParts), d.querySelectorAll(".rec-speaker-list").length]);"""
+    )
+    rows, lists = result
+    assert lists == 1
+    assert rows == [
+        {"speaker": "Speaker 1", "avatar": "1", "name": "Speaker 1", "bar": "60%", "stats": ["60% · 1:00", "2 turns"]},
+        {"speaker": "Maria", "avatar": "M", "name": "Maria", "bar": "10%", "stats": ["10% · 0:10", "1 turn"]},
+        {"speaker": "Speaker 3", "avatar": "3", "name": "Speaker 3", "bar": "30%", "stats": ["30% · 0:30", "1 turn"]},
+    ]
+
+
+def test_without_word_timing_a_row_shows_turns_only_and_no_bar():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers(transcriptLines(ROWS[0].text, [], "meeting"));
+        out(d.querySelectorAll(".rec-speaker").map(rowParts));"""
+    )
+    assert result == [
+        {"speaker": "Speaker 1", "avatar": "1", "name": "Speaker 1", "bar": None, "stats": ["1 turn"]},
+        {"speaker": "Speaker 2", "avatar": "2", "name": "Speaker 2", "bar": None, "stats": ["1 turn"]},
+    ]
+
+
+def test_a_name_is_shown_as_text_and_its_initial_is_a_letter():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers([{ who: "<b>élan</b>", colour: 3, text: "x", start: null, end: null }]);
+        const li = d.querySelector(".rec-speaker");
+        out([rowParts(li), li.querySelector(".rec-speaker-name").children.length,
+          li.querySelector(".rec-avatar").classList.contains("rec-fill-3")]);"""
+    )
+    parts, children, filled = result
+    assert parts["name"] == "<b>élan</b>"
+    assert parts["avatar"] == "<"  # first character, never markup that was parsed
+    assert children == 0
+    assert filled is True
+
+
+def test_no_speaker_lines_show_the_empty_note_and_no_list():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers([]);
+        const note = d.querySelector(".rec-speakers").innerHTML.includes("Detect speakers");
+        out([d.querySelectorAll(".rec-speaker").length, note]);"""
+    )
+    assert result == [0, True]
+
+
+def test_rows_offer_a_name_and_an_empty_actions_slot_for_extensions():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const d = showSpeakers(timedLines);
+        const li = d.querySelector(".rec-speaker");
+        const actions = li.querySelector('[data-slot="actions"]');
+        out([li.querySelector('[data-slot="name"]').textContent, actions.children.length, actions.textContent,
+          li.dataset.colour]);"""
+    )
+    assert result == ["Speaker 1", 0, "", "0"]
+
+
+def test_a_speaker_rows_hook_gets_every_row_on_each_draw_and_a_failing_one_is_skipped():
+    result = run_recordings(
+        DETAIL
+        + TIMED_LINES
+        + """const calls = [];
+        const d = showSpeakers(timedLines);
+        const hook = ({ recording, rows }) => {
+          calls.push([recording.id, rows.map((r) => [r.speaker, r.turns, r.seconds, r.share])]);
+          for (const r of rows) {
+            const b = document.createElement("button");
+            b.textContent = "...";
+            r.actions.append(b);
+          }
+        };
+        const added = addSpeakerRowsHook(hook);  // the open Speakers panel is drawn again at once
+        const again = addSpeakerRowsHook(hook);
+        console.error = () => {};
+        addSpeakerRowsHook(() => { throw new Error("boom"); });
+        renderRecordingTabs(d, ROWS[0]);
+        out([added, again, calls.length, calls[0], d.querySelectorAll(".rec-speaker-actions button").length,
+          d.querySelectorAll(".rec-speaker").length]);"""
+    )
+    added, again, count, first, buttons, rows = result
+    assert (added, again) == (True, False)  # the same function is not added twice
+    assert count == 3  # on registering, then once more for each of the following draws
+    assert first == [7, [["Speaker 1", 2, 60, 60], ["Maria", 1, 10, 10], ["Speaker 3", 1, 30, 30]]]
+    assert (buttons, rows) == (3, 3)  # the panel was rebuilt each time, so the buttons are not stacked up
+
+
+def test_the_extension_object_exposes_the_speaker_rows_hook():
+    core = (STATIC / "dashboard-core.js").read_text(encoding="utf-8")
+    assert "registerSpeakerRows(fn) {\n    return addSpeakerRowsHook(fn);" in core

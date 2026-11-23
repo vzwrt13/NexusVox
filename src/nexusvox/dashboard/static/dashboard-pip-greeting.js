@@ -63,11 +63,23 @@ function pipStatText(facts, day) {
   if (words <= 0 || saved < 1) return null;
   const minutes = Math.round(saved);
   const savedText = minutes < 60 ? minutes + " min" : Math.floor(minutes / 60) + " h " + (minutes % 60) + " min";
+  const values = { words: formatPipNumber(words), saved: savedText, wpm: String(pipCount(facts, "typing_wpm") || 40) };
   const template = PIP_STATS[pipDayNumber(day) % PIP_STATS.length];
-  return template
-    .replace("{words}", formatPipNumber(words))
-    .replace("{saved}", savedText)
-    .replace("{wpm}", String(pipCount(facts, "typing_wpm") || 40));
+  // Every occurrence of a placeholder is filled, so a template may use one twice.
+  return template.replace(/\{(words|saved|wpm)\}/g, (_, key) => values[key]);
+}
+
+// The milestones to treat as said when there is no saved state yet (the first run, for example after an update of an
+// installation that has a history): of the goals already reached, only the highest of each counter stays to be said,
+// so someone with 20,000 words is not told about their first dictation. A new user has reached nothing: no change.
+function backfilledPipSeen(facts) {
+  const reached = PIP_MILESTONES.filter((m) => pipCount(facts, m.counter) >= m.atLeast);
+  const highest = new Map();
+  for (const m of reached) {
+    const best = highest.get(m.counter);
+    if (!best || m.atLeast > best.atLeast) highest.set(m.counter, m);
+  }
+  return reached.filter((m) => highest.get(m.counter) !== m).map((m) => m.id);
 }
 
 // What to say today: { id, text } or null. `seen` lists the ids of milestones and tips said before.
@@ -88,7 +100,8 @@ function pickPipGreeting(facts, savedState, day) {
   if (state.day === day && state.id) {
     return { greeting: { id: state.id, text: state.text, dismissed: state.dismissed === true }, state };
   }
-  const seen = Array.isArray(state.seen) ? state.seen : [];
+  const hasHistory = state.day !== "" || (Array.isArray(state.seen) && state.seen.length > 0);
+  const seen = hasHistory ? state.seen : backfilledPipSeen(facts);
   const content = pickPipContent(facts, seen, day);
   if (!content) return { greeting: null, state };
   const kept = content.id === "stat-week" ? seen : [...seen, content.id];
@@ -138,8 +151,11 @@ function showPipGreeting(host, facts, day = localIsoDate(new Date())) {
     quiet();
     return null;
   }
+  // The state is read again when the link is clicked: another window may have saved a newer one meanwhile, and only
+  // the bubble that is still today's is marked dismissed.
   const dismiss = () => {
-    writePipGreetingState(dismissPipGreeting(state));
+    const current = readPipGreetingState();
+    if (current.day === state.day && current.id === state.id) writePipGreetingState(dismissPipGreeting(current));
     quiet();
   };
   mountPip(host, { pose: "tilt", bubble: buildPipBubble(greeting.text, dismiss) });

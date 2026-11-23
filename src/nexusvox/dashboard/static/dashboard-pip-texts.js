@@ -27,7 +27,7 @@ const PIP_MILESTONES = [
 
 // `unused` is a key of the same facts; the tip is for someone whose count is still 0 (a feature never used).
 const PIP_TIPS = [
-  { id: "tip-voice-commands", unused: "voice_commands", text: "Say \"new paragraph\" (or \"neuer Absatz\") or \"comma\" while you dictate. Spoken punctuation works in English and German." },
+  { id: "tip-voice-commands", unused: "formatting_commands", text: "Say \"new paragraph\" (or \"neuer Absatz\") or \"new line\" while you dictate, and the text is formatted as you speak." },
   { id: "tip-own-words", unused: "dictionary_entries", text: "Add names and product terms under Settings > Vocabulary, and they are spelled your way from then on." },
   { id: "tip-file-upload", unused: "uploads", text: "Have a recording lying around? Drop an audio or video file on the Recordings tab and it turns into text." },
   { id: "tip-meetings", unused: "meetings", text: "Record a meeting from the Recordings tab and get a transcript of both sides." },

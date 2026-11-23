@@ -18,7 +18,7 @@ pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is
 FAKE = """
 function el() {
   const e = {hidden: true, children: [], _t: '', _c: new Set(),
-    append(c) { this.children.push(c); },
+    append(...c) { this.children.push(...c); },
     classList: {add(c) { e._c.add(c); }, remove(...c) { c.forEach((x) => e._c.delete(x)); }}};
   Object.defineProperty(e, 'textContent', {get() { return e._t; }, set(v) { e._t = v; e.children = []; }});
   return e;
@@ -29,7 +29,9 @@ function ui(over = {}) {
     polishOn: true, cleanupOn: true, uploadOn: true, modelsData: {reachable: false, protocol: 'ollama'}}, over);
 }
 function view(e) {
-  return {hidden: e.hidden, text: e.textContent, links: e.children.length, down: e._c.has('down'), ok: e._c.has('ok')};
+  const text = e._t || e.children.map((c) => c.textContent || '').join('');
+  const links = e.children.filter((c) => c.href).length;
+  return {hidden: e.hidden, text, links, down: e._c.has('down'), ok: e._c.has('ok')};
 }
 """
 URL = "http://127.0.0.1:11434"
@@ -41,7 +43,7 @@ UNKNOWN = f"{{reachable: true, protocol: 'ollama', url: '{URL}', model: 'm', mod
 
 def run_js(body: str):
     source = dashboard_source()
-    status = re.search(r"const STATUS_STATES.*?\n\}\n", source, re.S).group(0)
+    status = re.search(r"const STATUS_STATES.*?function actionLink.*?\n\}\n", source, re.S).group(0)
     start = source.index("// ── Ollama install hint")
     helpers = source[start : source.index("// ── end of Ollama install hint")]
     out = subprocess.run(
@@ -171,6 +173,25 @@ def test_a_remote_ollama_that_does_not_answer_is_still_red():
 def test_the_not_installed_line_links_the_ollama_site():
     out = run_js(
         "const e = el(); renderOllamaNotInstalled(e);"
-        "console.log(JSON.stringify([e.children[0].href, e.children[0].textContent, e.hidden]));"
+        "const a = e.children.find((c) => c.href);"
+        "console.log(JSON.stringify([a.href, a.textContent, a.className, e.hidden, e._c.has('status-row')]));"
     )
-    assert out == ["https://ollama.com", "Install Ollama", False]
+    assert out == ["https://ollama.com", "Install Ollama", "btn btn-tint btn-sm", False, True]
+
+
+def test_a_status_row_goes_back_to_a_plain_line_when_set_again():
+    out = run_js(
+        "const e = el(); renderOllamaNotRunning(e, () => {}); const row = e._c.has('status-row');"
+        "setStatus(e, 'ok', 'Ollama is running.');"
+        "console.log(JSON.stringify([row, e._c.has('status-row'), e._c.has('ok'), e.textContent]));"
+    )
+    assert out == [True, False, True, "Ollama is running."]
+
+
+def test_start_ollama_is_a_tint_button_in_a_warn_status_row():
+    out = run_js(
+        "const e = el(); renderOllamaNotRunning(e, () => {});"
+        "const b = e.children.find((c) => c.type === 'button');"
+        "console.log(JSON.stringify([b.className, b.textContent, e._c.has('warn'), e.hidden]));"
+    )
+    assert out == ["btn btn-tint btn-sm", "Start Ollama", True, False]

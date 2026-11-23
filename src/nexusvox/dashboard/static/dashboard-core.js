@@ -33,7 +33,39 @@ function setStatus(el, state, text) {
   el.classList.add("status-line");
   el.classList.remove(...STATUS_STATES);
   if (STATUS_STATES.includes(state)) el.classList.add(state);
-  if (text !== undefined) el.textContent = text;
+  if (text !== undefined) {
+    el.classList.remove("status-row");
+    el.textContent = text;
+  }
+}
+// A status line with an action: a dot in the state colour, the sentence, and the button or link on the right
+// ("warn" = needs action, "ok" = ready). `action` is an element made with `actionButton` or `actionLink`.
+function setStatusRow(el, state, text, action) {
+  setStatus(el, state, "");
+  el.classList.add("status-row");
+  const label = document.createElement("span");
+  label.className = "status-row-text";
+  label.textContent = text;
+  el.append(label, action);
+}
+// The tint button of a status row (`fix or act` kind of the shared button set).
+function actionButton(label, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn btn-tint btn-sm";
+  button.textContent = label;
+  button.onclick = onClick;
+  return button;
+}
+// The same look on a link that opens a page.
+function actionLink(label, href) {
+  const a = document.createElement("a");
+  a.className = "btn btn-tint btn-sm";
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  a.textContent = label;
+  return a;
 }
 
 // ── Notice under a control ───────────────────────────────────────────

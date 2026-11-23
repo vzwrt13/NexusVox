@@ -10,29 +10,18 @@ const OLLAMA_SITE_URL = "https://ollama.com";
 const OLLAMA_DEFAULT_URL = "http://127.0.0.1:11434";
 const OLLAMA_NOT_INSTALLED =
   "Not installed yet. Ollama is a free app that runs AI language models on your own PC. Cleanup and Polish stay off until it is installed and running; everything else works without it.";
-// Installed but stopped: neutral too, with a button that starts it (`onStart(button)` does the work).
+// Installed but stopped: a yellow status row (needs action) with a button that starts it (`onStart(button)` does the work).
 function renderOllamaNotRunning(el, onStart) {
-  setStatus(el, undefined, "Ollama is installed but not running. ");
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "btn";
-  button.textContent = "Start Ollama";
-  button.onclick = () => onStart(button);
-  el.append(button);
+  const button = actionButton("Start Ollama", () => onStart(button));
+  setStatusRow(el, "warn", "Ollama is installed but not running.", button);
   el.hidden = false;
 }
 function isDefaultOllamaUrl(url) {
   return String(url || "").replace(/\/+$/, "") === OLLAMA_DEFAULT_URL;
 }
-// Writes the neutral "not installed yet" line (no colour state) plus the install link into `el`.
+// Writes the "not installed yet" status row (yellow dot, never red) with the install link as its button into `el`.
 function renderOllamaNotInstalled(el) {
-  setStatus(el, undefined, `${OLLAMA_NOT_INSTALLED} `);
-  const a = document.createElement("a");
-  a.href = OLLAMA_SITE_URL;
-  a.target = "_blank";
-  a.rel = "noopener noreferrer";
-  a.textContent = "Install Ollama";
-  el.append(a);
+  setStatusRow(el, "warn", OLLAMA_NOT_INSTALLED, actionLink("Install Ollama", OLLAMA_SITE_URL));
   el.hidden = false;
 }
 function isLocalLlmUrl(url) {
@@ -553,7 +542,7 @@ function renderLlmServers(servers, ollama) {
     else setStatus(state, "down", `○ ${server.url} · not answering: ${server.error || "unknown error"}`);
     const remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "btn";
+    remove.className = "btn btn-ghost btn-sm";
     remove.textContent = "Remove";
     remove.addEventListener("click", () => removeLlmServer(server.url, remove));
     value.append(state, " ", remove);

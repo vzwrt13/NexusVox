@@ -175,12 +175,13 @@ main:has(#tab-recordings.active) { max-width: none; padding-top: 24px; padding-b
   height: 44px;
   padding: 0 14px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface2);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
   color: var(--text);
   font-size: 14px;
 }
-.rec-search input:focus { border-color: var(--accent-light); outline: none; }
+.rec-search input:hover { border-color: var(--border-hover); }
+.rec-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); outline: none; }
 
 /* ── List rows ────────────────────────────────────────────────────── */
 .rec-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }

@@ -844,7 +844,7 @@ def test_start_ollama_route(flask_client, monkeypatch):
 _FAKE_DOM = """
 function el() {
   const e = {hidden: true, children: [], _t: '', _c: new Set(),
-    append(c) { this.children.push(c); },
+    append(...c) { this.children.push(...c); },
     classList: {add(c) { e._c.add(c); }, remove(...c) { c.forEach((x) => e._c.delete(x)); }}};
   Object.defineProperty(e, 'textContent', {get() { return e._t; }, set(v) { e._t = v; e.children = []; }});
   return e;
@@ -856,7 +856,7 @@ const document = {createElement: () => ({})};
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is not installed")
 def test_the_page_offers_start_for_a_stopped_ollama_and_install_for_a_missing_one():
     source = dashboard_source()
-    status = re.search(r"const STATUS_STATES.*?\n\}\n", source, re.S).group(0)
+    status = re.search(r"const STATUS_STATES.*?function actionLink.*?\n\}\n", source, re.S).group(0)
     hint = source[source.index("// ── Ollama install hint") : source.index("// ── end of Ollama install hint")]
     helpers = source[source.index(START) : source.index(END)]
     script = (
@@ -871,14 +871,15 @@ def test_the_page_offers_start_for_a_stopped_ollama_and_install_for_a_missing_on
         const stopped = el(), missing = el();
         renderModelsHint(stopped, s, {reachable: false, protocol: 'ollama', ollama: {state: 'stopped'}});
         renderModelsHint(missing, s, {reachable: false, protocol: 'ollama', ollama: {state: 'not_installed'}});
-        const button = stopped.children[0];
+        const button = stopped.children.find((c) => c.type === 'button');
         button.onclick();
         const groups = llmOptionGroups({reachable: true, protocol: 'openai', selected: 'm', recommended: [],
           other: [], servers: [], ollama: {url: 'x', active: false, reachable: false, state: 'stopped', models: []}});
         console.log(JSON.stringify({
-          stopped: [stopped.textContent, button.textContent, stopped._c.has('down'), stopped._c.has('warn')],
+          stopped: [stopped.children[0].textContent, button.textContent,
+            stopped._c.has('down'), stopped._c.has('warn')],
           started: started === button,
-          missing: [missing.textContent.slice(0, 13), missing.children[0].textContent],
+          missing: [missing.children[0].textContent.slice(0, 13), missing.children[1].textContent],
           group: groups[0].label,
         }));
         """
@@ -887,7 +888,7 @@ def test_the_page_offers_start_for_a_stopped_ollama_and_install_for_a_missing_on
         ["node", "-e", script], capture_output=True, text=True, encoding="utf-8", check=True, timeout=30
     ).stdout
     result = json.loads(out)
-    assert result["stopped"] == ["Ollama is installed but not running. ", "Start Ollama", False, False]
+    assert result["stopped"] == ["Ollama is installed but not running.", "Start Ollama", False, True]
     assert result["started"] is True
     assert result["missing"] == ["Not installed", "Install Ollama"]
     assert result["group"] == "Ollama — installed, not running"

@@ -18,9 +18,9 @@ async function loadFlaggedTranscriptions() {
         ${item.confidence != null ? `<span class="flagged-conf">${(item.confidence * 100).toFixed(1)}%</span>` : ""}
       </div>
       <div class="flagged-original"><strong>Original:</strong> ${escapeHtml(item.text)}</div>
-      ${item.audio_path ? `<button class="flagged-play-btn" onclick="playAudio(${item.id}, this)">&#9654; Play</button>` : ""}
+      ${item.audio_path ? `<button class="btn btn-ghost btn-sm flagged-play-btn" onclick="playAudio(${item.id}, this)">&#9654; Play</button>` : ""}
       <textarea class="flagged-textarea" rows="2" placeholder="Enter correct text...">${escapeHtml(item.corrected_text || "")}</textarea>
-      <button class="flagged-save-btn" onclick="saveCorrection(${item.id}, this)">Save</button>
+      <button class="btn btn-tint flagged-save-btn" onclick="saveCorrection(${item.id}, this)">Save</button>
     </div>
   `).join("");
 }

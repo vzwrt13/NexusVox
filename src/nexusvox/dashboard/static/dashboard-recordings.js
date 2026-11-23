@@ -804,8 +804,8 @@ function askDeleteRecording(detail) {
   row.hidden = false;
   row.innerHTML = `
     <span class="upload-delete-ask">Delete this ${what}? This cannot be undone.</span>
-    <button type="button" class="period-btn upload-delete-btn rec-delete-confirm">Delete</button>
-    <button type="button" class="period-btn rec-delete-cancel">Cancel</button>
+    <button type="button" class="btn btn-ghost btn-sm upload-delete-btn rec-delete-confirm">Delete</button>
+    <button type="button" class="btn btn-ghost btn-sm rec-delete-cancel">Cancel</button>
     <span class="upload-delete-error" hidden></span>`;
   row.querySelector(".rec-delete-cancel").addEventListener("click", () => {
     row.hidden = true;
@@ -1070,7 +1070,7 @@ function transcriptPanel(detail, item) {
     bar.className = "rec-transcript-bar";
     const original = recShowOriginal.has(String(item.id));
     bar.innerHTML = `<span>${original ? "As transcribed" : "Cleaned up"}</span>
-      <button type="button" class="period-btn rec-view-switch">${original ? "Show cleaned" : "Show original"}</button>`;
+      <button type="button" class="btn btn-ghost btn-sm rec-view-switch">${original ? "Show cleaned" : "Show original"}</button>`;
     bar.querySelector(".rec-view-switch").addEventListener("click", () => {
       const key = String(item.id);
       if (recShowOriginal.has(key)) recShowOriginal.delete(key);

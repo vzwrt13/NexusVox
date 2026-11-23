@@ -34,6 +34,15 @@
   --accent-glow: rgba(108, 92, 231, 0.18);
   --accent-soft: rgba(162, 155, 254, 0.35);
   --accent-fill: rgba(108, 92, 231, 0.2);
+  --accent-hover: #7b6cf0;
+  --on-accent: #fff;
+  --surface-hover: #22222a;
+  --yellow-soft: rgba(255, 212, 59, 0.13);
+  --red-soft: rgba(255, 107, 107, 0.13);
+  --accent-wash: rgba(108, 92, 231, 0.16);
+  --accent-wash-strong: rgba(108, 92, 231, 0.26);
+  --border-hover: #3a3a46;
+  color-scheme: dark;
   --green-fill: rgba(0, 210, 160, 0.15);
   --green: #00d2a0;
   --green-soft: rgba(0, 210, 160, 0.1);
@@ -66,6 +75,36 @@ a:hover { color: #c9c4ff; }
 
 button, input, select, textarea { font-family: inherit; }
 :focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+
+/* Shared controls. Every action button is `.btn` plus one kind; every native field gets the dark field look
+   (background, 1px border, violet focus) from the field rules further down. Kinds: .btn-primary (violet fill, at
+   most one per page), .btn-tint (violet wash: fix or act, e.g. Start Ollama, Download, Add), .btn-ghost (quiet:
+   Cancel, Reset, Back). `.btn-sm` is the small size. tests/test_dashboard_buttons.py guards the set. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 14px;
+  font: 500 13px/1.25 var(--font);
+  text-align: center;
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-ctl);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.btn[hidden], .status-row[hidden] { display: none; } /* display on the class would otherwise beat `hidden` */
+.btn:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.btn-sm { min-height: 28px; padding: 5px 11px; font-size: 12px; border-radius: 8px; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); color: var(--on-accent); }
+.btn-tint { background: var(--accent-wash); color: var(--accent-light); }
+.btn-tint:hover:not(:disabled) { background: var(--accent-wash-strong); color: var(--text); }
+.btn-ghost { background: var(--surface3); color: var(--text); border-color: var(--border-strong); }
+.btn-ghost:hover:not(:disabled) { border-color: var(--accent); background: var(--surface-hover); color: var(--text); }
 
 /* Sidebar: brand on top, the tab buttons stacked below it */
 header {
@@ -227,6 +266,15 @@ body::before {
 .status-line.ok { color: var(--green); }
 .status-line.warn { color: var(--yellow); }
 .status-line.down { color: var(--red); }
+/* A status line with an action (setStatusRow): a coloured dot, the sentence, the button on the right. The dot carries
+   the state (yellow = needs action, green = ready); the sentence stays neutral. */
+.status-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; color: var(--text-dim); }
+.status-row.status-line.ok, .status-row.status-line.warn, .status-row.status-line.down { color: var(--text-dim); }
+.status-row::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+.status-row.ok::before { background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+.status-row.warn::before { background: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-soft); }
+.status-row.down::before { background: var(--red); box-shadow: 0 0 0 3px var(--red-soft); }
+.status-row-text { flex: 1 1 200px; min-width: 0; }
 .model-status .status-line { margin-top: 0; }
 .denied-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; margin: 0; padding: 12px 16px; text-align: center; font-weight: 600; background: var(--surface3); border-bottom: 1px solid var(--red); }
 
@@ -273,7 +321,7 @@ body::before {
 
 /* Select dropdown */
 .select-input {
-  background: var(--surface2);
+  background-color: var(--bg);
   border: 1px solid var(--border-strong);
   color: var(--text);
   font-size: 13px;
@@ -288,7 +336,8 @@ body::before {
   background-position: right 10px center;
   padding-right: 30px;
 }
-.select-input:focus { outline: none; border-color: var(--accent-light); }
+.select-input:hover:not(:disabled) { border-color: var(--border-hover); }
+.select-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 .select-input:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .hotkey-current { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 2px 0 8px; }
@@ -324,7 +373,7 @@ body::before {
 .hotkey-mod input { accent-color: var(--accent); margin: 0; }
 .hotkey-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .hotkey-key { min-width: min(150px, 100%); padding-top: 5px; padding-bottom: 5px; }
-.period-btn.recording { color: var(--text); border-color: var(--red); animation: hotkey-pulse 1s ease-in-out infinite; }
+.btn.recording { color: var(--text); border-color: var(--red); animation: hotkey-pulse 1s ease-in-out infinite; }
 @keyframes hotkey-pulse { 50% { border-color: var(--border-strong); } }
 
 .settings-hint {
@@ -399,7 +448,7 @@ body::before {
 .date-label { font-size: 12px; color: var(--text-dim); }
 
 .date-input {
-  background: var(--surface2);
+  background: var(--bg);
   border: 1px solid var(--border-strong);
   color: var(--text);
   font-size: 12px;
@@ -407,7 +456,8 @@ body::before {
   border-radius: var(--radius-ctl);
   color-scheme: dark;
 }
-.date-input:focus { outline: none; border-color: var(--accent-light); }
+.date-input:hover { border-color: var(--border-hover); }
+.date-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 
 .period-btn {
   background: var(--surface2);
@@ -423,7 +473,7 @@ body::before {
 .period-btn:hover { color: var(--text); border-color: var(--border-strong); }
 .period-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .period-btn:disabled:hover { color: var(--text-dim); border-color: var(--border); }
-.period-btn.active { color: #000; background: var(--text); border-color: var(--text); }
+.period-btn.active { color: var(--accent-light); background: var(--accent-wash); border-color: transparent; }
 
 .refresh-btn {
   background: transparent;
@@ -558,21 +608,10 @@ canvas { width: 100% !important; max-height: 260px; }
   resize: vertical;
   margin-bottom: 8px;
 }
-.flagged-textarea:focus { outline: none; border-color: var(--accent-light); }
+.flagged-textarea:hover { border-color: var(--border-hover); }
+.flagged-textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 
-.flagged-save-btn {
-  background: var(--accent);
-  border: none;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-  padding: 7px 18px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.flagged-save-btn:hover { filter: brightness(1.15); }
-.flagged-save-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+/* .flagged-save-btn and .flagged-play-btn are only hooks for the review and edit scripts; the look is .btn */
 #upload-transcribe:disabled { opacity: 0.35; filter: grayscale(0.6); }
 
 /* Model switch status */
@@ -809,10 +848,12 @@ canvas { width: 100% !important; max-height: 260px; }
   font: inherit;
   padding: 2px 6px;
   color: var(--text);
-  background: var(--surface3);
-  border: 1px solid var(--accent-light);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
 }
+.upload-rename-input:hover { border-color: var(--border-hover); }
+.upload-rename-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 
 .upload-model {
   background: var(--surface3);
@@ -949,19 +990,7 @@ canvas { width: 100% !important; max-height: 260px; }
   font-weight: 500;
 }
 
-.flagged-play-btn {
-  background: var(--surface2);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  font-size: 12px;
-  padding: 5px 14px;
-  border-radius: 999px;
-  cursor: pointer;
-  margin-bottom: 10px;
-  transition: all 0.15s;
-}
-.flagged-play-btn:hover { border-color: var(--accent-light); color: var(--accent-light); }
-.flagged-play-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.flagged-play-btn { margin-bottom: 10px; }
 .review-load-more { display: block; margin: 16px auto 0; padding: 8px 20px; }
 
 .dict-form {
@@ -974,14 +1003,16 @@ canvas { width: 100% !important; max-height: 260px; }
 .dict-input {
   flex: 1 1 180px;
   min-width: 0;
-  background: var(--surface2);
+  background: var(--bg);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-ctl);
   color: var(--text);
   font-size: 13px;
   padding: 7px 12px;
 }
-.dict-input:focus { outline: none; border-color: var(--accent-light); }
+.dict-input::placeholder, .flagged-textarea::placeholder { color: var(--text-faint); }
+.dict-input:hover { border-color: var(--border-hover); }
+.dict-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 .dict-arrow { color: var(--text-dim); }
 .dict-add-btn { margin-bottom: 0; }
 .dict-list { display: flex; flex-direction: column; gap: 6px; }
@@ -1323,7 +1354,7 @@ canvas { width: 100% !important; max-height: 260px; }
 .upload-delete-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
 .upload-delete-ask { font-size: 13px; color: var(--text-dim); }
 .upload-delete-btn { color: var(--red); }
-.upload-delete-btn:hover { border-color: var(--red); color: var(--red); }
+.upload-delete-btn:hover, .btn.upload-delete-btn:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
 
 .flash-highlight { animation: flash-highlight 2s ease-out; }
 @keyframes flash-highlight {

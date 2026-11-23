@@ -524,7 +524,7 @@ def test_the_upload_tab_shows_the_selected_file_and_lets_it_be_removed():
     handler = handler[: handler.index("});")]
     assert "selectUploadFile(null)" in handler and "uploadBrowse.focus()" in handler
     assert "#upload-transcribe:disabled" in css and ".upload-zone.has-file.drag-over" in css
-    assert ".flagged-save-btn:disabled { opacity: 0.6;" in css  # shared button look is untouched
+    assert ".btn:disabled" in css  # the shared button set carries the disabled look
     assert "--green-fill" not in css[css.index(".upload-zone.has-file") :][:400]
 
 

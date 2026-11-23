@@ -133,7 +133,7 @@ function renderPolishPresets() {
     <div class="dict-row" data-id="${p.id}">
       <span class="dict-wrong">${escapeHtml(p.name)}${p.is_default ? " (default)" : ""}</span>
       <span class="snippet-text">${escapeHtml(p.instruction)}</span>
-      <button class="flagged-play-btn" onclick="editPolishPreset(${p.id})">Edit</button>
+      <button class="btn btn-ghost btn-sm" onclick="editPolishPreset(${p.id})">Edit</button>
       <button class="dict-delete" title="Remove" onclick="deletePolishPreset(${p.id})">&#10005;</button>
     </div>`);
 }
@@ -196,7 +196,7 @@ async function loadDictionarySuggestions() {
       <span class="dict-wrong">${escapeHtml(s.wrong)}</span>
       <span class="dict-arrow">&rarr;</span>
       <span class="dict-right">${escapeHtml(s.right)}</span>
-      <button class="flagged-play-btn" onclick="acceptDictionarySuggestion(${s.id})">Add</button>
+      <button class="btn btn-tint btn-sm" onclick="acceptDictionarySuggestion(${s.id})">Add</button>
       <button class="dict-delete" title="Dismiss" onclick="dismissDictionarySuggestion(${s.id})">&#10005;</button>
     </div>`).join("") : "";
 }

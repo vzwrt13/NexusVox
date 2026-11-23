@@ -181,8 +181,8 @@ async function loadMoreReviewTranscriptions() {
         <span class="review-duration">${formatDuration(item.duration_ms)}</span>
       </div>
       <div class="flagged-original"><strong>Original:</strong> ${escapeHtml(item.text)}</div>
-      <button class="flagged-play-btn" onclick="toggleReviewAudio(this.closest('.flagged-card'))">&#9654; Play</button>
-      <button class="flagged-play-btn review-retry-btn" title="Transcribe the stored audio again with the current model"
+      <button class="btn btn-ghost btn-sm flagged-play-btn" onclick="toggleReviewAudio(this.closest('.flagged-card'))">&#9654; Play</button>
+      <button class="btn btn-ghost btn-sm flagged-play-btn review-retry-btn" title="Transcribe the stored audio again with the current model"
         onclick="retryReviewTranscription(this.closest('.flagged-card'), this)">&#8635; Retry</button>
       <div class="review-checkbox-row">
         <label class="review-label">
@@ -193,7 +193,7 @@ async function loadMoreReviewTranscriptions() {
       </div>
       <textarea class="flagged-textarea review-correction" rows="2"
         placeholder="Enter correct text..." style="display: ${defaultCorrect ? "none" : "block"}">${escapeHtml(item.corrected_text || "")}</textarea>
-      <button class="flagged-save-btn" onclick="submitReview(${item.id}, this)">Submit Review</button>
+      <button class="btn btn-tint flagged-save-btn" onclick="submitReview(${item.id}, this)">Submit Review</button>
     </div>`;
   }).join(""));
   updateReviewProgress();
@@ -203,10 +203,10 @@ async function loadMoreReviewTranscriptions() {
 function showReviewSuggestions(suggestions) {
   const box = document.getElementById("review-suggestions");
   box.innerHTML = "<span>Add to dictionary?</span>" + suggestions.map((sg) => `
-    <button class="flagged-play-btn" onclick="acceptReviewSuggestion(this)"
+    <button class="btn btn-ghost btn-sm flagged-play-btn" onclick="acceptReviewSuggestion(this)"
       data-wrong="${escapeHtml(sg.wrong)}" data-right="${escapeHtml(sg.right)}">
       <s>${escapeHtml(sg.wrong)}</s> &rarr; ${escapeHtml(sg.right)}
-    </button>`).join("") + '<button class="flagged-play-btn" onclick="dismissReviewSuggestions()">Dismiss</button>';
+    </button>`).join("") + '<button class="btn btn-ghost btn-sm flagged-play-btn" onclick="dismissReviewSuggestions()">Dismiss</button>';
   box.hidden = false;
 }
 

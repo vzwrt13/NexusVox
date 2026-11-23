@@ -248,8 +248,8 @@ async function loadPendingMeetings() {
       <div class="flagged-meta"><span>${p.started_at ? parseServerTime(p.started_at).toLocaleString() : ""}</span></div>
       <div class="upload-filename">${escapeHtml(p.name)}</div>
       <div class="upload-delete-row">
-        <button type="button" class="period-btn pending-transcribe">Transcribe</button>
-        <button type="button" class="period-btn upload-delete-btn pending-delete">Delete</button>
+        <button type="button" class="btn btn-ghost btn-sm pending-transcribe">Transcribe</button>
+        <button type="button" class="btn btn-ghost btn-sm upload-delete-btn pending-delete">Delete</button>
       </div>
       <p class="pending-error" hidden></p>
     </div>`).join("");
@@ -269,8 +269,8 @@ async function loadPendingMeetings() {
     card.querySelector(".pending-delete").addEventListener("click", () => {
       row.innerHTML = `
         <span class="upload-delete-ask">Delete this recording and its audio files? This cannot be undone.</span>
-        <button type="button" class="period-btn upload-delete-btn pending-delete-confirm">Delete</button>
-        <button type="button" class="period-btn pending-delete-cancel">Cancel</button>`;
+        <button type="button" class="btn btn-ghost btn-sm upload-delete-btn pending-delete-confirm">Delete</button>
+        <button type="button" class="btn btn-ghost btn-sm pending-delete-cancel">Cancel</button>`;
       row.querySelector(".pending-delete-cancel").addEventListener("click", loadPendingMeetings);
       row.querySelector(".pending-delete-confirm").addEventListener("click", async () => {
         const resp = await fetch(`/api/meetings/pending/${encodeURIComponent(name)}`, { method: "DELETE" });

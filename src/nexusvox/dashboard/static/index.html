@@ -136,8 +136,8 @@
               <select id="hotkey-key-select" class="select-input hotkey-key"></select>
             </div>
             <div class="hotkey-actions">
-              <button type="button" id="hotkey-record-btn" class="period-btn">Record</button>
-              <button type="button" id="hotkey-reset-btn" class="period-btn">Reset to default</button>
+              <button type="button" id="hotkey-record-btn" class="btn btn-ghost btn-sm">Record</button>
+              <button type="button" id="hotkey-reset-btn" class="btn btn-ghost btn-sm">Reset to default</button>
             </div>
           </div>
         </div>
@@ -200,7 +200,7 @@
             <input type="text" id="dict-wrong" class="dict-input" placeholder="As transcribed, e.g. nexus fox" required>
             <span class="dict-arrow">&rarr;</span>
             <input type="text" id="dict-right" class="dict-input" placeholder="Should be, e.g. NexusVox" required>
-            <button type="submit" class="flagged-play-btn dict-add-btn">Add</button>
+            <button type="submit" class="btn btn-tint dict-add-btn">Add</button>
           </form>
           <div class="vocab-box" id="dict-box">
             <button type="button" class="vocab-toggle" id="dict-toggle" aria-expanded="true" aria-controls="dict-body">Dictionary</button>
@@ -234,8 +234,8 @@
             <input type="text" id="preset-name" class="dict-input" placeholder="Name, e.g. prompt engineer" required>
             <textarea id="preset-instruction" class="dict-input snippet-expansion" rows="3" placeholder="Instruction, e.g. Rewrite this as a clear, specific prompt for an AI assistant: state the goal, the context and the expected output." required></textarea>
             <label class="settings-hint"><input type="checkbox" id="preset-default"> Default when nothing is said</label>
-            <button type="submit" class="flagged-play-btn dict-add-btn" id="preset-save">Add</button>
-            <button type="button" class="flagged-play-btn dict-add-btn" id="preset-cancel" hidden>Cancel</button>
+            <button type="submit" class="btn btn-tint dict-add-btn" id="preset-save">Add</button>
+            <button type="button" class="btn btn-ghost dict-add-btn" id="preset-cancel" hidden>Cancel</button>
           </form>
           <div class="vocab-box" id="preset-box">
             <button type="button" class="vocab-toggle" id="preset-toggle" aria-expanded="true" aria-controls="preset-body">Presets</button>
@@ -389,7 +389,7 @@
             <p>Used by Cleanup, Polish and upload cleanup. Models that are not installed are greyed out with their download size; nothing downloads until you confirm it. It shares the GPU with the speech model - mind the VRAM.</p>
             <p id="llm-model-hint" class="settings-hint status-line" hidden></p>
             <p id="llm-slow-hint" class="settings-hint status-line warn" hidden>Noticeable latency on this hardware: Cleanup and Polish are slower.</p>
-            <button type="button" id="llm-pull-selected" class="btn" hidden></button>
+            <button type="button" id="llm-pull-selected" class="btn btn-tint" hidden></button>
           </div>
           <select id="llm-model-select" class="select-input"></select>
         </div>
@@ -397,9 +397,9 @@
           <span class="model-status-spinner"></span>
           <span id="llm-pull-text"></span>
           <progress id="llm-pull-progress" max="100" value="0" style="margin-left: 8px;"></progress>
-          <button type="button" id="llm-pull-cancel" class="btn" style="margin-left: 8px;">Cancel</button>
-          <button type="button" id="llm-pull-confirm" class="btn" style="margin-left: 8px;" hidden>Download</button>
-          <button type="button" id="llm-pull-decline" class="btn" style="margin-left: 8px;" hidden>Not now</button>
+          <button type="button" id="llm-pull-cancel" class="btn btn-ghost btn-sm" style="margin-left: 8px;">Cancel</button>
+          <button type="button" id="llm-pull-confirm" class="btn btn-tint btn-sm" style="margin-left: 8px;" hidden>Download</button>
+          <button type="button" id="llm-pull-decline" class="btn btn-ghost btn-sm" style="margin-left: 8px;" hidden>Not now</button>
         </div>
         <div class="settings-sub" id="llm-roles-card">
           <h3 class="overview-title">Advanced: language models per task</h3>
@@ -441,7 +441,7 @@
             <input type="text" id="llm-server-url" class="dict-input" placeholder="http://127.0.0.1:8081" aria-label="Server address with port" style="max-width: 280px;">
             <input type="password" id="llm-server-key" class="dict-input" placeholder="API key (optional)" aria-label="API key" autocomplete="off" style="max-width: 180px;">
             <input type="text" id="llm-server-name" class="dict-input" placeholder="Name (optional)" aria-label="Name" maxlength="60" style="max-width: 160px;">
-            <button type="button" id="llm-server-add" class="btn">Add custom server</button>
+            <button type="button" id="llm-server-add" class="btn btn-ghost">Add custom server</button>
           </div>
           <p id="llm-server-status" class="settings-hint status-line"></p>
         </div>
@@ -537,7 +537,7 @@
             <p>NexusVox also writes its log to <code id="log-dir">%LOCALAPPDATA%\NexusVox\logs</code> (one file per day, the last 7 days are kept). Send the file when you report a problem. Dictated text is shortened there to its first 20 characters and its length.</p>
             <p id="log-open-error" class="settings-hint" hidden></p>
           </div>
-          <button type="button" class="btn" id="open-log-folder">Open log folder</button>
+          <button type="button" class="btn btn-ghost" id="open-log-folder">Open log folder</button>
         </div>
 
         <div class="setting-row" style="margin-top: 16px;">
@@ -644,7 +644,7 @@
           </label>
           <p class="settings-hint" style="margin-top: 0;">Also sent: the NexusVox version, the Windows version and whether this PC runs CPU-only or with an NVIDIA GPU. Nothing is sent until you click Send. Your audio and dictated text never leave this PC.</p>
           <div class="feedback-actions">
-            <button type="submit" class="btn" id="send-feedback">Send</button>
+            <button type="submit" class="btn btn-primary" id="send-feedback">Send</button>
             <button type="button" class="link-btn" id="feedback-preview-toggle">Show what will be sent</button>
           </div>
           <pre id="feedback-preview" class="feedback-preview" hidden></pre>
@@ -656,7 +656,7 @@
             <h3>Web form</h3>
             <p>Opens the feedback form in your browser, with the same three facts filled in. No log is attached there.</p>
           </div>
-          <button type="button" class="btn" id="open-feedback-form">Open the web form</button>
+          <button type="button" class="btn btn-ghost" id="open-feedback-form">Open the web form</button>
         </div>
 
         <div class="setting-row" style="margin-top: 16px;">
@@ -722,9 +722,9 @@
       <!-- Your week: the report of one Monday-to-Sunday week -->
       <div id="analytics-week" class="analytics-view" hidden>
         <div class="week-switcher">
-          <button type="button" class="period-btn" id="week-prev" aria-label="Previous week">&#x2039;</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="week-prev" aria-label="Previous week">&#x2039;</button>
           <span class="week-range" id="week-range" aria-live="polite">--</span>
-          <button type="button" class="period-btn" id="week-next" aria-label="Next week">&#x203a;</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="week-next" aria-label="Next week">&#x203a;</button>
           <button type="button" class="link-btn" id="week-current">This week</button>
         </div>
         <p class="week-headline" id="week-headline"></p>
@@ -832,8 +832,8 @@
           <input type="date" id="filter-start" class="date-input">
           <label class="date-label" for="filter-end">To</label>
           <input type="date" id="filter-end" class="date-input">
-          <button class="period-btn" id="btn-apply-dates">Apply</button>
-          <button class="period-btn" id="btn-clear-dates">Clear</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-apply-dates">Apply</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-dates">Clear</button>
         </div>
         <button class="refresh-btn" id="btn-refresh" title="Refresh data">&#x21bb;</button>
       </div>
@@ -1043,8 +1043,8 @@
             <p>Recording a conversation without everyone's consent can be a criminal offence (in Germany, &sect;&nbsp;201 StGB). Tell the participants that you are recording.</p>
             <label class="meeting-consent-skip"><input type="checkbox" id="meeting-consent-skip"> Don't show this again</label>
             <div class="hotkey-actions">
-              <button type="button" class="flagged-save-btn" id="meeting-consent-ok">Start recording</button>
-              <button type="button" class="period-btn" id="meeting-consent-cancel">Cancel</button>
+              <button type="button" class="btn btn-primary" id="meeting-consent-ok">Start recording</button>
+              <button type="button" class="btn btn-ghost" id="meeting-consent-cancel">Cancel</button>
             </div>
           </div>
 
@@ -1135,8 +1135,8 @@
           </div>
 
           <div class="upload-actions rec-dialog-actions">
-            <button type="submit" value="cancel" class="period-btn" id="upload-cancel">Cancel</button>
-            <button type="button" class="flagged-save-btn" id="upload-transcribe" disabled>Transcribe</button>
+            <button type="submit" value="cancel" class="btn btn-ghost" id="upload-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="upload-transcribe" disabled>Transcribe</button>
           </div>
         </form>
       </dialog>
@@ -1153,7 +1153,7 @@
       <p id="review-progress" class="review-progress"></p>
       <div id="review-suggestions" class="review-suggestions" hidden></div>
       <div id="review-list" class="flagged-list"></div>
-      <button id="review-load-more" class="flagged-play-btn review-load-more" hidden onclick="loadMoreReviewTranscriptions()">Load more</button>
+      <button id="review-load-more" class="btn btn-ghost review-load-more" hidden onclick="loadMoreReviewTranscriptions()">Load more</button>
     </section>
 
     <!-- Dev Tab (hidden unless [experimental] dev_tab) -->
@@ -1246,7 +1246,7 @@
         <p class="setup-lead">Hold a key, speak, let go: your words are typed into whatever app you are in. The speech is recognised on this computer.</p>
         <p class="setup-text">Setting up takes about a minute: pick your microphone, check your hotkey and say hello.</p>
         <div class="setup-actions">
-          <button type="button" class="setup-btn primary" data-setup-next>Get started</button>
+          <button type="button" class="btn btn-primary" data-setup-next>Get started</button>
         </div>
       </section>
 
@@ -1263,8 +1263,8 @@
         </div>
         <p class="status-line" id="setup-mic-status" role="status">Checking the microphone...</p>
         <div class="setup-actions">
-          <button type="button" class="setup-btn" data-setup-back>Back</button>
-          <button type="button" class="setup-btn primary" data-setup-next>Continue</button>
+          <button type="button" class="btn btn-ghost" data-setup-back>Back</button>
+          <button type="button" class="btn btn-primary" data-setup-next>Continue</button>
         </div>
       </section>
 
@@ -1273,7 +1273,7 @@
         <div class="setup-pip" data-pip-pose="idle" data-pip-line="Pick a key you can reach without looking." hidden></div>
         <div class="setup-hotkey">
           <span class="keycaps" id="setup-hotkey-keycaps" aria-label="Your dictation hotkey"></span>
-          <button type="button" class="period-btn" id="setup-hotkey-record">Use other keys</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="setup-hotkey-record">Use other keys</button>
         </div>
         <p class="status-line" id="setup-hotkey-status" role="status" hidden></p>
         <p class="status-line warn" id="setup-hotkey-alt-hint" hidden></p>
@@ -1304,8 +1304,8 @@
         <p class="status-line" id="setup-test-status" role="status">Waiting for your words...</p>
         <p class="status-line" id="setup-model-status" role="status"></p>
         <div class="setup-actions">
-          <button type="button" class="setup-btn" data-setup-back>Back</button>
-          <button type="button" class="setup-btn primary" data-setup-next>Continue</button>
+          <button type="button" class="btn btn-ghost" data-setup-back>Back</button>
+          <button type="button" class="btn btn-primary" data-setup-next>Continue</button>
         </div>
       </section>
 
@@ -1320,8 +1320,8 @@
         </dl>
         <p class="setup-text">Everything here can be changed later under Settings, and you can run this setup again from there.</p>
         <div class="setup-actions">
-          <button type="button" class="setup-btn" data-setup-back>Back</button>
-          <button type="button" class="setup-btn primary" id="setup-finish">Open Home</button>
+          <button type="button" class="btn btn-ghost" data-setup-back>Back</button>
+          <button type="button" class="btn btn-primary" id="setup-finish">Open Home</button>
         </div>
       </section>
 

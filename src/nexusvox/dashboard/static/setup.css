@@ -106,20 +106,6 @@
 .setup-summary dd { margin: 0; }
 
 .setup-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
-.setup-btn {
-  padding: 10px 18px;
-  font: inherit;
-  font-size: 14px;
-  color: var(--text);
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-ctl);
-  cursor: pointer;
-}
-.setup-btn:hover { background: var(--surface2); }
-.setup-btn.primary { font-weight: 600; background: var(--accent); border-color: var(--accent); }
-.setup-btn.primary:hover { background: var(--accent-light); border-color: var(--accent-light); color: var(--bg); }
-.setup-btn:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
 
 .setup-skip { margin: 20px 0 0; text-align: center; }
 

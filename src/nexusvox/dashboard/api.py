@@ -18,6 +18,7 @@ from ..extensions import ExtensionRegistry
 from ..meetings.live import LiveTranscriber, WindowTranscriber
 from ..meetings.session import MeetingSession
 from ..storage.db import Database
+from ..system.update_install import UpdateInstaller
 from ..transcription.transcriber import BaseTranscriber
 from .api_analytics import AnalyticsMixin
 from .api_commands import CommandsMixin
@@ -59,6 +60,7 @@ class DashboardAPI(
         benchmarks_dir: Path | None = None,
         extensions: ExtensionRegistry | None = None,
         meeting: MeetingSession | None = None,
+        on_quit: Callable[[], None] | None = None,
     ) -> None:
         self._sf = session_factory
         self._config = config
@@ -84,3 +86,5 @@ class DashboardAPI(
         # The dashboard and the hotkey both start and stop meetings: one at a time, and a press that arrives
         # while another is being handled sees its outcome.
         self._meeting_lock = threading.RLock()
+        # *Install update*: downloads only on that click, then quits the app through `on_quit` (the tray's Quit).
+        self._updates = UpdateInstaller(on_quit)

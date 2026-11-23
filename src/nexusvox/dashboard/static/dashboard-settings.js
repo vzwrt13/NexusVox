@@ -299,6 +299,7 @@ async function checkForUpdate() {
     reply = { error: "dashboard", message: "The dashboard could not be reached." };
   }
   checkUpdateButton.disabled = false;
+  updateInstall.hidden = true;
   if (reply.ok) {
     // An available update is information, not a caveat: neutral. Green only when the comparison was made.
     setStatus(updateStatus, reply.latest && !reply.newer ? "ok" : undefined, reply.message);
@@ -307,11 +308,98 @@ async function checkForUpdate() {
       updateLink.dataset.url = reply.url;
       updateLink.hidden = false;
     }
+    // The installed app with a release that carries the installer: one click installs it. From source, only the link.
+    if (reply.newer && reply.can_install && reply.installer) {
+      updateInstall.textContent = `Install update ${reply.latest} (${updateMegabytes(reply.installer.size)} MB)`;
+      updateInstall.hidden = false;
+    }
   } else {
     setStatus(updateStatus, "down", reply.message || "The check failed.");
   }
 }
 checkUpdateButton.addEventListener("click", checkForUpdate);
+
+// ── Install update ──────────────────────────────────────────────────
+// Nothing is downloaded before the click. The server downloads, checks the signature, starts the installer and
+// quits the app; the page only polls the progress.
+const updateInstall = document.getElementById("update-install");
+const updateProgress = document.getElementById("update-progress");
+const updateCancel = document.getElementById("update-cancel");
+let updatePollTimer = null;
+function updateMegabytes(bytes) {
+  return (Math.max(0, Number(bytes) || 0) / (1024 * 1024)).toFixed(1);
+}
+function renderUpdate(status) {
+  const state = status.state;
+  const busy = state === "downloading" || state === "verifying" || state === "installing";
+  checkUpdateButton.disabled = busy;
+  updateInstall.hidden = busy || !(state === "failed" || state === "cancelled");
+  updateCancel.hidden = state !== "downloading";
+  updateProgress.hidden = !(state === "downloading" || state === "verifying");
+  if (state === "downloading") {
+    const total = Number(status.total) || 0;
+    updateProgress.value = total ? Math.min(1, status.received / total) : 0;
+    const text = total
+      ? `Downloading ${status.version || "the update"}: ${updateMegabytes(status.received)} of ${updateMegabytes(total)} MB`
+      : "Downloading the update...";
+    setStatus(updateStatus, undefined, text);
+  } else if (state === "verifying") {
+    updateProgress.value = 1;
+    setStatus(updateStatus, undefined, "Checking the installer's signature...");
+  } else if (state === "installing") {
+    setStatus(updateStatus, "ok", status.message || "Installing the update. NexusVox closes now and starts again.");
+  } else if (state === "failed") {
+    setStatus(updateStatus, "down", status.message || "Installing the update failed.");
+    updateLink.hidden = !updateLink.dataset.url; // the manual way stays open
+  } else if (state === "cancelled") {
+    setStatus(updateStatus, undefined, status.message || "Download cancelled.");
+  }
+  if (state !== "idle") updateStatus.hidden = false;
+  return state === "downloading" || state === "verifying";
+}
+async function pollUpdate() {
+  clearTimeout(updatePollTimer);
+  let status;
+  try {
+    const r = await fetch("/api/update/status");
+    status = await r.json();
+  } catch (e) {
+    // The app quits once the installer runs, and the dashboard with it: that is the expected end.
+    if (updateStatus.dataset.installing) return;
+    setStatus(updateStatus, "down", "The dashboard could not be reached.");
+    return;
+  }
+  if (status.state === "installing") updateStatus.dataset.installing = "1";
+  if (renderUpdate(status)) updatePollTimer = setTimeout(pollUpdate, 500);
+}
+updateInstall.addEventListener("click", async () => {
+  updateInstall.hidden = true;
+  updateLink.hidden = true;
+  let reply;
+  try {
+    const r = await fetch("/api/update/install", { method: "POST" });
+    reply = await r.json().catch(() => ({ error: "server", message: "The update could not start." }));
+  } catch (e) {
+    reply = { error: "dashboard", message: "The dashboard could not be reached." };
+  }
+  if (reply.error) {
+    setStatus(updateStatus, "down", reply.message || "The update could not start.");
+    updateLink.hidden = !updateLink.dataset.url;
+    return;
+  }
+  renderUpdate(reply);
+  pollUpdate();
+});
+updateCancel.addEventListener("click", async () => {
+  updateCancel.disabled = true;
+  try {
+    await fetch("/api/update/cancel", { method: "POST" });
+  } catch (e) {
+    // the next poll shows what happened
+  }
+  updateCancel.disabled = false;
+  pollUpdate();
+});
 // The default browser opens the page (the server does it); a link inside the dashboard window would load the dashboard.
 updateLink.addEventListener("click", async () => {
   const url = updateLink.dataset.url;
@@ -470,6 +558,7 @@ async function saveMicrophone(select) {
 microphoneSelects[0].addEventListener("change", () => saveMicrophone(microphoneSelects[0]));
 
 async function loadSettings() {
+  pollUpdate(); // a download started before the page was reloaded keeps running on the server: show it again
   const s = await api("/api/settings");
   lastSettings = s;
   translateToggle.checked = s.translate_enabled;

@@ -61,7 +61,7 @@ const document = new Proxy({}, {
     return stub();
   },
 });
-const page = { document, getComputedStyle: () => stub(), setInterval: () => 0, setTimeout: () => 0,
+const page = { document, getComputedStyle: () => stub(), setInterval: () => 0, setTimeout: () => 0, clearTimeout() {},
   localStorage: { getItem: () => null, setItem() {} }, location: { hash: "", pathname: "/", search: "" },
   addEventListener() {}, fetch: () => new Promise(() => {}), URLSearchParams, console };
 page.window = page;

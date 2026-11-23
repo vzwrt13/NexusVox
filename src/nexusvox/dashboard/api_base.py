@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from ..extensions import ExtensionRegistry
     from ..meetings.session import MeetingSession
     from ..storage.db import Database
+    from ..system.update_install import UpdateInstaller
     from ..transcription.transcriber import BaseTranscriber
     from .file_jobs import FileJobs
 
@@ -48,6 +49,7 @@ class DashboardState:
     extensions: ExtensionRegistry
     _meeting: MeetingSession
     _meeting_lock: threading.RLock
+    _updates: UpdateInstaller
 
     # Defined by `SettingsMixin`.
     get_settings: Callable[[], dict]

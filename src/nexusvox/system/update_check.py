@@ -1,8 +1,9 @@
 """Is a newer release out? One GET to the GitHub API, only when the user clicks *Check for updates*.
 
-Nothing is downloaded or installed from here: the answer is a message and a link to the release page. The request
-carries no identifier of the user or the PC (no cookie, no account, no machine id); the User-Agent names the app
-and its version, which GitHub requires some User-Agent for.
+Nothing is downloaded or installed from here: the answer is a message, a link to the release page and, when the
+release carries the Windows installer, where it is and how large (`system/update_install.py` downloads it, but only
+on a second click). The request carries no identifier of the user or the PC (no cookie, no account, no machine id);
+the User-Agent names the app and its version, which GitHub requires some User-Agent for.
 """
 
 from __future__ import annotations
@@ -20,6 +21,11 @@ logger = logging.getLogger(__name__)
 REPO = "vzwrt13/NexusVox"
 LATEST_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_URL = f"https://github.com/{REPO}/releases"
+# The one release asset the app may download: the per-user installer, under its fixed name (packaging/nexusvox.iss).
+INSTALLER_NAME = "NexusVox-Setup.exe"
+_DOWNLOAD_PREFIX = f"https://github.com/{REPO}/releases/download/"
+_TAG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
+_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def is_release_url(url: object) -> bool:
@@ -29,6 +35,29 @@ def is_release_url(url: object) -> bool:
     if url == RELEASES_URL:
         return True
     return url.startswith(RELEASES_URL) and url[len(RELEASES_URL)] in "/?#" and not url.startswith(RELEASES_URL + "/..")
+
+
+def is_installer_url(url: object) -> bool:
+    """True only for `NexusVox-Setup.exe` attached to a release of this project; the one file the app downloads."""
+    if not isinstance(url, str) or not url.startswith(_DOWNLOAD_PREFIX):
+        return False
+    tag, slash, name = url[len(_DOWNLOAD_PREFIX) :].partition("/")
+    return bool(slash) and name == INSTALLER_NAME and bool(_TAG_RE.match(tag)) and ".." not in tag
+
+
+def _installer(assets: object) -> dict | None:
+    """`{"url", "size", "sha256"}` of the release's installer, or None when the release has none this app may use."""
+    if not isinstance(assets, list):
+        return None
+    for asset in assets:
+        if not isinstance(asset, dict) or asset.get("name") != INSTALLER_NAME:
+            continue
+        url, size, digest = asset.get("browser_download_url"), asset.get("size"), asset.get("digest")
+        if not is_installer_url(url) or not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+            return None
+        sha256 = digest[len("sha256:") :] if isinstance(digest, str) and _DIGEST_RE.match(digest) else None
+        return {"url": url, "size": size, "sha256": sha256}
+    return None
 
 
 # httpx applies this to each phase (connect, read, ...) and not to the DNS lookup, so `_get` also caps the whole call.
@@ -91,7 +120,9 @@ def _get(headers: dict[str, str]) -> httpx.Response:
 
 
 def check_for_update(current: str | None = None) -> dict:
-    """`{"ok": True, "current", "latest", "newer", "url", "message"}`, or `{"error", "message"}` when it cannot tell."""
+    """`{"ok": True, "current", "latest", "newer", "url", "installer", "message"}`, or `{"error", "message"}` when it
+    cannot tell. `installer` is `{"url", "size", "sha256"}` for a newer release that carries the installer, else None;
+    `sha256` is None when GitHub sent no digest."""
     current = current or installed_version()
     headers = {"User-Agent": f"NexusVox/{current}", "Accept": "application/vnd.github+json"}
     try:
@@ -107,6 +138,7 @@ def check_for_update(current: str | None = None) -> dict:
             "latest": None,
             "newer": False,
             "url": RELEASES_URL,
+            "installer": None,
             "message": "GitHub shows no published release yet, so there is nothing to compare with.",
         }
     if response.status_code != 200:
@@ -131,5 +163,6 @@ def check_for_update(current: str | None = None) -> dict:
         "latest": shown,
         "newer": newer,
         "url": _release_page(body.get("html_url"), tag.strip()),
+        "installer": _installer(body.get("assets")) if newer else None,
         "message": f"Version {shown} is available." if newer else "You have the newest version.",
     }

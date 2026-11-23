@@ -576,10 +576,24 @@ class SettingsMixin(DashboardState):
     def update_check(self) -> dict:
         """Asks GitHub for the newest release; only the *Check for updates* click calls this."""
         try:
-            return check_for_update()
+            result = check_for_update()
         except Exception:  # the page shows a plain line instead of Flask's error page
             logger.exception("Update check failed")
             return {"error": "unreadable", "message": "The check failed. Try again later."}
+        if "error" not in result:
+            # The installer is downloaded only from what this check found, never from a URL the page sends.
+            result["can_install"] = self._updates.offer(result)
+        return result
+
+    def install_update(self) -> dict:
+        """*Install update*: download, verify and run the installer the last check found, then quit."""
+        return self._updates.start()
+
+    def cancel_update(self) -> dict:
+        return self._updates.cancel()
+
+    def update_status(self) -> dict:
+        return self._updates.status()
 
     def open_release_page(self, url: object) -> dict:
         """Opens a releases page of this project in the default browser; any other URL is refused."""

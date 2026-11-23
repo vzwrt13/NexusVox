@@ -16,6 +16,8 @@ ORDER = [
     "dashboard-pip.js",
     "dashboard-pip-texts.js",
     "dashboard-pip-greeting.js",
+    "dashboard-pip-whats-new.js",
+    "dashboard-pip-tour.js",
     "dashboard-settings.js",
     "dashboard-feedback.js",
     "dashboard-settings-models.js",

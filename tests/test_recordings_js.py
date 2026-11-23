@@ -634,3 +634,344 @@ def test_without_storage_the_handle_still_works():
         out([widthSet(), storedRecListWidth()]);"""
     )
     assert result == ["500px", None]
+
+
+# -- the Export menu: one row per content, formats as chips ------------------------------------------------
+
+# What the server lists today: the built-in targets and the Pro extension's (ids and labels as nexusvox-pro sets them).
+EXPORT_TARGETS = """extensionExports = [
+  { id: "txt", label: "Text", extension: ".txt" },
+  { id: "srt", label: "Subtitles (SRT)", extension: ".srt" },
+  { id: "vtt", label: "Subtitles (VTT)", extension: ".vtt" },
+  { id: "pro-transcript", label: "Transcript with speaker names", extension: ".named.txt" },
+  { id: "pro-summary-meeting", label: "Summary: Meeting summary (Markdown)", extension: ".summary-meeting.md" },
+  { id: "pro-summary-board", label: "Summary: Board minutes (Markdown)", extension: ".summary-board.md" },
+  { id: "pro-research-docx", label: "Transcript by speaker (DOCX)", extension: ".speakers.docx" },
+  { id: "pro-research-csv", label: "Transcript by speaker (CSV)", extension: ".speakers.csv" },
+];
+const rowsOf = (item) => exportRows(item).map((r) => [r.label, r.chips.map((c) => c.format)]);
+"""
+
+
+def test_the_export_menu_has_one_row_per_content_with_formats_as_chips():
+    result = run_recordings(
+        EXPORT_TARGETS + """out(rowsOf({ id: 7, exports_unavailable: { "pro-summary-board": "No summary yet" } }));"""
+    )
+    assert result == [
+        ["Transcript", ["TXT"]],
+        ["Subtitles", ["SRT", "VTT"]],
+        ["By speaker", ["TXT", "DOCX", "CSV"]],
+        ["Meeting summary", ["MD"]],
+    ]
+
+
+def test_summaries_that_do_not_exist_are_left_out_and_every_one_that_exists_gets_a_row():
+    result = run_recordings(
+        EXPORT_TARGETS
+        + """const without = { id: 7, exports_unavailable: { "pro-summary-meeting": "No summary yet",
+          "pro-summary-board": "No summary yet" } };
+        out([rowsOf(without).map((r) => r[0]), rowsOf({ id: 7 }).map((r) => r[0])]);"""
+    )
+    assert result == [
+        ["Transcript", "Subtitles", "By speaker"],
+        ["Transcript", "Subtitles", "By speaker", "Meeting summary", "Board minutes"],
+    ]
+
+
+def test_the_speaker_row_is_left_out_without_speaker_names_and_subtitles_without_word_timing():
+    result = run_recordings(
+        EXPORT_TARGETS
+        + """const noSpeakers = { id: 7, exports_unavailable: { "pro-transcript": "No speaker names",
+          "pro-research-docx": "No speakers", "pro-research-csv": "No speakers" } };
+        const noTiming = { id: 7, exports_unavailable: { srt: "No timing", vtt: "No timing" } };
+        const partly = { id: 7, exports_unavailable: { "pro-research-csv": "No speakers" } };
+        out([rowsOf(noSpeakers), rowsOf(noTiming).map((r) => r[0]), rowsOf(partly)[2]]);"""
+    )
+    assert result[0] == [
+        ["Transcript", ["TXT"]],
+        ["Subtitles", ["SRT", "VTT"]],
+        ["Meeting summary", ["MD"]],
+        ["Board minutes", ["MD"]],
+    ]
+    assert result[1] == ["Transcript", "By speaker", "Meeting summary", "Board minutes"]
+    assert result[2] == ["By speaker", ["TXT", "DOCX"]]
+
+
+def test_a_pending_or_failed_export_is_not_a_row_and_nothing_is_disabled():
+    result = run_recordings(
+        EXPORT_TARGETS
+        + """const html = exportMenuHtml({ id: 7, exports_unavailable: {
+          "pro-summary-meeting": { pending: "Summarising" },
+          "pro-summary-board": { error: "Offline", retry: "summarise" }, srt: "No timing" } });
+        out([html.includes("Meeting summary"), html.includes("Board minutes"), html.includes("disabled"),
+          html.includes("No timing"), html.includes("data-format=\\"SRT\\"")]);"""
+    )
+    assert result == [False, False, False, False, False]
+
+
+def test_an_export_of_an_unknown_extension_keeps_a_row_of_its_own():
+    result = run_recordings(
+        """extensionExports = [{ id: "txt", label: "Text", extension: ".txt" },
+          { id: "my-csv", label: "Team table (CSV)", extension: ".csv" }];
+        out(exportRows({ id: 7 }).map((r) => [r.label, r.chips.map((c) => c.format)]));"""
+    )
+    assert result == [["Transcript", ["TXT"]], ["Team table", ["CSV"]]]
+
+
+def test_the_menu_markup_has_icons_hints_chips_and_one_footer_line():
+    result = run_recordings(
+        EXPORT_TARGETS
+        + """extensionUploadActions = [{ id: "summarise", label: "Summarise" }];
+        const html = exportMenuHtml({ id: 7, exports_unavailable: { "pro-summary-board": "No summary yet" } });
+        const without = (extensionUploadActions = [], exportMenuHtml({ id: 7 }));
+        out([(html.match(/rec-export-row"/g) || []).length, (html.match(/class="rec-chip rec-export"/g) || []).length,
+          (html.match(/rec-export-ico/g) || []).length, html.includes("Uses your speaker names"),
+          html.includes('data-href="/api/file-transcriptions/7/export/pro-research-docx"'),
+          html.includes('aria-label="By speaker as DOCX"'),
+          html.includes("Other summaries appear here after you create them with Summarise. Files go to your Downloads"),
+          without.includes("Summarise"), without.includes("Files go to your Downloads folder.")]);"""
+    )
+    assert result == [4, 7, 4, True, True, True, True, False, True]
+
+
+def test_an_empty_menu_says_so_and_without_any_target_it_says_no_formats():
+    result = run_recordings(
+        """extensionExports = [{ id: "txt", label: "Text", extension: ".txt" }];
+        const none = exportMenuHtml({ id: 7, exports_unavailable: { txt: "No text" } });
+        extensionExports = [];
+        out([none.includes("Nothing can be exported from this recording yet."), exportMenuHtml({ id: 7 })]);"""
+    )
+    assert result == [True, '<p class="rec-menu-empty">No export formats are available.</p>']
+
+
+CHIP = """
+const rowsEl = document.createElement("div"); rowsEl.className = "rec-export-rows";
+const errorEl = document.createElement("p"); errorEl.className = "rec-export-error"; errorEl.hidden = true;
+const chip = document.createElement("button"); chip.className = "rec-chip rec-export";
+chip.dataset.href = "/api/file-transcriptions/7/export/txt"; chip.dataset.format = "TXT"; chip.textContent = "TXT";
+rowsEl.append(chip, errorEl); document.body.append(rowsEl);
+const feedback = []; globalThis.showFeedback = (item, kind, text) => feedback.push([kind, text]);
+const timers = []; globalThis.setTimeout = (fn) => timers.push(fn);
+const detail = { _item: { id: 7 } };
+"""
+
+
+def test_a_clicked_chip_exports_at_once_and_shows_a_mint_check_for_a_moment():
+    result = run_recordings(
+        CHIP
+        + """(async () => {
+          const calls = [];
+          globalThis.downloadExport = async (url, item, report) => { calls.push([url, item.id, report]); return ""; };
+          await runExportChip(chip, detail);
+          const shown = [chip.textContent, chip.classList.contains("done")];
+          timers[0]();
+          out([calls, shown, [chip.textContent, chip.classList.contains("done")], errorEl.hidden]);
+        })();"""
+    )
+    assert result == [
+        [["/api/file-transcriptions/7/export/txt", 7, False]],
+        ["✓ TXT", True],
+        ["TXT", False],
+        True,
+    ]
+
+
+def test_a_failed_export_shows_its_error_in_the_menu_and_no_check():
+    result = run_recordings(
+        CHIP
+        + """(async () => {
+          globalThis.downloadExport = async () => "No readable word timestamps are stored for this upload";
+          await runExportChip(chip, detail);
+          out([errorEl.hidden, errorEl.textContent, chip.textContent, chip.classList.contains("done"), timers.length]);
+        })();"""
+    )
+    assert result == [False, "No readable word timestamps are stored for this upload", "TXT", False, 0]
+
+
+def test_the_next_click_clears_the_error_and_a_click_while_it_runs_is_ignored():
+    result = run_recordings(
+        CHIP
+        + """(async () => {
+          let answer = "Export failed (500)"; let calls = 0; let release;
+          globalThis.downloadExport = () => {
+            calls++;
+            return new Promise((resolve) => { release = () => resolve(answer); });
+          };
+          const first = runExportChip(chip, detail);
+          await runExportChip(chip, detail); // while the first one runs
+          release(); await first;
+          const failed = [errorEl.hidden, calls];
+          answer = "";
+          const second = runExportChip(chip, detail);
+          const cleared = errorEl.hidden;
+          release(); await second;
+          out([failed, cleared, calls, chip.textContent]);
+        })();"""
+    )
+    assert result == [[False, 1], True, 2, "✓ TXT"]
+
+
+def test_arrow_keys_move_between_chips_in_the_export_menu_and_escape_closes_it():
+    result = run_recordings(
+        """const wrap = document.createElement("div"); wrap.className = "rec-menu-wrap";
+        const button = document.createElement("button"); button.className = "rec-menu-btn";
+        const menu = document.createElement("div"); menu.className = "rec-menu rec-menu-export"; menu.hidden = true;
+        const chips = ["TXT", "SRT", "VTT"].map((f) => { const c = document.createElement("button");
+          c.className = "rec-chip rec-export"; c.textContent = f; return c; });
+        menu.append(...chips); wrap.append(button, menu);
+        bindRecMenu(wrap);
+        button.click();
+        const trail = [document.activeElement === chips[0]];
+        const press = (key) => wrap.dispatch("keydown", { key });
+        press("ArrowRight"); trail.push(document.activeElement === chips[1]);
+        press("ArrowDown"); trail.push(document.activeElement === chips[2]);
+        press("ArrowRight"); trail.push(document.activeElement === chips[0]);
+        press("ArrowLeft"); trail.push(document.activeElement === chips[2]);
+        press("ArrowUp"); trail.push(document.activeElement === chips[1]);
+        chips[1].click(); trail.push(menu.hidden); // a chip click leaves the menu open
+        press("Escape"); trail.push(menu.hidden, document.activeElement === button);
+        out(trail);"""
+    )
+    assert result == [True, True, True, True, True, True, False, True, True]
+
+
+def test_left_and_right_do_nothing_in_the_more_menu():
+    result = run_recordings(
+        """const wrap = document.createElement("div"); wrap.className = "rec-menu-wrap";
+        const button = document.createElement("button"); button.className = "rec-menu-btn";
+        const menu = document.createElement("div"); menu.className = "rec-menu"; menu.hidden = true;
+        const items = ["Rename", "Delete"].map((l) => { const b = document.createElement("button");
+          b.className = "rec-menu-item"; b.textContent = l; return b; });
+        menu.append(...items); wrap.append(button, menu);
+        bindRecMenu(wrap);
+        button.click();
+        const press = (key) => wrap.dispatch("keydown", { key });
+        press("ArrowRight"); const stayed = document.activeElement === items[0];
+        press("ArrowDown"); out([stayed, document.activeElement === items[1]]);"""
+    )
+    assert result == [True, True]
+
+
+def test_a_declared_group_puts_an_extension_entry_on_a_core_row_or_opens_its_own():
+    result = run_recordings(
+        """extensionExports = [
+          { id: "txt", label: "TXT", extension: ".txt", group: "transcript" },
+          { id: "docx", label: "Word", extension: ".docx", group: "transcript" },
+          { id: "srt", label: "SRT", extension: ".srt", group: "subtitles" },
+          { id: "named", label: "Named", extension: ".named.txt", group: "speakers" },
+          { id: "sum-a", label: "Summary: A (Markdown)", extension: ".md", group: "summary-a",
+            group_label: "Meeting summary", hint: "Made today, 17:04" },
+          { id: "sum-a-docx", label: "A as Word", extension: ".docx", group: "summary-a" },
+          { id: "plain", label: "Plain", extension: ".txt", group: "constructor" },
+        ];
+        out(exportRows({ id: 7 }).map((r) => [r.label, r.hint, r.chips.map((c) => c.format)]));"""
+    )
+    assert result == [
+        ["Transcript", "Text only", ["TXT", "DOCX"]],
+        ["Subtitles", "With timestamps", ["SRT"]],
+        ["By speaker", "Uses your speaker names", ["TXT"]],
+        ["Meeting summary", "Made today, 17:04", ["MD", "DOCX"]],
+        ["Plain", "", ["TXT"]],
+    ]
+
+
+def test_a_declared_group_label_and_hint_replace_those_of_a_core_row():
+    result = run_recordings(
+        """extensionExports = [{ id: "txt", label: "TXT", extension: ".txt", group: "transcript",
+          group_label: "Full text", hint: "Cleaned up" }];
+        const r = exportRows({ id: 7 })[0]; out([r.label, r.hint, r.icon]);"""
+    )
+    assert result == ["Full text", "Cleaned up", "transcript"]
+
+
+def test_a_rows_title_and_hint_do_not_depend_on_which_of_its_exports_can_run():
+    result = run_recordings(
+        """extensionExports = [
+          { id: "sum-md", label: "A (Markdown)", extension: ".md", group: "summary-a",
+            group_label: "Meeting summary", hint: "Made today" },
+          { id: "sum-docx", label: "A as Word", extension: ".docx", group: "summary-a" },
+        ];
+        const head = (item) => exportRows(item).map((r) => [r.label, r.hint, r.icon, r.chips.map((c) => c.format)]);
+        out([head({ id: 7 }), head({ id: 7, exports_unavailable: { "sum-md": "No summary yet" } }),
+          head({ id: 7, exports_unavailable: { "sum-md": "x", "sum-docx": "x" } })]);"""
+    )
+    assert result == [
+        [["Meeting summary", "Made today", "summary", ["MD", "DOCX"]]],
+        [["Meeting summary", "Made today", "summary", ["DOCX"]]],
+        [],
+    ]
+
+
+def test_an_extension_can_retitle_a_core_row_even_though_the_built_in_target_comes_first():
+    result = run_recordings(
+        """extensionExports = [
+          { id: "txt", label: "TXT", extension: ".txt", group: "transcript" },
+          { id: "docx", label: "Word", extension: ".docx", group: "transcript",
+            group_label: "Full text", hint: "Cleaned up" },
+        ];
+        const row = (item) => exportRows(item)[0];
+        const both = row({ id: 7 }), onlyTxt = row({ id: 7, exports_unavailable: { docx: "x" } });
+        out([both.label, both.hint, onlyTxt.label, onlyTxt.hint, both.chips.map((c) => c.format)]);"""
+    )
+    assert result == ["Full text", "Cleaned up", "Full text", "Cleaned up", ["TXT", "DOCX"]]
+
+
+def test_a_failure_goes_to_the_page_when_the_menu_was_redrawn_or_closed_meanwhile():
+    result = run_recordings(
+        CHIP
+        + """(async () => {
+          const menu = document.createElement("div"); menu.className = "rec-menu";
+          rowsEl.remove(); menu.append(rowsEl); document.body.append(menu);
+          globalThis.downloadExport = async () => "Export failed (500)";
+          menu.hidden = false;
+          await runExportChip(chip, detail);                    // open: shown in the menu
+          const open = [errorEl.hidden, feedback.length];
+          errorEl.hidden = true;
+          menu.hidden = true;
+          await runExportChip(chip, detail);                    // closed meanwhile: the page's feedback
+          const closed = [errorEl.hidden, feedback.slice()];
+          menu.hidden = false;
+          globalThis.downloadExport = async () => { rowsEl.remove(); return "Export failed (500)"; };
+          await runExportChip(chip, detail);                    // the head was redrawn: the menu is gone
+          out([open, closed, feedback.length, feedback[1]]);
+        })();"""
+    )
+    assert result == [[False, 0], [True, [["error", "Export failed (500)"]]], 2, ["error", "Export failed (500)"]]
+
+
+def test_an_old_export_error_is_gone_when_the_menu_is_closed():
+    result = run_recordings(
+        """const wrap = document.createElement("div"); wrap.className = "rec-menu-wrap";
+        const button = document.createElement("button"); button.className = "rec-menu-btn";
+        const menu = document.createElement("div"); menu.className = "rec-menu rec-menu-export"; menu.hidden = true;
+        const chip = document.createElement("button"); chip.className = "rec-chip rec-export";
+        const error = document.createElement("p"); error.className = "rec-export-error"; error.hidden = true;
+        menu.append(chip, error); wrap.append(button, menu);
+        bindRecMenu(wrap);
+        button.click();
+        error.textContent = "No readable word timestamps"; error.hidden = false;
+        wrap.dispatch("keydown", { key: "Escape" });
+        button.click();
+        out([error.hidden, menu.hidden]);"""
+    )
+    assert result == [True, False]
+
+
+def test_a_tarball_chip_reads_tar_gz_and_other_suffixes_their_last_part():
+    result = run_recordings(
+        """const f = (extension) => exportFormat({ label: "X", extension });
+        out([f(".tar.gz"), f(".TAR.xz"), f(".speakers.docx"), f(".md"), f("")]);"""
+    )
+    assert result == ["TAR.GZ", "TAR.XZ", "DOCX", "MD", "X"]
+
+
+def test_a_group_named_like_a_lone_target_does_not_join_it_and_unknown_rows_get_a_neutral_icon():
+    result = run_recordings(
+        """extensionExports = [
+          { id: "foo", label: "Foo (CSV)", extension: ".csv" },
+          { id: "bar", label: "Bar (CSV)", extension: ".csv", group: "target:foo" },
+          { id: "sum", label: "Sum (MD)", extension: ".md", group: "summary-x" },
+        ];
+        out(exportRows({ id: 7 }).map((r) => [r.label, r.icon, r.chips.map((c) => c.id)]));"""
+    )
+    assert result == [["Foo", "file", ["foo"]], ["Bar", "file", ["bar"]], ["Sum", "summary", ["sum"]]]

@@ -1,6 +1,6 @@
 // A stand-in DOM for the dashboard tests under Node (tests/test_recordings_js.py): enough of Element for the code
 // under test. innerHTML is kept as a string (no parsing); elements made with createElement form a real tree that
-// querySelector walks. Selectors: one compound (`tag.a.b`, `[attr="v"]`, `#id`), optionally after `:scope > `.
+// querySelector walks. Selectors: one compound (`tag.a.b`, `[attr="v"]`, `#id`, a trailing `:not([disabled])`), optionally after `:scope > `.
 const byId = new Map();
 let activeElement = null;
 class El {
@@ -57,6 +57,8 @@ class El {
 }
 function ancestor(el, sel) { for (let x = el.parent; x; x = x.parent) if (matches(x, sel)) return true; return false; }
 function matches(el, sel) {
+  // `:not([disabled])` is the one pseudo-class the page's code uses.
+  if (sel.endsWith(":not([disabled])")) return !el.disabled && matches(el, sel.slice(0, -":not([disabled])".length));
   const m = /^([a-z]*)((?:[.#][\w-]+)*)((?:\[[\w-]+(?:="[^"]*")?\])*)$/i.exec(sel.trim());
   if (!m) throw new Error("selector not supported: " + sel);
   if (m[1] && el.tagName !== m[1].toUpperCase()) return false;

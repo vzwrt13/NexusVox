@@ -46,7 +46,8 @@ function setStatusRow(el, state, text, action) {
   const label = document.createElement("span");
   label.className = "status-row-text";
   label.textContent = text;
-  el.append(label, action);
+  el.append(label);
+  if (action) el.append(action);
 }
 // The tint button of a status row (`fix or act` kind of the shared button set).
 function actionButton(label, onClick) {

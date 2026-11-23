@@ -35,6 +35,10 @@
   --accent-soft: rgba(162, 155, 254, 0.35);
   --accent-fill: rgba(108, 92, 231, 0.2);
   --accent-hover: #7b6cf0;
+  --on-accent: #fff;
+  --surface-hover: #22222a;
+  --yellow-soft: rgba(255, 212, 59, 0.13);
+  --red-soft: rgba(255, 107, 107, 0.13);
   --accent-wash: rgba(108, 92, 231, 0.16);
   --accent-wash-strong: rgba(108, 92, 231, 0.26);
   --border-hover: #3a3a46;
@@ -94,12 +98,12 @@ button, input, select, textarea { font-family: inherit; }
 .btn:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
 .btn:disabled, .btn[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
 .btn-sm { min-height: 28px; padding: 5px 11px; font-size: 12px; border-radius: 8px; }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); color: #fff; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); color: var(--on-accent); }
 .btn-tint { background: var(--accent-wash); color: var(--accent-light); }
 .btn-tint:hover:not(:disabled) { background: var(--accent-wash-strong); color: var(--text); }
 .btn-ghost { background: var(--surface3); color: var(--text); border-color: var(--border-strong); }
-.btn-ghost:hover:not(:disabled) { border-color: var(--accent); background: #22222a; color: var(--text); }
+.btn-ghost:hover:not(:disabled) { border-color: var(--accent); background: var(--surface-hover); color: var(--text); }
 
 /* Sidebar: brand on top, the tab buttons stacked below it */
 header {
@@ -267,8 +271,8 @@ body::before {
 .status-row.status-line.ok, .status-row.status-line.warn, .status-row.status-line.down { color: var(--text-dim); }
 .status-row::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
 .status-row.ok::before { background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
-.status-row.warn::before { background: var(--yellow); box-shadow: 0 0 0 3px rgba(255, 212, 59, 0.13); }
-.status-row.down::before { background: var(--red); box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.13); }
+.status-row.warn::before { background: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-soft); }
+.status-row.down::before { background: var(--red); box-shadow: 0 0 0 3px var(--red-soft); }
 .status-row-text { flex: 1 1 200px; min-width: 0; }
 .model-status .status-line { margin-top: 0; }
 .denied-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; margin: 0; padding: 12px 16px; text-align: center; font-weight: 600; background: var(--surface3); border-bottom: 1px solid var(--red); }
@@ -843,10 +847,12 @@ canvas { width: 100% !important; max-height: 260px; }
   font: inherit;
   padding: 2px 6px;
   color: var(--text);
-  background: var(--surface3);
-  border: 1px solid var(--accent-light);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
 }
+.upload-rename-input:hover { border-color: var(--border-hover); }
+.upload-rename-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 
 .upload-model {
   background: var(--surface3);
@@ -1347,7 +1353,7 @@ canvas { width: 100% !important; max-height: 260px; }
 .upload-delete-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
 .upload-delete-ask { font-size: 13px; color: var(--text-dim); }
 .upload-delete-btn { color: var(--red); }
-.upload-delete-btn:hover { border-color: var(--red); color: var(--red); }
+.upload-delete-btn:hover, .btn.upload-delete-btn:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
 
 .flash-highlight { animation: flash-highlight 2s ease-out; }
 @keyframes flash-highlight {

@@ -195,3 +195,11 @@ def test_start_ollama_is_a_tint_button_in_a_warn_status_row():
         "console.log(JSON.stringify([b.className, b.textContent, e._c.has('warn'), e.hidden]));"
     )
     assert out == ["btn btn-tint btn-sm", "Start Ollama", True, False]
+
+
+def test_a_status_row_without_an_action_adds_nothing_after_the_sentence():
+    out = run_js(
+        "const e = el(); setStatusRow(e, 'ok', 'Ollama is running.');"
+        "console.log(JSON.stringify([e.children.length, e.children[0].textContent]));"
+    )
+    assert out == [1, "Ollama is running."]

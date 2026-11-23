@@ -103,7 +103,7 @@ header h1 {
   gap: 2px;
 }
 
-/* Feedback sits alone at the bottom of the sidebar, apart from the working tabs */
+/* The footer holds Help, Feedback and the version line at the bottom of the sidebar, apart from the working tabs */
 .tabs-footer {
   flex: 0 0 auto;
   overflow-y: visible;
@@ -114,8 +114,7 @@ header h1 {
 .tabs-footer .tab[hidden] { display: none; }
 .sidebar-version { padding: 6px 12px 0; font-size: 11px; color: var(--text-dim); }
 .sidebar-version p { margin: 0; }
-.sidebar-help { display: block; padding: 6px 12px 2px; font-size: 12px; color: var(--accent-light); text-decoration: none; }
-.sidebar-help:hover { text-decoration: underline; }
+.tabs-footer a.tab { text-decoration: none; box-sizing: border-box; }
 .sidebar-version-status { display: block; margin-top: 4px; font-size: 11px; line-height: 1.35; }
 .sidebar-version [hidden] { display: none; }
 .link-button {
@@ -1390,7 +1389,7 @@ canvas { width: 100% !important; max-height: 260px; }
 
 /* Duotone icons for the built-in tabs, the Settings sub-links and the Settings section headings. Decorative:
    they are CSS backgrounds, so screen readers never see them. Tabs from extensions have no icon and keep the dot. */
-.tab:is([data-tab="home"],[data-tab="settings"],[data-tab="analytics"],[data-tab="edit"],[data-tab="recordings"],[data-tab="review"],[data-tab="dev"],[data-tab="feedback"])::before {
+.tab:is([data-tab="home"],[data-tab="settings"],[data-tab="analytics"],[data-tab="edit"],[data-tab="recordings"],[data-tab="review"],[data-tab="dev"],[data-tab="feedback"],.tab-help)::before {
   width: 18px;
   height: 18px;
   border-radius: 0;
@@ -1407,6 +1406,7 @@ canvas { width: 100% !important; max-height: 260px; }
 .tab[data-tab="review"]::before { background-image: url("icons/duotone-review.svg"); }
 .tab[data-tab="dev"]::before { background-image: url("icons/duotone-dev.svg"); }
 .tab[data-tab="feedback"]::before { background-image: url("icons/duotone-feedback.svg"); }
+.tab-help::before { background-image: url("icons/duotone-help.svg"); }
 .settings-link[data-card], #tab-settings .settings-card > .nexus-section-title { display: flex; align-items: center; gap: 8px; }
 #tab-settings .settings-card > .nexus-section-title { font-size: 15px; font-weight: 600; color: var(--text); text-transform: none; letter-spacing: 0; }
 .settings-link[data-card]::before, #tab-settings .settings-card > .nexus-section-title::before {

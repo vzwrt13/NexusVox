@@ -118,7 +118,7 @@ def test_the_scripts_run_together_in_order():
 
 def test_tabs_go_live_in_the_last_file():
     last = (STATIC / ORDER[-1]).read_text(encoding="utf-8")
-    assert 'querySelectorAll(".tab").forEach(bindTab)' in last
+    assert 'querySelectorAll(".tab[data-tab]").forEach(bindTab)' in last
     assert 'addEventListener("hashchange", restoreTabFromHash)' in last
     others = "".join((STATIC / name).read_text(encoding="utf-8") for name in ORDER[:-1])
     assert "forEach(bindTab)" not in others and '"hashchange"' not in others

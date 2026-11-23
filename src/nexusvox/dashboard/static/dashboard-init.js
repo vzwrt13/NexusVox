@@ -19,7 +19,7 @@ async function loadFeatures() {
 
 // ── Init ─────────────────────────────────────────────────────────────
 // The tabs go live here, not in core: by now every file their handlers call has run.
-document.querySelectorAll(".tab").forEach(bindTab);
+document.querySelectorAll(".tab[data-tab]").forEach(bindTab); // the Help link is a plain link, not a tab
 window.addEventListener("hashchange", restoreTabFromHash);
 // Back on the first page: see guardHistory. The marker entry steps forward at once, so the page stays put.
 window.addEventListener("popstate", (e) => {

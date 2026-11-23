@@ -42,3 +42,9 @@ const PIP_STATS = [
   "{words} words dictated this week: about {saved} of typing saved, at {wpm} words a minute.",
   "This week you spoke {words} words instead of typing them: about {saved} saved at {wpm} words a minute.",
 ];
+
+// How the bubble looks follows the kind of content (milestone, tip, stat), so the look is data too. Style "a" is the
+// plain card with a small × in its corner; style "c" is the same card with a small label line above the text, which
+// `PIP_LABELS` gives per kind (a kind without a label has none).
+const PIP_BUBBLE_STYLES = { milestone: "c", tip: "a", stat: "a" };
+const PIP_LABELS = { milestone: "Milestone" };

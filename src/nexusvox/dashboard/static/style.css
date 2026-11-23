@@ -1591,6 +1591,16 @@ canvas { width: 100% !important; max-height: 260px; }
 }
 /* Room for the × on its right, only when there is one. */
 .pip-bubble:has(.pip-bubble-close) { padding-right: 30px; }
+/* Style c: a small label line above the text (the bubble of a milestone). */
+.pip-bubble-eyebrow {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-light);
+}
 /* The small × that dismisses the bubble, in its top-right corner. */
 .pip-bubble-close {
   position: absolute;

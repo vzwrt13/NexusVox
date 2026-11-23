@@ -6,8 +6,9 @@
 `pip-greetings.png`: one bubble per kind of content (a milestone, a tip about a feature never used, a usage statistic),
 each chosen by the real `pickPipGreeting` from invented counts and built by the real `buildPipBubble`.
 
-`pip-bubble-variants.png`: three looks for the same bubble side by side, to choose from. A is what the dashboard ships;
-B and C are drawn only here, from the same style sheet plus a few page-local rules.
+`pip-bubble-variants.png`: three looks for the same bubble side by side. A and C are what the dashboard ships (A for
+tips and statistics, C for milestones); B is an alternative drawn only here, from the same style sheet plus a
+few page-local rules.
 
 A throwaway page loads `style.css`, `dashboard-pip.js`, `dashboard-pip-texts.js` and `dashboard-pip-greeting.js` from
 the dashboard's static folder. Nothing here touches your config, your database, the browser's saved state or the
@@ -83,9 +84,9 @@ SAMPLES = (
 
 # The three looks of the variants image: what the page draws for each.
 VARIANTS = (
-    {"key": "a", "label": "A  Quiet card, × in the corner (shipped)"},
-    {"key": "b", "label": "B  Same card, a “Got it” link under the text"},
-    {"key": "c", "label": "C  Same card, a small label line and ×"},
+    {"key": "a", "label": "A  Quiet card, × in the corner: tips and statistics (shipped)"},
+    {"key": "b", "label": "B  Same card, a “Got it” link (not used)"},
+    {"key": "c", "label": "C  Same card, a label line and ×: milestones (shipped)"},
 )
 VARIANT_SAMPLE = SAMPLES[0]  # the same invented milestone in all three
 
@@ -133,7 +134,8 @@ CONTENT_PAGE = (
     rows.append(cell);
     const state = {{ ...emptyPipGreetingState(), seen: sample.seen }};
     const {{ greeting }} = pickPipGreeting(sample.facts, state, "2026-11-04");
-    mountPip(host, {{ pose: "tilt", side: "left", bubble: buildPipBubble(greeting.text, () => {{}}) }});
+    const options = {{ style: greeting.style, label: PIP_LABELS[greeting.kind] || "" }};
+    mountPip(host, {{ pose: "tilt", side: "left", bubble: buildPipBubble(greeting.text, () => {{}}, options) }});
   }}
 </script>
 </body></html>
@@ -147,13 +149,11 @@ VARIANTS_CSS = """
   .cell .home-pip {{ margin: 0; padding: 0; }}
   .v-b .pip-bubble {{ padding-right: 14px; }}
   .v-b .got-it {{ display: block; margin-top: 8px; font-size: 12px; }}
-  .v-c .eyebrow {{ display: block; margin-bottom: 3px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
-    text-transform: uppercase; color: var(--accent-light); }}
 """
 
 VARIANTS_PAGE = (
     HEAD
-    + """<h1>Pip's bubble, three looks for the same milestone (invented sample data); A is what ships</h1>
+    + """<h1>Pip's bubble, three looks for the same bubble (invented sample data); A and C ship, by content</h1>
 <div class="cells" id="cells"></div>
 """
     + SCRIPTS
@@ -169,14 +169,10 @@ VARIANTS_PAGE = (
     return el;
   }};
   const bubbleFor = (key) => {{
-    if (key === "a") return buildPipBubble(greeting.text, () => {{}});
+    if (key === "a") return buildPipBubble(greeting.text, () => {{}}, {{ style: "a" }});
+    if (key === "c") return buildPipBubble(greeting.text, () => {{}}, {{ style: "c", label: PIP_LABELS.milestone }});
     const wrap = make("div");
-    if (key === "b") {{
-      wrap.append(make("span", "", greeting.text), make("button", "link-btn got-it", "Got it"));
-    }} else {{
-      const close = make("button", "pip-bubble-close", "\\u00d7");
-      wrap.append(make("span", "eyebrow", "Milestone"), make("span", "", greeting.text), close);
-    }}
+    wrap.append(make("span", "", greeting.text), make("button", "link-btn got-it", "Got it"));
     return wrap;
   }};
   for (const variant of {variants}) {{

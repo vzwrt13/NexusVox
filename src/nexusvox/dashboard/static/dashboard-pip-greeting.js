@@ -82,6 +82,19 @@ function backfilledPipSeen(facts) {
   return reached.filter((m) => highest.get(m.counter) !== m).map((m) => m.id);
 }
 
+// The kind of a bubble from its id: a milestone, a tip or the statistic. It decides the look (PIP_BUBBLE_STYLES).
+function pipKindOf(id) {
+  if (PIP_MILESTONES.some((m) => m.id === id)) return "milestone";
+  if (PIP_TIPS.some((t) => t.id === id)) return "tip";
+  return "stat";
+}
+
+// A greeting as the page uses it: the saved or chosen id and text, plus the kind and the bubble style that follow.
+function pipGreetingOf(id, text, dismissed) {
+  const kind = pipKindOf(id);
+  return { id, text, dismissed, kind, style: PIP_BUBBLE_STYLES[kind] || "a" };
+}
+
 // What to say today: { id, text } or null. `seen` lists the ids of milestones and tips said before.
 function pickPipContent(facts, seen, day) {
   const milestone = PIP_MILESTONES.find((m) => !seen.includes(m.id) && pipCount(facts, m.counter) >= m.atLeast);
@@ -92,13 +105,13 @@ function pickPipContent(facts, seen, day) {
   return stat ? { id: "stat-week", text: stat } : null;
 }
 
-// The bubble for `day`: { greeting: { id, text, dismissed } | null, state }, `state` being what to save. A day that
+// The bubble for `day`: { greeting: { id, text, dismissed, kind, style } | null, state }, `state` being what to save. A day that
 // already has a bubble keeps it (dismissed or not); otherwise one is chosen, and a milestone or tip is remembered
 // as said. A day that has nothing to say saves nothing, so a milestone reached later that day can still be said.
 function pickPipGreeting(facts, savedState, day) {
   const state = savedState && typeof savedState === "object" ? savedState : emptyPipGreetingState();
   if (state.day === day && state.id) {
-    return { greeting: { id: state.id, text: state.text, dismissed: state.dismissed === true }, state };
+    return { greeting: pipGreetingOf(state.id, state.text, state.dismissed === true), state };
   }
   const hasHistory = state.day !== "" || (Array.isArray(state.seen) && state.seen.length > 0);
   const seen = hasHistory ? state.seen : backfilledPipSeen(facts);
@@ -106,7 +119,7 @@ function pickPipGreeting(facts, savedState, day) {
   if (!content) return { greeting: null, state };
   const kept = content.id === "stat-week" ? seen : [...seen, content.id];
   return {
-    greeting: { id: content.id, text: content.text, dismissed: false },
+    greeting: pipGreetingOf(content.id, content.text, false),
     state: { day, id: content.id, text: content.text, dismissed: false, seen: kept },
   };
 }
@@ -118,11 +131,20 @@ function dismissPipGreeting(state) {
 
 // ── On the page ──────────────────────────────────────────────────────
 
-// The bubble: its text and a small "×" that dismisses it (a button with an accessible name, in the card's corner).
-// Built from text nodes, never from markup.
-function buildPipBubble(text, onDismiss) {
+// The bubble, one component in two styles (`style`): "a" is the text with a small "×" in the card's corner, "c" adds a
+// small label line above the text (`label`, from PIP_LABELS). The "×" is a button with an accessible name. Built from
+// text nodes, never from markup; the style is a class on the content (`pip-bubble-style-a` / `-c`).
+function buildPipBubble(text, onDismiss, { style = "a", label = "" } = {}) {
   const wrap = document.createElement("div");
+  wrap.className = "pip-bubble-body pip-bubble-style-" + (style === "c" ? "c" : "a");
+  if (style === "c" && label) {
+    const eyebrow = document.createElement("span");
+    eyebrow.className = "pip-bubble-eyebrow";
+    eyebrow.textContent = label;
+    wrap.append(eyebrow);
+  }
   const message = document.createElement("span");
+  message.className = "pip-bubble-message";
   message.textContent = text;
   const close = document.createElement("button");
   close.type = "button";
@@ -162,6 +184,7 @@ function showPipGreeting(host, facts, day = localIsoDate(new Date())) {
     if (current.day === state.day && current.id === state.id) writePipGreetingState(dismissPipGreeting(current));
     quiet();
   };
-  mountPip(host, { pose: "tilt", side: "left", bubble: buildPipBubble(greeting.text, dismiss) });
+  const bubble = buildPipBubble(greeting.text, dismiss, { style: greeting.style, label: PIP_LABELS[greeting.kind] || "" });
+  mountPip(host, { pose: "tilt", side: "left", bubble });
   return greeting;
 }

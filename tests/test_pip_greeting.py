@@ -318,6 +318,7 @@ const document = { createElement: (tag) => ({ tag, children: [], className: "", 
   append(...k) { this.children.push(...k); }, addEventListener(t, f) { this.listeners[t] = f; } }) };
 const FACTS = { words: 0, dictations: 1, meetings: 1, uploads: 1, dictionary_entries: 1, formatting_commands: 1 };
 const last = () => mounts[mounts.length - 1];
+const part = (bubble, cls) => bubble.children.find((c) => c.className === cls);
 """
 
 
@@ -327,7 +328,7 @@ def test_dismissing_keeps_the_bubble_gone_for_the_rest_of_the_day_and_pip_sits_q
         PAGE + "const host = {};"
         "const shown = showPipGreeting(host, FACTS);"
         "const withBubble = last();"
-        "withBubble.bubble.children[1].listeners.click();"  # the × button
+        "part(withBubble.bubble, 'pip-bubble-close').listeners.click();"  # the × button
         "const afterDismiss = last();"
         "const reopened = showPipGreeting(host, FACTS);"  # the same day, Home opened again
         "const reopenedMount = last();"
@@ -335,7 +336,7 @@ def test_dismissing_keeps_the_bubble_gone_for_the_rest_of_the_day_and_pip_sits_q
         "const laterMount = last();"
         "const nextDay = showPipGreeting(host, FACTS, '2026-11-03');"
         "console.log(JSON.stringify({ shown: shown && shown.id, tilt: withBubble.pose,"
-        " text: withBubble.bubble.children[0].textContent,"
+        " text: part(withBubble.bubble, 'pip-bubble-message').textContent,"
         " afterDismiss: [afterDismiss.pose, afterDismiss.bubble], reopened, reopenedMount: [reopenedMount.pose,"
         " reopenedMount.bubble], later: laterMount.bubble, nextDay: nextDay && nextDay.id,"
         " stored: JSON.parse(store['nexusvox-pip-greeting']).day }))"
@@ -352,7 +353,8 @@ def test_dismissing_keeps_the_bubble_gone_for_the_rest_of_the_day_and_pip_sits_q
 @needs_node
 def test_the_bubble_has_a_labelled_x_button_and_pip_stands_in_the_right_corner():
     got = _js(
-        PAGE + "const host = {}; showPipGreeting(host, FACTS); const m = last(); const close = m.bubble.children[1];"
+        PAGE + "const host = {}; showPipGreeting(host, FACTS); const m = last();"
+        "const close = part(m.bubble, 'pip-bubble-close');"
         "console.log(JSON.stringify([m.side, close.className, close.textContent, close.attrs, close.type]))"
     )
     assert got[0] == "left"  # Pip is bottom right, so his bubble is on his left
@@ -362,10 +364,67 @@ def test_the_bubble_has_a_labelled_x_button_and_pip_stands_in_the_right_corner()
 
 
 @needs_node
+def test_the_bubble_style_follows_the_kind_of_content_milestone_c_tip_and_statistic_a():
+    got = _js(
+        PAGE + "const used = { words: 0, dictations: 0, meetings: 1, uploads: 1, dictionary_entries: 1,"
+        " formatting_commands: 1, week_words: 900, week_time_saved_minutes: 12, typing_wpm: 40 };"
+        "const said = ['first-meeting', 'first-file'];"
+        "const show = (facts, seen) => { localStorage.setItem('nexusvox-pip-greeting',"
+        " JSON.stringify({ day: '', id: '', text: '', dismissed: false, seen }));"
+        " const host = {}; const g = showPipGreeting(host, facts, '2026-11-02'); const b = last().bubble;"
+        " return { id: g.id, kind: g.kind, style: g.style, cls: b.className,"
+        "   eyebrow: (part(b, 'pip-bubble-eyebrow') || {}).textContent || null,"
+        "   close: !!part(b, 'pip-bubble-close') }; };"
+        "const milestone = show({ ...used, dictations: 5 }, said);"
+        "const tip = show({ ...used, uploads: 0 }, ['first-meeting', 'first-dictation']);"
+        "const stat = show(used, said);"
+        "console.log(JSON.stringify({ milestone, tip, stat }))"
+    )
+    assert got["milestone"] == {
+        "id": "first-dictation",
+        "kind": "milestone",
+        "style": "c",
+        "cls": "pip-bubble-body pip-bubble-style-c",
+        "eyebrow": "Milestone",
+        "close": True,
+    }
+    for kind in ("tip", "stat"):
+        assert got[kind]["style"] == "a" and got[kind]["cls"] == "pip-bubble-body pip-bubble-style-a", kind
+        assert got[kind]["eyebrow"] is None and got[kind]["close"], kind  # style A has no label line
+    assert (got["tip"]["kind"], got["stat"]["kind"]) == ("tip", "stat")
+
+
+@needs_node
+def test_every_kind_of_content_has_a_bubble_style_and_only_c_may_have_a_label():
+    got = _js("console.log(JSON.stringify({ styles: PIP_BUBBLE_STYLES, labels: PIP_LABELS }))")
+    assert got["styles"] == {"milestone": "c", "tip": "a", "stat": "a"}
+    assert set(got["labels"]) <= {kind for kind, style in got["styles"].items() if style == "c"}
+
+
+@needs_node
+def test_the_bubble_is_one_component_whose_style_only_changes_its_label_line():
+    got = _js(
+        PAGE + "const a = buildPipBubble('Hi', () => {}); const c = buildPipBubble('Hi', () => {},"
+        " { style: 'c', label: 'Milestone' });"
+        "const odd = buildPipBubble('Hi', () => {}, { style: 'zzz', label: 'X' });"
+        "const names = (b) => b.children.map((e) => e.className);"
+        "console.log(JSON.stringify([a.className, names(a), c.className, names(c), odd.className, names(odd)]))"
+    )
+    assert got == [
+        "pip-bubble-body pip-bubble-style-a",
+        ["pip-bubble-message", "pip-bubble-close"],
+        "pip-bubble-body pip-bubble-style-c",
+        ["pip-bubble-eyebrow", "pip-bubble-message", "pip-bubble-close"],
+        "pip-bubble-body pip-bubble-style-a",  # an unknown style is the plain one, and its label is not drawn
+        ["pip-bubble-message", "pip-bubble-close"],
+    ]
+
+
+@needs_node
 def test_dismiss_in_a_stale_window_does_not_overwrite_a_newer_state():
     got = _js(
         PAGE + "const host = {}; showPipGreeting(host, FACTS, '2026-11-02');"
-        "const dismiss = last().bubble.children[1].listeners.click;"
+        "const dismiss = part(last().bubble, 'pip-bubble-close').listeners.click;"
         # another window moves on: the next day, another milestone said
         "showPipGreeting(host, FACTS, '2026-11-03'); const newer = JSON.parse(store['nexusvox-pip-greeting']);"
         "dismiss();"
@@ -381,9 +440,10 @@ def test_dismiss_in_a_stale_window_does_not_overwrite_a_newer_state():
 @needs_node
 def test_an_undismissed_bubble_is_still_there_on_the_next_visit_of_the_day():
     got = _js(
-        PAGE + "const host = {}; showPipGreeting(host, FACTS); const first = last().bubble.children[0].textContent;"
+        PAGE + "const host = {}; showPipGreeting(host, FACTS);"
+        "const first = part(last().bubble, 'pip-bubble-message').textContent;"
         "showPipGreeting(host, FACTS);"
-        "console.log(JSON.stringify([first, last().bubble.children[0].textContent, mounts.length]))"
+        "console.log(JSON.stringify([first, part(last().bubble, 'pip-bubble-message').textContent, mounts.length]))"
     )
     assert got[0] == got[1] and got[2] == 2
 

@@ -35,6 +35,7 @@ import contextlib
 import json
 import os
 import random
+import re
 import shutil
 import socket
 import subprocess
@@ -72,6 +73,7 @@ VIEWPORT_WIDTH = 1280
 VIEWPORT_HEIGHT = 4000
 SHOTS = (
     ("home", "dashboard-home.png", None, 860, ""),  # the page the dashboard opens on: one window, Pip bottom right
+    ("home", "dashboard-home-tip.png", None, 860, ""),  # the same with every milestone said: a tip, bubble style A
     ("analytics", "dashboard-analytics.png", None, None, ""),  # the Overview
     ("analytics", "dashboard-analytics-week.png", None, None, "week"),
     ("recordings", "dashboard-recordings.png", None, 860, ""),
@@ -429,6 +431,7 @@ _hide_css = ""  # the rule for the tab being photographed; set by `run` before e
 _tab_page = ""  # the page of the tab being photographed (Analytics > Your week); set by `run` before each shot
 _click_selector: str | None = None  # the element the page clicks once loaded; set by `run` before each guide shot
 _setup_step: int | None = None  # the setup step the page is told to show; set by `run` before each setup shot
+_pip_script = ""  # runs before the page: Pip's saved state, so the second Home shot says a tip, not a milestone
 # Waits for the setup to open (it asks the server), shows the step and, on the hotkey step, a dictated test phrase.
 SETUP_SCRIPT = """<script>
 document.addEventListener("DOMContentLoaded", () => {{
@@ -450,6 +453,18 @@ document.addEventListener("DOMContentLoaded", () => {{
 TAB_PAGE_SCRIPT = '<script>history.replaceState(null, "", location.hash + "/{page}");</script>'
 
 
+def _all_milestones_said_script() -> str:
+    """A script that marks every milestone of Pip's texts as said in the page's saved state, so Home shows a tip or the
+    statistic (bubble style A) instead of a milestone (style C). The ids are read from the texts file, so a new
+    milestone needs no change here."""
+    texts = (_PROJECT_ROOT / "src" / "nexusvox" / "dashboard" / "static" / "dashboard-pip-texts.js").read_text(
+        encoding="utf-8"
+    )
+    ids = re.findall(r'\{ id: "([a-z0-9-]+)", counter:', texts)
+    state = {"day": "", "id": "", "text": "", "dismissed": False, "seen": ids}
+    return f"<script>localStorage.setItem('nexusvox-pip-greeting', {json.dumps(json.dumps(state))});</script>"
+
+
 def _tab_style(selector: str | None) -> str:
     return f"<style>{selector} {{ display: none !important; }}</style>" if selector else ""
 
@@ -463,6 +478,8 @@ def _serve_still(response):
         html = response.get_data(as_text=True)
         html = html.replace(CHART_SCRIPT, CHART_SCRIPT + STILL_CHARTS, 1)
         html = html.replace("</head>", STILL_CSS + _hide_css + "</head>", 1)
+        if _pip_script:
+            html = html.replace("</head>", _pip_script + "</head>", 1)
         if _tab_page:
             html = html.replace("</head>", TAB_PAGE_SCRIPT.format(page=_tab_page) + "</head>", 1)
         if _click_selector:
@@ -580,7 +597,7 @@ def _crop_to_content(target: Path, scale: float) -> None:
 
 
 def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
-    global _click_selector, _hide_css, _setup_step, _tab_page
+    global _click_selector, _hide_css, _pip_script, _setup_step, _tab_page
     browser_path = _find_browser(browser)
     _check_page_markers()
     out_dir = out_dir.resolve()  # before the working directory moves
@@ -645,6 +662,7 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
                 _hide_css = _tab_style(hide)
                 _tab_page = page
                 _click_selector = click[0]
+                _pip_script = _all_milestones_said_script() if filename == "dashboard-home-tip.png" else ""
                 url = f"http://127.0.0.1:{port}/?launch={guard.new_launch_secret()}&tab={tab}"
                 profile = (
                     data_dir / "browser-profile" / Path(filename).stem
@@ -655,6 +673,7 @@ def run(out_dir: Path, browser: str | None, scale: float) -> list[Path]:
                     _crop_to_content(target, scale)
 
             _tab_page = ""
+            _pip_script = ""
             _click_selector = None
             config.setup_done = False  # the setup overlay opens by itself on the dashboard's first page
             _hide_css = ""

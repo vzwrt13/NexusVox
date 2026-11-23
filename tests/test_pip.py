@@ -261,7 +261,7 @@ def test_the_bubble_is_a_quiet_card_with_a_soft_tail_and_one_gentle_entrance():
     assert "box-shadow" in card and "animation: pip-bubble-in" in card
     assert re.search(r"@keyframes pip-bubble-in\s*\{[^}]*opacity: 0[^}]*scale\(0\.94\)", CSS)
     assert ".pip-bubble::before" in CSS and ".pip-bubble-left .pip-bubble::before" in CSS  # a tail on either side
-    assert ".pip-bubble-close" in CSS
+    assert ".pip-bubble-close" in CSS and ".pip-bubble-eyebrow" in CSS  # the × and the label line of style c
 
 
 def test_pip_stands_in_the_bottom_right_corner_of_home_in_the_flow_and_never_over_a_card():

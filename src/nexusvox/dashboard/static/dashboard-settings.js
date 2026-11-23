@@ -326,6 +326,9 @@ const updateInstall = document.getElementById("update-install");
 const updateProgress = document.getElementById("update-progress");
 const updateCancel = document.getElementById("update-cancel");
 let updatePollTimer = null;
+let updatePollFailures = 0;
+// A status request can fail for a moment (a busy server, a throttled background tab) while the download goes on.
+const UPDATE_POLL_MAX_FAILURES = 5;
 function updateMegabytes(bytes) {
   return (Math.max(0, Number(bytes) || 0) / (1024 * 1024)).toFixed(1);
 }
@@ -366,9 +369,19 @@ async function pollUpdate() {
   } catch (e) {
     // The app quits once the installer runs, and the dashboard with it: that is the expected end.
     if (updateStatus.dataset.installing) return;
-    setStatus(updateStatus, "down", "The dashboard could not be reached.");
+    updatePollFailures += 1;
+    if (updatePollFailures < UPDATE_POLL_MAX_FAILURES) {
+      updatePollTimer = setTimeout(pollUpdate, 1000);
+      return;
+    }
+    updatePollFailures = 0;
+    updateProgress.hidden = true;
+    updateCancel.hidden = true;
+    checkUpdateButton.disabled = false;
+    setStatus(updateStatus, "down", "The dashboard could not be reached. Check for updates again to see the progress.");
     return;
   }
+  updatePollFailures = 0;
   if (status.state === "installing") updateStatus.dataset.installing = "1";
   if (renderUpdate(status)) updatePollTimer = setTimeout(pollUpdate, 500);
 }

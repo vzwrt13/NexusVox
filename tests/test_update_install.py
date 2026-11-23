@@ -341,7 +341,9 @@ def test_a_second_start_while_downloading_is_refused(tmp_path, signature):
     installer.offer(_check())
     installer.start()
     assert installer.start()["error"] == "busy"
-    assert installer.offer({"ok": True, "newer": False}) is True  # a check meanwhile keeps the running offer
+    # A check meanwhile offers no second install, and the running one keeps its offer.
+    assert installer.offer(_check()) is False
+    assert installer.status()["version"] == "9.0.0"
     gate.set()
     _finish(installer)
 
@@ -397,3 +399,148 @@ def test_launcher_failure_is_an_update_error(monkeypatch, tmp_path):
     with pytest.raises(UpdateError) as caught:
         update_install.launch_installer(tmp_path / "s.exe", tmp_path / "a.exe", 1)
     assert caught.value.code == "launch"
+
+
+def test_launcher_resets_the_frozen_apps_environment_and_leaves_the_program_folder(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(update_install.subprocess, "Popen", lambda command, **kw: calls.append((command, kw)))
+    for name in ("_PYI_APPLICATION_HOME_DIR", "_PYI_PARENT_PROCESS_LEVEL", "_MEIPASS2", "HF_HUB_CACHE", "HF_XET_CACHE"):
+        monkeypatch.setenv(name, "old")
+    monkeypatch.setenv("NEXUSVOX_KEEP_ME", "yes")
+    setup = tmp_path / "updates" / "NexusVox-Setup.exe"
+    app = tmp_path / "Programs" / "NexusVox" / "NexusVox.exe"
+    update_install.launch_installer(setup, app, 1)
+    ((_, kw),) = calls
+    env = {name.upper(): value for name, value in kw["env"].items()}
+    assert env["PYINSTALLER_RESET_ENVIRONMENT"] == "1" and env["NEXUSVOX_KEEP_ME"] == "yes"
+    assert not [name for name in env if name.startswith(("_PYI_", "_MEI")) or name.startswith("HF_")]
+    assert kw["cwd"] == str(setup.parent)  # a handle on the program folder would block the installer
+
+
+def test_the_waiter_waits_for_the_app_without_a_time_limit():
+    assert ".WaitForExit() }" in update_install._WAITER
+    assert "WaitForExit(1" not in update_install._WAITER  # no timeout that would start Setup under a running app
+
+
+# ── Cleanup that fails must not leave the flow busy ──────────────────
+
+
+def _locked(monkeypatch, suffix):
+    """Deleting a file whose name ends in `suffix` fails, as while antivirus still scans a fresh download."""
+    original = Path.unlink
+
+    def unlink(self, missing_ok=False):
+        if self.name.endswith(suffix) and self.exists():
+            raise PermissionError(13, "in use", str(self))
+        return original(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+
+def test_a_refused_file_that_cannot_be_deleted_still_ends_the_flow(monkeypatch, tmp_path, signature):
+    signature["value"] = Signature(False, reason="the file is not signed")
+    _locked(monkeypatch, ".exe")
+    launched = []
+    installer = _installer(tmp_path, _github(), launched)
+    installer.offer(_check())
+    installer.start()
+    status = _finish(installer)
+    assert status["state"] == "failed" and "was not run" in status["message"] and "not signed" in status["message"]
+    assert launched == []
+    assert installer.start()["state"] == "downloading"  # not refused as busy
+    _finish(installer)
+
+
+def test_a_part_file_that_cannot_be_deleted_keeps_the_real_error(monkeypatch, tmp_path):
+    _locked(monkeypatch, ".part")
+
+    def handler(request):
+        if str(request.url) == URL:
+            return httpx.Response(302, headers={"location": ASSET_HOST_URL})
+        return httpx.Response(200, content=PAYLOAD)
+
+    with pytest.raises(UpdateError) as caught:
+        download_installer(URL, tmp_path / "NexusVox-Setup.exe", size=len(PAYLOAD), sha256="0" * 64,
+                           transport=httpx.MockTransport(handler))  # fmt: skip
+    assert caught.value.code == "digest"
+
+
+def test_an_unexpected_error_ends_as_failed(tmp_path, signature):
+    def explode(setup, app, pid):
+        raise RuntimeError("boom")
+
+    installer = UpdateInstaller(
+        lambda: None, folder=lambda: tmp_path / "updates", can_install=lambda: True, transport=_github(),
+        launcher=explode, quit_delay_s=0,
+    )  # fmt: skip
+    installer.offer(_check())
+    installer.start()
+    status = _finish(installer)
+    assert status["state"] == "failed" and "release page" in status["message"]
+    assert _left(tmp_path) == []
+
+
+# ── The bytes as GitHub stores them ──────────────────────────────────
+
+
+def test_the_download_asks_for_the_file_uncompressed(tmp_path):
+    asked = []
+
+    def handler(request):
+        asked.append(request.headers.get("accept-encoding"))
+        return httpx.Response(200, content=PAYLOAD)
+
+    download_installer(URL, tmp_path / "s.exe", size=len(PAYLOAD), transport=httpx.MockTransport(handler))
+    assert asked == ["identity"] and (tmp_path / "s.exe").read_bytes() == PAYLOAD
+
+
+def test_a_compressed_answer_is_refused(tmp_path):
+    def handler(request):
+        return httpx.Response(200, stream=httpx.ByteStream(PAYLOAD), headers={"content-encoding": "gzip"})
+
+    with pytest.raises(UpdateError) as caught:
+        download_installer(URL, tmp_path / "s.exe", size=len(PAYLOAD), transport=httpx.MockTransport(handler))
+    assert caught.value.code == "server" and not (tmp_path / "s.exe").exists()
+
+
+# ── Revocation that cannot be looked up ──────────────────────────────
+
+
+@pytest.fixture
+def fake_trust(monkeypatch):
+    from nexusvox.system import authenticode
+
+    answers: dict[bool, int] = {}
+    calls: list[bool] = []
+
+    def verify(path, revocation=True):
+        calls.append(revocation)
+        return answers[revocation]
+
+    monkeypatch.setattr(authenticode.sys, "platform", "win32")
+    monkeypatch.setattr(authenticode, "_verify_trust", verify)
+    monkeypatch.setattr(authenticode, "_read_signer", lambda path: (SIGNER, SIGNER, True))
+    return answers, calls
+
+
+def test_unreachable_revocation_servers_fall_back_to_the_signature_alone(fake_trust, tmp_path):
+    answers, calls = fake_trust
+    answers.update({True: 0x800B010E, False: 0})  # CERT_E_REVOCATION_FAILURE, then valid
+    found = check_signature(tmp_path / "s.exe")
+    assert found.valid and found.signer == SIGNER and found.revocation_checked is False
+    assert calls == [True, False]
+
+
+def test_a_revoked_certificate_is_never_retried(fake_trust, tmp_path):
+    answers, calls = fake_trust
+    answers.update({True: 0x800B010C, False: 0})  # CERT_E_REVOKED
+    found = check_signature(tmp_path / "s.exe")
+    assert not found.valid and "revoked" in found.reason and calls == [True]
+
+
+def test_signature_refusal_points_to_the_release_page(tmp_path, signature):
+    signature["value"] = Signature(False, reason="the certificate was revoked")
+    installer = _installer(tmp_path, _github())
+    installer.offer(_check())
+    installer.start()
+    assert "release page" in _finish(installer)["message"]

@@ -122,6 +122,9 @@ valid and trusted, carries a timestamp, and the signing certificate's common nam
 - A new certificate under another name needs `SIGNER` changed in a release **before** the first one signed with it,
   or the in-app update of every older version refuses it.
 - Keep the timestamp (`-TimestampUrl`): a release signed without one is refused.
+- Revocation is checked for the whole chain except the root. A revoked certificate always refuses. When the CRL and
+  OCSP servers cannot be reached (a network that blocks them), the check is repeated without revocation and the
+  install goes ahead; the log says so (`revocation not checked`).
 - The installer must stay per-user (`PrivilegesRequired=lowest`) and accept `/SILENT /SP- /NORESTART`, which is how the
   app runs it once it has quit.
 

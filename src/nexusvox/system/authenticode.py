@@ -1,9 +1,10 @@
 """Who signed a file, and is the signature intact? Windows' own Authenticode check, read through ctypes.
 
 `check_signature` asks `WinVerifyTrust` whether the embedded signature is valid and chains to a trusted root (the
-revocation of every certificate in the chain but the root included), then reads the signer's name and whether the
-signature carries a timestamp from the PKCS #7 block itself. Nothing here runs the file. Windows only: elsewhere every
-file reads as not signed.
+revocation of every certificate in the chain but the root included; when that cannot be looked up, because a network
+blocks the CRL and OCSP servers, the check is repeated without it and the answer says so), then reads the signer's
+name and whether the signature carries a timestamp from the PKCS #7 block itself. Nothing here runs the
+file. Windows only: elsewhere every file reads as not signed.
 """
 
 from __future__ import annotations
@@ -27,14 +28,20 @@ class Signature:
     organisation: str | None = None
     timestamped: bool = False
     reason: str = ""  # why it is not valid, for the log; empty when valid
+    revocation_checked: bool = True  # False when the revocation servers could not be reached (never when revoked)
 
 
 # WinVerifyTrust: the generic Authenticode policy, no UI, the whole chain checked for revocation except the root.
 _WTD_UI_NONE = 2
+_WTD_REVOKE_NONE = 0
 _WTD_REVOKE_WHOLECHAIN = 1
 _WTD_CHOICE_FILE = 1
 _WTD_STATEACTION_IGNORE = 0
+_WTD_REVOCATION_CHECK_NONE = 0x10
 _WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT = 0x80
+# "Could not find out whether it is revoked", as opposed to CERT_E_REVOKED (0x800B010C), which always refuses:
+# CERT_E_REVOCATION_FAILURE, CRYPT_E_REVOCATION_OFFLINE, CRYPT_E_NO_REVOCATION_CHECK.
+_REVOCATION_UNKNOWN = {0x800B010E, 0x80092013, 0x80092012}
 
 # Reading the PKCS #7 block.
 _CERT_QUERY_OBJECT_FILE = 1
@@ -161,18 +168,18 @@ def _apis():
     return wintrust, crypt32
 
 
-def _verify_trust(path: str) -> int:
+def _verify_trust(path: str, revocation: bool = True) -> int:
     """WinVerifyTrust's answer for the file: 0 when the signature is valid and trusted, else an HRESULT."""
     wintrust, _ = _apis()
     file_info = _WintrustFileInfo(ctypes.sizeof(_WintrustFileInfo), path, None, None)
     data = _WintrustData()
     data.cbStruct = ctypes.sizeof(_WintrustData)
     data.dwUIChoice = _WTD_UI_NONE
-    data.fdwRevocationChecks = _WTD_REVOKE_WHOLECHAIN
+    data.fdwRevocationChecks = _WTD_REVOKE_WHOLECHAIN if revocation else _WTD_REVOKE_NONE
     data.dwUnionChoice = _WTD_CHOICE_FILE
     data.pFile = ctypes.pointer(file_info)
     data.dwStateAction = _WTD_STATEACTION_IGNORE
-    data.dwProvFlags = _WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT
+    data.dwProvFlags = _WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT if revocation else _WTD_REVOCATION_CHECK_NONE
     # INVALID_HANDLE_VALUE as hwnd: no UI may ever be shown.
     return wintrust.WinVerifyTrust(ctypes.c_void_p(-1), ctypes.byref(_WINTRUST_ACTION_GENERIC_VERIFY_V2), data) & (
         0xFFFFFFFF
@@ -250,11 +257,16 @@ def check_signature(path: str | Path) -> Signature:
         return Signature(False, reason="signatures can only be checked on Windows")
     path = str(Path(path).resolve())
     try:
-        status = _verify_trust(path)
+        status, revocation_checked = _verify_trust(path), True
+        if status in _REVOCATION_UNKNOWN:
+            logger.warning("Revocation of the signer could not be checked (0x%08X); checking without it", status)
+            status, revocation_checked = _verify_trust(path, revocation=False), False
         signer, organisation, timestamped = _read_signer(path) if status == 0 else (None, None, False)
     except OSError as exc:  # a DLL or entry point missing: treat it as unverifiable, never as valid
         logger.warning("The signature check could not run: %s", exc)
         return Signature(False, reason="the signature check could not run")
     if status != 0:
         return Signature(False, reason=_TRUST_ERRORS.get(status, f"Windows refused the signature (0x{status:08X})"))
-    return Signature(True, signer=signer, organisation=organisation, timestamped=timestamped)
+    return Signature(
+        True, signer=signer, organisation=organisation, timestamped=timestamped, revocation_checked=revocation_checked
+    )

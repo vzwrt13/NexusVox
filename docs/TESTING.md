@@ -123,7 +123,7 @@ tests/
 | `test_analytics_exports.py` | `dashboard/analytics.py` | The names `nexusvox.dashboard.analytics` must keep exporting |
 | `test_analytics_week.py` | `dashboard/analytics_week.py`, `analytics_usage.get_words_per_day` | Week boundaries (Monday to Sunday), words per day, meetings, new dictionary entries, the headline, the endpoints |
 | `test_pip_greeting.py` | `dashboard/analytics_pip.py`, `static/dashboard-pip-texts.js`, `static/dashboard-pip-greeting.js` | The counts behind Pip's bubble (counts only, formatting-command detection, cached totals), the texts rules, the order milestone / tip / statistic, once a day, dismissal, the catch-up for an existing history, never-used detection |
-| `test_pip_tour.py` | `static/dashboard-pip-whats-new.js`, `static/dashboard-pip-tour.js` | The what's-new data file, once per version, no entries = no popup, a first installation, the popup replacing the daily bubble (and not using it up), Show Pip off, the steps and their buttons |
+| `test_pip_tour.py` | `static/dashboard-pip-whats-new.js`, `static/dashboard-pip-tour.js` | The what's-new data file, once per version, no entries = no popup, a first installation, the popup replacing the daily bubble (and not using it up), Show Pip off, the steps and their buttons, Show me continuing the tour, the sidebar's What's new link |
 | `test_analytics_js.py` | `static/dashboard-analytics.js` | The three Analytics views in the markup, the view in the address, week and date helpers |
 | `test_dashboard_routes.py` | `dashboard/__init__.py`, `dashboard/routes_*.py` | Every topic module's routes reach the app |
 | `test_dashboard_api.py` | `dashboard/routes_*.py` | All `/api/*` HTTP endpoints return correct status codes and JSON shape |

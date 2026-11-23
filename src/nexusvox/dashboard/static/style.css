@@ -1686,6 +1686,9 @@ canvas { width: 100% !important; max-height: 260px; }
 }
 .pip-tour-next:hover { background: var(--accent-light); border-color: var(--accent-light); color: var(--bg); }
 .pip-tour-next:focus-visible, .pip-tour-show:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+/* The same card without Pip (the "What's new" link while Show Pip is off): floating at the bottom right, no tail. */
+.pip-tour-plain { position: fixed; right: 24px; bottom: 24px; z-index: 900; width: 280px; max-width: calc(100vw - 48px); }
+.pip-tour-plain::before { display: none; }
 
 /* Pip on Home (dashboard-pip-greeting.js): the bottom-right corner of the content, in the flow under the last row, so
    he never covers a card or a button. Home is a column at least as tall as the window, and the host's auto top margin

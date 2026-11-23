@@ -43,6 +43,13 @@ from ..system.com import ensure_com
 
 logger = logging.getLogger("nexusvox.mic_guard")
 
+
+def _log_enumeration_failure(outcome: str) -> None:
+    """One warning line for a failed session enumeration (no microphone); call it in an `except`."""
+    logger.warning("Mic guard: enumerating capture sessions failed, %s", outcome)
+    logger.debug("Mic guard: enumeration failure", exc_info=True)
+
+
 STATE_FILENAME = "mic_guard_state.json"
 
 # AudioSessionState values from audiosessiontypes.h
@@ -138,7 +145,7 @@ class MicGuard:
             try:
                 sessions = self._enumerate()
             except Exception:
-                logger.exception("Mic guard: enumerating capture sessions failed, nothing muted")
+                _log_enumeration_failure("nothing muted")
                 return []
 
             targets: list[tuple[CaptureSession, MutedEntry]] = []
@@ -235,7 +242,7 @@ class MicGuard:
         try:
             self._enumerate()
         except Exception:
-            logger.exception("Mic guard: warm-up enumeration failed")
+            _log_enumeration_failure("warm-up skipped")
 
     # -- crash recovery ---------------------------------------------------------------
 
@@ -266,7 +273,7 @@ class MicGuard:
         try:
             sessions = self._enumerate()
         except Exception:
-            logger.exception("Mic guard: enumerating capture sessions failed, nothing restored")
+            _log_enumeration_failure("nothing restored")
             return None
         present = {s.instance_id for s in sessions}
         wanted = {e.instance_id for e in entries}

@@ -354,3 +354,16 @@ def test_restored_count_is_not_inflated_by_extra_same_app_sessions():
     assert g.release() == 2  # a1 and one stand-in for a2
     assert a1.muted is False
     assert [new_one.muted, new_two.muted].count(False) == 1
+
+
+def test_a_failing_enumeration_logs_one_warning_and_no_traceback(caplog):
+    import logging
+
+    def no_microphone():
+        raise OSError("COMError: no capture device")
+
+    guard = MicGuard(no_microphone, own_pids=set(), watchdog_s=0)
+    with caplog.at_level(logging.DEBUG):
+        assert guard.hold() == []
+    above_debug = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(above_debug) == 1 and not above_debug[0].exc_info

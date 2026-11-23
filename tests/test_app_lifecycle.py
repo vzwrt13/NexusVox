@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 from unittest.mock import AsyncMock, MagicMock
@@ -916,3 +917,32 @@ def test_the_note_survives_a_first_download_but_not_a_later_refusal(monkeypatch)
     with pytest.raises(RuntimeError, match="during a dictation"):
         asyncio.run(app.switch_model("whisper-large-v3-turbo"))
     assert "note" not in app.get_switch_status()
+
+
+# -- Unreachable server ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("where", ["connect", "finish"])
+def test_an_unreachable_server_logs_one_warning_and_no_traceback(monkeypatch, caplog, where):
+    app = _take_app(monkeypatch, stop_info=(None, False, 101.0))
+    app._config.inference.server_url = "ws://127.0.0.1:1"
+    app._offline_stop = AsyncMock()
+    app._drop_stale_stop = AsyncMock(return_value=100.0)
+    app._transcriber._server_url = "ws://127.0.0.1:1"
+    failure = ConnectionRefusedError("refused")
+    if where == "connect":
+        app._transcriber.connect = AsyncMock(side_effect=failure)
+    else:
+        app._transcriber.finish = AsyncMock(side_effect=failure)
+
+    async def scenario():
+        app._record_stop_event = asyncio.Event()
+        asyncio.get_running_loop().call_later(0.01, app._record_stop_event.set)
+        await app._transcription_cycle()
+
+    with caplog.at_level(logging.DEBUG):
+        asyncio.run(scenario())
+    above_debug = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert [r.getMessage() for r in above_debug] == ["Transcription server not reachable at ws://127.0.0.1:1"]
+    assert not [r for r in above_debug if r.exc_info]
+    assert [r for r in caplog.records if r.levelno == logging.DEBUG and r.exc_info]  # the traceback stays at debug

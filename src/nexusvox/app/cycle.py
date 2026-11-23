@@ -34,6 +34,17 @@ START_CUE_DELAY_S = 0.15
 MAX_TAKE_LEAD_S = 10.0
 
 
+def _is_unreachable(exc: BaseException | None) -> bool:
+    """Whether *exc* (or its cause) says the server could not be reached: refused, timed out or no route."""
+    import httpx  # lazy, like the HTTP transcriber
+
+    while exc is not None:
+        if isinstance(exc, OSError | TimeoutError | httpx.ConnectError | httpx.TimeoutException):
+            return True
+        exc = exc.__cause__
+    return False
+
+
 class TranscriptionCycle:
     """The cycle part of `NexusVoxApp`."""
 
@@ -90,6 +101,17 @@ class TranscriptionCycle:
         logger.warning("A model switch is in progress, no dictation until it is done")
         await self._offline_stop(await self._drop_stale_stop(self._press_time))
 
+    def _log_server_failure(self, exc: BaseException, transcriber: object, message: str) -> None:
+        """Log *message* with the traceback, or one warning line when the server is just not reachable."""
+        if not _is_unreachable(exc):
+            logger.error(message, exc_info=exc)
+            return
+        url = getattr(transcriber, "_server_url", None)
+        if not isinstance(url, str):
+            url = self._config.inference.server_url
+        logger.warning("Transcription server not reachable at %s", url)
+        logger.debug("%s", message, exc_info=exc)
+
     async def _transcription_cycle(self, remote: bool = False) -> None:
         """Run one full transcription cycle: connect, record, transcribe, inject.
 
@@ -140,10 +162,10 @@ class TranscriptionCycle:
             connected = True  # a failed connect is disconnected too
             try:
                 await transcriber.connect()
-            except Exception:
+            except Exception as exc:
                 if remote:
                     raise
-                logger.exception("Could not reach the transcription server")
+                self._log_server_failure(exc, transcriber, "Could not reach the transcription server")
                 await hang_up()
                 await self._offline_stop(await self._drop_stale_stop(pressed_at))
                 return
@@ -275,11 +297,13 @@ class TranscriptionCycle:
             # Finalize transcription
             try:
                 result = await transcriber.finish()
-            except Exception:
+            except Exception as exc:
                 if remote or mark != POLISH or stop_at is None or stop_at - pressed_at >= QUICK_TAP_S:
                     raise
                 # A polish tap needs no transcript (HTTP backends only fail here, not in connect()).
-                logger.exception("Transcription failed; polishing with the default instruction")
+                self._log_server_failure(
+                    exc, transcriber, "Transcription failed; polishing with the default instruction"
+                )
                 await hang_up()
                 await self._polish_selection("", None)
                 return
@@ -403,8 +427,8 @@ class TranscriptionCycle:
             self._stats_pool.submit(self._store_stat, self._db.record_dictionary_hits, processed.dictionary_hits)
             await loop.run_in_executor(None, self._store_audio, audio_buffer, record.id)
 
-        except Exception:
-            logger.exception("Transcription cycle failed")
+        except Exception as exc:
+            self._log_server_failure(exc, transcriber, "Transcription cycle failed")
             await self._abort_recording(audio, stream_task, recording_stopped)
             self._tray.set_active(False)
             if not remote:

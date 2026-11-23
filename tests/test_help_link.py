@@ -44,3 +44,13 @@ def test_tray_help_logs_when_no_browser_starts(monkeypatch, caplog):
     monkeypatch.setattr(tray.webbrowser, "open", lambda url: False)
     _tray_help_item(tray)(None)
     assert "online guide" in caplog.text
+
+
+def test_dashboard_help_link_is_a_tab_styled_entry_above_feedback(db, session_factory):
+    app = _create_app(DashboardAPI(session_factory, Config(), db=db))
+    app.config["TESTING"] = True
+    html = app.test_client().get("/").get_data(as_text=True)
+    help_at = html.index('id="help-link"')
+    assert help_at < html.index('id="feedback-tab-button"')
+    assert 'class="tab tab-help"' in html[help_at - 40 : help_at]
+    assert "? Help" not in html

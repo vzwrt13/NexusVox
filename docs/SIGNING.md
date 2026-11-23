@@ -48,17 +48,22 @@ Do the normal release first ([.github/CLAUDE.md](../.github/CLAUDE.md#releasing)
 tag. The tag run creates the draft release. Then, on your PC, from a checkout of the tag:
 
 1. **Log in to SimplySign Desktop** (phone one-time code). The certificate now shows up as a virtual smart card.
-2. **Reinstall the checkout into the signing environment**, check the version, then build. A stale install there is
-   what gets bundled, whatever the checkout says:
+2. **Reinstall the checkout into the signing environment**, check it, then build. A stale install there is what gets
+   bundled, whatever the checkout says. The first command brings the dependencies up to the pins of this tag, the
+   second replaces nexusvox itself even when the version number did not change:
 
    ```powershell
+   python -m pip install .
    python -m pip install --no-deps --force-reinstall .
-   python -c "import importlib.metadata as m; print(m.version('nexusvox'))"   # must equal the version in pyproject.toml
+   python packaging\build.py --check
    python packaging\check_bootloader.py
    python packaging\build.py --clean
    ```
 
-   `build.py` also stops with one line when the installed nexusvox differs from the checkout.
+   `build.py --check` runs the checks `build.py` makes before every build and stops with one line when the running
+   Python differs from the one `installer.yml` builds with, or the installed nexusvox (the `__version__` of the copy
+   Python finds first) differs from the checkout. If it cannot read the Python version from the workflow, set
+   `NEXUSVOX_CI_PYTHON` to it (for example `3.12`).
 3. Run the script:
 
    ```powershell

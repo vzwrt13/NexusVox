@@ -2,6 +2,7 @@
 
     python packaging/build.py              # build into dist/NexusVox
     python packaging/build.py --clean      # drop PyInstaller's cache first
+    python packaging/build.py --check      # only check Python and the installed nexusvox against CI and the checkout
     python packaging/build.py --selftest   # test build in dist/selftest with `--selftest <dir>`; never ship it
 
 Run it with the Python environment that has NexusVox and PyInstaller installed. Install NexusVox as a
@@ -33,15 +34,50 @@ _VERSION_LINE = re.compile(r'^__version__\s*=\s*["\']([^"\']+)["\']', re.MULTILI
 
 
 INSTALLER_WORKFLOW = ROOT / ".github" / "workflows" / "installer.yml"
-_PYTHON_PIN = re.compile(r"""python-version:\s*["']?(\d+\.\d+)""")
+PYTHON_OVERRIDE_ENV = "NEXUSVOX_CI_PYTHON"
+_JOB_HEADER = re.compile(r"^  [\w-]+:\s*$")
+_STEP_START = re.compile(r"^\s*-\s")
+_PYTHON_VALUE = re.compile(r"python-version:\s*(.+)")
+INSTALL_COMMAND = "python -m pip install . && python -m pip install --no-deps --force-reinstall ."
+
+
+def _without_comments(text: str) -> list[str]:
+    return [re.sub(r"(^|\s)#.*$", "", line).rstrip() for line in text.splitlines()]
 
 
 def ci_python_version(workflow: Path = INSTALLER_WORKFLOW) -> str:
-    """The major.minor Python the installer workflow builds the app with (its first setup-python pin)."""
-    match = _PYTHON_PIN.search(workflow.read_text(encoding="utf-8"))
-    if not match:
-        raise ValueError(f"no python-version found in {workflow}")
-    return match.group(1)
+    """The major.minor Python the installer workflow builds the app with.
+
+    It is the `python-version` of the `actions/setup-python` step in the job that runs `packaging/build.py`
+    (comments skipped; quoted, bare and one-item list forms accepted). Setting `NEXUSVOX_CI_PYTHON` (for example
+    `3.12`) replaces the lookup when the workflow uses a form this cannot read.
+    """
+    override = os.environ.get(PYTHON_OVERRIDE_ENV, "").strip()
+    if override:
+        return override
+    jobs: list[list[str]] = []
+    for line in _without_comments(workflow.read_text(encoding="utf-8")):
+        if _JOB_HEADER.match(line):
+            jobs.append([])
+        if jobs:
+            jobs[-1].append(line)
+    build_jobs = [job for job in jobs if any("packaging/build.py" in line for line in job)]
+    if len(build_jobs) != 1:
+        raise ValueError(f"expected one job running packaging/build.py in {workflow}, found {len(build_jobs)}")
+    job = build_jobs[0]
+    for index, line in enumerate(job):
+        if "actions/setup-python" not in line:
+            continue
+        for step_line in job[index : index + 12]:
+            if step_line is not line and _STEP_START.match(step_line):
+                break
+            value = _PYTHON_VALUE.search(step_line)
+            if value:
+                versions = re.findall(r"\d+\.\d+", value.group(1))
+                if "${{" in value.group(1) or len(versions) != 1:
+                    raise ValueError(f"python-version is `{value.group(1)}`, not one fixed version")
+                return versions[0]
+    raise ValueError(f"no setup-python python-version in the build job of {workflow}")
 
 
 def python_mismatch_error(expected: str, running: tuple[int, int] | None = None) -> str | None:
@@ -78,23 +114,48 @@ def installed_package_init() -> Path | None:
     return Path(spec.origin) if spec and spec.origin else None
 
 
-def stale_bundle_error(root: Path = ROOT, installed_init: Path | None = None) -> str | None:
+def editable_install_found() -> bool:
+    """True when nexusvox resolves only through an editable install (a .pth entry or a meta-path finder)."""
+    try:
+        spec = importlib.util.find_spec("nexusvox")
+    except (ImportError, ValueError):
+        return False
+    return bool(spec and spec.origin)
+
+
+def stale_bundle_error(root: Path = ROOT, installed_init: Path | None = None, editable: bool = False) -> str | None:
     """One line naming the mismatch when the installed nexusvox is not the checkout's, else None."""
     expected = checkout_version(root)
     source_version = _package_version(root / "src" / "nexusvox" / "__init__.py")
     if source_version != expected:
         return f"src/nexusvox/__init__.py says {source_version}, pyproject.toml says {expected}: fix the checkout first"
     if installed_init is None:
-        return (
-            "nexusvox is not installed in this environment: run `python -m pip install --no-deps --force-reinstall .`"
-        )
+        if editable:
+            return f"nexusvox is an editable install here, the build needs a regular one: run `{INSTALL_COMMAND}`"
+        return f"nexusvox is not installed in this environment: run `{INSTALL_COMMAND}`"
     found = _package_version(installed_init)
     if found != expected:
         return (
             f"the installed nexusvox is {found} ({installed_init.parent}), the checkout is {expected}: "
-            "run `python -m pip install --no-deps --force-reinstall .` and build again"
+            f"run `{INSTALL_COMMAND}` and build again"
         )
     return None
+
+
+def preflight_error() -> str | None:
+    """The first reason this environment must not build the release app, as one line, or None."""
+    try:
+        expected_python = ci_python_version()
+    except (OSError, ValueError) as error:
+        return f"cannot read the CI Python version ({error}): set {PYTHON_OVERRIDE_ENV}=<major.minor> to override"
+    problem = python_mismatch_error(expected_python)
+    if problem:
+        return problem
+    try:
+        init = installed_package_init()
+        return stale_bundle_error(ROOT, init, editable=init is None and editable_install_found())
+    except (OSError, KeyError, ValueError) as error:  # ValueError covers tomllib.TOMLDecodeError
+        return f"cannot check the nexusvox version ({type(error).__name__}: {error}): is pyproject.toml intact?"
 
 
 def folder_size_mb(folder: Path) -> float:
@@ -105,6 +166,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--selftest", action="store_true", help="build in the --selftest mode (never ship that build)")
     parser.add_argument("--clean", action="store_true", help="remove PyInstaller's cache before building")
+    parser.add_argument("--check", action="store_true", help="only run the Python and installed-version checks")
     args = parser.parse_args()
 
     # A self-test build goes to its own folder so it can never be mistaken for the build that ships.
@@ -118,13 +180,13 @@ def main() -> int:
     if args.clean:
         command.append("--clean")
 
-    try:
-        problem = python_mismatch_error(ci_python_version()) or stale_bundle_error(ROOT, installed_package_init())
-    except (OSError, ValueError) as error:
-        problem = f"cannot read the CI Python version: {error}"
+    problem = preflight_error()
     if problem:
         print(f"error: {problem}", file=sys.stderr)
         return 1
+    if args.check:
+        print("ok: Python and installed nexusvox match the checkout and CI")
+        return 0
 
     try:
         ensure_lgpl_av()

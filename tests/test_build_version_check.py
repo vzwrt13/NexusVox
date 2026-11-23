@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
+import pytest
 from packaging_scripts import load_packaging_script
 
 load_packaging_script("lgpl_av")  # build.py imports it by name
@@ -62,10 +64,68 @@ def test_python_match_passes():
     assert build.python_mismatch_error("3.12", (3, 12)) is None
 
 
-def test_ci_python_version_is_read_from_the_workflow(tmp_path):
-    workflow = tmp_path / "w.yml"
-    workflow.write_text('steps:\n  - uses: actions/setup-python@v7\n    with:\n      python-version: "3.12"\n')
-    assert build.ci_python_version(workflow) == "3.12"
+def _workflow(tmp_path, text):
+    path = tmp_path / "w.yml"
+    path.write_text(text)
+    return path
+
+
+JOBS = """\
+jobs:
+  lint:
+    steps:
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+  installer:
+    steps:
+      # - uses: actions/setup-python@v7 (old)
+      #   python-version: "3.11"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: PIN
+      - run: python packaging/build.py
+"""
+
+
+@pytest.mark.parametrize("pin", ['"3.12"', "'3.12'", "3.12", "['3.12']"])
+def test_pin_is_read_from_the_build_job_only(tmp_path, pin):
+    assert build.ci_python_version(_workflow(tmp_path, JOBS.replace("PIN", pin))) == "3.12"
+
+
+@pytest.mark.parametrize("pin", ["${{ matrix.python }}", "['3.11', '3.12']"])
+def test_unreadable_pin_raises(tmp_path, pin):
+    with pytest.raises(ValueError):
+        build.ci_python_version(_workflow(tmp_path, JOBS.replace("PIN", pin)))
+
+
+def test_override_env_replaces_the_lookup(tmp_path, monkeypatch):
+    monkeypatch.setenv(build.PYTHON_OVERRIDE_ENV, "3.10")
+    assert build.ci_python_version(_workflow(tmp_path, "nothing readable")) == "3.10"
+
+
+def test_broken_pyproject_is_not_blamed_on_the_workflow(tmp_path, monkeypatch):
+    root = _checkout(tmp_path / "repo")
+    (root / "pyproject.toml").write_text("this is = = not toml")
+    monkeypatch.setattr(build, "ROOT", root)
+    monkeypatch.setattr(build, "ci_python_version", lambda: f"{sys.version_info.major}.{sys.version_info.minor}")
+    monkeypatch.setattr(build, "installed_package_init", lambda: None)
+    message = build.preflight_error()
+    assert "nexusvox version" in message and "CI Python" not in message
+
+
+def test_dynamic_version_gives_one_line_not_a_traceback(tmp_path, monkeypatch):
+    root = _checkout(tmp_path / "repo")
+    (root / "pyproject.toml").write_text('[project]\nname = "nexusvox"\ndynamic = ["version"]\n')
+    monkeypatch.setattr(build, "ROOT", root)
+    monkeypatch.setattr(build, "ci_python_version", lambda: f"{sys.version_info.major}.{sys.version_info.minor}")
+    monkeypatch.setattr(build, "installed_package_init", lambda: None)
+    assert "KeyError" in build.preflight_error()
+
+
+def test_editable_install_is_named_as_such(tmp_path):
+    message = build.stale_bundle_error(_checkout(tmp_path / "repo"), None, editable=True)
+    assert "editable" in message and "not installed" not in message
 
 
 def test_real_installer_workflow_pins_a_python():

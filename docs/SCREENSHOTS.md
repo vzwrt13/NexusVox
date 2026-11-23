@@ -42,9 +42,8 @@ slug and hide the rows after the hotkey row on Dictation (selector in `GUIDE_SHO
 matching, the image simply gets longer: look at the
 result before committing.
 
-The dashboard has a single (dark) theme, so there is no light/dark pair. The older `dashboard.png`,
-`settings.png`, `dashboard-meetings.png` and `dashboard-upload.png` (from before the Recordings tab) are
-not touched.
+The dashboard has a single (dark) theme, so there is no light/dark pair. Every image in `docs/images/` comes from
+this script; re-run it and commit the images that differ whenever the dashboard's look changes.
 
 ## Options
 

@@ -270,7 +270,13 @@ function shownRecordings() {
 }
 
 // What Pip says over an empty list; it is only a hint, so it names no recording content.
-const REC_EMPTY_PIP_LINE = "Record a meeting or upload an audio file from Home, and it shows up here.";
+const REC_EMPTY_PIP_LINE = "Start a recording or upload a file above, and it shows up here.";
+
+// A Pip host that is thrown away with the empty list is released first, so Show Pip does not keep redrawing it.
+function dropEmptyPip() {
+  const host = recList.querySelector(".rec-empty-pip");
+  if (host) unmountPip(host);
+}
 
 function recordingRowHtml(item) {
   return `<button type="button" class="rec-row" data-id="${item.id}" data-kind="${item.kind === "meeting" ? "meeting" : "upload"}">
@@ -294,6 +300,7 @@ function renderRecordingList() {
     // The list redraws on every poll; an empty list that is already drawn stays, so Pip's breathing is not restarted.
     if (recList.dataset.empty === message) return;
     recList.dataset.empty = message;
+    dropEmptyPip();
     recList.innerHTML = `<li class="empty-state">${message}</li>`;
     if (!recItems.length) {
       const host = document.createElement("div");
@@ -303,6 +310,7 @@ function renderRecordingList() {
     }
     return;
   }
+  if (recList.dataset.empty) dropEmptyPip();
   delete recList.dataset.empty;
   const existing = new Map([...recList.children].filter((li) => li.dataset.id).map((li) => [li.dataset.id, li]));
   const rows = shown.map((item) => {

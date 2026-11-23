@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 from dashboard_js import STATIC
@@ -259,13 +260,22 @@ def test_every_setup_step_has_a_pip_host_with_one_short_sentence():
     )
 
 
-def test_the_setup_mounts_its_hosts_through_mountpip_and_they_start_hidden():
-    assert "mountPip(host" in SETUP_JS and "data-pip-line" not in SETUP_JS.split("mountPip(host")[0].split("\n")[-1]
-    assert "host.dataset.pipLine" in SETUP_JS
-    assert "innerHTML" not in SETUP_JS.split("mountPip(host")[1].split("}")[0]  # text only, never markup
-    assert re.search(
-        r"\.setup-pip\[hidden\]\s*\{\s*display:\s*none", (STATIC / "setup.css").read_text(encoding="utf-8")
-    )
+def test_the_setup_mounts_its_hosts_through_mountpip_as_text_and_they_start_hidden():
+    block = re.search(r'for \(const host of setupEl\.querySelectorAll\("\.setup-pip"\)\) \{(.*?)\n\}', SETUP_JS, re.S)
+    assert block, "the setup no longer mounts its .setup-pip hosts in one loop"
+    assert "mountPip(host" in block.group(1) and "bubble: host.dataset.pipLine" in block.group(1)
+    assert "innerHTML" not in block.group(1)
+    assert not re.search(r"innerHTML\s*=\s*host\.dataset", SETUP_JS)  # the line is never parsed as markup
+    css = (STATIC / "setup.css").read_text(encoding="utf-8")
+    assert re.search(r"\.setup-pip\[hidden\]\s*\{\s*display:\s*none", css)
+
+
+def test_the_empty_list_photo_page_matches_the_markup_the_dashboard_draws():
+    photo = (Path(__file__).resolve().parents[1] / "scripts" / "pip_poses.py").read_text(encoding="utf-8")
+    for needle in ('<li class="empty-state">', 'host.className = "rec-empty-pip"', 'pose: "sleeping", size: 72'):
+        assert needle in RECORDINGS_JS, needle
+        assert needle in photo.replace("{{", "{").replace("}}", "}"), needle
+    assert "unmountPip(host)" in RECORDINGS_JS  # a dropped empty list releases its host
 
 
 def test_the_empty_recordings_list_shows_pip_sleeping_with_one_line_and_keeps_its_text():
@@ -274,7 +284,7 @@ def test_the_empty_recordings_list_shows_pip_sleeping_with_one_line_and_keeps_it
     line = re.search(r'REC_EMPTY_PIP_LINE = "([^"]+)"', RECORDINGS_JS).group(1)
     assert line.count(". ") == 0 and len(line) <= 90
     # Pip only appears for an empty library, not for a search without a match.
-    assert "if (!recItems.length) {" in RECORDINGS_JS.split("mountPip(host")[0].split("recList.innerHTML")[1]
+    assert "if (!recItems.length) {" in RECORDINGS_JS.split(" mountPip(host")[0].split("recList.innerHTML")[1]
 
 
 @needs_node

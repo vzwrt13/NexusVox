@@ -4,7 +4,8 @@
 
 A throwaway page loads `style.css` and `dashboard-pip.js` from the dashboard's static folder and mounts Pip once
 per pose (idle, blink, head tilt, sleeping) plus once with a speech bubble. It also writes the empty Recordings list
-with Pip sleeping to `pip-empty-recordings.png`. The bubble text is invented sample data, counts only.
+with Pip sleeping next to the first image (`--out`'s folder) as `pip-empty-recordings.png`.
+The bubble text is invented sample data, counts only.
 Nothing here touches your config, your database or the network, and the browser is headless: no window opens.
 The idle motion is switched off for the picture, so two runs give the same image.
 """
@@ -101,7 +102,8 @@ EMPTY_PAGE = """<!doctype html>
 
 
 def empty_recordings_page(directory: Path) -> Path:
-    """The empty Recordings list as the dashboard draws it: the same markup, style sheets and Pip component."""
+    """The empty Recordings list: a hand-kept copy of the markup `renderRecordingList` draws, with the real style
+    sheets, Pip component and bubble text. `tests/test_pip.py` fails when the copy and the script drift apart."""
     import json
 
     text = (STATIC / "dashboard-recordings.js").read_text(encoding="utf-8")
@@ -153,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scale", type=float, default=2.0, help="device pixel ratio of the image (default: 2)")
     args = parser.parse_args(argv)
     run(args.out, args.browser, args.scale)
-    run_empty(EMPTY_OUT, args.browser, args.scale)
+    run_empty(args.out.with_name(EMPTY_OUT.name), args.browser, args.scale)
     return 0
 
 

@@ -396,6 +396,107 @@ def test_an_upload_runs_the_hook_on_the_stored_transcription(ext_client, db, dum
     assert db.get_file_transcription(seen.id).text == seen.text
 
 
+def _registry_with(extension_class, db, session_factory):
+    reg = ExtensionRegistry()
+    reg.add(extension_class)
+    return _create_app(DashboardAPI(session_factory, Config(), db=db, extensions=reg))
+
+
+def test_an_upload_hook_can_read_the_audio_and_the_file_is_gone_afterwards(
+    db, session_factory, sample_wav_bytes, monkeypatch
+):
+    stub_transcription(monkeypatch)
+    seen: list[dict] = []
+
+    class Reader(V1Extension):
+        name = "reader"
+
+        def on_file_transcribed(self, transcript):
+            path = transcript.audio_path
+            seen.append(
+                {"path": path, "exists": path.is_file(), "wav": path.read_bytes()[:4], "size": path.stat().st_size}
+            )
+            return None
+
+    app = _registry_with(Reader, db, session_factory)
+    with app.test_client() as client:
+        job = upload(client, sample_wav_bytes)
+
+    assert job["state"] == "done", job["error"]
+    (info,) = seen
+    assert isinstance(info["path"], Path)
+    assert info["exists"] is True
+    assert info["wav"] == b"RIFF"
+    assert info["size"] > 0
+    assert not info["path"].exists()  # cleaned up as before, once the hooks returned
+    assert db.get_file_transcription(job["result"]["id"]).audio_path is None  # the core stores no upload audio
+
+
+def test_the_audio_outlives_every_hook_of_the_upload(db, session_factory, sample_wav_bytes, monkeypatch):
+    stub_transcription(monkeypatch)
+    exists_in_second: list[bool] = []
+    first_path: list[Path] = []
+
+    class First(V1Extension):
+        name = "first"
+
+        def on_file_transcribed(self, transcript):
+            first_path.append(transcript.audio_path)
+
+    class Second(V1Extension):
+        name = "second"
+
+        def on_file_transcribed(self, transcript):
+            exists_in_second.append(transcript.audio_path.is_file() and transcript.audio_path == first_path[0])
+
+    reg = ExtensionRegistry()
+    reg.add(First)
+    reg.add(Second)
+    app = _create_app(DashboardAPI(session_factory, Config(), db=db, extensions=reg))
+    with app.test_client() as client:
+        job = upload(client, sample_wav_bytes)
+
+    assert job["state"] == "done", job["error"]
+    assert exists_in_second == [True]
+    assert not first_path[0].exists()
+
+
+def test_the_audio_is_cleaned_up_when_a_hook_raises(db, session_factory, sample_wav_bytes, monkeypatch):
+    stub_transcription(monkeypatch)
+    paths: list[Path] = []
+
+    class Exploding(V1Extension):
+        name = "exploding"
+
+        def on_file_transcribed(self, transcript):
+            paths.append(transcript.audio_path)
+            raise RuntimeError("kaput")
+
+    app = _registry_with(Exploding, db, session_factory)
+    with app.test_client() as client:
+        job = upload(client, sample_wav_bytes)
+
+    assert job["state"] == "done", job["error"]
+    assert len(paths) == 1
+    assert not paths[0].exists()
+
+
+def test_a_hook_that_ignores_the_audio_is_unaffected(ext_client, dummy, sample_wav_bytes, monkeypatch):
+    stub_transcription(monkeypatch)
+
+    job = upload(ext_client, sample_wav_bytes)
+
+    assert job["result"]["extensions"] == {"dummy": {"words": 4, "note": "Dummy saw it."}}
+    (seen,) = dummy.seen
+    assert seen.text == "hello from the file"
+
+
+def test_the_audio_path_defaults_to_none():
+    transcript = FileTranscript(id=1, text="t", language="en", duration_ms=1, original_filename="a.wav")
+
+    assert transcript.audio_path is None
+
+
 def test_a_hook_that_raises_never_fails_the_upload(db, session_factory, sample_wav_bytes, monkeypatch):
     class Exploding(V1Extension):
         name = "exploding"

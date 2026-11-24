@@ -636,3 +636,12 @@ def test_a_tour_opened_from_the_link_gives_pip_his_bubble_back_when_it_ends():
         " === null, !!last().bubble]))"
     )
     assert got == [True, True, True, True]  # a bubble again, and not the tour's card
+
+
+@needs_node
+def test_the_shipped_entries_show_for_1_0_2_after_an_update_from_1_0_1():
+    got = _js(
+        "const a = pickPipTour('1.0.2', USED, { version: '1.0.1', day: '', pending: '', step: 0 }, '2026-11-25');"
+        "console.log(JSON.stringify([a.steps.length > 0, a.state.pending]))"
+    )
+    assert got == [True, "1.0.2"]

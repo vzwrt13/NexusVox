@@ -75,6 +75,10 @@ class FileTranscript:
     speaker_names: dict[int, str] = field(default_factory=dict)
     # The name the user gave the row, if any; `original_filename` stays the file or meeting folder name. Also additive.
     title: str | None = None
+    # An upload's audio as a 16 kHz mono 16-bit WAV, set only while `on_file_transcribed` runs for an upload (it is
+    # `None` for a meeting and in every later view of the row). The file is deleted when the hooks have returned:
+    # read it inside the hook; do not keep the path or copy the audio unless the user asked for that. Also additive.
+    audio_path: Path | None = None
 
     @property
     def best_text(self) -> str:
@@ -90,7 +94,7 @@ def _speaker_names_from_json(raw: str | None) -> dict[int, str]:
 
 
 def file_transcript_from_record(record: FileTranscription) -> FileTranscript:
-    """The hook view of a `file_transcriptions` row."""
+    """The hook view of a `file_transcriptions` row (`audio_path` stays None: the upload worker sets it)."""
     words: list[Word] = []
     if record.words:
         try:
@@ -202,6 +206,10 @@ class Extension:
         Runs on the upload's worker thread, after the save, so a slow hook delays the end of the job but
         cannot lose the transcript. Return a JSON-serialisable dict to add it to the job's result under
         `extensions[<name>]`; a `note` string in it is also shown as a note. Return None to add nothing.
+
+        For an upload, `transcript.audio_path` is the audio (16 kHz mono 16-bit WAV). The path is valid only while
+        this hook runs: the core deletes the file afterwards and stores no upload audio. Do not keep the path, and
+        do not copy the audio, unless the user asked you to. It is `None` for a meeting recording.
         """
         return None
 

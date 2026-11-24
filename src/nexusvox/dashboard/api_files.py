@@ -7,6 +7,7 @@ import re
 import tempfile
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from ..dictation.lang_detect import stored_language
@@ -166,71 +167,77 @@ class FilesMixin(DashboardState):
             logger.error("Audio conversion failed for %s: %s", filename, exc)
             return {"ok": False, "error": f"Audio conversion failed: {exc}"}
 
-        duration_ms = audio.duration_ms
-        # A recording over the cap skips speaker detection: no switch to Parakeet (its container would start for
-        # nothing), and the job says why there are no speakers.
-        detect = diarize and duration_ms / 1000 <= MAX_DETECTION_S
-        # A model without speaker detection runs this upload on Parakeet (see `speaker_fallback`). The container, if
-        # the job started it, is stopped as soon as the transcription is done: the cleanup below may need the VRAM.
-        # The converted audio (a temporary file) is deleted when the transcription ends, however it ends.
+        # The converted audio (a temporary file) is deleted when the job ends, however it ends: after the extension
+        # hooks have returned, because `on_file_transcribed` may read it (`FileTranscript.audio_path`).
         try:
-            with (
-                audio,
-                speaker_detection_job(
+            duration_ms = audio.duration_ms
+            # A recording over the cap skips speaker detection: no switch to Parakeet (its container would start for
+            # nothing), and the job says why there are no speakers.
+            detect = diarize and duration_ms / 1000 <= MAX_DETECTION_S
+            # A model without speaker detection runs this upload on Parakeet (see `speaker_fallback`). The container,
+            # if the job started it, is stopped as soon as the transcription is done: the cleanup may need the VRAM.
+            try:
+                with speaker_detection_job(
                     self._config.inference,
                     wanted=detect,
                     what="upload",
                     active_model=lambda: self._config.inference.model,
-                ) as speakers,
-            ):
-                result = self._transcribe_wav_chunks(
-                    audio,
-                    word_timestamps=True,
-                    diarize=detect,
-                    on_progress=progress,
-                    inference=speakers.config,
-                    explain_no_speakers=not speakers.failed,
-                )
-        except Exception as exc:
-            logger.error("Transcription failed for %s: %s", filename, exc)
-            return {"ok": False, "error": f"Transcription failed: {exc}"}
+                ) as speakers:
+                    result = self._transcribe_wav_chunks(
+                        audio,
+                        word_timestamps=True,
+                        diarize=detect,
+                        on_progress=progress,
+                        inference=speakers.config,
+                        explain_no_speakers=not speakers.failed,
+                    )
+            except Exception as exc:
+                logger.error("Transcription failed for %s: %s", filename, exc)
+                return {"ok": False, "error": f"Transcription failed: {exc}"}
 
-        notes = [speakers.notice, *result.notes] if speakers.notice else list(result.notes)
-        if diarize and not detect:
-            notes.append(detection_too_long_note())
-        cleaned_text = None
-        if cleanup_level and result.text:
-            try:
-                cleaned = clean_transcript(
-                    result.text, cleanup_level, config_for(self._config.llm, "file_cleanup"), progress
-                )
-            except Exception as exc:  # clean_transcript reports model failures itself; this is a bug
-                logger.exception("Cleaning up the transcript of %s failed: %s", filename, exc)
-                notes.append("Text cleanup failed; the transcript is saved as transcribed.")
-            else:
-                if cleaned.note:
-                    notes.append(cleaned.note)
-                if cleaned.text != result.text:
-                    cleaned_text = cleaned.text
+            notes = [speakers.notice, *result.notes] if speakers.notice else list(result.notes)
+            if diarize and not detect:
+                notes.append(detection_too_long_note())
+            cleaned_text = None
+            if cleanup_level and result.text:
+                try:
+                    cleaned = clean_transcript(
+                        result.text, cleanup_level, config_for(self._config.llm, "file_cleanup"), progress
+                    )
+                except Exception as exc:  # clean_transcript reports model failures itself; this is a bug
+                    logger.exception("Cleaning up the transcript of %s failed: %s", filename, exc)
+                    notes.append("Text cleanup failed; the transcript is saved as transcribed.")
+                else:
+                    if cleaned.note:
+                        notes.append(cleaned.note)
+                    if cleaned.text != result.text:
+                        cleaned_text = cleaned.text
 
-        return self._store_file_transcription(
-            filename,
-            notes,
-            progress,
-            text=result.text,
-            duration_ms=duration_ms,
-            confidence=result.confidence,
-            words=result.words,
-            model=speakers.config.model,
-            cleaned_text=cleaned_text,
-            cleanup_level=cleanup_level,
-            processing_ms=int((time.monotonic() - started) * 1000),
-        )
+            return self._store_file_transcription(
+                filename,
+                notes,
+                progress,
+                text=result.text,
+                duration_ms=duration_ms,
+                confidence=result.confidence,
+                words=result.words,
+                model=speakers.config.model,
+                cleaned_text=cleaned_text,
+                cleanup_level=cleanup_level,
+                processing_ms=int((time.monotonic() - started) * 1000),
+                hook_audio_path=audio.path,
+            )
+        finally:
+            audio.close()
 
-    def _store_file_transcription(self, filename: str, notes: list[str], progress, **fields) -> dict:
+    def _store_file_transcription(
+        self, filename: str, notes: list[str], progress, *, hook_audio_path: Path | None = None, **fields
+    ) -> dict:
         """Save a finished file transcription, run the extension hook and build the job result (blocking).
 
         `fields` go to `Database.save_file_transcription`; the language is detected from the text.
+        `hook_audio_path` is the audio file the extension hooks may read (`FileTranscript.audio_path`); it is not
+        stored, and the caller keeps it until this returns.
         """
         if progress:
             progress("saving")
@@ -252,7 +259,8 @@ class FilesMixin(DashboardState):
 
         extension_results: dict = {}
         try:
-            extension_results, extension_notes = self.extensions.file_transcribed(file_transcript_from_record(record))
+            transcript = replace(file_transcript_from_record(record), audio_path=hook_audio_path)
+            extension_results, extension_notes = self.extensions.file_transcribed(transcript)
             notes.extend(extension_notes)
         except Exception as exc:  # the transcript is stored; extensions are an extra
             logger.exception("Extensions could not process the transcription of %s: %s", filename, exc)

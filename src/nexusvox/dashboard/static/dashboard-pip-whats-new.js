@@ -14,6 +14,9 @@
 //     page ("settings/vocabulary", "analytics/week"). An entry without a target has no "Show me" link.
 //   - pick the features worth a mention, not every change: three or four steps are plenty.
 const PIP_WHATS_NEW = {
+  "1.0.2": [
+    { title: "Install updates here", text: "Check for updates in the sidebar now offers Install update. NexusVox checks the installer's signature, installs it and restarts." },
+  ],
   "1.0.1": [
     { title: "Model download asks first", text: "The speech model downloads only after you click Download, so nothing big arrives unannounced.", target: "settings/models" },
     { title: "Easier exports", text: "The Export menu on a recording now lists each format as its own row.", target: "recordings" },
